@@ -367,7 +367,7 @@
       }
 
       async function loadSessions() {
-        const sessions = await fetchJson(`${apiBase}/api/study-sessions`);
+        const sessions = await fetchJson(`${apiBase}/api/sessions`);
         renderList('session-list', sessions, (session) => {
           const container = document.createElement('div');
           
@@ -538,7 +538,7 @@
         });
       }
 
-      postForm('study-form', `${apiBase}/api/study-sessions`);
+      postForm('study-form', `${apiBase}/api/sessions`);
       postForm('vocabulary-form', `${apiBase}/api/vocabulary`);
       postForm('kanji-form', `${apiBase}/api/kanji`);
       postForm('grammar-form', `${apiBase}/api/grammar`);

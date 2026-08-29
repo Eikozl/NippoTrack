@@ -162,6 +162,17 @@ app.use((req, res, next) => {
 
 app.use(express.static(path.join(__dirname, '../../client/src')));
 
+// Redirect canonical naming /api/sessions to /api/study-sessions (backward compatible)
+app.use('/api/sessions/:id', (req, res, next) => {
+  req.url = `/api/study-sessions/${req.params.id}${req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''}`;
+  next();
+});
+
+app.use('/api/sessions', (req, res, next) => {
+  req.url = `/api/study-sessions${req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''}`;
+  next();
+});
+
 app.get('/api', (req, res) => {
   res.json({
     name: 'Japanese Learning Tracker API',
@@ -169,8 +180,8 @@ app.get('/api', (req, res) => {
     endpoints: [
       'GET /api/health',
       'GET /api/dashboard',
-      'GET /api/study-sessions',
-      'POST /api/study-sessions',
+      'GET /api/sessions',
+      'POST /api/sessions',
       'GET /api/vocabulary',
       'POST /api/vocabulary',
       'GET /api/kanji',
