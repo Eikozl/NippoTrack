@@ -10,7 +10,23 @@ const JLPT_LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1'];
 const STATUSES = ['New', 'Learning', 'Familiar', 'Mastered'];
 
 function isValidDateString(value) {
-  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  
+  const date = new Date(value + 'T00:00:00Z');
+  const timestamp = date.getTime();
+  
+  if (typeof timestamp !== 'number' || Number.isNaN(timestamp)) {
+    return false;
+  }
+  
+  const [year, month, day] = value.split('-').map(Number);
+  const dateObj = new Date(year, month - 1, day);
+  
+  return dateObj.getFullYear() === year && 
+         dateObj.getMonth() === month - 1 && 
+         dateObj.getDate() === day;
 }
 
 function isPositiveInteger(value) {
@@ -29,7 +45,7 @@ function normalizeText(value, maxLength = null) {
   }
 
   if (maxLength && text.length > maxLength) {
-    return text.slice(0, maxLength);
+    throw new Error(`Field exceeds maximum length of ${maxLength} characters`);
   }
 
   return text;
@@ -218,7 +234,45 @@ app.get('/api/dashboard', async (req, res) => {
 
 app.get('/api/study-sessions', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM study_sessions ORDER BY session_date DESC, id_session DESC LIMIT 100');
+    let query = 'SELECT id_session, session_date, duration_minutes, category, resource, notes FROM study_sessions WHERE 1=1';
+    const params = [];
+
+    if (req.query.category) {
+      const category = String(req.query.category);
+      if (!STUDY_CATEGORIES.includes(category)) {
+        return res.status(400).json({ error: 'Invalid category' });
+      }
+      query += ' AND category = ?';
+      params.push(category);
+    }
+
+    if (req.query.date) {
+      if (!isValidDateString(req.query.date)) {
+        return res.status(400).json({ error: 'Invalid date format (YYYY-MM-DD)' });
+      }
+      query += ' AND session_date = ?';
+      params.push(req.query.date);
+    } else {
+      if (req.query.from) {
+        if (!isValidDateString(req.query.from)) {
+          return res.status(400).json({ error: 'Invalid from date (YYYY-MM-DD)' });
+        }
+        query += ' AND session_date >= ?';
+        params.push(req.query.from);
+      }
+
+      if (req.query.to) {
+        if (!isValidDateString(req.query.to)) {
+          return res.status(400).json({ error: 'Invalid to date (YYYY-MM-DD)' });
+        }
+        query += ' AND session_date <= ?';
+        params.push(req.query.to);
+      }
+    }
+
+    query += ' ORDER BY session_date DESC, id_session DESC LIMIT 100';
+
+    const [rows] = await pool.execute(query, params);
     res.json(rows);
   } catch (error) {
     res.status(503).json({ error: 'Database unavailable' });
@@ -315,7 +369,36 @@ app.delete('/api/study-sessions/:id', async (req, res) => {
 
 app.get('/api/vocabulary', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM vocabulary ORDER BY id_vocabulary DESC LIMIT 100');
+    let query = 'SELECT id_vocabulary, word, reading, meaning, jlpt_level, status FROM vocabulary WHERE 1=1';
+    const params = [];
+
+    if (req.query.search) {
+      const searchTerm = `%${String(req.query.search).trim()}%`;
+      query += ' AND (word LIKE ? OR reading LIKE ? OR meaning LIKE ?)';
+      params.push(searchTerm, searchTerm, searchTerm);
+    }
+
+    if (req.query.jlpt) {
+      const jlpt = String(req.query.jlpt).toUpperCase();
+      if (!JLPT_LEVELS.includes(jlpt)) {
+        return res.status(400).json({ error: 'Invalid JLPT level' });
+      }
+      query += ' AND jlpt_level = ?';
+      params.push(jlpt);
+    }
+
+    if (req.query.status) {
+      const status = String(req.query.status);
+      if (!STATUSES.includes(status)) {
+        return res.status(400).json({ error: 'Invalid status' });
+      }
+      query += ' AND status = ?';
+      params.push(status);
+    }
+
+    query += ' ORDER BY id_vocabulary DESC LIMIT 100';
+
+    const [rows] = await pool.execute(query, params);
     res.json(rows);
   } catch (error) {
     res.status(503).json({ error: 'Database unavailable' });
@@ -414,7 +497,36 @@ app.delete('/api/vocabulary/:id', async (req, res) => {
 
 app.get('/api/kanji', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM kanji ORDER BY id_kanji DESC LIMIT 100');
+    let query = 'SELECT id_kanji, character_kanji, meaning, onyomi, kunyomi, jlpt_level, status FROM kanji WHERE 1=1';
+    const params = [];
+
+    if (req.query.search) {
+      const searchTerm = `%${String(req.query.search).trim()}%`;
+      query += ' AND (character_kanji LIKE ? OR meaning LIKE ? OR onyomi LIKE ? OR kunyomi LIKE ?)';
+      params.push(searchTerm, searchTerm, searchTerm, searchTerm);
+    }
+
+    if (req.query.jlpt) {
+      const jlpt = String(req.query.jlpt).toUpperCase();
+      if (!JLPT_LEVELS.includes(jlpt)) {
+        return res.status(400).json({ error: 'Invalid JLPT level' });
+      }
+      query += ' AND jlpt_level = ?';
+      params.push(jlpt);
+    }
+
+    if (req.query.status) {
+      const status = String(req.query.status);
+      if (!STATUSES.includes(status)) {
+        return res.status(400).json({ error: 'Invalid status' });
+      }
+      query += ' AND status = ?';
+      params.push(status);
+    }
+
+    query += ' ORDER BY id_kanji DESC LIMIT 100';
+
+    const [rows] = await pool.execute(query, params);
     res.json(rows);
   } catch (error) {
     res.status(503).json({ error: 'Database unavailable' });
@@ -523,7 +635,36 @@ app.delete('/api/kanji/:id', async (req, res) => {
 
 app.get('/api/grammar', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM grammar_points ORDER BY id_grammar DESC LIMIT 100');
+    let query = 'SELECT id_grammar, grammar_point, meaning, structure, example, jlpt_level, status FROM grammar_points WHERE 1=1';
+    const params = [];
+
+    if (req.query.search) {
+      const searchTerm = `%${String(req.query.search).trim()}%`;
+      query += ' AND (grammar_point LIKE ? OR meaning LIKE ? OR structure LIKE ?)';
+      params.push(searchTerm, searchTerm, searchTerm);
+    }
+
+    if (req.query.jlpt) {
+      const jlpt = String(req.query.jlpt).toUpperCase();
+      if (!JLPT_LEVELS.includes(jlpt)) {
+        return res.status(400).json({ error: 'Invalid JLPT level' });
+      }
+      query += ' AND jlpt_level = ?';
+      params.push(jlpt);
+    }
+
+    if (req.query.status) {
+      const status = String(req.query.status);
+      if (!STATUSES.includes(status)) {
+        return res.status(400).json({ error: 'Invalid status' });
+      }
+      query += ' AND status = ?';
+      params.push(status);
+    }
+
+    query += ' ORDER BY id_grammar DESC LIMIT 100';
+
+    const [rows] = await pool.execute(query, params);
     res.json(rows);
   } catch (error) {
     res.status(503).json({ error: 'Database unavailable' });
