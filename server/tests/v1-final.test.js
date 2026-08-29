@@ -112,11 +112,6 @@ test('relationship option searches reach records beyond 100 and keep search valu
   await withPoolStubs({
     execute: async (sql, params) => {
       calls.push({ sql, params });
-      if (params.includes('target')) {
-        if (sql.includes('FROM vocabulary')) return [[{ id_vocabulary: 151, word: 'target', reading: null, meaning: null }]];
-        if (sql.includes('FROM kanji')) return [[{ id_kanji: 151, character_kanji: 'target', meaning: null, onyomi: null, kunyomi: null }]];
-        return [[{ id_grammar: 151, grammar_point: 'target', meaning: null, structure: null, example: null }]];
-      }
       if (sql.includes('FROM vocabulary')) return [[{ id_vocabulary: 151, word: '語彙151', reading: null, meaning: 'target' }]];
       if (sql.includes('FROM kanji')) return [[{ id_kanji: 151, character_kanji: '試', meaning: 'target' }]];
       return [[{ id_grammar: 151, grammar_point: '〜ながら', meaning: 'target' }]];

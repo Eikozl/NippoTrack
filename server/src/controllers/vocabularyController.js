@@ -27,15 +27,15 @@ async function listVocabulary(req, res) {
       const candidates = buildSearchCandidates(search);
       const rawContains = `%${candidates.raw}%`;
       const rawPrefix = `${candidates.raw}%`;
+      const meaningWordPrefix = `% ${candidates.raw}%`;
       const kanaValues = kanaSearchValues(candidates);
-      const romajiMode = Boolean(candidates.normalizedRomaji);
       const normalizedWord = normalizedJapaneseSql('word');
       const normalizedReading = normalizedJapaneseSql('reading');
       const kanaContains = buildComparisons([normalizedWord, normalizedReading], kanaValues);
       const kanaExact = buildComparisons([normalizedWord, normalizedReading], kanaValues, { operator: '=' });
       const kanaPrefix = buildComparisons([normalizedWord, normalizedReading], kanaValues, { pattern: 'prefix' });
-      whereSql += ` AND (word LIKE ? OR reading LIKE ?${romajiMode ? '' : ' OR meaning LIKE ?'}${kanaContains.sql ? ` OR ${kanaContains.sql}` : ''})`;
-      params.push(rawContains, rawContains, ...(romajiMode ? [] : [rawContains]), ...kanaContains.params);
+      whereSql += ` AND (word LIKE ? OR reading LIKE ? OR meaning LIKE ?${kanaContains.sql ? ` OR ${kanaContains.sql}` : ''})`;
+      params.push(rawContains, rawContains, rawContains, ...kanaContains.params);
       orderBy = `CASE
         WHEN word = ? THEN 1
         WHEN reading = ? THEN 2
@@ -43,11 +43,11 @@ async function listVocabulary(req, res) {
         WHEN word LIKE ? THEN 4
         WHEN reading LIKE ? THEN 5
         ${kanaPrefix.sql ? `WHEN ${kanaPrefix.sql} THEN 6` : ''}
-        ${romajiMode ? '' : 'WHEN meaning LIKE ? THEN 7'}
+        WHEN meaning LIKE ? OR CONCAT(' ', COALESCE(meaning, '')) LIKE ? THEN 7
         ELSE 8 END, id_vocabulary DESC`;
       orderParams = [
         candidates.raw, candidates.raw, ...kanaExact.params,
-        rawPrefix, rawPrefix, ...kanaPrefix.params, ...(romajiMode ? [] : [rawPrefix])
+        rawPrefix, rawPrefix, ...kanaPrefix.params, rawPrefix, meaningWordPrefix
       ];
     }
 
@@ -98,13 +98,13 @@ async function listVocabularyOptions(req, res) {
     if (search) {
       const rawContains = `%${candidates.raw}%`;
       const rawPrefix = `${candidates.raw}%`;
+      const meaningWordPrefix = `% ${candidates.raw}%`;
       const kanaValues = kanaSearchValues(candidates);
-      const romajiMode = Boolean(candidates.normalizedRomaji);
       const kanaContains = buildComparisons([normalizedWord, normalizedReading], kanaValues);
       const kanaExact = buildComparisons([normalizedWord, normalizedReading], kanaValues, { operator: '=' });
       const kanaPrefix = buildComparisons([normalizedWord, normalizedReading], kanaValues, { pattern: 'prefix' });
       const candidateLimit = Math.min(limit * 5, 200);
-      query += ` WHERE word LIKE ? OR reading LIKE ?${romajiMode ? '' : ' OR meaning LIKE ?'}${kanaContains.sql ? ` OR ${kanaContains.sql}` : ''}`;
+      query += ` WHERE word LIKE ? OR reading LIKE ? OR meaning LIKE ?${kanaContains.sql ? ` OR ${kanaContains.sql}` : ''}`;
       query += ` ORDER BY CASE
         WHEN word = ? THEN 1
         WHEN reading = ? THEN 2
@@ -112,12 +112,12 @@ async function listVocabularyOptions(req, res) {
         WHEN word LIKE ? THEN 4
         WHEN reading LIKE ? THEN 5
         ${kanaPrefix.sql ? `WHEN ${kanaPrefix.sql} THEN 6` : ''}
-        ${romajiMode ? '' : 'WHEN meaning LIKE ? THEN 7'}
+        WHEN meaning LIKE ? OR CONCAT(' ', COALESCE(meaning, '')) LIKE ? THEN 7
         ELSE 8 END, id_vocabulary DESC LIMIT ?`;
       params = [
-        rawContains, rawContains, ...(romajiMode ? [] : [rawContains]), ...kanaContains.params,
+        rawContains, rawContains, rawContains, ...kanaContains.params,
         candidates.raw, candidates.raw, ...kanaExact.params,
-        rawPrefix, rawPrefix, ...kanaPrefix.params, ...(romajiMode ? [] : [rawPrefix]),
+        rawPrefix, rawPrefix, ...kanaPrefix.params, rawPrefix, meaningWordPrefix,
         candidateLimit
       ];
     } else {

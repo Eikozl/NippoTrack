@@ -27,24 +27,24 @@ async function listGrammar(req, res) {
       const candidates = buildSearchCandidates(search);
       const rawContains = `%${candidates.raw}%`;
       const rawPrefix = `${candidates.raw}%`;
+      const meaningWordPrefix = `% ${candidates.raw}%`;
       const kanaValues = kanaSearchValues(candidates);
-      const romajiMode = Boolean(candidates.normalizedRomaji);
       const normalizedPoint = normalizedJapaneseSql('grammar_point');
       const kanaContains = buildComparisons([normalizedPoint], kanaValues);
       const kanaExact = buildComparisons([normalizedPoint], kanaValues, { operator: '=' });
       const kanaPrefix = buildComparisons([normalizedPoint], kanaValues, { pattern: 'prefix' });
-      whereSql += ` AND (grammar_point LIKE ?${romajiMode ? '' : ' OR meaning LIKE ? OR structure LIKE ? OR example LIKE ?'}${kanaContains.sql ? ` OR ${kanaContains.sql}` : ''})`;
-      params.push(rawContains, ...(romajiMode ? [] : [rawContains, rawContains, rawContains]), ...kanaContains.params);
+      whereSql += ` AND (grammar_point LIKE ? OR meaning LIKE ? OR structure LIKE ? OR example LIKE ?${kanaContains.sql ? ` OR ${kanaContains.sql}` : ''})`;
+      params.push(rawContains, rawContains, rawContains, rawContains, ...kanaContains.params);
       orderBy = `CASE
         WHEN grammar_point = ? THEN 1
         ${kanaExact.sql ? `WHEN ${kanaExact.sql} THEN 2` : ''}
         WHEN grammar_point LIKE ? THEN 3
         ${kanaPrefix.sql ? `WHEN ${kanaPrefix.sql} THEN 4` : ''}
-        ${romajiMode ? '' : 'WHEN meaning LIKE ? THEN 5'}
+        WHEN meaning LIKE ? OR CONCAT(' ', COALESCE(meaning, '')) LIKE ? THEN 5
         ELSE 6 END, id_grammar DESC`;
       orderParams = [
         candidates.raw, ...kanaExact.params,
-        rawPrefix, ...kanaPrefix.params, ...(romajiMode ? [] : [rawPrefix])
+        rawPrefix, ...kanaPrefix.params, rawPrefix, meaningWordPrefix
       ];
     }
     if (req.query.jlpt) {
@@ -88,25 +88,25 @@ async function listGrammarOptions(req, res) {
     if (search) {
       const rawContains = `%${candidates.raw}%`;
       const rawPrefix = `${candidates.raw}%`;
+      const meaningWordPrefix = `% ${candidates.raw}%`;
       const kanaValues = kanaSearchValues(candidates);
-      const romajiMode = Boolean(candidates.normalizedRomaji);
       const kanaContains = buildComparisons([normalizedPoint], kanaValues);
       const kanaExact = buildComparisons([normalizedPoint], kanaValues, { operator: '=' });
       const kanaPrefix = buildComparisons([normalizedPoint], kanaValues, { pattern: 'prefix' });
       const candidateLimit = Math.min(limit * 5, 200);
-      query += ` WHERE grammar_point LIKE ?${romajiMode ? '' : ' OR meaning LIKE ? OR structure LIKE ? OR example LIKE ?'}
+      query += ` WHERE grammar_point LIKE ? OR meaning LIKE ? OR structure LIKE ? OR example LIKE ?
         ${kanaContains.sql ? `OR ${kanaContains.sql}` : ''}`;
       query += ` ORDER BY CASE
         WHEN grammar_point = ? THEN 1
         ${kanaExact.sql ? `WHEN ${kanaExact.sql} THEN 2` : ''}
         WHEN grammar_point LIKE ? THEN 3
         ${kanaPrefix.sql ? `WHEN ${kanaPrefix.sql} THEN 4` : ''}
-        ${romajiMode ? '' : 'WHEN meaning LIKE ? THEN 5'}
+        WHEN meaning LIKE ? OR CONCAT(' ', COALESCE(meaning, '')) LIKE ? THEN 5
         ELSE 6 END, id_grammar DESC LIMIT ?`;
       params = [
-        rawContains, ...(romajiMode ? [] : [rawContains, rawContains, rawContains]), ...kanaContains.params,
+        rawContains, rawContains, rawContains, rawContains, ...kanaContains.params,
         candidates.raw, ...kanaExact.params,
-        rawPrefix, ...kanaPrefix.params, ...(romajiMode ? [] : [rawPrefix]),
+        rawPrefix, ...kanaPrefix.params, rawPrefix, meaningWordPrefix,
         candidateLimit
       ];
     } else {

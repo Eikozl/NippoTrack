@@ -15,12 +15,20 @@ function startsWith(value, query) {
   return Boolean(query) && comparable(value).startsWith(comparable(query));
 }
 
+function wordStartsWith(value, query) {
+  const normalizedQuery = comparable(query);
+  if (!normalizedQuery) return false;
+  return comparable(value)
+    .split(/[^\p{L}\p{N}]+/u)
+    .some((word) => word.startsWith(normalizedQuery));
+}
+
 function exact(value, query) {
   return Boolean(query) && comparable(value) === comparable(query);
 }
 
 function proseMatches(value, candidates) {
-  return candidates.normalizedRomaji ? false : includes(value, candidates.raw);
+  return includes(value, candidates.raw);
 }
 
 function finish(items, limit, idKey, preserveOrder = false) {
@@ -57,7 +65,7 @@ function rankVocabularyOptions(rows, candidates, limit) {
     else if ([normalizedWord, normalizedReading]
       .some((value) => startsWith(value, candidates.normalizedJapanese))) score = 5;
     else if (startsWith(displayRomaji, candidates.normalizedRomaji)) score = 6;
-    else if (startsWith(item.meaning, candidates.raw)) score = 7;
+    else if (wordStartsWith(item.meaning, candidates.raw)) score = 7;
     return { item, displayRomaji, matched, score };
   }), limit, 'id_vocabulary', !candidates.raw);
 }
@@ -84,7 +92,7 @@ function rankKanjiOptions(rows, candidates, limit) {
     else if ([onyomiRomaji, kunyomiRomaji].some((value) => exact(value, candidates.normalizedRomaji))) score = 3;
     else if ([normalizedOnyomi, normalizedKunyomi].some((value) => startsWith(value, candidates.normalizedJapanese))) score = 4;
     else if ([onyomiRomaji, kunyomiRomaji].some((value) => startsWith(value, candidates.normalizedRomaji))) score = 5;
-    else if (startsWith(item.meaning, candidates.raw)) score = 6;
+    else if (wordStartsWith(item.meaning, candidates.raw)) score = 6;
     return { item, displayRomaji, matched, score };
   }), limit, 'id_kanji', !candidates.raw);
 }
@@ -106,7 +114,7 @@ function rankGrammarOptions(rows, candidates, limit) {
     else if (exact(displayRomaji, candidates.normalizedRomaji)) score = 3;
     else if (startsWith(normalizedPoint, candidates.normalizedJapanese)) score = 4;
     else if (startsWith(displayRomaji, candidates.normalizedRomaji)) score = 5;
-    else if (startsWith(item.meaning, candidates.raw)) score = 6;
+    else if (wordStartsWith(item.meaning, candidates.raw)) score = 6;
     return { item, displayRomaji, matched, score };
   }), limit, 'id_grammar', !candidates.raw);
 }

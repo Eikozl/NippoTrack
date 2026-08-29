@@ -174,7 +174,7 @@ test('derives display romaji without persisting it', () => {
   assert.equal(hiraganaToRomaji('ショク'), 'shoku');
 });
 
-test('ranks vocabulary across romaji prefixes, Japanese and kana without English leakage', () => {
+test('ranks vocabulary across romaji, Japanese, kana and English meaning', () => {
   const search = (query) => rankVocabularyOptions(VOCABULARY_ROWS, buildSearchCandidates(query), 20);
   assert.deepEqual(ids(search('nihongo'), 'id_vocabulary'), [2]);
   assert.deepEqual(ids(search('nih'), 'id_vocabulary'), [1, 2]);
@@ -182,7 +182,8 @@ test('ranks vocabulary across romaji prefixes, Japanese and kana without English
   assert.deepEqual(ids(search('tabe'), 'id_vocabulary'), [4]);
   assert.deepEqual(ids(search('にほん'), 'id_vocabulary'), [1, 2]);
   assert.deepEqual(ids(search('日本'), 'id_vocabulary'), [1, 2]);
-  assert.deepEqual(ids(search('language'), 'id_vocabulary'), []);
+  assert.deepEqual(ids(search('language'), 'id_vocabulary'), [2]);
+  assert.deepEqual(ids(search('eat'), 'id_vocabulary'), [4, 3]);
   assert.equal(search('nihongo')[0].displayRomaji, 'nihongo');
 });
 
@@ -229,33 +230,34 @@ test('matches alternate romaji spellings and katakana vocabulary without stored 
   assert.deepEqual(ids(rankVocabularyOptions(rows, buildSearchCandidates('si'), 20), 'id_vocabulary'), [60]);
 });
 
-test('short romaji does not leak through unrelated English contains matches', () => {
+test('romaji reading matches rank above weaker English contains matches', () => {
   const rows = [
     { id_vocabulary: 71, word: '日本語', reading: 'にほんご', meaning: 'Japanese language' },
     { id_vocabulary: 70, word: '下', reading: 'げ', meaning: 'below' }
   ];
-  assert.deepEqual(ids(rankVocabularyOptions(rows, buildSearchCandidates('ge'), 20), 'id_vocabulary'), [70]);
-  assert.deepEqual(ids(rankVocabularyOptions(rows, buildSearchCandidates('language'), 20), 'id_vocabulary'), []);
+  assert.deepEqual(ids(rankVocabularyOptions(rows, buildSearchCandidates('ge'), 20), 'id_vocabulary'), [70, 71]);
+  assert.deepEqual(ids(rankVocabularyOptions(rows, buildSearchCandidates('language'), 20), 'id_vocabulary'), [71]);
 });
 
-test('ranks kanji through normalized onyomi, kunyomi and romaji', () => {
+test('ranks kanji through normalized onyomi, kunyomi, romaji and meaning', () => {
   const search = (query) => rankKanjiOptions(KANJI_ROWS, buildSearchCandidates(query), 20);
   for (const query of ['shoku', 'ショク', 'しょく', 'taberu', 'たべる']) {
     assert.deepEqual(ids(search(query), 'id_kanji'), [1], query);
   }
-  for (const query of ['mizu', 'みず']) {
+  for (const query of ['mizu', 'みず', 'water']) {
     assert.deepEqual(ids(search(query), 'id_kanji'), [2], query);
   }
   assert.equal(search('shoku')[0].displayRomaji, 'shoku / taberu');
 });
 
-test('ranks grammar through decoration-normalized kana and romaji without English leakage', () => {
+test('ranks grammar through decoration-normalized kana, romaji and English meaning', () => {
   const search = (query) => rankGrammarOptions(GRAMMAR_ROWS, buildSearchCandidates(query), 20);
   assert.deepEqual(ids(search('kara'), 'id_grammar'), [1]);
   assert.deepEqual(ids(search('tai'), 'id_grammar'), [2]);
   assert.deepEqual(ids(search('temo'), 'id_grammar'), [3]);
   assert.deepEqual(ids(search('kudasai'), 'id_grammar'), [4]);
-  assert.deepEqual(ids(search('because'), 'id_grammar'), []);
+  assert.deepEqual(ids(search('because'), 'id_grammar'), [1]);
+  assert.deepEqual(ids(search('want'), 'id_grammar'), [2]);
   assert.deepEqual(ids(search('〜てもいい'), 'id_grammar'), [3]);
   assert.equal(search('temo')[0].displayRomaji, 'temoii');
 });
@@ -318,7 +320,7 @@ test('paginated library endpoints use romaji candidates without breaking counts 
   });
 });
 
-test('romaji-aware option endpoints search Japanese readings rather than English prose', async () => {
+test('romaji-aware option endpoints preserve Japanese and English search with ranked readings', async () => {
   const calls = [];
   await withPoolStubs({
     execute: async (sql, params) => {
@@ -338,19 +340,21 @@ test('romaji-aware option endpoints search Japanese readings rather than English
         ['/api/vocabulary/options?search=tabe&limit=20', 'id_vocabulary', [4]],
         [`/api/vocabulary/options?search=${encodeURIComponent('たべる')}&limit=20`, 'id_vocabulary', [4]],
         [`/api/vocabulary/options?search=${encodeURIComponent('日本')}&limit=20`, 'id_vocabulary', [1, 2]],
-        ['/api/vocabulary/options?search=language&limit=20', 'id_vocabulary', []],
+        ['/api/vocabulary/options?search=language&limit=20', 'id_vocabulary', [2]],
+        ['/api/vocabulary/options?search=eat&limit=20', 'id_vocabulary', [4, 3]],
         ['/api/kanji/options?search=shoku&limit=20', 'id_kanji', [1]],
         [`/api/kanji/options?search=${encodeURIComponent('ショク')}&limit=20`, 'id_kanji', [1]],
         [`/api/kanji/options?search=${encodeURIComponent('しょく')}&limit=20`, 'id_kanji', [1]],
         ['/api/kanji/options?search=taberu&limit=20', 'id_kanji', [1]],
         [`/api/kanji/options?search=${encodeURIComponent('たべる')}&limit=20`, 'id_kanji', [1]],
         ['/api/kanji/options?search=mizu&limit=20', 'id_kanji', [2]],
-        ['/api/kanji/options?search=water&limit=20', 'id_kanji', []],
+        ['/api/kanji/options?search=water&limit=20', 'id_kanji', [2]],
         ['/api/grammar/options?search=kara&limit=20', 'id_grammar', [1]],
         ['/api/grammar/options?search=tai&limit=20', 'id_grammar', [2]],
         ['/api/grammar/options?search=temo&limit=20', 'id_grammar', [3]],
         ['/api/grammar/options?search=kudasai&limit=20', 'id_grammar', [4]],
-        ['/api/grammar/options?search=because&limit=20', 'id_grammar', []],
+        ['/api/grammar/options?search=because&limit=20', 'id_grammar', [1]],
+        ['/api/grammar/options?search=want&limit=20', 'id_grammar', [2]],
         [`/api/grammar/options?search=${encodeURIComponent('〜てもいい')}&limit=20`, 'id_grammar', [3]]
       ];
 

@@ -27,26 +27,26 @@ async function listKanji(req, res) {
       const candidates = buildSearchCandidates(search);
       const rawContains = `%${candidates.raw}%`;
       const rawPrefix = `${candidates.raw}%`;
+      const meaningWordPrefix = `% ${candidates.raw}%`;
       const kanaValues = kanaSearchValues(candidates);
-      const romajiMode = Boolean(candidates.normalizedRomaji);
       const normalizedOnyomi = normalizedJapaneseSql('onyomi');
       const normalizedKunyomi = normalizedJapaneseSql('kunyomi');
       const kanaContains = buildComparisons([normalizedOnyomi, normalizedKunyomi], kanaValues);
       const kanaExact = buildComparisons([normalizedOnyomi, normalizedKunyomi], kanaValues, { operator: '=' });
       const kanaPrefix = buildComparisons([normalizedOnyomi, normalizedKunyomi], kanaValues, { pattern: 'prefix' });
-      whereSql += ` AND (character_kanji LIKE ?${romajiMode ? '' : ' OR meaning LIKE ?'} OR onyomi LIKE ? OR kunyomi LIKE ?${kanaContains.sql ? ` OR ${kanaContains.sql}` : ''})`;
-      params.push(rawContains, ...(romajiMode ? [] : [rawContains]), rawContains, rawContains, ...kanaContains.params);
+      whereSql += ` AND (character_kanji LIKE ? OR meaning LIKE ? OR onyomi LIKE ? OR kunyomi LIKE ?${kanaContains.sql ? ` OR ${kanaContains.sql}` : ''})`;
+      params.push(rawContains, rawContains, rawContains, rawContains, ...kanaContains.params);
       orderBy = `CASE
         WHEN character_kanji = ? THEN 1
         WHEN onyomi = ? OR kunyomi = ? THEN 2
         ${kanaExact.sql ? `WHEN ${kanaExact.sql} THEN 3` : ''}
         WHEN onyomi LIKE ? OR kunyomi LIKE ? THEN 4
         ${kanaPrefix.sql ? `WHEN ${kanaPrefix.sql} THEN 5` : ''}
-        ${romajiMode ? '' : 'WHEN meaning LIKE ? THEN 6'}
+        WHEN meaning LIKE ? OR CONCAT(' ', COALESCE(meaning, '')) LIKE ? THEN 6
         ELSE 7 END, id_kanji DESC`;
       orderParams = [
         candidates.raw, candidates.raw, candidates.raw, ...kanaExact.params,
-        rawPrefix, rawPrefix, ...kanaPrefix.params, ...(romajiMode ? [] : [rawPrefix])
+        rawPrefix, rawPrefix, ...kanaPrefix.params, rawPrefix, meaningWordPrefix
       ];
     }
     if (req.query.jlpt) {
@@ -91,13 +91,13 @@ async function listKanjiOptions(req, res) {
     if (search) {
       const rawContains = `%${candidates.raw}%`;
       const rawPrefix = `${candidates.raw}%`;
+      const meaningWordPrefix = `% ${candidates.raw}%`;
       const kanaValues = kanaSearchValues(candidates);
-      const romajiMode = Boolean(candidates.normalizedRomaji);
       const kanaContains = buildComparisons([normalizedOnyomi, normalizedKunyomi], kanaValues);
       const kanaExact = buildComparisons([normalizedOnyomi, normalizedKunyomi], kanaValues, { operator: '=' });
       const kanaPrefix = buildComparisons([normalizedOnyomi, normalizedKunyomi], kanaValues, { pattern: 'prefix' });
       const candidateLimit = Math.min(limit * 5, 200);
-      query += ` WHERE character_kanji LIKE ?${romajiMode ? '' : ' OR meaning LIKE ?'} OR onyomi LIKE ? OR kunyomi LIKE ?
+      query += ` WHERE character_kanji LIKE ? OR meaning LIKE ? OR onyomi LIKE ? OR kunyomi LIKE ?
         ${kanaContains.sql ? `OR ${kanaContains.sql}` : ''}`;
       query += ` ORDER BY CASE
         WHEN character_kanji = ? THEN 1
@@ -105,12 +105,12 @@ async function listKanjiOptions(req, res) {
         ${kanaExact.sql ? `WHEN ${kanaExact.sql} THEN 3` : ''}
         WHEN onyomi LIKE ? OR kunyomi LIKE ? THEN 4
         ${kanaPrefix.sql ? `WHEN ${kanaPrefix.sql} THEN 5` : ''}
-        ${romajiMode ? '' : 'WHEN meaning LIKE ? THEN 6'}
+        WHEN meaning LIKE ? OR CONCAT(' ', COALESCE(meaning, '')) LIKE ? THEN 6
         ELSE 7 END, id_kanji DESC LIMIT ?`;
       params = [
-        rawContains, ...(romajiMode ? [] : [rawContains]), rawContains, rawContains, ...kanaContains.params,
+        rawContains, rawContains, rawContains, rawContains, ...kanaContains.params,
         candidates.raw, candidates.raw, candidates.raw, ...kanaExact.params,
-        rawPrefix, rawPrefix, ...kanaPrefix.params, ...(romajiMode ? [] : [rawPrefix]),
+        rawPrefix, rawPrefix, ...kanaPrefix.params, rawPrefix, meaningWordPrefix,
         candidateLimit
       ];
     } else {
