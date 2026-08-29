@@ -321,13 +321,33 @@ app.get('/api/study-sessions/:id', async (req, res) => {
       return res.status(404).json({ error: 'study session not found' });
     }
 
-    return res.json(session);
+    // Fetch related vocabulary, kanji, grammar from junction tables
+    const [vocabRows] = await pool.execute(
+      'SELECT v.id_vocabulary, v.word, v.reading, v.meaning, v.jlpt_level, v.status FROM session_vocabulary sv JOIN vocabulary v ON sv.id_vocabulary = v.id_vocabulary WHERE sv.id_session = ?',
+      [id]
+    );
+    const [kanjiRows] = await pool.execute(
+      'SELECT k.id_kanji, k.character_kanji, k.meaning, k.onyomi, k.kunyomi, k.jlpt_level, k.status FROM session_kanji sk JOIN kanji k ON sk.id_kanji = k.id_kanji WHERE sk.id_session = ?',
+      [id]
+    );
+    const [grammarRows] = await pool.execute(
+      'SELECT g.id_grammar, g.grammar_point, g.meaning, g.structure, g.example, g.jlpt_level, g.status FROM session_grammar sg JOIN grammar_points g ON sg.id_grammar = g.id_grammar WHERE sg.id_session = ?',
+      [id]
+    );
+
+    return res.json({
+      ...session,
+      vocabulary: vocabRows || [],
+      kanji: kanjiRows || [],
+      grammar: grammarRows || []
+    });
   } catch (error) {
     return res.status(400).json({ error: error.message || 'Invalid study session id.' });
   }
 });
 
 app.post('/api/study-sessions', async (req, res) => {
+  let connection;
   try {
     const body = req.body || {};
     validateWriteFields(body, ALLOWED_FIELDS.sessions);
@@ -341,19 +361,58 @@ app.post('/api/study-sessions', async (req, res) => {
       notes: normalizeText(body.notes, 1500)
     };
 
-    const [result] = await pool.execute(
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [result] = await connection.execute(
       'INSERT INTO study_sessions (session_date, duration_minutes, category, resource, notes) VALUES (?, ?, ?, ?, ?)',
       [nextBody.session_date, nextBody.duration_minutes, nextBody.category, nextBody.resource, nextBody.notes]
     );
+    const sessionId = result.insertId;
 
-    const [rows] = await pool.execute('SELECT * FROM study_sessions WHERE id_session = ?', [result.insertId]);
+    // Insert related vocabulary if provided
+    if (Array.isArray(body.vocabulary_ids) && body.vocabulary_ids.length > 0) {
+      for (const vocabId of body.vocabulary_ids) {
+        const vid = Number(vocabId);
+        if (!Number.isInteger(vid) || vid <= 0) continue;
+        await connection.execute('INSERT INTO session_vocabulary (id_session, id_vocabulary) VALUES (?, ?)', [sessionId, vid]);
+      }
+    }
+
+    // Insert related kanji if provided
+    if (Array.isArray(body.kanji_ids) && body.kanji_ids.length > 0) {
+      for (const kanjiId of body.kanji_ids) {
+        const kid = Number(kanjiId);
+        if (!Number.isInteger(kid) || kid <= 0) continue;
+        await connection.execute('INSERT INTO session_kanji (id_session, id_kanji) VALUES (?, ?)', [sessionId, kid]);
+      }
+    }
+
+    // Insert related grammar if provided
+    if (Array.isArray(body.grammar_ids) && body.grammar_ids.length > 0) {
+      for (const grammarId of body.grammar_ids) {
+        const gid = Number(grammarId);
+        if (!Number.isInteger(gid) || gid <= 0) continue;
+        await connection.execute('INSERT INTO session_grammar (id_session, id_grammar) VALUES (?, ?)', [sessionId, gid]);
+      }
+    }
+
+    await connection.commit();
+    connection.release();
+
+    const [rows] = await pool.execute('SELECT * FROM study_sessions WHERE id_session = ?', [sessionId]);
     return res.status(201).json(rows[0]);
   } catch (error) {
+    if (connection) {
+      await connection.rollback();
+      connection.release();
+    }
     return res.status(400).json({ error: error.message || 'Unable to create study session.' });
   }
 });
 
 app.put('/api/study-sessions/:id', async (req, res) => {
+  let connection;
   try {
     const id = parseIdParam(req, 'study session');
     const current = await fetchEntityById('study_sessions', 'id_session', id);
@@ -374,14 +433,54 @@ app.put('/api/study-sessions/:id', async (req, res) => {
       notes: body.notes !== undefined ? normalizeText(body.notes, 1500) : current.notes
     };
 
-    await pool.execute(
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    await connection.execute(
       'UPDATE study_sessions SET session_date = ?, duration_minutes = ?, category = ?, resource = ?, notes = ? WHERE id_session = ?',
       [nextBody.session_date, nextBody.duration_minutes, nextBody.category, nextBody.resource, nextBody.notes, id]
     );
 
+    // Update related vocabulary if provided
+    if (Array.isArray(body.vocabulary_ids)) {
+      await connection.execute('DELETE FROM session_vocabulary WHERE id_session = ?', [id]);
+      for (const vocabId of body.vocabulary_ids) {
+        const vid = Number(vocabId);
+        if (!Number.isInteger(vid) || vid <= 0) continue;
+        await connection.execute('INSERT INTO session_vocabulary (id_session, id_vocabulary) VALUES (?, ?)', [id, vid]);
+      }
+    }
+
+    // Update related kanji if provided
+    if (Array.isArray(body.kanji_ids)) {
+      await connection.execute('DELETE FROM session_kanji WHERE id_session = ?', [id]);
+      for (const kanjiId of body.kanji_ids) {
+        const kid = Number(kanjiId);
+        if (!Number.isInteger(kid) || kid <= 0) continue;
+        await connection.execute('INSERT INTO session_kanji (id_session, id_kanji) VALUES (?, ?)', [id, kid]);
+      }
+    }
+
+    // Update related grammar if provided
+    if (Array.isArray(body.grammar_ids)) {
+      await connection.execute('DELETE FROM session_grammar WHERE id_session = ?', [id]);
+      for (const grammarId of body.grammar_ids) {
+        const gid = Number(grammarId);
+        if (!Number.isInteger(gid) || gid <= 0) continue;
+        await connection.execute('INSERT INTO session_grammar (id_session, id_grammar) VALUES (?, ?)', [id, gid]);
+      }
+    }
+
+    await connection.commit();
+    connection.release();
+
     const updated = await fetchEntityById('study_sessions', 'id_session', id);
     return res.json(updated);
   } catch (error) {
+    if (connection) {
+      await connection.rollback();
+      connection.release();
+    }
     return res.status(400).json({ error: error.message || 'Unable to update study session.' });
   }
 });
