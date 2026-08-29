@@ -27,7 +27,9 @@ function isValidDateString(value) {
 }
 
 function isPositiveInteger(value) {
-  return Number.isInteger(Number(value)) && Number(value) > 0;
+  if (typeof value !== 'number' && typeof value !== 'string') return false;
+  if (typeof value === 'string' && !/^[1-9]\d*$/.test(value.trim())) return false;
+  return Number.isSafeInteger(Number(value)) && Number(value) > 0;
 }
 
 function normalizeRelationshipIds(body, fieldName) {
@@ -46,12 +48,16 @@ function normalizeRelationshipIds(body, fieldName) {
   return [...new Set(body[fieldName])];
 }
 
-function normalizeText(value, maxLength = null) {
+function normalizeText(value, maxLength = null, fieldName = 'field') {
   if (value === undefined || value === null) {
     return null;
   }
 
-  const text = String(value).trim();
+  if (typeof value !== 'string') {
+    throw new ValidationError(`${fieldName} must be a string.`);
+  }
+
+  const text = value.trim();
 
   if (!text) {
     return null;
@@ -67,6 +73,10 @@ function normalizeText(value, maxLength = null) {
 function validateAllowedValues(value, allowedValues, fieldName) {
   if (value === undefined || value === null || value === '') {
     return;
+  }
+
+  if (typeof value !== 'string') {
+    throw new ValidationError(`${fieldName} must be a string.`);
   }
 
   if (!allowedValues.includes(value)) {
@@ -85,33 +95,37 @@ function parseIdParam(req, entityName) {
 }
 
 function validateStudySessionPayload(body, { partial = false } = {}) {
-  if (!partial && !isValidDateString(body.session_date)) {
+  if (!partial && body.session_date === undefined) {
     throw new ValidationError('session_date is required and must use YYYY-MM-DD format.');
   }
 
-  if (body.session_date !== undefined
-      && body.session_date !== null
-      && body.session_date !== ''
-      && !isValidDateString(body.session_date)) {
-    throw new ValidationError('session_date must use YYYY-MM-DD format.');
+  if (body.session_date !== undefined) {
+    const sessionDate = normalizeText(body.session_date, 10, 'session_date');
+    if (!sessionDate || !isValidDateString(sessionDate)) {
+      throw new ValidationError('session_date is required and must use YYYY-MM-DD format.');
+    }
   }
 
-  if (!partial && !isPositiveInteger(body.duration_minutes)) {
+  if (!partial && body.duration_minutes === undefined) {
     throw new ValidationError('duration_minutes must be a positive integer.');
   }
 
-  if (body.duration_minutes !== undefined
-      && body.duration_minutes !== null
-      && body.duration_minutes !== ''
-      && !isPositiveInteger(body.duration_minutes)) {
+  if (body.duration_minutes !== undefined && !isPositiveInteger(body.duration_minutes)) {
     throw new ValidationError('duration_minutes must be a positive integer.');
   }
 
-  if (!partial && !body.category) {
+  if (!partial && body.category === undefined) {
     throw new ValidationError('category is required.');
   }
 
-  validateAllowedValues(body.category, STUDY_CATEGORIES, 'category');
+  if (body.category !== undefined) {
+    const category = normalizeText(body.category, 20, 'category');
+    if (!category) throw new ValidationError('category is required.');
+    validateAllowedValues(category, STUDY_CATEGORIES, 'category');
+  }
+
+  if (body.resource !== undefined) normalizeText(body.resource, 255, 'resource');
+  if (body.notes !== undefined) normalizeText(body.notes, 1500, 'notes');
 
   return {
     vocabularyIds: normalizeRelationshipIds(body, 'vocabulary_ids'),
@@ -125,16 +139,19 @@ function validateStandardRecordPayload(body, {
   requiredWord = true,
   requiredGrammar = false
 } = {}) {
-  if (requiredWord && (!body.word || !String(body.word).trim())) {
-    throw new ValidationError('word is required.');
+  if (requiredWord || body.word !== undefined) {
+    const word = normalizeText(body.word, null, 'word');
+    if (requiredWord && !word) throw new ValidationError('word is required.');
   }
 
-  if (requiredGrammar && (!body.grammar_point || !String(body.grammar_point).trim())) {
-    throw new ValidationError('grammar_point is required.');
+  if (requiredGrammar || body.grammar_point !== undefined) {
+    const grammarPoint = normalizeText(body.grammar_point, null, 'grammar_point');
+    if (requiredGrammar && !grammarPoint) throw new ValidationError('grammar_point is required.');
   }
 
-  if (requiredMeaning && (!body.meaning || !String(body.meaning).trim())) {
-    throw new ValidationError('meaning is required.');
+  if (requiredMeaning || body.meaning !== undefined) {
+    const meaning = normalizeText(body.meaning, null, 'meaning');
+    if (requiredMeaning && !meaning) throw new ValidationError('meaning is required.');
   }
 
   validateAllowedValues(body.jlpt_level, JLPT_LEVELS, 'jlpt_level');

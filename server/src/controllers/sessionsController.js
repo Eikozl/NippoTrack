@@ -1,6 +1,7 @@
 const pool = require('../config/db');
 const { ALLOWED_FIELDS, STUDY_CATEGORIES } = require('../constants');
 const { sendRouteError } = require('../errors/http');
+const { parsePagination } = require('../pagination');
 const {
   isValidDateString,
   normalizeText,
@@ -9,16 +10,18 @@ const {
   validateWriteFields
 } = require('../validation');
 const { fetchEntityById, rollbackAndRelease } = require('./helpers');
+const { executePaginatedList } = require('./listHelpers');
 
 async function listSessions(req, res) {
   try {
-    let query = 'SELECT id_session, session_date, duration_minutes, category, resource, notes FROM study_sessions WHERE 1=1';
+    const { page, limit, offset } = parsePagination(req.query);
+    let whereSql = ' WHERE 1=1';
     const params = [];
 
     if (req.query.category) {
-      const category = String(req.query.category);
+      const category = normalizeText(req.query.category, 20, 'category');
       if (!STUDY_CATEGORIES.includes(category)) return res.status(400).json({ error: 'Invalid category' });
-      query += ' AND category = ?';
+      whereSql += ' AND category = ?';
       params.push(category);
     }
 
@@ -26,28 +29,35 @@ async function listSessions(req, res) {
       if (!isValidDateString(req.query.date)) {
         return res.status(400).json({ error: 'Invalid date format (YYYY-MM-DD)' });
       }
-      query += ' AND session_date = ?';
+      whereSql += ' AND session_date = ?';
       params.push(req.query.date);
     } else {
       if (req.query.from) {
         if (!isValidDateString(req.query.from)) {
           return res.status(400).json({ error: 'Invalid from date (YYYY-MM-DD)' });
         }
-        query += ' AND session_date >= ?';
+        whereSql += ' AND session_date >= ?';
         params.push(req.query.from);
       }
       if (req.query.to) {
         if (!isValidDateString(req.query.to)) {
           return res.status(400).json({ error: 'Invalid to date (YYYY-MM-DD)' });
         }
-        query += ' AND session_date <= ?';
+        whereSql += ' AND session_date <= ?';
         params.push(req.query.to);
       }
     }
 
-    query += ' ORDER BY session_date DESC, id_session DESC LIMIT 100';
-    const [rows] = await pool.execute(query, params);
-    return res.json(rows);
+    return res.json(await executePaginatedList(pool, {
+      table: 'study_sessions',
+      columns: 'id_session, session_date, duration_minutes, category, resource, notes',
+      whereSql,
+      params,
+      orderBy: 'session_date DESC, id_session DESC',
+      page,
+      limit,
+      offset
+    }));
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Database unavailable' });
   }
@@ -80,11 +90,11 @@ async function getSession(req, res) {
 
 function normalizeSession(body, current = {}) {
   return {
-    sessionDate: body.session_date !== undefined ? normalizeText(body.session_date) || current.session_date : current.session_date,
+    sessionDate: body.session_date !== undefined ? normalizeText(body.session_date, 10, 'session_date') : current.session_date,
     durationMinutes: body.duration_minutes !== undefined ? Number(body.duration_minutes) : current.duration_minutes,
-    category: body.category !== undefined ? normalizeText(body.category, 20) || current.category : current.category,
-    resource: body.resource !== undefined ? normalizeText(body.resource, 255) : (current.resource ?? null),
-    notes: body.notes !== undefined ? normalizeText(body.notes, 1500) : (current.notes ?? null)
+    category: body.category !== undefined ? normalizeText(body.category, 20, 'category') : current.category,
+    resource: body.resource !== undefined ? normalizeText(body.resource, 255, 'resource') : (current.resource ?? null),
+    notes: body.notes !== undefined ? normalizeText(body.notes, 1500, 'notes') : (current.notes ?? null)
   };
 }
 

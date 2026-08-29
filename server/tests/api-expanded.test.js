@@ -140,9 +140,10 @@ test('vocabulary, kanji and grammar filters use bound parameters', async () => {
         assert.equal(response.status, 200);
       }
 
-      assert.deepEqual(calls[0].params, ['%study%', '%study%', '%study%', 'N4', 'Learning']);
-      assert.deepEqual(calls[1].params, ['%day%', '%day%', '%day%', '%day%', 'N5', 'New']);
-      assert.deepEqual(calls[2].params, ['%ongoing%', '%ongoing%', '%ongoing%', 'N3', 'Familiar']);
+      const listCalls = calls.filter(({ sql }) => /ORDER BY/.test(sql));
+      assert.deepEqual(listCalls[0].params, ['%study%', '%study%', '%study%', 'N4', 'Learning', 50, 0]);
+      assert.deepEqual(listCalls[1].params, ['%day%', '%day%', '%day%', '%day%', 'N5', 'New', 50, 0]);
+      assert.deepEqual(listCalls[2].params, ['%ongoing%', '%ongoing%', '%ongoing%', 'N3', 'Familiar', 50, 0]);
       calls.forEach(({ sql }) => assert.doesNotMatch(sql, /study|ongoing/));
     } finally {
       await stopServer(server);
@@ -205,10 +206,11 @@ test('canonical /api/sessions supports category, exact-date and date-range filte
         assert.equal(response.status, 200);
       }
 
-      assert.deepEqual(calls[0].params, ['Reading', '2026-08-29']);
-      assert.deepEqual(calls[1].params, ['2026-08-01', '2026-08-29']);
-      assert.match(calls[0].sql, /category = \?.*session_date = \?/);
-      assert.match(calls[1].sql, /session_date >= \?.*session_date <= \?/);
+      const listCalls = calls.filter(({ sql }) => /ORDER BY/.test(sql));
+      assert.deepEqual(listCalls[0].params, ['Reading', '2026-08-29', 50, 0]);
+      assert.deepEqual(listCalls[1].params, ['2026-08-01', '2026-08-29', 50, 0]);
+      assert.match(listCalls[0].sql, /category = \?.*session_date = \?/);
+      assert.match(listCalls[1].sql, /session_date >= \?.*session_date <= \?/);
     } finally {
       await stopServer(server);
     }

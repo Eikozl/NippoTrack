@@ -109,12 +109,13 @@ export function field({ name, label, type = 'text', value = '', required = false
 export function searchableMultiSelect({
   name,
   label,
-  options,
+  options = [],
   value = [],
   placeholder = 'Search…',
   emptyMessage = 'No records available.',
   createLabel = 'Add new',
-  onCreate
+  onCreate,
+  loadOptions
 }) {
   const selectedValues = new Set(value.map(String));
   const optionLabels = new Map(options.map((option) => [String(option.value), option.label]));
@@ -124,18 +125,27 @@ export function searchableMultiSelect({
     attrs: { name, id: `field-${name}`, multiple: '', 'aria-hidden': 'true', tabindex: '-1' }
   });
 
-  options.forEach((option) => {
-    const optionNode = element('option', { text: option.label, attrs: { value: option.value } });
-    optionNode.selected = selectedValues.has(String(option.value));
-    hiddenSelect.appendChild(optionNode);
-  });
-
   const chips = element('div', { className: 'flex min-h-8 flex-wrap gap-2' });
-  const optionRows = [];
+  const optionsList = element('div', {
+    className: 'max-h-40 overflow-y-auto rounded-lg border border-stone bg-white p-1',
+    attrs: { role: 'group', 'aria-labelledby': labelId }
+  });
+  const search = element('input', {
+    className: 'field-control',
+    attrs: { type: 'search', placeholder, autocomplete: 'off', 'aria-labelledby': labelId }
+  });
+  let optionRows = [];
+  let requestSequence = 0;
 
   function syncSelection() {
-    Array.from(hiddenSelect.options).forEach((option) => {
-      option.selected = selectedValues.has(option.value);
+    hiddenSelect.replaceChildren();
+    selectedValues.forEach((selectedValue) => {
+      const option = element('option', {
+        text: optionLabels.get(selectedValue) || selectedValue,
+        attrs: { value: selectedValue }
+      });
+      option.selected = true;
+      hiddenSelect.appendChild(option);
     });
     optionRows.forEach(({ checkbox }) => {
       checkbox.checked = selectedValues.has(checkbox.value);
@@ -164,71 +174,100 @@ export function searchableMultiSelect({
     });
   }
 
+  function renderOptions(availableOptions, message = null) {
+    optionRows = [];
+    optionsList.replaceChildren();
+
+    availableOptions.forEach((option) => {
+      const optionValue = String(option.value);
+      optionLabels.set(optionValue, option.label);
+      const checkbox = element('input', {
+        className: 'mt-0.5 size-4 accent-vermilion',
+        attrs: { type: 'checkbox', value: optionValue }
+      });
+      checkbox.checked = selectedValues.has(optionValue);
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) selectedValues.add(optionValue);
+        else selectedValues.delete(optionValue);
+        syncSelection();
+      });
+      const row = element('label', { className: 'flex cursor-pointer items-start gap-3 rounded-md px-3 py-2 text-sm font-normal transition hover:bg-paper' }, [
+        checkbox,
+        element('span', { className: 'min-w-0 leading-5 text-ink', text: option.label })
+      ]);
+      optionRows.push({ checkbox, row, searchText: option.label.toLocaleLowerCase() });
+      optionsList.appendChild(row);
+    });
+
+    if (availableOptions.length === 0) {
+      optionsList.appendChild(element('p', {
+        className: 'grid min-h-24 place-items-center p-4 text-center text-sm font-normal leading-5 text-muted',
+        text: message || emptyMessage
+      }));
+    }
+    syncSelection();
+  }
+
   const createButton = element('button', {
     className: 'text-xs font-semibold text-vermilion transition hover:text-vermilion-dark',
     text: `+ ${createLabel}`,
     attrs: { type: 'button' }
   });
-  createButton.addEventListener('click', onCreate);
+  if (onCreate) createButton.addEventListener('click', onCreate);
 
   const header = element('div', { className: 'flex items-center justify-between gap-3' }, [
     element('span', { text: label, attrs: { id: labelId } }),
-    createButton
+    onCreate ? createButton : null
   ]);
 
-  if (options.length === 0) {
-    return element('div', { className: 'field' }, [
-      header,
-      element('div', { className: 'grid min-h-28 place-items-center rounded-lg border border-dashed border-stone bg-paper/45 p-4 text-center' }, [
-        element('p', { className: 'text-sm font-normal leading-5 text-muted', text: emptyMessage })
-      ]),
-      hiddenSelect
-    ]);
-  }
+  search.addEventListener('input', debounce(async () => {
+    const query = search.value.trim();
+    if (!loadOptions) {
+      const normalizedQuery = query.toLocaleLowerCase();
+      const filtered = options.filter((option) => option.label.toLocaleLowerCase().includes(normalizedQuery));
+      renderOptions(filtered, 'No matches found.');
+      return;
+    }
 
-  const search = element('input', {
-    className: 'field-control',
-    attrs: { type: 'search', placeholder, autocomplete: 'off', 'aria-labelledby': labelId }
-  });
-  const noMatches = element('p', { className: 'hidden p-3 text-center text-sm font-normal text-muted', text: 'No matches found.' });
-  const optionsList = element('div', {
-    className: 'max-h-40 overflow-y-auto rounded-lg border border-stone bg-white p-1',
-    attrs: { role: 'group', 'aria-labelledby': labelId }
-  });
+    const sequence = ++requestSequence;
+    optionsList.replaceChildren(element('p', { className: 'p-4 text-center text-sm font-normal text-muted', text: 'Searching…' }));
+    try {
+      const loadedOptions = await loadOptions(query);
+      if (sequence !== requestSequence) return;
+      renderOptions(loadedOptions, query ? 'No matches found.' : emptyMessage);
+    } catch {
+      if (sequence !== requestSequence) return;
+      renderOptions([], 'Unable to load options. Try again.');
+    }
+  }, 250));
 
-  options.forEach((option) => {
-    const checkbox = element('input', {
-      className: 'size-4 accent-vermilion',
-      attrs: { type: 'checkbox', value: option.value }
-    });
-    checkbox.checked = selectedValues.has(String(option.value));
-    checkbox.addEventListener('change', () => {
-      if (checkbox.checked) selectedValues.add(checkbox.value);
-      else selectedValues.delete(checkbox.value);
-      syncSelection();
-    });
-    const row = element('label', { className: 'flex cursor-pointer items-start gap-3 rounded-md px-3 py-2 text-sm font-normal transition hover:bg-paper' }, [
-      checkbox,
-      element('span', { className: 'min-w-0 leading-5 text-ink', text: option.label })
-    ]);
-    optionRows.push({ checkbox, row, searchText: option.label.toLocaleLowerCase() });
-    optionsList.appendChild(row);
-  });
-  optionsList.appendChild(noMatches);
-
-  search.addEventListener('input', () => {
-    const query = search.value.trim().toLocaleLowerCase();
-    let visibleCount = 0;
-    optionRows.forEach(({ row, searchText }) => {
-      const visible = !query || searchText.includes(query);
-      row.classList.toggle('hidden', !visible);
-      if (visible) visibleCount += 1;
-    });
-    noMatches.classList.toggle('hidden', visibleCount !== 0);
-  });
-
-  syncSelection();
+  renderOptions(options);
   return element('div', { className: 'field' }, [header, search, chips, optionsList, hiddenSelect]);
+}
+
+export function paginationControls(pagination, onPageChange) {
+  if (!pagination || pagination.totalPages <= 1) return null;
+
+  const previous = element('button', {
+    className: 'button-secondary min-h-9 px-3 py-1.5',
+    text: 'Previous',
+    attrs: { type: 'button', ...(pagination.page <= 1 ? { disabled: '' } : {}) }
+  });
+  const next = element('button', {
+    className: 'button-secondary min-h-9 px-3 py-1.5',
+    text: 'Next',
+    attrs: { type: 'button', ...(pagination.page >= pagination.totalPages ? { disabled: '' } : {}) }
+  });
+  previous.addEventListener('click', () => onPageChange(pagination.page - 1));
+  next.addEventListener('click', () => onPageChange(pagination.page + 1));
+
+  return element('nav', { className: 'mt-5 flex flex-col items-center justify-between gap-3 sm:flex-row', attrs: { 'aria-label': 'Pagination' } }, [
+    element('p', {
+      className: 'text-sm text-muted',
+      text: `Page ${pagination.page} of ${pagination.totalPages} · ${pagination.total} records`
+    }),
+    element('div', { className: 'flex gap-2' }, [previous, next])
+  ]);
 }
 
 export function openDialog({ title, content, submitLabel = 'Save', onSubmit }) {

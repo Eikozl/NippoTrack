@@ -8,6 +8,7 @@ import {
   loadingState,
   openDialog,
   pageHeader,
+  paginationControls,
   showToast
 } from '../ui';
 
@@ -121,6 +122,8 @@ function recordCard(item, config, onEdit, onDelete) {
 }
 
 export function renderEntityPage(container, config) {
+  const pageSize = 30;
+  let currentPage = 1;
   const addButton = element('button', { className: 'button-primary', text: `Add ${config.singular}`, attrs: { type: 'button' } });
   const search = element('input', { className: 'field-control', attrs: { type: 'search', placeholder: `Search ${config.title.toLowerCase()}…`, 'aria-label': `Search ${config.title}` } });
   const jlpt = element('select', { className: 'field-control', attrs: { 'aria-label': 'Filter by JLPT level' } }, JLPT_OPTIONS.map((option) => element('option', { text: option.label, attrs: { value: option.value } })));
@@ -141,12 +144,31 @@ export function renderEntityPage(container, config) {
   async function load() {
     results.replaceChildren(loadingState(`Loading ${config.title.toLowerCase()}…`));
     try {
-      const items = await apiRequest(`${config.endpoint}${queryString({ search: search.value, jlpt: jlpt.value, status: status.value })}`);
+      const data = await apiRequest(`${config.endpoint}${queryString({
+        search: search.value,
+        jlpt: jlpt.value,
+        status: status.value,
+        page: currentPage,
+        limit: pageSize
+      })}`);
+      const { items, pagination } = data;
+      if (!items.length && currentPage > 1 && pagination.totalPages > 0) {
+        currentPage = pagination.totalPages;
+        await load();
+        return;
+      }
       if (!items.length) {
         results.replaceChildren(emptyState({ title: `No ${config.title.toLowerCase()} found`, description: config.empty }));
         return;
       }
-      results.replaceChildren(element('div', { className: 'grid gap-4 md:grid-cols-2 xl:grid-cols-3' }, items.map((item) => recordCard(item, config, editRecord, deleteRecord))));
+      const pager = paginationControls(pagination, (pageNumber) => {
+          currentPage = pageNumber;
+          load();
+        });
+      results.replaceChildren(
+        element('div', { className: 'grid gap-4 md:grid-cols-2 xl:grid-cols-3' }, items.map((item) => recordCard(item, config, editRecord, deleteRecord))),
+        ...[pager].filter(Boolean)
+      );
     } catch (error) {
       results.replaceChildren(errorState(error, load));
     }
@@ -160,6 +182,7 @@ export function renderEntityPage(container, config) {
     });
     close();
     showToast(id ? `${config.title} record updated.` : `${config.title} record created.`);
+    if (!id) currentPage = 1;
     await load();
   }
 
@@ -192,9 +215,13 @@ export function renderEntityPage(container, config) {
   }
 
   addButton.addEventListener('click', () => openRecordDialog());
-  const debouncedLoad = debounce(load);
+  const resetAndLoad = () => {
+    currentPage = 1;
+    load();
+  };
+  const debouncedLoad = debounce(resetAndLoad);
   search.addEventListener('input', debouncedLoad);
-  jlpt.addEventListener('change', load);
-  status.addEventListener('change', load);
+  jlpt.addEventListener('change', resetAndLoad);
+  status.addEventListener('change', resetAndLoad);
   load();
 }

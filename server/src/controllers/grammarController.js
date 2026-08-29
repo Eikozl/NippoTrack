@@ -1,6 +1,7 @@
 const pool = require('../config/db');
 const { ALLOWED_FIELDS, JLPT_LEVELS, STATUSES } = require('../constants');
 const { ValidationError, sendRouteError } = require('../errors/http');
+const { parseOptionLimit, parsePagination } = require('../pagination');
 const {
   normalizeText,
   parseIdParam,
@@ -8,35 +9,66 @@ const {
   validateWriteFields
 } = require('../validation');
 const { fetchEntityById } = require('./helpers');
+const { executePaginatedList } = require('./listHelpers');
 
 async function listGrammar(req, res) {
   try {
-    let query = 'SELECT id_grammar, grammar_point, meaning, structure, example, jlpt_level, status FROM grammar_points WHERE 1=1';
+    const { page, limit, offset } = parsePagination(req.query);
+    let whereSql = ' WHERE 1=1';
     const params = [];
 
-    if (req.query.search) {
-      const searchTerm = `%${String(req.query.search).trim()}%`;
-      query += ' AND (grammar_point LIKE ? OR meaning LIKE ? OR structure LIKE ?)';
+    const search = normalizeText(req.query.search, 100, 'search');
+    if (search) {
+      const searchTerm = `%${search}%`;
+      whereSql += ' AND (grammar_point LIKE ? OR meaning LIKE ? OR structure LIKE ?)';
       params.push(searchTerm, searchTerm, searchTerm);
     }
     if (req.query.jlpt) {
-      const jlpt = String(req.query.jlpt).toUpperCase();
+      const jlpt = normalizeText(req.query.jlpt, 2, 'jlpt').toUpperCase();
       if (!JLPT_LEVELS.includes(jlpt)) return res.status(400).json({ error: 'Invalid JLPT level' });
-      query += ' AND jlpt_level = ?';
+      whereSql += ' AND jlpt_level = ?';
       params.push(jlpt);
     }
     if (req.query.status) {
-      const status = String(req.query.status);
+      const status = normalizeText(req.query.status, 20, 'status');
       if (!STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' });
-      query += ' AND status = ?';
+      whereSql += ' AND status = ?';
       params.push(status);
     }
 
-    query += ' ORDER BY id_grammar DESC LIMIT 100';
-    const [rows] = await pool.execute(query, params);
-    return res.json(rows);
+    return res.json(await executePaginatedList(pool, {
+      table: 'grammar_points',
+      columns: 'id_grammar, grammar_point, meaning, structure, example, jlpt_level, status',
+      whereSql,
+      params,
+      orderBy: 'id_grammar DESC',
+      page,
+      limit,
+      offset
+    }));
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Database unavailable' });
+  }
+}
+
+async function listGrammarOptions(req, res) {
+  try {
+    const limit = parseOptionLimit(req.query.limit);
+    const search = normalizeText(req.query.search, 100, 'search');
+    const params = [];
+    let whereSql = '';
+    if (search) {
+      const term = `%${search}%`;
+      whereSql = ' WHERE grammar_point LIKE ? OR meaning LIKE ? OR structure LIKE ?';
+      params.push(term, term, term);
+    }
+    const [items] = await pool.execute(
+      `SELECT id_grammar, grammar_point, meaning FROM grammar_points${whereSql} ORDER BY id_grammar DESC LIMIT ?`,
+      [...params, limit]
+    );
+    return res.json({ items });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load grammar options.' });
   }
 }
 
@@ -52,17 +84,20 @@ async function getGrammar(req, res) {
 }
 
 function normalizeGrammar(body, current = {}) {
-  if (body.grammar_point !== undefined && !String(body.grammar_point).trim()) {
-    throw new ValidationError('grammar_point is required.');
-  }
+  const grammarPoint = body.grammar_point !== undefined
+    ? normalizeText(body.grammar_point, 100, 'grammar_point')
+    : current.grammar_point;
+  const meaning = body.meaning !== undefined ? normalizeText(body.meaning, 255, 'meaning') : current.meaning;
+  if (body.grammar_point !== undefined && !grammarPoint) throw new ValidationError('grammar_point is required.');
+  if (body.meaning !== undefined && !meaning) throw new ValidationError('meaning is required.');
   return {
-    grammarPoint: body.grammar_point !== undefined ? normalizeText(body.grammar_point, 100) || current.grammar_point : current.grammar_point,
-    meaning: body.meaning !== undefined ? normalizeText(body.meaning, 255) || current.meaning : current.meaning,
-    structure: body.structure !== undefined ? normalizeText(body.structure, 2000) : (current.structure ?? null),
-    example: body.example !== undefined ? normalizeText(body.example, 2000) : (current.example ?? null),
-    jlptLevel: body.jlpt_level !== undefined ? (body.jlpt_level === '' ? null : normalizeText(body.jlpt_level, 2)) : (current.jlpt_level ?? null),
-    status: body.status !== undefined ? normalizeText(body.status, 20) || current.status : (current.status || 'New'),
-    notes: body.notes !== undefined ? normalizeText(body.notes, 1500) : (current.notes ?? null)
+    grammarPoint,
+    meaning,
+    structure: body.structure !== undefined ? normalizeText(body.structure, 2000, 'structure') : (current.structure ?? null),
+    example: body.example !== undefined ? normalizeText(body.example, 2000, 'example') : (current.example ?? null),
+    jlptLevel: body.jlpt_level !== undefined ? (body.jlpt_level === '' ? null : normalizeText(body.jlpt_level, 2, 'jlpt_level')) : (current.jlpt_level ?? null),
+    status: body.status !== undefined ? normalizeText(body.status, 20, 'status') || current.status : (current.status || 'New'),
+    notes: body.notes !== undefined ? normalizeText(body.notes, 1500, 'notes') : (current.notes ?? null)
   };
 }
 
@@ -71,7 +106,10 @@ async function createGrammar(req, res) {
     const body = req.body || {};
     validateWriteFields(body, ALLOWED_FIELDS.grammar);
     validateStandardRecordPayload(body, { requiredWord: false, requiredMeaning: true, requiredGrammar: true });
-    const values = normalizeGrammar({ ...body, status: body.status || 'New' });
+    const values = normalizeGrammar({
+      ...body,
+      status: body.status === undefined || body.status === null || body.status === '' ? 'New' : body.status
+    });
     const [result] = await pool.execute(
       'INSERT INTO grammar_points (grammar_point, meaning, structure, example, jlpt_level, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [values.grammarPoint, values.meaning, values.structure, values.example, values.jlptLevel, values.status, values.notes]
@@ -119,4 +157,4 @@ async function deleteGrammar(req, res) {
   }
 }
 
-module.exports = { createGrammar, deleteGrammar, getGrammar, listGrammar, updateGrammar };
+module.exports = { createGrammar, deleteGrammar, getGrammar, listGrammar, listGrammarOptions, updateGrammar };

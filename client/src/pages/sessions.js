@@ -9,6 +9,7 @@ import {
   loadingState,
   openDialog,
   pageHeader,
+  paginationControls,
   searchableMultiSelect,
   showToast
 } from '../ui';
@@ -72,8 +73,20 @@ function selectedNumbers(select) {
   return Array.from(select.selectedOptions, (option) => Number(option.value));
 }
 
+function mergeOptions(loadedOptions, selectedRecords, mapRecord) {
+  const merged = new Map(loadedOptions.map((option) => [String(option.value), option]));
+  selectedRecords.forEach((record) => {
+    const option = mapRecord(record);
+    merged.set(String(option.value), option);
+  });
+  return Array.from(merged.values());
+}
+
 export function renderSessions(container) {
   destroyCharts();
+  const pageSize = 20;
+  const relationshipLimit = 20;
+  let currentPage = 1;
   const addButton = element('button', { className: 'button-primary', text: 'Add session', attrs: { type: 'button' } });
   const category = element('select', { className: 'field-control', attrs: { 'aria-label': 'Filter by category' } }, [
     element('option', { text: 'Any category', attrs: { value: '' } }),
@@ -136,28 +149,60 @@ export function renderSessions(container) {
     results.replaceChildren(loadingState('Loading study sessions…'));
     try {
       const dates = periodQuery(period.value, fromDate.value, toDate.value);
-      const sessions = await apiRequest(`/api/sessions${queryString({
+      const data = await apiRequest(`/api/sessions${queryString({
         category: category.value,
+        page: currentPage,
+        limit: pageSize,
         ...dates
       })}`);
-      results.replaceChildren(sessions.length
-        ? element('div', { className: 'grid gap-4' }, sessions.map((session) => sessionCard(session, editSession, deleteSession)))
-        : emptyState({ title: 'No sessions found', description: 'Record a study session or adjust the current filters.' }));
+      const { items, pagination } = data;
+      if (!items.length && currentPage > 1 && pagination.totalPages > 0) {
+        currentPage = pagination.totalPages;
+        await load();
+        return;
+      }
+      if (!items.length) {
+        results.replaceChildren(emptyState({ title: 'No sessions found', description: 'Record a study session or adjust the current filters.' }));
+        return;
+      }
+      const pager = paginationControls(pagination, (pageNumber) => {
+        currentPage = pageNumber;
+        load();
+      });
+      results.replaceChildren(
+        element('div', { className: 'grid gap-4' }, items.map((session) => sessionCard(session, editSession, deleteSession))),
+        ...[pager].filter(Boolean)
+      );
     } catch (error) {
       results.replaceChildren(errorState(error, load));
     }
   }
 
-  async function loadRelationshipOptions() {
+  async function loadVocabularyOptions(search = '') {
+    const data = await apiRequest(`/api/vocabulary/options${queryString({ search, limit: relationshipLimit })}`);
+    return data.items.map((item) => ({ value: item.id_vocabulary, label: `${item.word}${item.reading ? ` · ${item.reading}` : ''}` }));
+  }
+
+  async function loadKanjiOptions(search = '') {
+    const data = await apiRequest(`/api/kanji/options${queryString({ search, limit: relationshipLimit })}`);
+    return data.items.map((item) => ({ value: item.id_kanji, label: `${item.character_kanji} · ${item.meaning}` }));
+  }
+
+  async function loadGrammarOptions(search = '') {
+    const data = await apiRequest(`/api/grammar/options${queryString({ search, limit: relationshipLimit })}`);
+    return data.items.map((item) => ({ value: item.id_grammar, label: `${item.grammar_point} · ${item.meaning}` }));
+  }
+
+  async function loadRelationshipOptions(record) {
     const [vocabulary, kanji, grammar] = await Promise.all([
-      apiRequest('/api/vocabulary'),
-      apiRequest('/api/kanji'),
-      apiRequest('/api/grammar')
+      loadVocabularyOptions(),
+      loadKanjiOptions(),
+      loadGrammarOptions()
     ]);
     return {
-      vocabulary: vocabulary.map((item) => ({ value: item.id_vocabulary, label: `${item.word}${item.reading ? ` · ${item.reading}` : ''}` })),
-      kanji: kanji.map((item) => ({ value: item.id_kanji, label: `${item.character_kanji} · ${item.meaning}` })),
-      grammar: grammar.map((item) => ({ value: item.id_grammar, label: `${item.grammar_point} · ${item.meaning}` }))
+      vocabulary: mergeOptions(vocabulary, record.vocabulary || [], (item) => ({ value: item.id_vocabulary, label: `${item.word}${item.reading ? ` · ${item.reading}` : ''}` })),
+      kanji: mergeOptions(kanji, record.kanji || [], (item) => ({ value: item.id_kanji, label: `${item.character_kanji} · ${item.meaning}` })),
+      grammar: mergeOptions(grammar, record.grammar || [], (item) => ({ value: item.id_grammar, label: `${item.grammar_point} · ${item.meaning}` }))
     };
   }
 
@@ -166,7 +211,7 @@ export function renderSessions(container) {
     const previousLabel = addButton.textContent;
     addButton.textContent = 'Loading…';
     try {
-      const options = await loadRelationshipOptions();
+      const options = await loadRelationshipOptions(record);
       let closeDialog;
       const goToLibrary = (page) => {
         closeDialog?.();
@@ -186,7 +231,8 @@ export function renderSessions(container) {
           placeholder: 'Search vocabulary…',
           emptyMessage: 'No vocabulary records yet. Add vocabulary before linking it to this session.',
           createLabel: 'Add vocabulary',
-          onCreate: () => goToLibrary('vocabulary')
+          onCreate: () => goToLibrary('vocabulary'),
+          loadOptions: loadVocabularyOptions
         }),
         searchableMultiSelect({
           name: 'kanji_ids',
@@ -196,7 +242,8 @@ export function renderSessions(container) {
           placeholder: 'Search kanji…',
           emptyMessage: 'No kanji records yet. Add kanji before linking it to this session.',
           createLabel: 'Add kanji',
-          onCreate: () => goToLibrary('kanji')
+          onCreate: () => goToLibrary('kanji'),
+          loadOptions: loadKanjiOptions
         }),
         searchableMultiSelect({
           name: 'grammar_ids',
@@ -206,7 +253,8 @@ export function renderSessions(container) {
           placeholder: 'Search grammar…',
           emptyMessage: 'No grammar records yet. Add grammar before linking it to this session.',
           createLabel: 'Add grammar',
-          onCreate: () => goToLibrary('grammar')
+          onCreate: () => goToLibrary('grammar'),
+          loadOptions: loadGrammarOptions
         })
       ];
       formFields[4].classList.add('sm:col-span-2');
@@ -233,6 +281,7 @@ export function renderSessions(container) {
           });
           close();
           showToast(record.id_session ? 'Study session updated.' : 'Study session created.');
+          if (!record.id_session) currentPage = 1;
           await load();
         }
       });
@@ -264,18 +313,22 @@ export function renderSessions(container) {
   }
 
   addButton.addEventListener('click', () => openSessionDialog());
-  category.addEventListener('change', load);
+  const resetAndLoad = () => {
+    currentPage = 1;
+    load();
+  };
+  category.addEventListener('change', resetAndLoad);
   period.addEventListener('change', () => {
     updateCustomRangeVisibility();
-    load();
+    resetAndLoad();
   });
   fromDate.addEventListener('change', () => {
     toDate.min = fromDate.value;
-    load();
+    resetAndLoad();
   });
   toDate.addEventListener('change', () => {
     fromDate.max = toDate.value;
-    load();
+    resetAndLoad();
   });
   clearButton.addEventListener('click', () => {
     category.value = '';
@@ -285,7 +338,7 @@ export function renderSessions(container) {
     fromDate.removeAttribute('max');
     toDate.removeAttribute('min');
     updateCustomRangeVisibility();
-    load();
+    resetAndLoad();
   });
   updateCustomRangeVisibility();
   load();

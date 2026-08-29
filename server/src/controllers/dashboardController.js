@@ -16,7 +16,7 @@ async function getDashboard(req, res) {
       'SELECT id_session, session_date, category, duration_minutes FROM study_sessions ORDER BY session_date DESC, id_session DESC LIMIT 5'
     );
     const [weeklyActivity] = await pool.query(
-      'SELECT session_date AS date, SUM(duration_minutes) AS minutes FROM study_sessions WHERE session_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY) GROUP BY session_date ORDER BY session_date'
+      'SELECT session_date AS date, SUM(duration_minutes) AS minutes FROM study_sessions WHERE session_date BETWEEN DATE_SUB(CURDATE(), INTERVAL 6 DAY) AND CURDATE() GROUP BY session_date ORDER BY session_date'
     );
     const [studyDistribution] = await pool.query(
       'SELECT category, SUM(duration_minutes) AS minutes FROM study_sessions GROUP BY category ORDER BY minutes DESC'
