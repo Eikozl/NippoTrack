@@ -359,11 +359,11 @@
       }
 
       async function loadSummary() {
-        const summary = await fetchJson(`${apiBase}/api/dashboard`);
-        document.getElementById('total-sessions').textContent = summary.totalSessions;
-        document.getElementById('total-minutes').textContent = summary.totalMinutes;
-        document.getElementById('total-vocabulary').textContent = summary.totalVocabulary;
-        document.getElementById('total-kanji').textContent = summary.totalKanji;
+        const dashboard = await fetchJson(`${apiBase}/api/dashboard`);
+        document.getElementById('total-sessions').textContent = dashboard.recentSessions ? dashboard.recentSessions.length : 0;
+        document.getElementById('total-minutes').textContent = dashboard.minutesToday || 0;
+        document.getElementById('total-vocabulary').textContent = dashboard.vocabularyCount || 0;
+        document.getElementById('total-kanji').textContent = dashboard.kanjiCount || 0;
       }
 
       async function loadSessions() {

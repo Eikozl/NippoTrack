@@ -171,17 +171,45 @@ app.get('/api/health', async (req, res) => {
 
 app.get('/api/dashboard', async (req, res) => {
   try {
-    const [sessionSummary] = await pool.query('SELECT COUNT(*) AS total_sessions, COALESCE(SUM(duration_minutes), 0) AS total_minutes FROM study_sessions');
-    const [vocabularySummary] = await pool.query('SELECT COUNT(*) AS total_vocabulary FROM vocabulary');
-    const [kanjiSummary] = await pool.query('SELECT COUNT(*) AS total_kanji FROM kanji');
-    const [grammarSummary] = await pool.query('SELECT COUNT(*) AS total_grammar FROM grammar_points');
+    // Today's minutes
+    const [todayData] = await pool.query(
+      'SELECT COALESCE(SUM(duration_minutes), 0) AS minutes_today FROM study_sessions WHERE session_date = CURDATE()'
+    );
+
+    // This week's minutes (Monday-based)
+    const [weekData] = await pool.query(
+      'SELECT COALESCE(SUM(duration_minutes), 0) AS minutes_week FROM study_sessions WHERE YEARWEEK(session_date, 1) = YEARWEEK(CURDATE(), 1)'
+    );
+
+    // Counts
+    const [vocabCount] = await pool.query('SELECT COUNT(*) AS total FROM vocabulary');
+    const [kanjiCount] = await pool.query('SELECT COUNT(*) AS total FROM kanji');
+    const [grammarCount] = await pool.query('SELECT COUNT(*) AS total FROM grammar_points');
+
+    // Recent sessions (last 5)
+    const [recentSessions] = await pool.query(
+      'SELECT id_session, session_date, category, duration_minutes FROM study_sessions ORDER BY session_date DESC, id_session DESC LIMIT 5'
+    );
+
+    // Weekly activity (last 7 days)
+    const [weeklyActivity] = await pool.query(
+      'SELECT session_date AS date, SUM(duration_minutes) AS minutes FROM study_sessions WHERE session_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY) GROUP BY session_date ORDER BY session_date'
+    );
+
+    // Study distribution (by category)
+    const [studyDistribution] = await pool.query(
+      'SELECT category, SUM(duration_minutes) AS minutes FROM study_sessions GROUP BY category ORDER BY minutes DESC'
+    );
 
     res.json({
-      totalSessions: Number(sessionSummary[0].total_sessions || 0),
-      totalMinutes: Number(sessionSummary[0].total_minutes || 0),
-      totalVocabulary: Number(vocabularySummary[0].total_vocabulary || 0),
-      totalKanji: Number(kanjiSummary[0].total_kanji || 0),
-      totalGrammar: Number(grammarSummary[0].total_grammar || 0)
+      minutesToday: Number(todayData[0]?.minutes_today || 0),
+      minutesThisWeek: Number(weekData[0]?.minutes_week || 0),
+      vocabularyCount: Number(vocabCount[0]?.total || 0),
+      kanjiCount: Number(kanjiCount[0]?.total || 0),
+      grammarCount: Number(grammarCount[0]?.total || 0),
+      recentSessions: recentSessions || [],
+      weeklyActivity: weeklyActivity || [],
+      studyDistribution: studyDistribution || []
     });
   } catch (error) {
     res.status(503).json({ error: 'Database unavailable' });
