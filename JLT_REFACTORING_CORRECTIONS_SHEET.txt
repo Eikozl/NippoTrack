@@ -1,0 +1,1012 @@
+JAPANESE LEARNING TRACKER (JLT)
+REFACTORING & CORRECTIONS SHEET
+Target: Current V1 repository state
+Purpose: Correct architectural drift, security issues, Git hygiene, API contract gaps, and frontend implementation problems before continuing development.
+
+======================================================================
+0. EXECUTION RULE
+======================================================================
+
+DO NOT ADD NEW FEATURES UNTIL THIS CORRECTION SHEET IS COMPLETE.
+
+This refactor is a stabilization checkpoint.
+
+The goal is NOT to rewrite the project from scratch.
+Preserve working code when possible, but correct unsafe, premature, or
+architecturally inconsistent implementation.
+
+The existing MariaDB schema is considered FROZEN for V1.
+Do not modify it unless a concrete functional defect is discovered.
+
+Do not begin V2 or V3 work.
+
+======================================================================
+1. PRIORITY ORDER
+======================================================================
+
+Execute corrections in this exact order:
+
+P0 - Repository / secret hygiene
+P0 - Security vulnerabilities
+P1 - Backend foundation correctness
+P1 - API contract corrections
+P1 - Relationship / transaction support
+P2 - Code organization / maintainability
+P2 - Frontend prototype cleanup
+P2 - Testing
+P3 - Documentation / developer experience
+
+Do not skip ahead.
+
+======================================================================
+2. P0 - REPOSITORY & SECRET HYGIENE
+======================================================================
+
+CURRENT PROBLEM:
+The repository currently tracks:
+- server/.env
+- server/node_modules
+- .vs
+
+This violates the project security and Git hygiene rules.
+
+REQUIRED CHANGES:
+
+1. Create a root .gitignore.
+
+Minimum contents:
+
+    node_modules/
+    .env
+    .env.*
+    !.env.example
+    .vs/
+    dist/
+    coverage/
+    *.log
+
+2. Remove tracked environment files from Git index.
+
+At minimum:
+- server/.env must no longer be tracked.
+
+3. Keep:
+- server/.env.example
+
+4. Remove tracked node_modules from Git.
+
+5. Remove tracked .vs metadata.
+
+6. Do NOT delete the developer's local .env from disk if it is needed for
+   local development. Remove it from Git tracking only.
+
+7. If any real secret was ever committed:
+- rotate it
+- remove it from Git history if applicable
+- document the cleanup
+
+ACCEPTANCE CRITERIA:
+
+[ ] git status does not show node_modules as tracked
+[ ] .env is ignored
+[ ] .env.example remains tracked
+[ ] .vs is ignored
+[ ] no credentials are stored in committed frontend/backend source files
+
+======================================================================
+3. P0 - FIX STORED XSS RISK
+======================================================================
+
+CURRENT PROBLEM:
+Frontend rendering currently uses innerHTML with values returned from the
+database, including vocabulary, grammar, sessions, and kanji data.
+
+This allows stored user content to become executable HTML.
+
+REQUIRED CHANGES:
+
+1. Do NOT insert database/user-supplied content using innerHTML.
+
+2. Prefer:
+- document.createElement(...)
+- element.textContent = value
+
+3. If templates are retained, user-controlled values must be escaped before
+   insertion. textContent is preferred.
+
+4. Empty-state markup may use static innerHTML only when no user-controlled
+   data is interpolated.
+
+5. Replace list rendering with safe DOM construction.
+
+BAD:
+
+    li.innerHTML = `
+      <strong>${item.word}</strong>
+      <div>${item.meaning}</div>
+    `;
+
+GOOD:
+
+    const strong = document.createElement('strong');
+    strong.textContent = item.word;
+
+    const meaning = document.createElement('div');
+    meaning.textContent = item.meaning;
+
+    li.append(strong, meaning);
+
+ACCEPTANCE TEST:
+
+Insert a record containing:
+
+    <img src=x onerror=alert('xss')>
+
+The UI must display it as text.
+It must NOT execute.
+
+======================================================================
+4. P0 - SAFE ERROR HANDLING
+======================================================================
+
+CURRENT PROBLEM:
+Several API routes return raw error.message values or DB details to clients.
+
+Examples of unsafe behavior:
+- detail: error.message
+- raw duplicate/connection/parser messages
+
+REQUIRED CHANGES:
+
+1. Client responses must be generic and safe.
+
+Examples:
+
+Database unavailable:
+
+    {
+      "error": "Database unavailable"
+    }
+
+Validation failure:
+
+    {
+      "error": "Invalid status"
+    }
+
+Conflict:
+
+    {
+      "error": "Kanji already exists"
+    }
+
+2. Log internal details server-side only.
+
+3. Do not expose:
+- SQL statements
+- stack traces
+- DB usernames
+- DB host details
+- parser errors
+- raw MariaDB/MySQL error objects
+
+4. Introduce centralized error handling when practical.
+
+Recommended:
+    src/middleware/errorHandler.js
+
+5. Distinguish common error classes:
+- validation -> 400
+- not found -> 404
+- duplicate/constraint conflict -> 409
+- database/service failure -> 503 or 500
+
+ACCEPTANCE CRITERIA:
+
+[ ] no route returns raw error.message for unknown DB/runtime errors
+[ ] logs retain enough detail for debugging
+[ ] API responses remain safe and minimal
+
+======================================================================
+5. P1 - HEALTH ENDPOINT MUST VERIFY THE REAL DATABASE
+======================================================================
+
+CURRENT PROBLEM:
+The health check uses SELECT 1 but does not verify that the active database
+is actually "jlt".
+
+REQUIRED CHANGE:
+
+GET /api/health must verify:
+- API is running
+- DB connection works
+- DATABASE() returns "jlt"
+
+Example SQL:
+
+    SELECT DATABASE() AS database_name, 1 AS ok;
+
+Expected response:
+
+    {
+      "ok": true,
+      "status": "healthy",
+      "database": "jlt"
+    }
+
+If DB fails:
+
+    {
+      "ok": false,
+      "status": "database_unavailable"
+    }
+
+Do not return raw DB errors.
+
+ACCEPTANCE CRITERIA:
+
+[ ] health endpoint confirms database_name === "jlt"
+[ ] safe response when DB is unavailable
+
+======================================================================
+6. P1 - FIX DASHBOARD API CONTRACT
+======================================================================
+
+CURRENT PROBLEM:
+The dashboard endpoint currently returns general totals only.
+
+V1 dashboard contract requires:
+- minutesToday
+- minutesThisWeek
+- vocabularyCount
+- kanjiCount
+- grammarCount
+- recentSessions
+- weeklyActivity
+- studyDistribution
+
+REQUIRED ENDPOINT:
+
+    GET /api/dashboard
+
+REQUIRED RESPONSE SHAPE:
+
+    {
+      "minutesToday": 0,
+      "minutesThisWeek": 0,
+      "vocabularyCount": 0,
+      "kanjiCount": 0,
+      "grammarCount": 0,
+      "recentSessions": [],
+      "weeklyActivity": [],
+      "studyDistribution": []
+    }
+
+GUIDELINES:
+
+1. Use existing tables.
+2. Avoid SELECT * for dashboard queries.
+3. Keep response compact.
+4. Use COALESCE for aggregates.
+5. Weekly calculations should be Monday-based if using YEARWEEK(..., 1).
+
+Suggested query intent:
+
+Today:
+    SUM(duration_minutes)
+    WHERE session_date = CURDATE()
+
+This week:
+    YEARWEEK(session_date, 1) = YEARWEEK(CURDATE(), 1)
+
+Recent sessions:
+- small LIMIT
+- return only dashboard-required fields
+
+Study distribution:
+- GROUP BY category
+- SUM(duration_minutes)
+
+Weekly activity:
+- aggregate by date for current/recent week
+
+ACCEPTANCE CRITERIA:
+
+[ ] endpoint matches required JSON keys exactly
+[ ] no unrelated fields returned
+[ ] empty DB returns valid zero/empty values
+
+======================================================================
+7. P1 - ADD REQUIRED SEARCH & FILTERING
+======================================================================
+
+CURRENT PROBLEM:
+Read endpoints currently return basic SELECT * lists with LIMIT 100.
+Required filters/search are missing.
+
+VOCABULARY:
+GET /api/vocabulary
+Support:
+- ?search=
+- ?jlpt=
+- ?status=
+
+Search may cover:
+- word
+- reading
+- meaning
+
+KANJI:
+GET /api/kanji
+Support:
+- ?search=
+- ?jlpt=
+- ?status=
+
+Search may cover:
+- character_kanji
+- meaning
+- onyomi
+- kunyomi
+
+GRAMMAR:
+GET /api/grammar
+Support:
+- ?search=
+- ?jlpt=
+- ?status=
+
+Search may cover:
+- grammar_point
+- meaning
+- structure
+
+SESSIONS:
+Preferred canonical route:
+    GET /api/sessions
+
+Support:
+- ?category=
+- ?date=
+or
+- ?from=
+- ?to=
+
+REQUIREMENTS:
+
+1. Validate all filter values.
+2. Parameterize dynamic values.
+3. Never interpolate raw user input into SQL.
+4. Avoid unnecessary response fields.
+5. Keep LIMIT protection if useful.
+6. Dynamic SQL structure may only concatenate trusted application-generated
+   fragments. User values must be bound parameters.
+
+ACCEPTANCE CRITERIA:
+
+[ ] required filters work
+[ ] invalid jlpt/status/category returns 400
+[ ] SQL-injection strings remain data and do not alter SQL behavior
+
+======================================================================
+8. P1 - SESSION ROUTE NAMING CONSISTENCY
+======================================================================
+
+CURRENT PROBLEM:
+Specification used /api/sessions, implementation uses /api/study-sessions.
+
+REQUIRED ACTION:
+Choose one and use it consistently.
+
+PREFERRED:
+    /api/sessions
+
+If backward compatibility matters, optionally retain /api/study-sessions as a
+temporary deprecated alias.
+
+Update:
+- API docs
+- frontend fetch calls
+- tests
+- endpoint listing
+
+ACCEPTANCE CRITERIA:
+
+[ ] one canonical route name
+[ ] frontend/tests use canonical route
+[ ] no inconsistent naming remains
+
+======================================================================
+9. P1 - IMPLEMENT N:M RELATIONSHIPS IN THE API
+======================================================================
+
+CURRENT PROBLEM:
+The database contains the intended junction tables, but API support is
+incomplete.
+
+Required relations:
+
+study_sessions <-> vocabulary
+via session_vocabulary
+
+study_sessions <-> kanji
+via session_kanji
+
+study_sessions <-> grammar_points
+via session_grammar
+
+kanji <-> vocabulary
+via kanji_vocabulary
+
+REQUIRED BEHAVIOR:
+
+GET /api/sessions/:id
+should be able to return:
+- session data
+- related vocabulary
+- related kanji
+- related grammar
+
+GET /api/kanji/:id
+may include associated vocabulary.
+
+GET /api/vocabulary/:id
+may include associated kanji.
+
+Do not store relationship IDs as comma-separated text.
+
+ACCEPTANCE CRITERIA:
+
+[ ] relationships are read using JOINs/junction tables
+[ ] no duplicated denormalized relationship data
+[ ] deletes rely on existing ON DELETE CASCADE where appropriate
+
+======================================================================
+10. P1 - USE TRANSACTIONS FOR MULTI-TABLE SESSION WRITES
+======================================================================
+
+CURRENT PROBLEM:
+Creating/updating a session plus its relationships can modify multiple tables.
+
+REQUIRED:
+
+POST /api/sessions
+PUT /api/sessions/:id
+
+must use a transaction when modifying:
+- study_sessions
+- session_vocabulary
+- session_kanji
+- session_grammar
+
+Required flow:
+1. get connection from pool
+2. BEGIN
+3. insert/update parent session
+4. validate related IDs
+5. update junction tables
+6. COMMIT
+
+On failure:
+- ROLLBACK
+
+Always release connection.
+
+Pseudo-pattern:
+
+    const connection = await pool.getConnection();
+
+    try {
+      await connection.beginTransaction();
+      ...
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+
+ACCEPTANCE TEST:
+Force one junction insertion to fail.
+No partial session/relationship state should remain.
+
+======================================================================
+11. P1 - FIELD TAMPERING / WRITE ALLOWLISTS
+======================================================================
+
+Preserve and formalize explicit writable-field allowlists.
+
+VOCABULARY:
+- word
+- reading
+- meaning
+- jlpt_level
+- status
+- notes
+
+KANJI:
+- character_kanji
+- meaning
+- onyomi
+- kunyomi
+- jlpt_level
+- status
+- notes
+
+GRAMMAR:
+- grammar_point
+- meaning
+- structure
+- example
+- jlpt_level
+- status
+- notes
+
+SESSION:
+- session_date
+- duration_minutes
+- category
+- resource
+- notes
+- relationship arrays where explicitly supported
+
+Reject or ignore attempts to set:
+- IDs
+- created_at
+- updated_at
+- unrelated DB fields
+
+Preferred behavior:
+Return 400 for unknown/protected fields rather than silently accepting them.
+
+======================================================================
+12. P1 - INPUT VALIDATION MUST REJECT, NOT SILENTLY TRUNCATE
+======================================================================
+
+CURRENT PROBLEM:
+normalizeText() silently truncates strings that exceed max length.
+
+REQUIRED CHANGE:
+
+If input exceeds allowed length:
+- return 400
+- identify field that is too long
+
+Do NOT silently slice user data.
+
+Also improve date validation.
+Regex-only YYYY-MM-DD validation is insufficient because 2026-99-99 matches
+format but is not a real date.
+
+ACCEPTANCE CRITERIA:
+
+[ ] oversized values return 400
+[ ] impossible dates return 400
+[ ] valid Japanese text remains intact
+
+======================================================================
+13. P1 - CORS & HELMET HARDENING
+======================================================================
+
+CURRENT PROBLEM:
+- Helmet CSP is disabled
+- CORS origin is "*"
+
+REQUIRED CHANGES:
+
+1. Determine whether CORS is actually needed.
+2. If frontend is served by Express on same origin, remove permissive manual
+   CORS entirely.
+3. If dev frontend/backend use different origins, configure a narrow allowlist
+   such as http://localhost:5173.
+4. Do NOT use "*" by default.
+5. Re-enable CSP unless there is a concrete compatibility issue.
+6. If CSP must be customized, configure it intentionally and document why.
+
+ACCEPTANCE CRITERIA:
+
+[ ] no unnecessary Access-Control-Allow-Origin: *
+[ ] Helmet active
+[ ] CSP enabled or intentionally configured with documented reason
+
+======================================================================
+14. P1 - DATABASE CONFIGURATION
+======================================================================
+
+CURRENT GOOD:
+mysql2/promise + pool + utf8mb4 are appropriate.
+
+REQUIRED IMPROVEMENTS:
+
+1. Do not silently default to root for deployment.
+2. Document creation of a dedicated JLT application DB user.
+3. Runtime application user should generally need only:
+- SELECT
+- INSERT
+- UPDATE
+- DELETE
+on jlt.*
+
+No DROP/ALTER/CREATE for normal runtime.
+
+Suggested .env.example:
+
+    DB_HOST=127.0.0.1
+    DB_PORT=3306
+    DB_USER=jlt_app
+    DB_PASSWORD=change_me
+    DB_NAME=jlt
+    PORT=3000
+
+======================================================================
+15. P2 - SPLIT THE MONOLITHIC app.js
+======================================================================
+
+CURRENT PROBLEM:
+server/src/app.js contains validation, helpers, routes, DB logic, middleware,
+and API metadata in one large file.
+
+REFACTOR TARGET:
+
+server/src/
+|-- app.js
+|-- config/
+|   `-- db.js
+|-- routes/
+|   |-- dashboard.routes.js
+|   |-- sessions.routes.js
+|   |-- vocabulary.routes.js
+|   |-- kanji.routes.js
+|   `-- grammar.routes.js
+|-- controllers/
+|   |-- dashboard.controller.js
+|   |-- sessions.controller.js
+|   |-- vocabulary.controller.js
+|   |-- kanji.controller.js
+|   `-- grammar.controller.js
+|-- middleware/
+|   |-- errorHandler.js
+|   `-- validation.js
+`-- utils/
+    `-- validators.js
+
+IMPORTANT:
+Do not invent unnecessary service/repository layers merely for style.
+Keep SQL readable and visible.
+
+app.js should mainly:
+- create app
+- add middleware
+- mount routes
+- add error handler
+- export app
+
+======================================================================
+16. P2 - AVOID SELECT *
+======================================================================
+
+Several API reads use SELECT *.
+
+Select only fields required by each endpoint.
+
+Example list response:
+
+    SELECT
+      id_vocabulary,
+      word,
+      reading,
+      meaning,
+      jlpt_level,
+      status
+    FROM vocabulary
+
+Detail endpoints may return notes/timestamps if useful.
+
+Benefits:
+- trimmed responses
+- stable API contracts
+- less accidental internal-field exposure
+
+======================================================================
+17. P2 - FRONTEND IS A PROTOTYPE, NOT FINAL ARCHITECTURE
+======================================================================
+
+CURRENT STATE:
+Frontend is one index.html with inline CSS and JS.
+
+Preserve it temporarily if useful, but do NOT treat it as final V1 frontend.
+
+AFTER backend P0/P1 corrections are complete, refactor frontend into:
+- Vite
+- HTML
+- JavaScript modules
+- Tailwind CSS
+- Chart.js
+
+Suggested structure:
+
+client/
+|-- index.html
+|-- src/
+|   |-- main.js
+|   |-- api/
+|   |   `-- api.js
+|   |-- pages/
+|   |-- components/
+|   `-- styles/
+`-- package.json
+
+Do NOT use React.
+Do NOT start this frontend rebuild before backend stabilization is complete.
+
+======================================================================
+18. P2 - DASHBOARD FRONTEND MUST USE FINAL API CONTRACT
+======================================================================
+
+After backend dashboard correction, frontend must consume:
+- minutesToday
+- minutesThisWeek
+- vocabularyCount
+- kanjiCount
+- grammarCount
+- recentSessions
+- weeklyActivity
+- studyDistribution
+
+Chart.js should eventually use:
+- weeklyActivity
+- studyDistribution
+
+Do not invent fake data.
+
+======================================================================
+19. P2 - PROPER FRONTEND ERROR / LOADING STATES
+======================================================================
+
+Avoid:
+- alert() as primary UX
+- appending raw error HTML to document body
+
+Create reusable states:
+- loading
+- empty
+- error
+- success feedback where useful
+
+User-facing errors should be clear and non-technical.
+
+======================================================================
+20. P2 - TEST COVERAGE EXPANSION
+======================================================================
+
+CURRENT GOOD:
+Basic tests already exist. Keep them.
+
+ADD TESTS FOR:
+
+HEALTH:
+[ ] reports jlt database
+[ ] safe failure response
+
+VALIDATION:
+[ ] invalid JLPT
+[ ] invalid status
+[ ] invalid category
+[ ] impossible date
+[ ] negative duration
+[ ] zero duration
+[ ] oversized strings
+[ ] invalid IDs
+
+SECURITY:
+[ ] SQL-injection-like input remains data
+[ ] protected fields cannot be tampered with
+[ ] raw DB errors not returned
+[ ] XSS payload rendered as text if frontend tests are practical
+
+FILTERS:
+[ ] vocabulary search
+[ ] JLPT filter
+[ ] status filter
+[ ] kanji search/filter
+[ ] grammar search/filter
+[ ] session category/date filter
+
+RELATIONSHIPS:
+[ ] session detail includes related items
+[ ] transaction rollback works
+[ ] duplicate junction relationships handled
+
+CRUD:
+[ ] 201 create
+[ ] 200 update
+[ ] 404 missing record
+[ ] delete behavior
+
+======================================================================
+21. P3 - PACKAGE / SCRIPT CLEANUP
+======================================================================
+
+Useful scripts may remain:
+
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "node --test tests/*.test.js",
+    "db:check": "node scripts/check-db.js"
+
+Optional:
+    "audit": "npm audit"
+
+Run:
+    npm audit
+
+Document unresolved moderate/high/critical vulnerabilities.
+Avoid unnecessary dependencies.
+
+======================================================================
+22. P3 - README / PROJECT STATUS
+======================================================================
+
+Add/update README.md with:
+
+1. Project purpose
+2. V1 scope
+3. V1 non-goals
+4. Tech stack
+5. Local setup
+6. Environment variables
+7. DB requirement
+8. How to run backend
+9. How to run tests
+10. Current implementation status
+11. Security notes
+12. V2/V3 deferred roadmap
+
+Clearly state:
+
+V1:
+- current implementation target
+
+V2:
+- goals/calendar/notes/content/review/tags
+
+V3:
+- polish/import-export/dark mode/offline/desktop packaging
+
+Do NOT imply V2/V3 are already implemented.
+
+======================================================================
+23. DO NOT IMPLEMENT YET
+======================================================================
+
+During this refactor DO NOT ADD:
+- authentication
+- login
+- passwords
+- sessions/cookies
+- login rate limiting
+- bot protection
+- row-level security
+- file uploads
+- social features
+- AI
+- SRS
+- goals
+- calendar module
+- notes module
+- content log
+- cloud sync
+- Electron
+- React
+- ORM
+- microservices
+
+These remain out of scope.
+
+======================================================================
+24. REQUIRED FINAL STATE BEFORE CONTINUING DEVELOPMENT
+======================================================================
+
+REPOSITORY:
+[ ] .gitignore exists
+[ ] .env untracked
+[ ] node_modules untracked
+[ ] .vs untracked
+
+SECURITY:
+[ ] no stored-XSS rendering pattern
+[ ] safe API errors
+[ ] Helmet enabled
+[ ] CSP not casually disabled
+[ ] CORS not "*"
+[ ] parameterized dynamic SQL
+[ ] server-side validation
+[ ] protected fields blocked
+
+BACKEND:
+[ ] health checks jlt DB
+[ ] dashboard contract complete
+[ ] search/filtering complete
+[ ] canonical session routes
+[ ] N:M reads implemented
+[ ] multi-table writes use transactions
+[ ] SELECT * reduced
+[ ] app.js refactored into maintainable modules
+
+FRONTEND:
+[ ] current prototype still works after API changes OR is adapted
+[ ] no unsafe innerHTML with user content
+[ ] final frontend refactor postponed until backend stabilization is complete
+
+TESTS:
+[ ] existing tests pass
+[ ] validation/security/filter/relationship tests pass
+
+DOCUMENTATION:
+[ ] README reflects actual state
+[ ] V1/V2/V3 clearly separated
+
+======================================================================
+25. FINAL AGENT PROMPT
+======================================================================
+
+COPY/PASTE THIS TO THE CODING AGENT:
+
+You are performing a stabilization refactor on Japanese Learning Tracker V1.
+
+Do NOT add new product features.
+
+The current repository already contains working backend and prototype frontend
+code, but it deviated from the agreed implementation order and has security,
+Git hygiene, API contract, relationship-handling, and maintainability issues.
+
+Your job is to refactor the existing code according to the attached
+"JLT REFACTORING & CORRECTIONS SHEET".
+
+Rules:
+
+1. Follow the correction priorities in order.
+2. Do not redesign or recreate the MariaDB schema.
+3. Preserve working functionality when possible.
+4. Do not begin V2 or V3 work.
+5. Do not introduce React, an ORM, authentication, AI, microservices, or other
+   unrelated technologies.
+6. Fix Git hygiene first.
+7. Fix XSS and error leakage before adding anything else.
+8. Ensure all dynamic SQL remains parameterized.
+9. Complete the agreed Dashboard API contract.
+10. Add required search/filtering.
+11. Implement existing N:M relationships in the API.
+12. Use transactions for multi-table session writes.
+13. Refactor oversized app.js into understandable modules.
+14. Keep SQL visible and readable.
+15. Expand tests for validation, security, filters, and relationships.
+16. Do not silently truncate invalid input.
+17. Do not expose raw DB errors.
+18. Do not use permissive CORS "*" unless there is a documented temporary
+    reason.
+19. Do not disable CSP globally without a documented necessity.
+20. Treat the current frontend as a prototype; do not perform the final Vite /
+    Tailwind frontend rebuild until backend stabilization is complete.
+
+Work incrementally.
+
+After each priority group (P0, P1, P2, P3):
+- summarize files changed
+- explain what was fixed
+- run tests
+- report test results
+- report any remaining issue
+
+Do NOT continue to the next priority group if tests are failing because of
+your changes.
+
+At the end, provide:
+- final project structure
+- list of corrected issues
+- tests run and results
+- remaining known limitations
+- confirmation that V2/V3 were not touched
+
+END OF CORRECTION SHEET
