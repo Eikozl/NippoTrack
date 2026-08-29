@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Japanese Learning Tracker</title>
+    <style>
+      :root {
+        --bg: #f5f7fb;
+        --card: #ffffff;
+        --text: #1f2937;
+        --muted: #6b7280;
+        --accent: #2563eb;
+        --accent-soft: #dbeafe;
+        --border: #dfe7f1;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 32px 20px 48px;
+      }
+
+      h1, h2 { margin-top: 0; }
+
+      .toolbar {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 16px;
+        margin: 24px 0 28px;
+      }
+
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 3px 10px rgba(15, 23, 42, 0.04);
+      }
+
+      .metric-label {
+        display: block;
+        font-size: 12px;
+        color: var(--muted);
+        margin-bottom: 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .metric-value {
+        font-size: 28px;
+        font-weight: 700;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 24px;
+        margin-top: 24px;
+      }
+
+      form {
+        display: grid;
+        gap: 14px;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        color: var(--text);
+        font-size: 14px;
+      }
+
+      input, select, textarea, button {
+        font: inherit;
+      }
+
+      input, select, textarea {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px 12px;
+        background: #fff;
+      }
+
+      textarea {
+        min-height: 90px;
+        resize: vertical;
+      }
+
+      button {
+        border: none;
+        border-radius: 8px;
+        background: var(--accent);
+        color: #fff;
+        padding: 12px 16px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: grid;
+        gap: 12px;
+      }
+
+      li {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px 14px;
+        background: #fff;
+      }
+
+      .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .muted {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .status {
+        display: inline-block;
+        background: var(--accent-soft);
+        color: var(--accent);
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Japanese Learning Tracker</h1>
+
+      <div class="toolbar">
+        <div class="card">
+          <span class="metric-label">Sessions</span>
+          <span class="metric-value" id="total-sessions">0</span>
+        </div>
+        <div class="card">
+          <span class="metric-label">Minutes studied</span>
+          <span class="metric-value" id="total-minutes">0</span>
+        </div>
+        <div class="card">
+          <span class="metric-label">Vocabulary</span>
+          <span class="metric-value" id="total-vocabulary">0</span>
+        </div>
+        <div class="card">
+          <span class="metric-label">Kanji</span>
+          <span class="metric-value" id="total-kanji">0</span>
+        </div>
+      </div>
+
+      <div class="grid">
+        <section class="card">
+          <h2>Add study session</h2>
+          <form id="study-form">
+            <label>
+              Date
+              <input type="date" name="session_date" required />
+            </label>
+            <label>
+              Duration (minutes)
+              <input type="number" name="duration_minutes" min="1" value="30" required />
+            </label>
+            <label>
+              Category
+              <select name="category">
+                <option value="Vocabulary">Vocabulary</option>
+                <option value="Grammar">Grammar</option>
+                <option value="Kanji">Kanji</option>
+                <option value="Reading">Reading</option>
+                <option value="Listening">Listening</option>
+                <option value="Speaking">Speaking</option>
+                <option value="Writing">Writing</option>
+                <option value="Mixed">Mixed</option>
+              </select>
+            </label>
+            <label>
+              Resource
+              <input type="text" name="resource" placeholder="Example: Genki, NHK" />
+            </label>
+            <label>
+              Notes
+              <textarea name="notes" placeholder="What did you practice?"></textarea>
+            </label>
+            <button type="submit">Save session</button>
+          </form>
+        </section>
+
+        <section class="card">
+          <h2>Recent sessions</h2>
+          <ul id="session-list"></ul>
+        </section>
+
+        <section class="card">
+          <h2>Add vocabulary</h2>
+          <form id="vocabulary-form">
+            <label>Word<input type="text" name="word" required /></label>
+            <label>Reading<input type="text" name="reading" /></label>
+            <label>Meaning<input type="text" name="meaning" required /></label>
+            <label>JLPT
+              <select name="jlpt_level">
+                <option value="">None</option>
+                <option value="N5">N5</option>
+                <option value="N4">N4</option>
+                <option value="N3">N3</option>
+                <option value="N2">N2</option>
+                <option value="N1">N1</option>
+              </select>
+            </label>
+            <label>Status
+              <select name="status">
+                <option value="New">New</option>
+                <option value="Learning">Learning</option>
+                <option value="Familiar">Familiar</option>
+                <option value="Mastered">Mastered</option>
+              </select>
+            </label>
+            <label>Notes<textarea name="notes"></textarea></label>
+            <button type="submit">Save vocabulary</button>
+          </form>
+        </section>
+
+        <section class="card">
+          <h2>Vocabulary list</h2>
+          <ul id="vocabulary-list"></ul>
+        </section>
+
+        <section class="card">
+          <h2>Add kanji</h2>
+          <form id="kanji-form">
+            <label>Character<input type="text" name="character_kanji" required /></label>
+            <label>Meaning<input type="text" name="meaning" required /></label>
+            <label>Onyomi<input type="text" name="onyomi" /></label>
+            <label>Kunyomi<input type="text" name="kunyomi" /></label>
+            <label>JLPT
+              <select name="jlpt_level">
+                <option value="">None</option>
+                <option value="N5">N5</option>
+                <option value="N4">N4</option>
+                <option value="N3">N3</option>
+                <option value="N2">N2</option>
+                <option value="N1">N1</option>
+              </select>
+            </label>
+            <label>Status
+              <select name="status">
+                <option value="New">New</option>
+                <option value="Learning">Learning</option>
+                <option value="Familiar">Familiar</option>
+                <option value="Mastered">Mastered</option>
+              </select>
+            </label>
+            <label>Notes<textarea name="notes"></textarea></label>
+            <button type="submit">Save kanji</button>
+          </form>
+        </section>
+
+        <section class="card">
+          <h2>Kanji list</h2>
+          <ul id="kanji-list"></ul>
+        </section>
+
+        <section class="card">
+          <h2>Add grammar</h2>
+          <form id="grammar-form">
+            <label>Grammar point<input type="text" name="grammar_point" required /></label>
+            <label>Meaning<input type="text" name="meaning" required /></label>
+            <label>Structure<textarea name="structure"></textarea></label>
+            <label>Example<textarea name="example"></textarea></label>
+            <label>JLPT
+              <select name="jlpt_level">
+                <option value="">None</option>
+                <option value="N5">N5</option>
+                <option value="N4">N4</option>
+                <option value="N3">N3</option>
+                <option value="N2">N2</option>
+                <option value="N1">N1</option>
+              </select>
+            </label>
+            <label>Status
+              <select name="status">
+                <option value="New">New</option>
+                <option value="Learning">Learning</option>
+                <option value="Familiar">Familiar</option>
+                <option value="Mastered">Mastered</option>
+              </select>
+            </label>
+            <label>Notes<textarea name="notes"></textarea></label>
+            <button type="submit">Save grammar</button>
+          </form>
+        </section>
+
+        <section class="card">
+          <h2>Grammar list</h2>
+          <ul id="grammar-list"></ul>
+        </section>
+      </div>
+    </div>
+
+    <script>
+      const apiBase = 'http://localhost:3000';
+
+      async function fetchJson(url, options = {}) {
+        const response = await fetch(url, {
+          headers: { 'Content-Type': 'application/json' },
+          ...options
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Request failed');
+        }
+
+        return data;
+      }
+
+      function renderList(elementId, items, formatter) {
+        const list = document.getElementById(elementId);
+        list.innerHTML = '';
+
+        if (!items.length) {
+          list.innerHTML = '<li class="muted">No records yet.</li>';
+          return;
+        }
+
+        items.slice(0, 8).forEach((item) => {
+          const li = document.createElement('li');
+          li.innerHTML = formatter(item);
+          list.appendChild(li);
+        });
+      }
+
+      async function loadSummary() {
+        const summary = await fetchJson(`${apiBase}/api/dashboard`);
+        document.getElementById('total-sessions').textContent = summary.totalSessions;
+        document.getElementById('total-minutes').textContent = summary.totalMinutes;
+        document.getElementById('total-vocabulary').textContent = summary.totalVocabulary;
+        document.getElementById('total-kanji').textContent = summary.totalKanji;
+      }
+
+      async function loadSessions() {
+        const sessions = await fetchJson(`${apiBase}/api/study-sessions`);
+        renderList('session-list', sessions, (session) => `
+          <div class="row">
+            <strong>${session.session_date}</strong>
+            <span class="status">${session.category}</span>
+          </div>
+          <div class="muted">${session.duration_minutes} minutes</div>
+          <div class="muted">${session.resource || 'No resource selected'}</div>
+        `);
+      }
+
+      async function loadVocabulary() {
+        const items = await fetchJson(`${apiBase}/api/vocabulary`);
+        renderList('vocabulary-list', items, (item) => `
+          <div class="row">
+            <strong>${item.word}</strong>
+            <span class="status">${item.status || 'New'}</span>
+          </div>
+          <div class="muted">${item.reading || 'No reading'}</div>
+          <div class="muted">${item.meaning}</div>
+        `);
+      }
+
+      async function loadKanji() {
+        const items = await fetchJson(`${apiBase}/api/kanji`);
+        renderList('kanji-list', items, (item) => `
+          <div class="row">
+            <strong>${item.character_kanji}</strong>
+            <span class="status">${item.status || 'New'}</span>
+          </div>
+          <div class="muted">${item.meaning}</div>
+          <div class="muted">${item.onyomi || 'No onyomi'} / ${item.kunyomi || 'No kunyomi'}</div>
+        `);
+      }
+
+      async function loadGrammar() {
+        const items = await fetchJson(`${apiBase}/api/grammar`);
+        renderList('grammar-list', items, (item) => `
+          <div class="row">
+            <strong>${item.grammar_point}</strong>
+            <span class="status">${item.status || 'New'}</span>
+          </div>
+          <div class="muted">${item.meaning}</div>
+          <div class="muted">${item.structure || 'No structure'}</div>
+        `);
+      }
+
+      async function postForm(formId, url) {
+        const form = document.getElementById(formId);
+        form.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const formData = new FormData(event.target);
+          const payload = Object.fromEntries(formData.entries());
+
+          try {
+            await fetchJson(url, { method: 'POST', body: JSON.stringify(payload) });
+            event.target.reset();
+            await loadSummary();
+            await loadSessions();
+            await loadVocabulary();
+            await loadKanji();
+            await loadGrammar();
+          } catch (error) {
+            alert(error.message);
+          }
+        });
+      }
+
+      postForm('study-form', `${apiBase}/api/study-sessions`);
+      postForm('vocabulary-form', `${apiBase}/api/vocabulary`);
+      postForm('kanji-form', `${apiBase}/api/kanji`);
+      postForm('grammar-form', `${apiBase}/api/grammar`);
+
+      (async () => {
+        try {
+          await loadSummary();
+          await loadSessions();
+          await loadVocabulary();
+          await loadKanji();
+          await loadGrammar();
+        } catch (error) {
+          document.body.insertAdjacentHTML('beforeend', '<div class="container"><div class="card"><strong>API unavailable.</strong> Start the backend with the project server first.</div></div>');
+          console.error(error);
+        }
+      })();
+    </script>
+  </body>
+</html>
