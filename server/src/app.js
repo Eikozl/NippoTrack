@@ -5,6 +5,22 @@ const pool = require('./config/db');
 
 const app = express();
 
+const ALLOWED_FIELDS = {
+  sessions: ['session_date', 'duration_minutes', 'category', 'resource', 'notes'],
+  vocabulary: ['word', 'reading', 'meaning', 'jlpt_level', 'status', 'notes'],
+  kanji: ['character_kanji', 'meaning', 'onyomi', 'kunyomi', 'jlpt_level', 'status', 'notes'],
+  grammar: ['grammar_point', 'meaning', 'structure', 'example', 'jlpt_level', 'status', 'notes']
+};
+
+function validateWriteFields(body, allowedFields) {
+  const providedKeys = Object.keys(body);
+  const unauthorized = providedKeys.filter(key => !allowedFields.includes(key));
+  
+  if (unauthorized.length > 0) {
+    throw new Error(`Unauthorized fields: ${unauthorized.join(', ')}`);
+  }
+}
+
 const STUDY_CATEGORIES = ['Grammar', 'Vocabulary', 'Kanji', 'Reading', 'Listening', 'Speaking', 'Writing', 'Mixed'];
 const JLPT_LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1'];
 const STATUSES = ['New', 'Learning', 'Familiar', 'Mastered'];
@@ -314,6 +330,7 @@ app.get('/api/study-sessions/:id', async (req, res) => {
 app.post('/api/study-sessions', async (req, res) => {
   try {
     const body = req.body || {};
+    validateWriteFields(body, ALLOWED_FIELDS.sessions);
     validateStudySessionPayload(body);
 
     const nextBody = {
@@ -346,6 +363,7 @@ app.put('/api/study-sessions/:id', async (req, res) => {
     }
 
     const body = req.body || {};
+    validateWriteFields(body, ALLOWED_FIELDS.sessions);
     validateStudySessionPayload(body, { partial: true });
 
     const nextBody = {
@@ -440,6 +458,7 @@ app.get('/api/vocabulary/:id', async (req, res) => {
 app.post('/api/vocabulary', async (req, res) => {
   try {
     const body = req.body || {};
+    validateWriteFields(body, ALLOWED_FIELDS.vocabulary);
     validateStandardRecordPayload(body, { requiredWord: true, requiredMeaning: true });
 
     const nextBody = {
@@ -473,6 +492,7 @@ app.put('/api/vocabulary/:id', async (req, res) => {
     }
 
     const body = req.body || {};
+    validateWriteFields(body, ALLOWED_FIELDS.vocabulary);
     validateStandardRecordPayload(body, { requiredWord: false, requiredMeaning: false });
 
     const nextBody = {
@@ -568,6 +588,7 @@ app.get('/api/kanji/:id', async (req, res) => {
 app.post('/api/kanji', async (req, res) => {
   try {
     const body = req.body || {};
+    validateWriteFields(body, ALLOWED_FIELDS.kanji);
     validateStandardRecordPayload(body, { requiredWord: false, requiredMeaning: true });
 
     if (!body.character_kanji || !String(body.character_kanji).trim()) {
@@ -606,6 +627,7 @@ app.put('/api/kanji/:id', async (req, res) => {
     }
 
     const body = req.body || {};
+    validateWriteFields(body, ALLOWED_FIELDS.kanji);
     validateStandardRecordPayload(body, { requiredWord: false, requiredMeaning: false });
 
     if (body.character_kanji !== undefined && !String(body.character_kanji).trim()) {
@@ -706,6 +728,7 @@ app.get('/api/grammar/:id', async (req, res) => {
 app.post('/api/grammar', async (req, res) => {
   try {
     const body = req.body || {};
+    validateWriteFields(body, ALLOWED_FIELDS.grammar);
     validateStandardRecordPayload(body, { requiredWord: false, requiredMeaning: true, requiredGrammar: true });
 
     const nextBody = {
@@ -740,6 +763,7 @@ app.put('/api/grammar/:id', async (req, res) => {
     }
 
     const body = req.body || {};
+    validateWriteFields(body, ALLOWED_FIELDS.grammar);
     validateStandardRecordPayload(body, { requiredWord: false, requiredMeaning: false, requiredGrammar: false });
 
     if (body.grammar_point !== undefined && !String(body.grammar_point).trim()) {
