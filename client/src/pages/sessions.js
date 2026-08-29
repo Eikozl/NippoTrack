@@ -77,9 +77,44 @@ function mergeOptions(loadedOptions, selectedRecords, mapRecord) {
   const merged = new Map(loadedOptions.map((option) => [String(option.value), option]));
   selectedRecords.forEach((record) => {
     const option = mapRecord(record);
-    merged.set(String(option.value), option);
+    if (!merged.has(String(option.value))) merged.set(String(option.value), option);
   });
   return Array.from(merged.values());
+}
+
+function vocabularyOption(item) {
+  return {
+    value: item.id_vocabulary,
+    label: item.word,
+    chipLabel: item.word,
+    meta: [item.reading, item.displayRomaji].filter(Boolean).join(' · '),
+    description: item.meaning
+  };
+}
+
+function kanjiOption(item) {
+  const readings = [
+    item.onyomi ? `On: ${item.onyomi}` : null,
+    item.kunyomi ? `Kun: ${item.kunyomi}` : null,
+    item.displayRomaji
+  ].filter(Boolean);
+  return {
+    value: item.id_kanji,
+    label: item.character_kanji,
+    chipLabel: item.character_kanji,
+    meta: readings.join(' · '),
+    description: item.meaning
+  };
+}
+
+function grammarOption(item) {
+  return {
+    value: item.id_grammar,
+    label: item.grammar_point,
+    chipLabel: item.grammar_point,
+    meta: item.displayRomaji || '',
+    description: item.meaning
+  };
 }
 
 export function renderSessions(container) {
@@ -180,17 +215,17 @@ export function renderSessions(container) {
 
   async function loadVocabularyOptions(search = '') {
     const data = await apiRequest(`/api/vocabulary/options${queryString({ search, limit: relationshipLimit })}`);
-    return data.items.map((item) => ({ value: item.id_vocabulary, label: `${item.word}${item.reading ? ` · ${item.reading}` : ''}` }));
+    return data.items.map(vocabularyOption);
   }
 
   async function loadKanjiOptions(search = '') {
     const data = await apiRequest(`/api/kanji/options${queryString({ search, limit: relationshipLimit })}`);
-    return data.items.map((item) => ({ value: item.id_kanji, label: `${item.character_kanji} · ${item.meaning}` }));
+    return data.items.map(kanjiOption);
   }
 
   async function loadGrammarOptions(search = '') {
     const data = await apiRequest(`/api/grammar/options${queryString({ search, limit: relationshipLimit })}`);
-    return data.items.map((item) => ({ value: item.id_grammar, label: `${item.grammar_point} · ${item.meaning}` }));
+    return data.items.map(grammarOption);
   }
 
   async function loadRelationshipOptions(record) {
@@ -200,9 +235,9 @@ export function renderSessions(container) {
       loadGrammarOptions()
     ]);
     return {
-      vocabulary: mergeOptions(vocabulary, record.vocabulary || [], (item) => ({ value: item.id_vocabulary, label: `${item.word}${item.reading ? ` · ${item.reading}` : ''}` })),
-      kanji: mergeOptions(kanji, record.kanji || [], (item) => ({ value: item.id_kanji, label: `${item.character_kanji} · ${item.meaning}` })),
-      grammar: mergeOptions(grammar, record.grammar || [], (item) => ({ value: item.id_grammar, label: `${item.grammar_point} · ${item.meaning}` }))
+      vocabulary: mergeOptions(vocabulary, record.vocabulary || [], vocabularyOption),
+      kanji: mergeOptions(kanji, record.kanji || [], kanjiOption),
+      grammar: mergeOptions(grammar, record.grammar || [], grammarOption)
     };
   }
 

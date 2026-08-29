@@ -6,6 +6,7 @@ async function executePaginatedList(pool, {
   whereSql,
   params,
   orderBy,
+  orderParams = [],
   page,
   limit,
   offset
@@ -14,7 +15,7 @@ async function executePaginatedList(pool, {
     pool.execute(`SELECT COUNT(*) AS total FROM ${table}${whereSql}`, params),
     pool.execute(
       `SELECT ${columns} FROM ${table}${whereSql} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
+      [...params, ...orderParams, limit, offset]
     )
   ]);
   const total = Number(countResult[0][0]?.total || 0);
@@ -22,4 +23,3 @@ async function executePaginatedList(pool, {
 }
 
 module.exports = { executePaginatedList };
-

@@ -2,6 +2,9 @@ const pool = require('../config/db');
 const { ALLOWED_FIELDS, JLPT_LEVELS, STATUSES } = require('../constants');
 const { ValidationError, sendRouteError } = require('../errors/http');
 const { parseOptionLimit, parsePagination } = require('../pagination');
+const { buildSearchCandidates } = require('../search/japaneseSearch');
+const { rankVocabularyOptions } = require('../search/optionRanking');
+const { buildComparisons, kanaSearchValues, normalizedJapaneseSql } = require('../search/sqlSearch');
 const {
   normalizeText,
   parseIdParam,
@@ -16,12 +19,36 @@ async function listVocabulary(req, res) {
     const { page, limit, offset } = parsePagination(req.query);
     let whereSql = ' WHERE 1=1';
     const params = [];
+    let orderBy = 'id_vocabulary DESC';
+    let orderParams = [];
 
     const search = normalizeText(req.query.search, 100, 'search');
     if (search) {
-      const searchTerm = `%${search}%`;
-      whereSql += ' AND (word LIKE ? OR reading LIKE ? OR meaning LIKE ?)';
-      params.push(searchTerm, searchTerm, searchTerm);
+      const candidates = buildSearchCandidates(search);
+      const rawContains = `%${candidates.raw}%`;
+      const rawPrefix = `${candidates.raw}%`;
+      const kanaValues = kanaSearchValues(candidates);
+      const romajiMode = Boolean(candidates.normalizedRomaji);
+      const normalizedWord = normalizedJapaneseSql('word');
+      const normalizedReading = normalizedJapaneseSql('reading');
+      const kanaContains = buildComparisons([normalizedWord, normalizedReading], kanaValues);
+      const kanaExact = buildComparisons([normalizedWord, normalizedReading], kanaValues, { operator: '=' });
+      const kanaPrefix = buildComparisons([normalizedWord, normalizedReading], kanaValues, { pattern: 'prefix' });
+      whereSql += ` AND (word LIKE ? OR reading LIKE ?${romajiMode ? '' : ' OR meaning LIKE ?'}${kanaContains.sql ? ` OR ${kanaContains.sql}` : ''})`;
+      params.push(rawContains, rawContains, ...(romajiMode ? [] : [rawContains]), ...kanaContains.params);
+      orderBy = `CASE
+        WHEN word = ? THEN 1
+        WHEN reading = ? THEN 2
+        ${kanaExact.sql ? `WHEN ${kanaExact.sql} THEN 3` : ''}
+        WHEN word LIKE ? THEN 4
+        WHEN reading LIKE ? THEN 5
+        ${kanaPrefix.sql ? `WHEN ${kanaPrefix.sql} THEN 6` : ''}
+        ${romajiMode ? '' : 'WHEN meaning LIKE ? THEN 7'}
+        ELSE 8 END, id_vocabulary DESC`;
+      orderParams = [
+        candidates.raw, candidates.raw, ...kanaExact.params,
+        rawPrefix, rawPrefix, ...kanaPrefix.params, ...(romajiMode ? [] : [rawPrefix])
+      ];
     }
 
     if (req.query.jlpt) {
@@ -47,7 +74,8 @@ async function listVocabulary(req, res) {
       columns: 'id_vocabulary, word, reading, meaning, jlpt_level, status',
       whereSql,
       params,
-      orderBy: 'id_vocabulary DESC',
+      orderBy,
+      orderParams,
       page,
       limit,
       offset
@@ -61,20 +89,43 @@ async function listVocabularyOptions(req, res) {
   try {
     const limit = parseOptionLimit(req.query.limit);
     const search = normalizeText(req.query.search, 100, 'search');
-    const params = [];
-    let whereSql = '';
+    const candidates = buildSearchCandidates(search || '');
+    const normalizedWord = normalizedJapaneseSql('word');
+    const normalizedReading = normalizedJapaneseSql('reading');
+    let query = 'SELECT id_vocabulary, word, reading, meaning FROM vocabulary';
+    let params = [limit];
 
     if (search) {
-      const term = `%${search}%`;
-      whereSql = ' WHERE word LIKE ? OR reading LIKE ? OR meaning LIKE ?';
-      params.push(term, term, term);
+      const rawContains = `%${candidates.raw}%`;
+      const rawPrefix = `${candidates.raw}%`;
+      const kanaValues = kanaSearchValues(candidates);
+      const romajiMode = Boolean(candidates.normalizedRomaji);
+      const kanaContains = buildComparisons([normalizedWord, normalizedReading], kanaValues);
+      const kanaExact = buildComparisons([normalizedWord, normalizedReading], kanaValues, { operator: '=' });
+      const kanaPrefix = buildComparisons([normalizedWord, normalizedReading], kanaValues, { pattern: 'prefix' });
+      const candidateLimit = Math.min(limit * 5, 200);
+      query += ` WHERE word LIKE ? OR reading LIKE ?${romajiMode ? '' : ' OR meaning LIKE ?'}${kanaContains.sql ? ` OR ${kanaContains.sql}` : ''}`;
+      query += ` ORDER BY CASE
+        WHEN word = ? THEN 1
+        WHEN reading = ? THEN 2
+        ${kanaExact.sql ? `WHEN ${kanaExact.sql} THEN 3` : ''}
+        WHEN word LIKE ? THEN 4
+        WHEN reading LIKE ? THEN 5
+        ${kanaPrefix.sql ? `WHEN ${kanaPrefix.sql} THEN 6` : ''}
+        ${romajiMode ? '' : 'WHEN meaning LIKE ? THEN 7'}
+        ELSE 8 END, id_vocabulary DESC LIMIT ?`;
+      params = [
+        rawContains, rawContains, ...(romajiMode ? [] : [rawContains]), ...kanaContains.params,
+        candidates.raw, candidates.raw, ...kanaExact.params,
+        rawPrefix, rawPrefix, ...kanaPrefix.params, ...(romajiMode ? [] : [rawPrefix]),
+        candidateLimit
+      ];
+    } else {
+      query += ' ORDER BY id_vocabulary DESC LIMIT ?';
     }
 
-    const [items] = await pool.execute(
-      `SELECT id_vocabulary, word, reading, meaning FROM vocabulary${whereSql} ORDER BY id_vocabulary DESC LIMIT ?`,
-      [...params, limit]
-    );
-    return res.json({ items });
+    const [rows] = await pool.execute(query, params);
+    return res.json({ items: rankVocabularyOptions(rows, candidates, limit) });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load vocabulary options.' });
   }

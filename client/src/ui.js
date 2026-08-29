@@ -118,7 +118,7 @@ export function searchableMultiSelect({
   loadOptions
 }) {
   const selectedValues = new Set(value.map(String));
-  const optionLabels = new Map(options.map((option) => [String(option.value), option.label]));
+  const optionLabels = new Map(options.map((option) => [String(option.value), option.chipLabel || option.label]));
   const labelId = `field-${name}-label`;
   const hiddenSelect = element('select', {
     className: 'hidden',
@@ -136,6 +136,13 @@ export function searchableMultiSelect({
   });
   let optionRows = [];
   let requestSequence = 0;
+
+  function optionSearchText(option) {
+    return [option.label, option.meta, option.description]
+      .filter(Boolean)
+      .join(' ')
+      .toLocaleLowerCase();
+  }
 
   function syncSelection() {
     hiddenSelect.replaceChildren();
@@ -180,7 +187,7 @@ export function searchableMultiSelect({
 
     availableOptions.forEach((option) => {
       const optionValue = String(option.value);
-      optionLabels.set(optionValue, option.label);
+      optionLabels.set(optionValue, option.chipLabel || option.label);
       const checkbox = element('input', {
         className: 'mt-0.5 size-4 accent-vermilion',
         attrs: { type: 'checkbox', value: optionValue }
@@ -191,11 +198,16 @@ export function searchableMultiSelect({
         else selectedValues.delete(optionValue);
         syncSelection();
       });
+      const details = element('span', { className: 'min-w-0 leading-5' }, [
+        element('span', { className: 'block font-semibold text-ink', text: option.label }),
+        ...(option.meta ? [element('span', { className: 'block text-xs text-muted', text: option.meta })] : []),
+        ...(option.description ? [element('span', { className: 'block truncate text-xs text-ink/70', text: option.description })] : [])
+      ]);
       const row = element('label', { className: 'flex cursor-pointer items-start gap-3 rounded-md px-3 py-2 text-sm font-normal transition hover:bg-paper' }, [
         checkbox,
-        element('span', { className: 'min-w-0 leading-5 text-ink', text: option.label })
+        details
       ]);
-      optionRows.push({ checkbox, row, searchText: option.label.toLocaleLowerCase() });
+      optionRows.push({ checkbox, row, searchText: optionSearchText(option) });
       optionsList.appendChild(row);
     });
 
@@ -220,17 +232,7 @@ export function searchableMultiSelect({
     onCreate ? createButton : null
   ]);
 
-  search.addEventListener('input', debounce(async () => {
-    const query = search.value.trim();
-    if (!loadOptions) {
-      const normalizedQuery = query.toLocaleLowerCase();
-      const filtered = options.filter((option) => option.label.toLocaleLowerCase().includes(normalizedQuery));
-      renderOptions(filtered, 'No matches found.');
-      return;
-    }
-
-    const sequence = ++requestSequence;
-    optionsList.replaceChildren(element('p', { className: 'p-4 text-center text-sm font-normal text-muted', text: 'Searching…' }));
+  const loadRemoteOptions = debounce(async (query, sequence) => {
     try {
       const loadedOptions = await loadOptions(query);
       if (sequence !== requestSequence) return;
@@ -239,7 +241,21 @@ export function searchableMultiSelect({
       if (sequence !== requestSequence) return;
       renderOptions([], 'Unable to load options. Try again.');
     }
-  }, 250));
+  }, 250);
+
+  search.addEventListener('input', () => {
+    const query = search.value.trim();
+    const sequence = ++requestSequence;
+    if (!loadOptions) {
+      const normalizedQuery = query.toLocaleLowerCase();
+      const filtered = options.filter((option) => optionSearchText(option).includes(normalizedQuery));
+      renderOptions(filtered, 'No matches found.');
+      return;
+    }
+
+    optionsList.replaceChildren(element('p', { className: 'p-4 text-center text-sm font-normal text-muted', text: 'Searching…' }));
+    loadRemoteOptions(query, sequence);
+  });
 
   renderOptions(options);
   return element('div', { className: 'field' }, [header, search, chips, optionsList, hiddenSelect]);

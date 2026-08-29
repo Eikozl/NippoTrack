@@ -30,7 +30,7 @@ jobs:
         run: npm ci --prefix client
 
       - name: Run backend tests
-        run: npm test
+        run: npm --prefix server test
 
       - name: Build frontend
-        run: npm run build
+        run: npm --prefix client run build

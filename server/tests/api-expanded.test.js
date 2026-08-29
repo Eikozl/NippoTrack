@@ -140,10 +140,23 @@ test('vocabulary, kanji and grammar filters use bound parameters', async () => {
         assert.equal(response.status, 200);
       }
 
+      const countCalls = calls.filter(({ sql }) => /SELECT COUNT\(\*\)/.test(sql));
       const listCalls = calls.filter(({ sql }) => /ORDER BY/.test(sql));
-      assert.deepEqual(listCalls[0].params, ['%study%', '%study%', '%study%', 'N4', 'Learning', 50, 0]);
-      assert.deepEqual(listCalls[1].params, ['%day%', '%day%', '%day%', '%day%', 'N5', 'New', 50, 0]);
-      assert.deepEqual(listCalls[2].params, ['%ongoing%', '%ongoing%', '%ongoing%', 'N3', 'Familiar', 50, 0]);
+      const expected = [
+        { search: '%study%', jlpt: 'N4', status: 'Learning' },
+        { search: '%day%', jlpt: 'N5', status: 'New' },
+        { search: '%ongoing%', jlpt: 'N3', status: 'Familiar' }
+      ];
+      expected.forEach(({ search, jlpt, status }, index) => {
+        const countParams = countCalls[index].params;
+        const listParams = listCalls[index].params;
+        assert.equal(countParams.includes(search), true);
+        assert.equal(countParams.includes(jlpt), true);
+        assert.equal(countParams.includes(status), true);
+        assert.deepEqual(listParams.slice(0, countParams.length), countParams);
+        assert.deepEqual(listParams.slice(-2), [50, 0]);
+        assert.match(listCalls[index].sql, /ORDER BY CASE/);
+      });
       calls.forEach(({ sql }) => assert.doesNotMatch(sql, /study|ongoing/));
     } finally {
       await stopServer(server);

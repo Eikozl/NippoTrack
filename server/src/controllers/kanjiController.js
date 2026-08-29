@@ -2,6 +2,9 @@ const pool = require('../config/db');
 const { ALLOWED_FIELDS, JLPT_LEVELS, STATUSES } = require('../constants');
 const { ValidationError, sendRouteError } = require('../errors/http');
 const { parseOptionLimit, parsePagination } = require('../pagination');
+const { buildSearchCandidates } = require('../search/japaneseSearch');
+const { rankKanjiOptions } = require('../search/optionRanking');
+const { buildComparisons, kanaSearchValues, normalizedJapaneseSql } = require('../search/sqlSearch');
 const {
   normalizeText,
   parseIdParam,
@@ -16,12 +19,35 @@ async function listKanji(req, res) {
     const { page, limit, offset } = parsePagination(req.query);
     let whereSql = ' WHERE 1=1';
     const params = [];
+    let orderBy = 'id_kanji DESC';
+    let orderParams = [];
 
     const search = normalizeText(req.query.search, 100, 'search');
     if (search) {
-      const searchTerm = `%${search}%`;
-      whereSql += ' AND (character_kanji LIKE ? OR meaning LIKE ? OR onyomi LIKE ? OR kunyomi LIKE ?)';
-      params.push(searchTerm, searchTerm, searchTerm, searchTerm);
+      const candidates = buildSearchCandidates(search);
+      const rawContains = `%${candidates.raw}%`;
+      const rawPrefix = `${candidates.raw}%`;
+      const kanaValues = kanaSearchValues(candidates);
+      const romajiMode = Boolean(candidates.normalizedRomaji);
+      const normalizedOnyomi = normalizedJapaneseSql('onyomi');
+      const normalizedKunyomi = normalizedJapaneseSql('kunyomi');
+      const kanaContains = buildComparisons([normalizedOnyomi, normalizedKunyomi], kanaValues);
+      const kanaExact = buildComparisons([normalizedOnyomi, normalizedKunyomi], kanaValues, { operator: '=' });
+      const kanaPrefix = buildComparisons([normalizedOnyomi, normalizedKunyomi], kanaValues, { pattern: 'prefix' });
+      whereSql += ` AND (character_kanji LIKE ?${romajiMode ? '' : ' OR meaning LIKE ?'} OR onyomi LIKE ? OR kunyomi LIKE ?${kanaContains.sql ? ` OR ${kanaContains.sql}` : ''})`;
+      params.push(rawContains, ...(romajiMode ? [] : [rawContains]), rawContains, rawContains, ...kanaContains.params);
+      orderBy = `CASE
+        WHEN character_kanji = ? THEN 1
+        WHEN onyomi = ? OR kunyomi = ? THEN 2
+        ${kanaExact.sql ? `WHEN ${kanaExact.sql} THEN 3` : ''}
+        WHEN onyomi LIKE ? OR kunyomi LIKE ? THEN 4
+        ${kanaPrefix.sql ? `WHEN ${kanaPrefix.sql} THEN 5` : ''}
+        ${romajiMode ? '' : 'WHEN meaning LIKE ? THEN 6'}
+        ELSE 7 END, id_kanji DESC`;
+      orderParams = [
+        candidates.raw, candidates.raw, candidates.raw, ...kanaExact.params,
+        rawPrefix, rawPrefix, ...kanaPrefix.params, ...(romajiMode ? [] : [rawPrefix])
+      ];
     }
     if (req.query.jlpt) {
       const jlpt = normalizeText(req.query.jlpt, 2, 'jlpt').toUpperCase();
@@ -41,7 +67,8 @@ async function listKanji(req, res) {
       columns: 'id_kanji, character_kanji, meaning, onyomi, kunyomi, jlpt_level, status',
       whereSql,
       params,
-      orderBy: 'id_kanji DESC',
+      orderBy,
+      orderParams,
       page,
       limit,
       offset
@@ -55,18 +82,43 @@ async function listKanjiOptions(req, res) {
   try {
     const limit = parseOptionLimit(req.query.limit);
     const search = normalizeText(req.query.search, 100, 'search');
-    const params = [];
-    let whereSql = '';
+    const candidates = buildSearchCandidates(search || '');
+    const normalizedOnyomi = normalizedJapaneseSql('onyomi');
+    const normalizedKunyomi = normalizedJapaneseSql('kunyomi');
+    let query = 'SELECT id_kanji, character_kanji, meaning, onyomi, kunyomi FROM kanji';
+    let params = [limit];
+
     if (search) {
-      const term = `%${search}%`;
-      whereSql = ' WHERE character_kanji LIKE ? OR meaning LIKE ? OR onyomi LIKE ? OR kunyomi LIKE ?';
-      params.push(term, term, term, term);
+      const rawContains = `%${candidates.raw}%`;
+      const rawPrefix = `${candidates.raw}%`;
+      const kanaValues = kanaSearchValues(candidates);
+      const romajiMode = Boolean(candidates.normalizedRomaji);
+      const kanaContains = buildComparisons([normalizedOnyomi, normalizedKunyomi], kanaValues);
+      const kanaExact = buildComparisons([normalizedOnyomi, normalizedKunyomi], kanaValues, { operator: '=' });
+      const kanaPrefix = buildComparisons([normalizedOnyomi, normalizedKunyomi], kanaValues, { pattern: 'prefix' });
+      const candidateLimit = Math.min(limit * 5, 200);
+      query += ` WHERE character_kanji LIKE ?${romajiMode ? '' : ' OR meaning LIKE ?'} OR onyomi LIKE ? OR kunyomi LIKE ?
+        ${kanaContains.sql ? `OR ${kanaContains.sql}` : ''}`;
+      query += ` ORDER BY CASE
+        WHEN character_kanji = ? THEN 1
+        WHEN onyomi = ? OR kunyomi = ? THEN 2
+        ${kanaExact.sql ? `WHEN ${kanaExact.sql} THEN 3` : ''}
+        WHEN onyomi LIKE ? OR kunyomi LIKE ? THEN 4
+        ${kanaPrefix.sql ? `WHEN ${kanaPrefix.sql} THEN 5` : ''}
+        ${romajiMode ? '' : 'WHEN meaning LIKE ? THEN 6'}
+        ELSE 7 END, id_kanji DESC LIMIT ?`;
+      params = [
+        rawContains, ...(romajiMode ? [] : [rawContains]), rawContains, rawContains, ...kanaContains.params,
+        candidates.raw, candidates.raw, candidates.raw, ...kanaExact.params,
+        rawPrefix, rawPrefix, ...kanaPrefix.params, ...(romajiMode ? [] : [rawPrefix]),
+        candidateLimit
+      ];
+    } else {
+      query += ' ORDER BY id_kanji DESC LIMIT ?';
     }
-    const [items] = await pool.execute(
-      `SELECT id_kanji, character_kanji, meaning FROM kanji${whereSql} ORDER BY id_kanji DESC LIMIT ?`,
-      [...params, limit]
-    );
-    return res.json({ items });
+
+    const [rows] = await pool.execute(query, params);
+    return res.json({ items: rankKanjiOptions(rows, candidates, limit) });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load kanji options.' });
   }

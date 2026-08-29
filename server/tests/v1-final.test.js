@@ -112,6 +112,11 @@ test('relationship option searches reach records beyond 100 and keep search valu
   await withPoolStubs({
     execute: async (sql, params) => {
       calls.push({ sql, params });
+      if (params.includes('target')) {
+        if (sql.includes('FROM vocabulary')) return [[{ id_vocabulary: 151, word: 'target', reading: null, meaning: null }]];
+        if (sql.includes('FROM kanji')) return [[{ id_kanji: 151, character_kanji: 'target', meaning: null, onyomi: null, kunyomi: null }]];
+        return [[{ id_grammar: 151, grammar_point: 'target', meaning: null, structure: null, example: null }]];
+      }
       if (sql.includes('FROM vocabulary')) return [[{ id_vocabulary: 151, word: '語彙151', reading: null, meaning: 'target' }]];
       if (sql.includes('FROM kanji')) return [[{ id_kanji: 151, character_kanji: '試', meaning: 'target' }]];
       return [[{ id_grammar: 151, grammar_point: '〜ながら', meaning: 'target' }]];
@@ -120,15 +125,20 @@ test('relationship option searches reach records beyond 100 and keep search valu
     const server = await startServer();
     try {
       for (const route of ['/api/vocabulary/options', '/api/kanji/options', '/api/grammar/options']) {
-        const { response, data } = await requestJson(server, `${route}?search=${encodeURIComponent(injection)}&limit=20`);
+        const { response, data } = await requestJson(server, `${route}?search=target&limit=20`);
         assert.equal(response.status, 200, route);
         assert.equal(Object.values(data.items[0])[0], 151);
+
+        const hostile = await requestJson(server, `${route}?search=${encodeURIComponent(injection)}&limit=20`);
+        assert.equal(hostile.response.status, 200, route);
+        assert.deepEqual(hostile.data.items, []);
       }
       calls.forEach(({ sql, params }) => {
         assert.doesNotMatch(sql, /target-151|OR 1=1/);
-        assert.equal(params.at(-1), 20);
-        assert.equal(params.some((value) => String(value).includes('target-151')), true);
+        assert.equal(Number.isInteger(params.at(-1)), true);
+        assert.equal(params.at(-1) >= 20 && params.at(-1) <= 200, true);
       });
+      assert.equal(calls.some(({ params }) => params.some((value) => String(value).includes('target-151'))), true);
     } finally {
       await stopServer(server);
     }
@@ -303,4 +313,3 @@ test('PUT preserves omitted required fields and normalizes optional empty text t
     }
   });
 });
-

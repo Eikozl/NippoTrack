@@ -26,6 +26,7 @@ export const ENTITY_CONFIGS = {
     title: 'Vocabulary',
     singular: 'vocabulary entry',
     description: 'Capture words, readings, meanings and learning status.',
+    searchPlaceholder: 'Search words, readings, romaji, or meanings…',
     empty: 'Add the first word you want to retain.',
     primary: (item) => item.word,
     secondary: (item) => item.reading || 'Reading not recorded',
@@ -46,6 +47,7 @@ export const ENTITY_CONFIGS = {
     title: 'Kanji',
     singular: 'kanji entry',
     description: 'Track character meanings, readings and familiarity.',
+    searchPlaceholder: 'Search kanji, readings, romaji, or meanings…',
     empty: 'Add the first character you are studying.',
     primary: (item) => item.character_kanji,
     secondary: (item) => [item.onyomi, item.kunyomi].filter(Boolean).join(' · ') || 'Readings not recorded',
@@ -67,6 +69,7 @@ export const ENTITY_CONFIGS = {
     title: 'Grammar',
     singular: 'grammar point',
     description: 'Keep structures, examples and mastery status in one place.',
+    searchPlaceholder: 'Search grammar, romaji, or meanings…',
     empty: 'Add the first grammar pattern you want to review.',
     primary: (item) => item.grammar_point,
     secondary: (item) => item.structure || 'Structure not recorded',
@@ -124,8 +127,9 @@ function recordCard(item, config, onEdit, onDelete) {
 export function renderEntityPage(container, config) {
   const pageSize = 30;
   let currentPage = 1;
+  let loadSequence = 0;
   const addButton = element('button', { className: 'button-primary', text: `Add ${config.singular}`, attrs: { type: 'button' } });
-  const search = element('input', { className: 'field-control', attrs: { type: 'search', placeholder: `Search ${config.title.toLowerCase()}…`, 'aria-label': `Search ${config.title}` } });
+  const search = element('input', { className: 'field-control', attrs: { type: 'search', placeholder: config.searchPlaceholder, 'aria-label': `Search ${config.title}` } });
   const jlpt = element('select', { className: 'field-control', attrs: { 'aria-label': 'Filter by JLPT level' } }, JLPT_OPTIONS.map((option) => element('option', { text: option.label, attrs: { value: option.value } })));
   const status = element('select', { className: 'field-control', attrs: { 'aria-label': 'Filter by status' } }, [
     element('option', { text: 'Any status', attrs: { value: '' } }),
@@ -142,6 +146,7 @@ export function renderEntityPage(container, config) {
   container.replaceChildren(page);
 
   async function load() {
+    const sequence = ++loadSequence;
     results.replaceChildren(loadingState(`Loading ${config.title.toLowerCase()}…`));
     try {
       const data = await apiRequest(`${config.endpoint}${queryString({
@@ -151,6 +156,7 @@ export function renderEntityPage(container, config) {
         page: currentPage,
         limit: pageSize
       })}`);
+      if (sequence !== loadSequence) return;
       const { items, pagination } = data;
       if (!items.length && currentPage > 1 && pagination.totalPages > 0) {
         currentPage = pagination.totalPages;
@@ -170,6 +176,7 @@ export function renderEntityPage(container, config) {
         ...[pager].filter(Boolean)
       );
     } catch (error) {
+      if (sequence !== loadSequence) return;
       results.replaceChildren(errorState(error, load));
     }
   }
@@ -220,7 +227,10 @@ export function renderEntityPage(container, config) {
     load();
   };
   const debouncedLoad = debounce(resetAndLoad);
-  search.addEventListener('input', debouncedLoad);
+  search.addEventListener('input', () => {
+    loadSequence += 1;
+    debouncedLoad();
+  });
   jlpt.addEventListener('change', resetAndLoad);
   status.addEventListener('change', resetAndLoad);
   load();

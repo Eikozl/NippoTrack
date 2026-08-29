@@ -2,6 +2,9 @@ const pool = require('../config/db');
 const { ALLOWED_FIELDS, JLPT_LEVELS, STATUSES } = require('../constants');
 const { ValidationError, sendRouteError } = require('../errors/http');
 const { parseOptionLimit, parsePagination } = require('../pagination');
+const { buildSearchCandidates } = require('../search/japaneseSearch');
+const { rankGrammarOptions } = require('../search/optionRanking');
+const { buildComparisons, kanaSearchValues, normalizedJapaneseSql } = require('../search/sqlSearch');
 const {
   normalizeText,
   parseIdParam,
@@ -16,12 +19,33 @@ async function listGrammar(req, res) {
     const { page, limit, offset } = parsePagination(req.query);
     let whereSql = ' WHERE 1=1';
     const params = [];
+    let orderBy = 'id_grammar DESC';
+    let orderParams = [];
 
     const search = normalizeText(req.query.search, 100, 'search');
     if (search) {
-      const searchTerm = `%${search}%`;
-      whereSql += ' AND (grammar_point LIKE ? OR meaning LIKE ? OR structure LIKE ?)';
-      params.push(searchTerm, searchTerm, searchTerm);
+      const candidates = buildSearchCandidates(search);
+      const rawContains = `%${candidates.raw}%`;
+      const rawPrefix = `${candidates.raw}%`;
+      const kanaValues = kanaSearchValues(candidates);
+      const romajiMode = Boolean(candidates.normalizedRomaji);
+      const normalizedPoint = normalizedJapaneseSql('grammar_point');
+      const kanaContains = buildComparisons([normalizedPoint], kanaValues);
+      const kanaExact = buildComparisons([normalizedPoint], kanaValues, { operator: '=' });
+      const kanaPrefix = buildComparisons([normalizedPoint], kanaValues, { pattern: 'prefix' });
+      whereSql += ` AND (grammar_point LIKE ?${romajiMode ? '' : ' OR meaning LIKE ? OR structure LIKE ? OR example LIKE ?'}${kanaContains.sql ? ` OR ${kanaContains.sql}` : ''})`;
+      params.push(rawContains, ...(romajiMode ? [] : [rawContains, rawContains, rawContains]), ...kanaContains.params);
+      orderBy = `CASE
+        WHEN grammar_point = ? THEN 1
+        ${kanaExact.sql ? `WHEN ${kanaExact.sql} THEN 2` : ''}
+        WHEN grammar_point LIKE ? THEN 3
+        ${kanaPrefix.sql ? `WHEN ${kanaPrefix.sql} THEN 4` : ''}
+        ${romajiMode ? '' : 'WHEN meaning LIKE ? THEN 5'}
+        ELSE 6 END, id_grammar DESC`;
+      orderParams = [
+        candidates.raw, ...kanaExact.params,
+        rawPrefix, ...kanaPrefix.params, ...(romajiMode ? [] : [rawPrefix])
+      ];
     }
     if (req.query.jlpt) {
       const jlpt = normalizeText(req.query.jlpt, 2, 'jlpt').toUpperCase();
@@ -41,7 +65,8 @@ async function listGrammar(req, res) {
       columns: 'id_grammar, grammar_point, meaning, structure, example, jlpt_level, status',
       whereSql,
       params,
-      orderBy: 'id_grammar DESC',
+      orderBy,
+      orderParams,
       page,
       limit,
       offset
@@ -55,18 +80,41 @@ async function listGrammarOptions(req, res) {
   try {
     const limit = parseOptionLimit(req.query.limit);
     const search = normalizeText(req.query.search, 100, 'search');
-    const params = [];
-    let whereSql = '';
+    const candidates = buildSearchCandidates(search || '');
+    const normalizedPoint = normalizedJapaneseSql('grammar_point');
+    let query = 'SELECT id_grammar, grammar_point, meaning, structure, example FROM grammar_points';
+    let params = [limit];
+
     if (search) {
-      const term = `%${search}%`;
-      whereSql = ' WHERE grammar_point LIKE ? OR meaning LIKE ? OR structure LIKE ?';
-      params.push(term, term, term);
+      const rawContains = `%${candidates.raw}%`;
+      const rawPrefix = `${candidates.raw}%`;
+      const kanaValues = kanaSearchValues(candidates);
+      const romajiMode = Boolean(candidates.normalizedRomaji);
+      const kanaContains = buildComparisons([normalizedPoint], kanaValues);
+      const kanaExact = buildComparisons([normalizedPoint], kanaValues, { operator: '=' });
+      const kanaPrefix = buildComparisons([normalizedPoint], kanaValues, { pattern: 'prefix' });
+      const candidateLimit = Math.min(limit * 5, 200);
+      query += ` WHERE grammar_point LIKE ?${romajiMode ? '' : ' OR meaning LIKE ? OR structure LIKE ? OR example LIKE ?'}
+        ${kanaContains.sql ? `OR ${kanaContains.sql}` : ''}`;
+      query += ` ORDER BY CASE
+        WHEN grammar_point = ? THEN 1
+        ${kanaExact.sql ? `WHEN ${kanaExact.sql} THEN 2` : ''}
+        WHEN grammar_point LIKE ? THEN 3
+        ${kanaPrefix.sql ? `WHEN ${kanaPrefix.sql} THEN 4` : ''}
+        ${romajiMode ? '' : 'WHEN meaning LIKE ? THEN 5'}
+        ELSE 6 END, id_grammar DESC LIMIT ?`;
+      params = [
+        rawContains, ...(romajiMode ? [] : [rawContains, rawContains, rawContains]), ...kanaContains.params,
+        candidates.raw, ...kanaExact.params,
+        rawPrefix, ...kanaPrefix.params, ...(romajiMode ? [] : [rawPrefix]),
+        candidateLimit
+      ];
+    } else {
+      query += ' ORDER BY id_grammar DESC LIMIT ?';
     }
-    const [items] = await pool.execute(
-      `SELECT id_grammar, grammar_point, meaning FROM grammar_points${whereSql} ORDER BY id_grammar DESC LIMIT ?`,
-      [...params, limit]
-    );
-    return res.json({ items });
+
+    const [rows] = await pool.execute(query, params);
+    return res.json({ items: rankGrammarOptions(rows, candidates, limit) });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load grammar options.' });
   }
