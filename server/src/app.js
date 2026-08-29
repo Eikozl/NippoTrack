@@ -64,10 +64,13 @@ async function fetchEntityById(tableName, idColumn, idValue) {
 
 async function checkDatabase() {
   try {
-    const [rows] = await pool.query('SELECT 1 AS ok');
-    return rows && rows.length > 0 ? { connected: true } : { connected: false, error: 'No result returned from database.' };
+    const [rows] = await pool.query('SELECT DATABASE() AS database_name');
+    if (rows && rows.length > 0 && rows[0].database_name === 'jlt') {
+      return { connected: true, database: 'jlt' };
+    }
+    return { connected: false };
   } catch (error) {
-    return { connected: false, error: error.message };
+    return { connected: false };
   }
 }
 
@@ -162,8 +165,7 @@ app.get('/api/health', async (req, res) => {
   res.json({
     ok: database.connected,
     status: database.connected ? 'healthy' : 'database_unavailable',
-    database: database.connected ? 'connected' : 'not_configured',
-    detail: database.connected ? 'Database connection is healthy.' : `Database check failed: ${database.error || 'Unknown error.'}`
+    database: database.connected ? 'jlt' : 'unavailable'
   });
 });
 
@@ -182,7 +184,7 @@ app.get('/api/dashboard', async (req, res) => {
       totalGrammar: Number(grammarSummary[0].total_grammar || 0)
     });
   } catch (error) {
-    res.status(503).json({ error: 'Database unavailable', detail: error.message });
+    res.status(503).json({ error: 'Database unavailable' });
   }
 });
 
@@ -191,7 +193,7 @@ app.get('/api/study-sessions', async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM study_sessions ORDER BY session_date DESC, id_session DESC LIMIT 100');
     res.json(rows);
   } catch (error) {
-    res.status(503).json({ error: 'Database unavailable', detail: error.message });
+    res.status(503).json({ error: 'Database unavailable' });
   }
 });
 
@@ -288,7 +290,7 @@ app.get('/api/vocabulary', async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM vocabulary ORDER BY id_vocabulary DESC LIMIT 100');
     res.json(rows);
   } catch (error) {
-    res.status(503).json({ error: 'Database unavailable', detail: error.message });
+    res.status(503).json({ error: 'Database unavailable' });
   }
 });
 
@@ -387,7 +389,7 @@ app.get('/api/kanji', async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM kanji ORDER BY id_kanji DESC LIMIT 100');
     res.json(rows);
   } catch (error) {
-    res.status(503).json({ error: 'Database unavailable', detail: error.message });
+    res.status(503).json({ error: 'Database unavailable' });
   }
 });
 
@@ -496,7 +498,7 @@ app.get('/api/grammar', async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM grammar_points ORDER BY id_grammar DESC LIMIT 100');
     res.json(rows);
   } catch (error) {
-    res.status(503).json({ error: 'Database unavailable', detail: error.message });
+    res.status(503).json({ error: 'Database unavailable' });
   }
 });
 
