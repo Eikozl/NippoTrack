@@ -1,0 +1,18 @@
+{
+  "name": "japanese-learning-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Development commands for the Japanese Learning Tracker client and API.",
+  "scripts": {
+    "start": "node dev.js",
+    "dev": "node dev.js",
+    "dev:server": "npm --prefix server run dev",
+    "dev:client": "npm --prefix client run dev",
+    "start:server": "npm --prefix server start",
+    "build": "npm --prefix client run build",
+    "test": "npm --prefix server test",
+    "db:check": "npm --prefix server run db:check",
+    "install:all": "npm --prefix server install && npm --prefix client install",
+    "audit": "npm audit --prefix server && npm audit --prefix client"
+  }
+}

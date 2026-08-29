@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="A focused personal tracker for Japanese study sessions and learning material." />
+    <title>Japanese Learning Tracker</title>
+  </head>
+  <body>
+    <div id="app-shell" class="min-h-screen lg:grid lg:grid-cols-[17rem_1fr]">
+      <div id="mobile-backdrop" class="fixed inset-0 z-30 hidden bg-ink/25 backdrop-blur-[1px] lg:hidden"></div>
+
+      <aside id="sidebar" class="fixed inset-y-0 left-0 z-40 flex w-68 -translate-x-full flex-col border-r border-stone bg-paper px-5 py-6 transition-transform duration-200 lg:sticky lg:top-0 lg:h-screen lg:translate-x-0">
+        <div class="flex items-center justify-between gap-3 px-2">
+          <div class="flex items-center gap-3">
+            <span class="grid size-10 place-items-center rounded-xl bg-vermilion text-sm font-bold tracking-wide text-white">JLT</span>
+            <div>
+              <p class="text-sm font-semibold text-ink">Japanese Learning</p>
+              <p class="text-xs text-muted">Study tracker</p>
+            </div>
+          </div>
+          <button id="close-navigation" class="icon-button lg:hidden" type="button" aria-label="Close navigation">×</button>
+        </div>
+
+        <nav class="mt-10 grid gap-1" aria-label="Primary navigation">
+          <button class="nav-item is-active" type="button" data-page="dashboard"><span>Dashboard</span></button>
+          <button class="nav-item" type="button" data-page="sessions"><span>Sessions</span></button>
+          <button class="nav-item" type="button" data-page="vocabulary"><span>Vocabulary</span></button>
+          <button class="nav-item" type="button" data-page="kanji"><span>Kanji</span></button>
+          <button class="nav-item" type="button" data-page="grammar"><span>Grammar</span></button>
+          <button class="nav-item" type="button" data-page="statistics"><span>Statistics</span></button>
+        </nav>
+
+        <div class="mt-auto rounded-xl border border-stone bg-white/70 p-4">
+          <p class="text-xs font-semibold uppercase tracking-[0.16em] text-vermilion">Study loop</p>
+          <p class="mt-2 text-sm leading-6 text-muted">Study · Record · Review · Measure</p>
+          <button id="export-data" class="button-secondary mt-4 w-full" type="button">Export backup</button>
+        </div>
+      </aside>
+
+      <div class="min-w-0">
+        <header class="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-stone bg-canvas/90 px-4 backdrop-blur-md sm:px-7 lg:hidden">
+          <button id="open-navigation" class="icon-button" type="button" aria-label="Open navigation">☰</button>
+          <p class="text-sm font-semibold text-ink">Japanese Learning Tracker</p>
+          <span class="size-10" aria-hidden="true"></span>
+        </header>
+
+        <main id="app-content" class="mx-auto min-h-screen max-w-[92rem] px-4 py-7 sm:px-7 sm:py-9 lg:px-10" tabindex="-1"></main>
+      </div>
+    </div>
+
+    <div id="toast-region" class="pointer-events-none fixed bottom-5 right-5 z-50 grid w-[min(24rem,calc(100vw-2.5rem))] gap-3" aria-live="polite"></div>
+    <div id="modal-root"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

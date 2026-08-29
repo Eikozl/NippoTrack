@@ -1,12 +1,28 @@
 const mysql = require('mysql2/promise');
 require('dotenv').config();
 
+function requireEnvironment(name, { allowEmpty = false } = {}) {
+  const value = process.env[name];
+
+  if (value === undefined || (!allowEmpty && value.trim() === '')) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+
+  return value;
+}
+
+const port = Number(requireEnvironment('DB_PORT'));
+
+if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  throw new Error('DB_PORT must be an integer between 1 and 65535');
+}
+
 const pool = mysql.createPool({
-  host: process.env.DB_HOST || '127.0.0.1',
-  port: Number(process.env.DB_PORT || 3306),
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'jlt',
+  host: requireEnvironment('DB_HOST'),
+  port,
+  user: requireEnvironment('DB_USER'),
+  password: requireEnvironment('DB_PASSWORD', { allowEmpty: true }),
+  database: requireEnvironment('DB_NAME'),
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
