@@ -4,7 +4,14 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+<<<<<<< HEAD
     "test": "echo \"Error: no test specified\" && exit 1"
+=======
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "node --test tests/*.test.js",
+    "db:check": "node scripts/check-db.js"
+>>>>>>> c04406a (backend API foundation and validation)
   },
   "keywords": [],
   "author": "",
@@ -13,6 +20,10 @@
   "dependencies": {
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+<<<<<<< HEAD
+=======
+    "helmet": "^8.3.0",
+>>>>>>> c04406a (backend API foundation and validation)
     "mysql2": "^3.24.2"
   },
   "devDependencies": {

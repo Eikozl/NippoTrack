@@ -1,0 +1,608 @@
+const express = require('express');
+const path = require('path');
+const helmet = require('helmet');
+const pool = require('./config/db');
+
+const app = express();
+
+const STUDY_CATEGORIES = ['Grammar', 'Vocabulary', 'Kanji', 'Reading', 'Listening', 'Speaking', 'Writing', 'Mixed'];
+const JLPT_LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1'];
+const STATUSES = ['New', 'Learning', 'Familiar', 'Mastered'];
+
+function isValidDateString(value) {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function isPositiveInteger(value) {
+  return Number.isInteger(Number(value)) && Number(value) > 0;
+}
+
+function normalizeText(value, maxLength = null) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const text = String(value).trim();
+
+  if (!text) {
+    return null;
+  }
+
+  if (maxLength && text.length > maxLength) {
+    return text.slice(0, maxLength);
+  }
+
+  return text;
+}
+
+function validateAllowedValues(value, allowedValues, fieldName) {
+  if (value === undefined || value === null || value === '') {
+    return true;
+  }
+
+  if (!allowedValues.includes(value)) {
+    throw new Error(`${fieldName} must be one of: ${allowedValues.join(', ')}`);
+  }
+
+  return true;
+}
+
+function parseIdParam(req, entityName) {
+  const id = Number(req.params.id);
+
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new Error(`${entityName} id must be a positive integer`);
+  }
+
+  return id;
+}
+
+async function fetchEntityById(tableName, idColumn, idValue) {
+  const [rows] = await pool.execute(`SELECT * FROM ${tableName} WHERE ${idColumn} = ?`, [idValue]);
+  return rows.length ? rows[0] : null;
+}
+
+async function checkDatabase() {
+  try {
+    const [rows] = await pool.query('SELECT 1 AS ok');
+    return rows && rows.length > 0 ? { connected: true } : { connected: false, error: 'No result returned from database.' };
+  } catch (error) {
+    return { connected: false, error: error.message };
+  }
+}
+
+function validateStudySessionPayload(body, { partial = false } = {}) {
+  if (!partial && !isValidDateString(body.session_date)) {
+    throw new Error('session_date is required and must use YYYY-MM-DD format.');
+  }
+
+  if (body.session_date !== undefined && body.session_date !== null && body.session_date !== '' && !isValidDateString(body.session_date)) {
+    throw new Error('session_date must use YYYY-MM-DD format.');
+  }
+
+  if (!partial && !isPositiveInteger(body.duration_minutes)) {
+    throw new Error('duration_minutes must be a positive integer.');
+  }
+
+  if (body.duration_minutes !== undefined && body.duration_minutes !== null && body.duration_minutes !== '' && !isPositiveInteger(body.duration_minutes)) {
+    throw new Error('duration_minutes must be a positive integer.');
+  }
+
+  if (!partial && !body.category) {
+    throw new Error('category is required.');
+  }
+
+  if (body.category !== undefined && body.category !== null && body.category !== '') {
+    validateAllowedValues(body.category, STUDY_CATEGORIES, 'category');
+  }
+}
+
+function validateStandardRecordPayload(body, { requiredMeaning = true, requiredWord = true, requiredGrammar = false } = {}) {
+  if (requiredWord && (!body.word || !String(body.word).trim())) {
+    throw new Error('word is required.');
+  }
+
+  if (requiredGrammar && (!body.grammar_point || !String(body.grammar_point).trim())) {
+    throw new Error('grammar_point is required.');
+  }
+
+  if (requiredMeaning && (!body.meaning || !String(body.meaning).trim())) {
+    throw new Error('meaning is required.');
+  }
+
+  if (body.jlpt_level !== undefined && body.jlpt_level !== null && body.jlpt_level !== '') {
+    validateAllowedValues(body.jlpt_level, JLPT_LEVELS, 'jlpt_level');
+  }
+
+  if (body.status !== undefined && body.status !== null && body.status !== '') {
+    validateAllowedValues(body.status, STATUSES, 'status');
+  }
+}
+
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: false }));
+
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+
+  next();
+});
+
+app.use(express.static(path.join(__dirname, '../../client/src')));
+
+app.get('/api', (req, res) => {
+  res.json({
+    name: 'Japanese Learning Tracker API',
+    version: '1.0.0',
+    endpoints: [
+      'GET /api/health',
+      'GET /api/dashboard',
+      'GET /api/study-sessions',
+      'POST /api/study-sessions',
+      'GET /api/vocabulary',
+      'POST /api/vocabulary',
+      'GET /api/kanji',
+      'POST /api/kanji',
+      'GET /api/grammar',
+      'POST /api/grammar'
+    ]
+  });
+});
+
+app.get('/api/health', async (req, res) => {
+  const database = await checkDatabase();
+
+  res.json({
+    ok: database.connected,
+    status: database.connected ? 'healthy' : 'database_unavailable',
+    database: database.connected ? 'connected' : 'not_configured',
+    detail: database.connected ? 'Database connection is healthy.' : `Database check failed: ${database.error || 'Unknown error.'}`
+  });
+});
+
+app.get('/api/dashboard', async (req, res) => {
+  try {
+    const [sessionSummary] = await pool.query('SELECT COUNT(*) AS total_sessions, COALESCE(SUM(duration_minutes), 0) AS total_minutes FROM study_sessions');
+    const [vocabularySummary] = await pool.query('SELECT COUNT(*) AS total_vocabulary FROM vocabulary');
+    const [kanjiSummary] = await pool.query('SELECT COUNT(*) AS total_kanji FROM kanji');
+    const [grammarSummary] = await pool.query('SELECT COUNT(*) AS total_grammar FROM grammar_points');
+
+    res.json({
+      totalSessions: Number(sessionSummary[0].total_sessions || 0),
+      totalMinutes: Number(sessionSummary[0].total_minutes || 0),
+      totalVocabulary: Number(vocabularySummary[0].total_vocabulary || 0),
+      totalKanji: Number(kanjiSummary[0].total_kanji || 0),
+      totalGrammar: Number(grammarSummary[0].total_grammar || 0)
+    });
+  } catch (error) {
+    res.status(503).json({ error: 'Database unavailable', detail: error.message });
+  }
+});
+
+app.get('/api/study-sessions', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM study_sessions ORDER BY session_date DESC, id_session DESC LIMIT 100');
+    res.json(rows);
+  } catch (error) {
+    res.status(503).json({ error: 'Database unavailable', detail: error.message });
+  }
+});
+
+app.get('/api/study-sessions/:id', async (req, res) => {
+  try {
+    const id = parseIdParam(req, 'study session');
+    const session = await fetchEntityById('study_sessions', 'id_session', id);
+
+    if (!session) {
+      return res.status(404).json({ error: 'study session not found' });
+    }
+
+    return res.json(session);
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Invalid study session id.' });
+  }
+});
+
+app.post('/api/study-sessions', async (req, res) => {
+  try {
+    const body = req.body || {};
+    validateStudySessionPayload(body);
+
+    const nextBody = {
+      session_date: normalizeText(body.session_date),
+      duration_minutes: Number(body.duration_minutes),
+      category: normalizeText(body.category, 20),
+      resource: normalizeText(body.resource, 255),
+      notes: normalizeText(body.notes, 1500)
+    };
+
+    const [result] = await pool.execute(
+      'INSERT INTO study_sessions (session_date, duration_minutes, category, resource, notes) VALUES (?, ?, ?, ?, ?)',
+      [nextBody.session_date, nextBody.duration_minutes, nextBody.category, nextBody.resource, nextBody.notes]
+    );
+
+    const [rows] = await pool.execute('SELECT * FROM study_sessions WHERE id_session = ?', [result.insertId]);
+    return res.status(201).json(rows[0]);
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Unable to create study session.' });
+  }
+});
+
+app.put('/api/study-sessions/:id', async (req, res) => {
+  try {
+    const id = parseIdParam(req, 'study session');
+    const current = await fetchEntityById('study_sessions', 'id_session', id);
+
+    if (!current) {
+      return res.status(404).json({ error: 'study session not found' });
+    }
+
+    const body = req.body || {};
+    validateStudySessionPayload(body, { partial: true });
+
+    const nextBody = {
+      session_date: body.session_date !== undefined ? normalizeText(body.session_date) || current.session_date : current.session_date,
+      duration_minutes: body.duration_minutes !== undefined ? Number(body.duration_minutes) : current.duration_minutes,
+      category: body.category !== undefined ? normalizeText(body.category, 20) || current.category : current.category,
+      resource: body.resource !== undefined ? normalizeText(body.resource, 255) : current.resource,
+      notes: body.notes !== undefined ? normalizeText(body.notes, 1500) : current.notes
+    };
+
+    await pool.execute(
+      'UPDATE study_sessions SET session_date = ?, duration_minutes = ?, category = ?, resource = ?, notes = ? WHERE id_session = ?',
+      [nextBody.session_date, nextBody.duration_minutes, nextBody.category, nextBody.resource, nextBody.notes, id]
+    );
+
+    const updated = await fetchEntityById('study_sessions', 'id_session', id);
+    return res.json(updated);
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Unable to update study session.' });
+  }
+});
+
+app.delete('/api/study-sessions/:id', async (req, res) => {
+  try {
+    const id = parseIdParam(req, 'study session');
+    const current = await fetchEntityById('study_sessions', 'id_session', id);
+
+    if (!current) {
+      return res.status(404).json({ error: 'study session not found' });
+    }
+
+    await pool.execute('DELETE FROM study_sessions WHERE id_session = ?', [id]);
+    return res.json({ success: true, deletedId: id });
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Unable to delete study session.' });
+  }
+});
+
+app.get('/api/vocabulary', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM vocabulary ORDER BY id_vocabulary DESC LIMIT 100');
+    res.json(rows);
+  } catch (error) {
+    res.status(503).json({ error: 'Database unavailable', detail: error.message });
+  }
+});
+
+app.get('/api/vocabulary/:id', async (req, res) => {
+  try {
+    const id = parseIdParam(req, 'vocabulary entry');
+    const entry = await fetchEntityById('vocabulary', 'id_vocabulary', id);
+
+    if (!entry) {
+      return res.status(404).json({ error: 'vocabulary entry not found' });
+    }
+
+    return res.json(entry);
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Invalid vocabulary id.' });
+  }
+});
+
+app.post('/api/vocabulary', async (req, res) => {
+  try {
+    const body = req.body || {};
+    validateStandardRecordPayload(body, { requiredWord: true, requiredMeaning: true });
+
+    const nextBody = {
+      word: normalizeText(body.word, 100),
+      reading: normalizeText(body.reading, 150),
+      meaning: normalizeText(body.meaning, 255),
+      jlpt_level: body.jlpt_level === undefined || body.jlpt_level === '' ? null : normalizeText(body.jlpt_level, 2),
+      status: normalizeText(body.status, 20) || 'New',
+      notes: normalizeText(body.notes, 1500)
+    };
+
+    const [result] = await pool.execute(
+      'INSERT INTO vocabulary (word, reading, meaning, jlpt_level, status, notes) VALUES (?, ?, ?, ?, ?, ?)',
+      [nextBody.word, nextBody.reading, nextBody.meaning, nextBody.jlpt_level, nextBody.status, nextBody.notes]
+    );
+
+    const [rows] = await pool.execute('SELECT * FROM vocabulary WHERE id_vocabulary = ?', [result.insertId]);
+    return res.status(201).json(rows[0]);
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Unable to create vocabulary entry.' });
+  }
+});
+
+app.put('/api/vocabulary/:id', async (req, res) => {
+  try {
+    const id = parseIdParam(req, 'vocabulary entry');
+    const current = await fetchEntityById('vocabulary', 'id_vocabulary', id);
+
+    if (!current) {
+      return res.status(404).json({ error: 'vocabulary entry not found' });
+    }
+
+    const body = req.body || {};
+    validateStandardRecordPayload(body, { requiredWord: false, requiredMeaning: false });
+
+    const nextBody = {
+      word: body.word !== undefined ? normalizeText(body.word, 100) || current.word : current.word,
+      reading: body.reading !== undefined ? normalizeText(body.reading, 150) : current.reading,
+      meaning: body.meaning !== undefined ? normalizeText(body.meaning, 255) || current.meaning : current.meaning,
+      jlpt_level: body.jlpt_level !== undefined ? (body.jlpt_level === '' ? null : normalizeText(body.jlpt_level, 2)) : current.jlpt_level,
+      status: body.status !== undefined ? normalizeText(body.status, 20) || current.status : current.status,
+      notes: body.notes !== undefined ? normalizeText(body.notes, 1500) : current.notes
+    };
+
+    await pool.execute(
+      'UPDATE vocabulary SET word = ?, reading = ?, meaning = ?, jlpt_level = ?, status = ?, notes = ? WHERE id_vocabulary = ?',
+      [nextBody.word, nextBody.reading, nextBody.meaning, nextBody.jlpt_level, nextBody.status, nextBody.notes, id]
+    );
+
+    const updated = await fetchEntityById('vocabulary', 'id_vocabulary', id);
+    return res.json(updated);
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Unable to update vocabulary entry.' });
+  }
+});
+
+app.delete('/api/vocabulary/:id', async (req, res) => {
+  try {
+    const id = parseIdParam(req, 'vocabulary entry');
+    const current = await fetchEntityById('vocabulary', 'id_vocabulary', id);
+
+    if (!current) {
+      return res.status(404).json({ error: 'vocabulary entry not found' });
+    }
+
+    await pool.execute('DELETE FROM vocabulary WHERE id_vocabulary = ?', [id]);
+    return res.json({ success: true, deletedId: id });
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Unable to delete vocabulary entry.' });
+  }
+});
+
+app.get('/api/kanji', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM kanji ORDER BY id_kanji DESC LIMIT 100');
+    res.json(rows);
+  } catch (error) {
+    res.status(503).json({ error: 'Database unavailable', detail: error.message });
+  }
+});
+
+app.get('/api/kanji/:id', async (req, res) => {
+  try {
+    const id = parseIdParam(req, 'kanji entry');
+    const entry = await fetchEntityById('kanji', 'id_kanji', id);
+
+    if (!entry) {
+      return res.status(404).json({ error: 'kanji entry not found' });
+    }
+
+    return res.json(entry);
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Invalid kanji id.' });
+  }
+});
+
+app.post('/api/kanji', async (req, res) => {
+  try {
+    const body = req.body || {};
+    validateStandardRecordPayload(body, { requiredWord: false, requiredMeaning: true });
+
+    if (!body.character_kanji || !String(body.character_kanji).trim()) {
+      throw new Error('character_kanji is required.');
+    }
+
+    const nextBody = {
+      character_kanji: normalizeText(body.character_kanji, 4),
+      meaning: normalizeText(body.meaning, 255),
+      onyomi: normalizeText(body.onyomi, 255),
+      kunyomi: normalizeText(body.kunyomi, 255),
+      jlpt_level: body.jlpt_level === undefined || body.jlpt_level === '' ? null : normalizeText(body.jlpt_level, 2),
+      status: normalizeText(body.status, 20) || 'New',
+      notes: normalizeText(body.notes, 1500)
+    };
+
+    const [result] = await pool.execute(
+      'INSERT INTO kanji (character_kanji, meaning, onyomi, kunyomi, jlpt_level, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [nextBody.character_kanji, nextBody.meaning, nextBody.onyomi, nextBody.kunyomi, nextBody.jlpt_level, nextBody.status, nextBody.notes]
+    );
+
+    const [rows] = await pool.execute('SELECT * FROM kanji WHERE id_kanji = ?', [result.insertId]);
+    return res.status(201).json(rows[0]);
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Unable to create kanji entry.' });
+  }
+});
+
+app.put('/api/kanji/:id', async (req, res) => {
+  try {
+    const id = parseIdParam(req, 'kanji entry');
+    const current = await fetchEntityById('kanji', 'id_kanji', id);
+
+    if (!current) {
+      return res.status(404).json({ error: 'kanji entry not found' });
+    }
+
+    const body = req.body || {};
+    validateStandardRecordPayload(body, { requiredWord: false, requiredMeaning: false });
+
+    if (body.character_kanji !== undefined && !String(body.character_kanji).trim()) {
+      throw new Error('character_kanji is required.');
+    }
+
+    const nextBody = {
+      character_kanji: body.character_kanji !== undefined ? normalizeText(body.character_kanji, 4) || current.character_kanji : current.character_kanji,
+      meaning: body.meaning !== undefined ? normalizeText(body.meaning, 255) || current.meaning : current.meaning,
+      onyomi: body.onyomi !== undefined ? normalizeText(body.onyomi, 255) : current.onyomi,
+      kunyomi: body.kunyomi !== undefined ? normalizeText(body.kunyomi, 255) : current.kunyomi,
+      jlpt_level: body.jlpt_level !== undefined ? (body.jlpt_level === '' ? null : normalizeText(body.jlpt_level, 2)) : current.jlpt_level,
+      status: body.status !== undefined ? normalizeText(body.status, 20) || current.status : current.status,
+      notes: body.notes !== undefined ? normalizeText(body.notes, 1500) : current.notes
+    };
+
+    await pool.execute(
+      'UPDATE kanji SET character_kanji = ?, meaning = ?, onyomi = ?, kunyomi = ?, jlpt_level = ?, status = ?, notes = ? WHERE id_kanji = ?',
+      [nextBody.character_kanji, nextBody.meaning, nextBody.onyomi, nextBody.kunyomi, nextBody.jlpt_level, nextBody.status, nextBody.notes, id]
+    );
+
+    const updated = await fetchEntityById('kanji', 'id_kanji', id);
+    return res.json(updated);
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Unable to update kanji entry.' });
+  }
+});
+
+app.delete('/api/kanji/:id', async (req, res) => {
+  try {
+    const id = parseIdParam(req, 'kanji entry');
+    const current = await fetchEntityById('kanji', 'id_kanji', id);
+
+    if (!current) {
+      return res.status(404).json({ error: 'kanji entry not found' });
+    }
+
+    await pool.execute('DELETE FROM kanji WHERE id_kanji = ?', [id]);
+    return res.json({ success: true, deletedId: id });
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Unable to delete kanji entry.' });
+  }
+});
+
+app.get('/api/grammar', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM grammar_points ORDER BY id_grammar DESC LIMIT 100');
+    res.json(rows);
+  } catch (error) {
+    res.status(503).json({ error: 'Database unavailable', detail: error.message });
+  }
+});
+
+app.get('/api/grammar/:id', async (req, res) => {
+  try {
+    const id = parseIdParam(req, 'grammar point');
+    const entry = await fetchEntityById('grammar_points', 'id_grammar', id);
+
+    if (!entry) {
+      return res.status(404).json({ error: 'grammar point not found' });
+    }
+
+    return res.json(entry);
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Invalid grammar id.' });
+  }
+});
+
+app.post('/api/grammar', async (req, res) => {
+  try {
+    const body = req.body || {};
+    validateStandardRecordPayload(body, { requiredWord: false, requiredMeaning: true, requiredGrammar: true });
+
+    const nextBody = {
+      grammar_point: normalizeText(body.grammar_point, 100),
+      meaning: normalizeText(body.meaning, 255),
+      structure: normalizeText(body.structure, 2000),
+      example: normalizeText(body.example, 2000),
+      jlpt_level: body.jlpt_level === undefined || body.jlpt_level === '' ? null : normalizeText(body.jlpt_level, 2),
+      status: normalizeText(body.status, 20) || 'New',
+      notes: normalizeText(body.notes, 1500)
+    };
+
+    const [result] = await pool.execute(
+      'INSERT INTO grammar_points (grammar_point, meaning, structure, example, jlpt_level, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [nextBody.grammar_point, nextBody.meaning, nextBody.structure, nextBody.example, nextBody.jlpt_level, nextBody.status, nextBody.notes]
+    );
+
+    const [rows] = await pool.execute('SELECT * FROM grammar_points WHERE id_grammar = ?', [result.insertId]);
+    return res.status(201).json(rows[0]);
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Unable to create grammar point.' });
+  }
+});
+
+app.put('/api/grammar/:id', async (req, res) => {
+  try {
+    const id = parseIdParam(req, 'grammar point');
+    const current = await fetchEntityById('grammar_points', 'id_grammar', id);
+
+    if (!current) {
+      return res.status(404).json({ error: 'grammar point not found' });
+    }
+
+    const body = req.body || {};
+    validateStandardRecordPayload(body, { requiredWord: false, requiredMeaning: false, requiredGrammar: false });
+
+    if (body.grammar_point !== undefined && !String(body.grammar_point).trim()) {
+      throw new Error('grammar_point is required.');
+    }
+
+    const nextBody = {
+      grammar_point: body.grammar_point !== undefined ? normalizeText(body.grammar_point, 100) || current.grammar_point : current.grammar_point,
+      meaning: body.meaning !== undefined ? normalizeText(body.meaning, 255) || current.meaning : current.meaning,
+      structure: body.structure !== undefined ? normalizeText(body.structure, 2000) : current.structure,
+      example: body.example !== undefined ? normalizeText(body.example, 2000) : current.example,
+      jlpt_level: body.jlpt_level !== undefined ? (body.jlpt_level === '' ? null : normalizeText(body.jlpt_level, 2)) : current.jlpt_level,
+      status: body.status !== undefined ? normalizeText(body.status, 20) || current.status : current.status,
+      notes: body.notes !== undefined ? normalizeText(body.notes, 1500) : current.notes
+    };
+
+    await pool.execute(
+      'UPDATE grammar_points SET grammar_point = ?, meaning = ?, structure = ?, example = ?, jlpt_level = ?, status = ?, notes = ? WHERE id_grammar = ?',
+      [nextBody.grammar_point, nextBody.meaning, nextBody.structure, nextBody.example, nextBody.jlpt_level, nextBody.status, nextBody.notes, id]
+    );
+
+    const updated = await fetchEntityById('grammar_points', 'id_grammar', id);
+    return res.json(updated);
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Unable to update grammar point.' });
+  }
+});
+
+app.delete('/api/grammar/:id', async (req, res) => {
+  try {
+    const id = parseIdParam(req, 'grammar point');
+    const current = await fetchEntityById('grammar_points', 'id_grammar', id);
+
+    if (!current) {
+      return res.status(404).json({ error: 'grammar point not found' });
+    }
+
+    await pool.execute('DELETE FROM grammar_points WHERE id_grammar = ?', [id]);
+    return res.json({ success: true, deletedId: id });
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Unable to delete grammar point.' });
+  }
+});
+
+app.use((err, req, res, next) => {
+  console.error('Unhandled API error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+app.use((req, res) => {
+  res.status(404).json({ error: 'endpoint not found' });
+});
+
+module.exports = app;
