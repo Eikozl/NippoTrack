@@ -387,3 +387,39 @@ test('Helmet CSP permits the external frontend script without unsafe inline Java
     await stopServer(server);
   }
 });
+
+test('GET /api/sessions/:id includes optional structured writing with existing V1 relationships', async () => {
+  await withPoolStubs({
+    execute: async (sql) => {
+      if (sql.includes('FROM study_sessions')) {
+        return [[{
+          id_session: 21,
+          session_date: '2026-08-30',
+          duration_minutes: 30,
+          category: 'Writing',
+          resource: 'Notebook',
+          notes: null
+        }]];
+      }
+      if (sql.includes('FROM session_writings')) {
+        return [[{ id_session_writing: 4, title: 'Practice', content: '日本語を書きます。', notes: null }]];
+      }
+      return [[]];
+    }
+  }, async () => {
+    const server = await startServer();
+    try {
+      const response = await fetch(`http://127.0.0.1:${server.address().port}/api/sessions/21`);
+      const data = await response.json();
+
+      assert.equal(response.status, 200);
+      assert.equal(data.writing.id_session_writing, 4);
+      assert.equal(data.writing.content, '日本語を書きます。');
+      assert.deepEqual(data.vocabulary, []);
+      assert.deepEqual(data.kanji, []);
+      assert.deepEqual(data.grammar, []);
+    } finally {
+      await stopServer(server);
+    }
+  });
+});

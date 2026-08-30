@@ -62,7 +62,7 @@ export function showToast(message, type = 'success') {
   window.setTimeout(() => toast.remove(), 3600);
 }
 
-export function field({ name, label, type = 'text', value = '', required = false, maxLength, options, multiple = false, placeholder = '' }) {
+export function field({ name, label, type = 'text', value = '', required = false, maxLength, options, multiple = false, placeholder = '', description = '' }) {
   let control;
 
   if (options) {
@@ -102,6 +102,7 @@ export function field({ name, label, type = 'text', value = '', required = false
 
   return element('label', { className: 'field', attrs: { for: `field-${name}` } }, [
     element('span', { text: label }),
+    ...(description ? [element('span', { className: 'text-xs font-normal leading-5 text-muted', text: description })] : []),
     control
   ]);
 }
@@ -286,7 +287,7 @@ export function paginationControls(pagination, onPageChange) {
   ]);
 }
 
-export function openDialog({ title, content, submitLabel = 'Save', onSubmit }) {
+export function openDialog({ title, content, submitLabel = 'Save', submitClassName = 'button-primary', onSubmit }) {
   const root = document.getElementById('modal-root');
   const overlay = element('div', {
     className: 'fixed inset-0 z-50 grid place-items-end bg-ink/35 p-0 sm:place-items-center sm:p-5',
@@ -297,7 +298,7 @@ export function openDialog({ title, content, submitLabel = 'Save', onSubmit }) {
     attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'dialog-title' }
   });
   const closeButton = element('button', { className: 'icon-button', text: '×', attrs: { type: 'button', 'aria-label': 'Close dialog' } });
-  const submitButton = element('button', { className: 'button-primary', text: submitLabel, attrs: { type: 'submit' } });
+  const submitButton = element('button', { className: submitClassName, text: submitLabel, attrs: { type: 'submit' } });
   const cancelButton = element('button', { className: 'button-secondary', text: 'Cancel', attrs: { type: 'button' } });
   const close = () => {
     document.removeEventListener('keydown', onKeyDown);
@@ -338,6 +339,19 @@ export function openDialog({ title, content, submitLabel = 'Save', onSubmit }) {
   document.addEventListener('keydown', onKeyDown);
   form.querySelector('input, select, textarea')?.focus();
   return close;
+}
+
+export function confirmDialog({ title = 'Confirm deletion', description, confirmLabel = 'Delete', onConfirm }) {
+  return openDialog({
+    title,
+    content: [element('div', { className: 'sm:col-span-2' }, [element('p', { className: 'text-sm leading-6 text-muted', text: description })])],
+    submitLabel: confirmLabel,
+    submitClassName: 'button-danger',
+    onSubmit: async (form, close) => {
+      await onConfirm();
+      close();
+    }
+  });
 }
 
 export function formatDate(value) {

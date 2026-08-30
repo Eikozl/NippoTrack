@@ -11,8 +11,9 @@ const {
   validateStandardRecordPayload,
   validateWriteFields
 } = require('../validation');
-const { fetchEntityById } = require('./helpers');
+const { fetchEntityById, rollbackAndRelease } = require('./helpers');
 const { executePaginatedList } = require('./listHelpers');
+const { createReviewItem } = require('./reviewController');
 
 async function listVocabulary(req, res) {
   try {
@@ -144,13 +145,18 @@ async function getVocabulary(req, res) {
       'SELECT k.id_kanji, k.character_kanji, k.meaning, k.jlpt_level, k.status FROM kanji_vocabulary kv JOIN kanji k ON kv.id_kanji = k.id_kanji WHERE kv.id_vocabulary = ? ORDER BY k.character_kanji',
       [id]
     );
-    return res.json({ ...entry, kanji });
+    const [examples] = await pool.execute(
+      'SELECT id_usage_example, sentence, translation, notes FROM usage_examples WHERE id_vocabulary = ? ORDER BY id_usage_example DESC',
+      [id]
+    );
+    return res.json({ ...entry, kanji, examples });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load vocabulary entry.' });
   }
 }
 
 async function createVocabulary(req, res) {
+  let connection;
   try {
     const body = req.body || {};
     validateWriteFields(body, ALLOWED_FIELDS.vocabulary);
@@ -163,13 +169,32 @@ async function createVocabulary(req, res) {
       status: normalizeText(body.status, 20, 'status') || 'New',
       notes: normalizeText(body.notes, 1500, 'notes')
     };
-    const [result] = await pool.execute(
+    const exampleSentence = normalizeText(body.example_sentence, 2000, 'example_sentence');
+    const exampleTranslation = normalizeText(body.example_translation, 2000, 'example_translation');
+    const exampleNotes = normalizeText(body.example_notes, 1500, 'example_notes');
+    if (!exampleSentence) {
+      const [result] = await pool.execute(
+        'INSERT INTO vocabulary (word, reading, meaning, jlpt_level, status, notes) VALUES (?, ?, ?, ?, ?, ?)',
+        [values.word, values.reading, values.meaning, values.jlptLevel, values.status, values.notes]
+      );
+      await createReviewItem(pool, 'id_vocabulary', result.insertId);
+      return res.status(201).json(await fetchEntityById('vocabulary', result.insertId));
+    }
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [result] = await connection.execute(
       'INSERT INTO vocabulary (word, reading, meaning, jlpt_level, status, notes) VALUES (?, ?, ?, ?, ?, ?)',
       [values.word, values.reading, values.meaning, values.jlptLevel, values.status, values.notes]
     );
+    await connection.execute('INSERT INTO usage_examples (id_vocabulary, sentence, translation, notes) VALUES (?, ?, ?, ?)', [result.insertId, exampleSentence, exampleTranslation, exampleNotes]);
+    await createReviewItem(connection, 'id_vocabulary', result.insertId);
+    await connection.commit();
+    connection.release();
+    connection = null;
     const created = await fetchEntityById('vocabulary', result.insertId);
     return res.status(201).json(created);
   } catch (error) {
+    if (connection) await rollbackAndRelease(connection);
     return sendRouteError(res, error, { defaultMessage: 'Unable to create vocabulary entry.' });
   }
 }
@@ -218,10 +243,60 @@ async function deleteVocabulary(req, res) {
   }
 }
 
+function exampleValues(body, { partial = false } = {}) {
+  const allowed = ['sentence', 'translation', 'notes'];
+  validateWriteFields(body, allowed);
+  if (!partial && body.sentence === undefined) throw new ValidationError('sentence is required.');
+  const sentence = body.sentence === undefined ? undefined : normalizeText(body.sentence, 2000, 'sentence');
+  if (!partial && !sentence) throw new ValidationError('sentence is required.');
+  if (body.sentence !== undefined && !sentence) throw new ValidationError('sentence is required.');
+  return { sentence, translation: body.translation === undefined ? undefined : normalizeText(body.translation, 2000, 'translation'), notes: body.notes === undefined ? undefined : normalizeText(body.notes, 1500, 'notes') };
+}
+
+async function createVocabularyExample(req, res) {
+  try {
+    const vocabularyId = parseIdParam(req, 'vocabulary entry');
+    if (!await fetchEntityById('vocabulary', vocabularyId)) return res.status(404).json({ error: 'vocabulary entry not found' });
+    const values = exampleValues(req.body || {});
+    const [result] = await pool.execute('INSERT INTO usage_examples (id_vocabulary, sentence, translation, notes) VALUES (?, ?, ?, ?)', [vocabularyId, values.sentence, values.translation, values.notes]);
+    const [rows] = await pool.execute('SELECT id_usage_example, sentence, translation, notes FROM usage_examples WHERE id_usage_example = ?', [result.insertId]);
+    return res.status(201).json(rows[0]);
+  } catch (error) { return sendRouteError(res, error, { defaultMessage: 'Unable to create usage example.' }); }
+}
+
+async function updateVocabularyExample(req, res) {
+  try {
+    const vocabularyId = parseIdParam(req, 'vocabulary entry');
+    const exampleId = Number(req.params.exampleId);
+    if (!Number.isInteger(exampleId) || exampleId <= 0) throw new ValidationError('usage example id must be a positive integer');
+    const [existing] = await pool.execute('SELECT id_usage_example, sentence, translation, notes FROM usage_examples WHERE id_usage_example = ? AND id_vocabulary = ?', [exampleId, vocabularyId]);
+    if (!existing[0]) return res.status(404).json({ error: 'usage example not found' });
+    const values = exampleValues(req.body || {}, { partial: true });
+    const current = existing[0];
+    await pool.execute('UPDATE usage_examples SET sentence = ?, translation = ?, notes = ? WHERE id_usage_example = ?', [values.sentence ?? current.sentence, values.translation ?? current.translation, values.notes ?? current.notes, exampleId]);
+    const [rows] = await pool.execute('SELECT id_usage_example, sentence, translation, notes FROM usage_examples WHERE id_usage_example = ?', [exampleId]);
+    return res.json(rows[0]);
+  } catch (error) { return sendRouteError(res, error, { defaultMessage: 'Unable to update usage example.' }); }
+}
+
+async function deleteVocabularyExample(req, res) {
+  try {
+    const vocabularyId = parseIdParam(req, 'vocabulary entry');
+    const exampleId = Number(req.params.exampleId);
+    if (!Number.isInteger(exampleId) || exampleId <= 0) throw new ValidationError('usage example id must be a positive integer');
+    const [result] = await pool.execute('DELETE FROM usage_examples WHERE id_usage_example = ? AND id_vocabulary = ?', [exampleId, vocabularyId]);
+    if (!result.affectedRows) return res.status(404).json({ error: 'usage example not found' });
+    return res.json({ success: true, deletedId: exampleId });
+  } catch (error) { return sendRouteError(res, error, { defaultMessage: 'Unable to delete usage example.' }); }
+}
+
 module.exports = {
   createVocabulary,
   deleteVocabulary,
   getVocabulary,
+  createVocabularyExample,
+  updateVocabularyExample,
+  deleteVocabularyExample,
   listVocabularyOptions,
   listVocabulary,
   updateVocabulary

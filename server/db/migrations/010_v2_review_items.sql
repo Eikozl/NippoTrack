@@ -1,0 +1,21 @@
+CREATE TABLE review_items (
+  id_review_item INT NOT NULL AUTO_INCREMENT,
+  id_vocabulary INT DEFAULT NULL,
+  id_kanji INT DEFAULT NULL,
+  id_grammar INT DEFAULT NULL,
+  due_on DATE NOT NULL,
+  interval_days SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+  last_reviewed_at DATETIME DEFAULT NULL,
+  last_result VARCHAR(20) DEFAULT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id_review_item),
+  UNIQUE KEY uq_review_items_vocabulary (id_vocabulary),
+  UNIQUE KEY uq_review_items_kanji (id_kanji),
+  UNIQUE KEY uq_review_items_grammar (id_grammar),
+  KEY idx_review_items_due_on (due_on),
+  CONSTRAINT chk_review_items_one_target CHECK ((id_vocabulary IS NOT NULL) + (id_kanji IS NOT NULL) + (id_grammar IS NOT NULL) = 1),
+  CONSTRAINT fk_review_items_vocabulary FOREIGN KEY (id_vocabulary) REFERENCES vocabulary (id_vocabulary) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT fk_review_items_kanji FOREIGN KEY (id_kanji) REFERENCES kanji (id_kanji) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT fk_review_items_grammar FOREIGN KEY (id_grammar) REFERENCES grammar_points (id_grammar) ON DELETE CASCADE ON UPDATE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

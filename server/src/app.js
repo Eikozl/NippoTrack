@@ -10,6 +10,8 @@ const vocabularyRoutes = require('./routes/vocabulary');
 const kanjiRoutes = require('./routes/kanji');
 const grammarRoutes = require('./routes/grammar');
 const exportRoutes = require('./routes/export');
+const v2Routes = require('./routes/v2');
+const reviewRoutes = require('./routes/review');
 
 const app = express();
 
@@ -21,7 +23,7 @@ app.use(cors);
 app.get('/api', (req, res) => {
   res.json({
     name: 'Japanese Learning Tracker API',
-    version: '1.0.0',
+    version: '2.0.0',
     endpoints: [
       'GET /api/health',
       'GET /api/dashboard',
@@ -33,7 +35,12 @@ app.get('/api', (req, res) => {
       'POST /api/kanji',
       'GET /api/grammar',
       'POST /api/grammar',
-      'GET /api/export'
+      'GET /api/export',
+      'GET /api/goals',
+      'GET /api/content',
+      'GET /api/notes',
+      'GET /api/tags'
+      ,'GET /api/review'
     ]
   });
 });
@@ -46,6 +53,8 @@ app.use('/api/vocabulary', vocabularyRoutes);
 app.use('/api/kanji', kanjiRoutes);
 app.use('/api/grammar', grammarRoutes);
 app.use('/api/export', exportRoutes);
+app.use('/api', v2Routes);
+app.use('/api/review', reviewRoutes);
 
 app.use(express.static(path.join(__dirname, '../../client/dist')));
 app.use(errorHandler);

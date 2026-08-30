@@ -1,6 +1,6 @@
 const pool = require('../config/db');
 const { ALLOWED_FIELDS, STUDY_CATEGORIES } = require('../constants');
-const { sendRouteError } = require('../errors/http');
+const { ValidationError, sendRouteError } = require('../errors/http');
 const { parsePagination } = require('../pagination');
 const {
   isValidDateString,
@@ -81,8 +81,12 @@ async function getSession(req, res) {
       'SELECT g.id_grammar, g.grammar_point, g.meaning, g.structure, g.example, g.jlpt_level, g.status FROM session_grammar sg JOIN grammar_points g ON sg.id_grammar = g.id_grammar WHERE sg.id_session = ?',
       [id]
     );
+    const [writingRows] = await pool.execute(
+      'SELECT id_session_writing, title, content, notes FROM session_writings WHERE id_session = ?',
+      [id]
+    );
 
-    return res.json({ ...session, vocabulary, kanji, grammar });
+    return res.json({ ...session, vocabulary, kanji, grammar, writing: writingRows[0] || null });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load study session.' });
   }
@@ -96,6 +100,26 @@ function normalizeSession(body, current = {}) {
     resource: body.resource !== undefined ? normalizeText(body.resource, 255, 'resource') : (current.resource ?? null),
     notes: body.notes !== undefined ? normalizeText(body.notes, 1500, 'notes') : (current.notes ?? null)
   };
+}
+
+function normalizeWriting(body, current = null) {
+  const supplied = ['writing_title', 'writing_content', 'writing_notes'].some((field) => body[field] !== undefined);
+  if (!supplied) return undefined;
+  const content = body.writing_content !== undefined ? normalizeText(body.writing_content, 10000, 'writing_content') : current?.content;
+  if (!content) throw new ValidationError('writing_content is required when saving writing.');
+  return {
+    title: body.writing_title !== undefined ? normalizeText(body.writing_title, 150, 'writing_title') : (current?.title ?? null),
+    content,
+    notes: body.writing_notes !== undefined ? normalizeText(body.writing_notes, 1500, 'writing_notes') : (current?.notes ?? null)
+  };
+}
+
+async function saveWriting(connection, sessionId, writing) {
+  if (!writing) return;
+  await connection.execute(
+    'INSERT INTO session_writings (id_session, title, content, notes) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE title = VALUES(title), content = VALUES(content), notes = VALUES(notes)',
+    [sessionId, writing.title, writing.content, writing.notes]
+  );
 }
 
 async function insertRelationships(connection, sessionId, relationships) {
@@ -126,6 +150,7 @@ async function createSession(req, res) {
     validateWriteFields(body, ALLOWED_FIELDS.sessions);
     const relationships = validateStudySessionPayload(body);
     const values = normalizeSession(body);
+    const writing = normalizeWriting(body);
 
     connection = await pool.getConnection();
     await connection.beginTransaction();
@@ -134,6 +159,7 @@ async function createSession(req, res) {
       [values.sessionDate, values.durationMinutes, values.category, values.resource, values.notes]
     );
     await insertRelationships(connection, result.insertId, relationships);
+    await saveWriting(connection, result.insertId, writing);
     await connection.commit();
     connection.release();
     connection = null;
@@ -159,6 +185,8 @@ async function updateSession(req, res) {
 
     connection = await pool.getConnection();
     await connection.beginTransaction();
+    const [writingRows] = await connection.execute('SELECT title, content, notes FROM session_writings WHERE id_session = ?', [id]);
+    const writing = normalizeWriting(body, writingRows[0] || null);
     await connection.execute(
       'UPDATE study_sessions SET session_date = ?, duration_minutes = ?, category = ?, resource = ?, notes = ? WHERE id_session = ?',
       [values.sessionDate, values.durationMinutes, values.category, values.resource, values.notes, id]
@@ -174,6 +202,7 @@ async function updateSession(req, res) {
       await connection.execute('DELETE FROM session_grammar WHERE id_session = ?', [id]);
     }
     await insertRelationships(connection, id, relationships);
+    await saveWriting(connection, id, writing);
     await connection.commit();
     connection.release();
     connection = null;

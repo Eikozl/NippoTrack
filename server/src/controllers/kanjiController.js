@@ -13,6 +13,7 @@ const {
 } = require('../validation');
 const { fetchEntityById } = require('./helpers');
 const { executePaginatedList } = require('./listHelpers');
+const { createReviewItem } = require('./reviewController');
 
 async function listKanji(req, res) {
   try {
@@ -134,7 +135,11 @@ async function getKanji(req, res) {
       'SELECT v.id_vocabulary, v.word, v.reading, v.meaning, v.jlpt_level, v.status FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary WHERE kv.id_kanji = ? ORDER BY v.word',
       [id]
     );
-    return res.json({ ...entry, vocabulary });
+    const [usageExamples] = await pool.execute(
+      'SELECT v.id_vocabulary, v.word, v.reading, ue.id_usage_example, ue.sentence, ue.translation FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary JOIN usage_examples ue ON ue.id_vocabulary = v.id_vocabulary WHERE kv.id_kanji = ? ORDER BY v.word, ue.id_usage_example DESC',
+      [id]
+    );
+    return res.json({ ...entry, vocabulary, usageExamples });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load kanji entry.' });
   }
@@ -175,6 +180,7 @@ async function createKanji(req, res) {
       'INSERT INTO kanji (character_kanji, meaning, onyomi, kunyomi, jlpt_level, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [values.character, values.meaning, values.onyomi, values.kunyomi, values.jlptLevel, values.status, values.notes]
     );
+    await createReviewItem(pool, 'id_kanji', result.insertId);
     return res.status(201).json(await fetchEntityById('kanji', result.insertId));
   } catch (error) {
     return sendRouteError(res, error, {

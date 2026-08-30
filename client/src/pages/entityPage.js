@@ -1,6 +1,7 @@
 import { apiRequest, queryString } from '../api';
 import {
   debounce,
+  confirmDialog,
   element,
   emptyState,
   errorState,
@@ -31,13 +32,37 @@ export const ENTITY_CONFIGS = {
     primary: (item) => item.word,
     secondary: (item) => item.reading || 'Reading not recorded',
     detail: (item) => item.meaning,
+    renderDetail: (item, actions) => element('div', { className: 'sm:col-span-2' }, [
+      element('dl', { className: 'grid gap-3 text-sm sm:grid-cols-2' }, [
+        element('div', {}, [element('dt', { className: 'text-muted', text: 'Reading' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.reading || 'Not recorded' })]),
+        element('div', {}, [element('dt', { className: 'text-muted', text: 'Meaning' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.meaning })]),
+        element('div', {}, [element('dt', { className: 'text-muted', text: 'JLPT level' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.jlpt_level || 'Not set' })]),
+        element('div', {}, [element('dt', { className: 'text-muted', text: 'Status' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.status || 'New' })])
+      ]),
+      ...(item.notes ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Notes' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: item.notes })])] : []),
+      element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [
+        element('h3', { className: 'font-semibold text-ink', text: 'Related kanji' }),
+        item.kanji?.length ? element('ul', { className: 'mt-2 flex flex-wrap gap-2' }, item.kanji.map((kanji) => element('li', { className: 'status-pill', text: `${kanji.character_kanji} · ${kanji.meaning}` }))) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No kanji linked.' })
+      ]),
+      element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [
+        element('div', { className: 'flex items-center justify-between gap-3' }, [element('h3', { className: 'font-semibold text-ink', text: 'Example usage' }), element('button', { className: 'button-secondary min-h-9 px-3 py-1.5', text: 'Add example', attrs: { type: 'button', 'data-example-action': 'add' } })]),
+        item.examples?.length ? element('div', { className: 'mt-3 grid gap-3' }, item.examples.map((example) => element('article', { className: 'rounded-md bg-paper p-3' }, [
+          element('p', { className: 'whitespace-pre-wrap text-sm leading-6 text-ink', text: example.sentence }),
+          ...(example.translation ? [element('p', { className: 'mt-2 text-sm text-muted', text: example.translation })] : []),
+          element('button', { className: 'button-secondary mt-3 min-h-9 px-3 py-1.5', text: 'Edit example', attrs: { type: 'button', 'data-example-action': 'edit', 'data-example-id': example.id_usage_example } })
+        ]))) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No examples recorded yet.' })
+      ])
+    ]),
     fields: [
       { name: 'word', label: 'Word', required: true, maxLength: 100 },
       { name: 'reading', label: 'Reading', maxLength: 150 },
       { name: 'meaning', label: 'Meaning', required: true, maxLength: 255, wide: true },
+      { name: 'example_sentence', label: 'Example sentence', type: 'textarea', maxLength: 2000, wide: true, createOnly: true, section: 'example' },
+      { name: 'example_translation', label: 'Translation', type: 'textarea', maxLength: 2000, createOnly: true, section: 'example' },
+      { name: 'example_notes', label: 'Example notes', type: 'textarea', maxLength: 1500, createOnly: true, section: 'example' },
       { name: 'jlpt_level', label: 'JLPT level', options: JLPT_OPTIONS },
       { name: 'status', label: 'Status', options: STATUS_OPTIONS, defaultValue: 'New' },
-      { name: 'notes', label: 'Notes', type: 'textarea', maxLength: 1500, wide: true }
+      { name: 'notes', label: 'Entry notes', type: 'textarea', maxLength: 1500, wide: true }
     ]
   },
   kanji: {
@@ -52,6 +77,16 @@ export const ENTITY_CONFIGS = {
     primary: (item) => item.character_kanji,
     secondary: (item) => [item.onyomi, item.kunyomi].filter(Boolean).join(' · ') || 'Readings not recorded',
     detail: (item) => item.meaning,
+    renderDetail: (item) => element('div', { className: 'sm:col-span-2' }, [
+      element('dl', { className: 'grid gap-3 text-sm sm:grid-cols-2' }, [
+        element('div', {}, [element('dt', { className: 'text-muted', text: 'Meaning' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.meaning })]),
+        element('div', {}, [element('dt', { className: 'text-muted', text: 'Onyomi' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.onyomi || 'Not recorded' })]),
+        element('div', {}, [element('dt', { className: 'text-muted', text: 'Kunyomi' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.kunyomi || 'Not recorded' })]),
+        element('div', {}, [element('dt', { className: 'text-muted', text: 'JLPT level' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.jlpt_level || 'Not set' })])
+      ]),
+      element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Related vocabulary' }), item.vocabulary?.length ? element('ul', { className: 'mt-3 grid gap-2' }, item.vocabulary.map((word) => element('li', { className: 'text-sm text-ink/80', text: `${word.word} · ${word.reading || 'reading not recorded'} · ${word.meaning}` }))) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No vocabulary linked.' })]),
+      element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Usage through related words' }), item.usageExamples?.length ? element('div', { className: 'mt-3 grid gap-3' }, item.usageExamples.map((example) => element('article', { className: 'rounded-md bg-paper p-3' }, [element('p', { className: 'text-xs font-semibold text-vermilion', text: `${example.word} · ${example.reading || 'reading not recorded'}` }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm text-ink', text: example.sentence }), ...(example.translation ? [element('p', { className: 'mt-2 text-sm text-muted', text: example.translation })] : [])]))) : element('p', { className: 'mt-2 text-sm text-muted', text: 'Add examples to linked vocabulary to see real reading usage here.' })])
+    ]),
     fields: [
       { name: 'character_kanji', label: 'Character', required: true, maxLength: 4 },
       { name: 'meaning', label: 'Meaning', required: true, maxLength: 255 },
@@ -74,6 +109,17 @@ export const ENTITY_CONFIGS = {
     primary: (item) => item.grammar_point,
     secondary: (item) => item.structure || 'Structure not recorded',
     detail: (item) => item.meaning,
+    renderDetail: (item) => element('div', { className: 'sm:col-span-2' }, [
+      element('dl', { className: 'grid gap-3 text-sm sm:grid-cols-2' }, [
+        element('div', {}, [element('dt', { className: 'text-muted', text: 'Grammar point' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.grammar_point })]),
+        element('div', {}, [element('dt', { className: 'text-muted', text: 'Meaning' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.meaning })]),
+        element('div', {}, [element('dt', { className: 'text-muted', text: 'JLPT level' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.jlpt_level || 'Not set' })]),
+        element('div', {}, [element('dt', { className: 'text-muted', text: 'Status' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.status || 'New' })])
+      ]),
+      ...(item.structure ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Structure' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: item.structure })])] : []),
+      ...(item.example ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Example' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: item.example })])] : []),
+      ...(item.notes ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Notes' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: item.notes })])] : [])
+    ]),
     fields: [
       { name: 'grammar_point', label: 'Grammar point', required: true, maxLength: 100 },
       { name: 'meaning', label: 'Meaning', required: true, maxLength: 255 },
@@ -87,14 +133,27 @@ export const ENTITY_CONFIGS = {
 };
 
 function buildFields(config, record = {}) {
-  return config.fields.map((definition) => {
+  const visibleDefinitions = config.fields.filter((definition) => !definition.createOnly || !record[config.idKey]);
+  const createField = (definition) => {
     const input = field({
       ...definition,
       value: record[definition.name] ?? definition.defaultValue ?? ''
     });
     if (definition.wide) input.classList.add('sm:col-span-2');
     return input;
-  });
+  };
+  const regularFields = visibleDefinitions.filter((definition) => definition.section !== 'example').map(createField);
+  const exampleFields = visibleDefinitions.filter((definition) => definition.section === 'example').map(createField);
+
+  if (!exampleFields.length) return regularFields;
+
+  const insertionIndex = Math.min(3, regularFields.length);
+  regularFields.splice(insertionIndex, 0, element('section', { className: 'rounded-lg border border-stone bg-paper/40 p-4 sm:col-span-2' }, [
+    element('h3', { className: 'font-semibold text-ink', text: 'Example usage (optional)' }),
+    element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: 'Save the first natural sentence together with this vocabulary entry.' }),
+    element('div', { className: 'mt-4 grid gap-4 sm:grid-cols-2' }, exampleFields)
+  ]));
+  return regularFields;
 }
 
 function formPayload(form, config) {
@@ -102,9 +161,11 @@ function formPayload(form, config) {
   return Object.fromEntries(config.fields.map(({ name }) => [name, formData.get(name) ?? '']));
 }
 
-function recordCard(item, config, onEdit, onDelete) {
+function recordCard(item, config, onView, onEdit, onDelete) {
+  const viewButton = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5', text: 'View', attrs: { type: 'button' } });
   const editButton = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5', text: 'Edit', attrs: { type: 'button' } });
   const deleteButton = element('button', { className: 'button-danger', text: 'Delete', attrs: { type: 'button' } });
+  viewButton.addEventListener('click', () => onView(item));
   editButton.addEventListener('click', () => onEdit(item));
   deleteButton.addEventListener('click', () => onDelete(item));
 
@@ -119,7 +180,7 @@ function recordCard(item, config, onEdit, onDelete) {
     element('p', { className: 'mt-4 line-clamp-3 text-sm leading-6 text-ink/80', text: config.detail(item) }),
     element('div', { className: 'mt-auto flex items-end justify-between gap-3 pt-5' }, [
       element('span', { className: 'text-xs font-semibold text-muted', text: item.jlpt_level || 'JLPT not set' }),
-      element('div', { className: 'flex gap-2' }, [editButton, deleteButton])
+      element('div', { className: 'flex gap-2' }, [viewButton, editButton, deleteButton])
     ])
   ]);
 }
@@ -172,7 +233,7 @@ export function renderEntityPage(container, config) {
           load();
         });
       results.replaceChildren(
-        element('div', { className: 'grid gap-4 md:grid-cols-2 xl:grid-cols-3' }, items.map((item) => recordCard(item, config, editRecord, deleteRecord))),
+        element('div', { className: 'grid gap-4 md:grid-cols-2 xl:grid-cols-3' }, items.map((item) => recordCard(item, config, viewRecord, editRecord, deleteRecord))),
         ...[pager].filter(Boolean)
       );
     } catch (error) {
@@ -210,15 +271,41 @@ export function renderEntityPage(container, config) {
     }
   }
 
-  async function deleteRecord(item) {
-    if (!window.confirm(`Delete this ${config.singular}? This cannot be undone.`)) return;
+  async function viewRecord(item) {
     try {
-      await apiRequest(`${config.endpoint}/${item[config.idKey]}`, { method: 'DELETE' });
-      showToast(`${config.title} record deleted.`);
-      await load();
+      const record = await apiRequest(`${config.endpoint}/${item[config.idKey]}`);
+      const openExampleForm = (example = null) => openDialog({
+        title: example ? 'Edit usage example' : 'Add usage example',
+        content: [
+          field({ name: 'sentence', label: 'Sentence', type: 'textarea', required: true, maxLength: 2000, value: example?.sentence || '' }),
+          field({ name: 'translation', label: 'Translation', type: 'textarea', maxLength: 2000, value: example?.translation || '' }),
+          field({ name: 'notes', label: 'Notes', type: 'textarea', maxLength: 1500, value: example?.notes || '' })
+        ],
+        submitLabel: example ? 'Save example' : 'Add example',
+        onSubmit: async (form, close) => {
+          const data = new FormData(form);
+          const path = example ? `${config.endpoint}/${record[config.idKey]}/examples/${example.id_usage_example}` : `${config.endpoint}/${record[config.idKey]}/examples`;
+          await apiRequest(path, { method: example ? 'PUT' : 'POST', body: { sentence: data.get('sentence'), translation: data.get('translation'), notes: data.get('notes') } });
+          close();
+          showToast(example ? 'Usage example updated.' : 'Usage example added.');
+          await viewRecord(record);
+        }
+      });
+      const content = config.renderDetail ? config.renderDetail(record, { openExampleForm }) : element('div', { className: 'sm:col-span-2 text-sm text-muted', text: 'A detailed preview is not available for this record yet.' });
+      content.querySelector('[data-example-action="add"]')?.addEventListener('click', () => openExampleForm());
+      content.querySelectorAll('[data-example-action="edit"]').forEach((button) => button.addEventListener('click', () => openExampleForm(record.examples.find((example) => example.id_usage_example === Number(button.dataset.exampleId)))));
+      openDialog({ title: `${config.title} detail`, content: [content], submitLabel: 'Close', onSubmit: async (form, close) => close() });
     } catch (error) {
       showToast(error.message, 'error');
     }
+  }
+
+  async function deleteRecord(item) {
+    confirmDialog({
+      title: `Delete ${config.singular}?`,
+      description: `This will permanently delete this ${config.singular}. This cannot be undone.`,
+      onConfirm: async () => { await apiRequest(`${config.endpoint}/${item[config.idKey]}`, { method: 'DELETE' }); showToast(`${config.title} record deleted.`); await load(); }
+    });
   }
 
   addButton.addEventListener('click', () => openRecordDialog());

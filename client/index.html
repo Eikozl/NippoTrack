@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="A focused personal tracker for Japanese study sessions and learning material." />
     <title>Japanese Learning Tracker</title>
-    <link rel="shortcut icon" href="/src/assets/2151401.png" type="image/x-icon">
+    <link rel="icon" href="/src/assets/favicon.png" type="image/png">
   </head>
   <body>
     <div id="app-shell" class="min-h-screen lg:grid lg:grid-cols-[17rem_1fr]">
@@ -14,7 +14,9 @@
       <aside id="sidebar" class="fixed inset-y-0 left-0 z-40 flex w-68 -translate-x-full flex-col border-r border-stone bg-paper px-5 py-6 transition-transform duration-200 lg:sticky lg:top-0 lg:h-screen lg:translate-x-0">
         <div class="flex items-center justify-between gap-3 px-2">
           <div class="flex items-center gap-3">
-            <span class="grid size-10 place-items-center rounded-xl bg-neutral-50 text-lg font-bold tracking-wide text-white border border-gray-950">🔴</span>
+            <span class="grid size-10 place-items-center overflow-hidden rounded-xl text-lg font-bold tracking-wide text-white">
+              <img src="/src/assets/favicon.png" alt="Japanese Learning Tracker" class="size-full object-contain" />
+            </span>
             <div>
               <p class="text-sm font-semibold text-ink">Japanese Learning</p>
               <p class="text-xs text-muted">Study tracker</p>
@@ -29,6 +31,11 @@
           <button class="nav-item" type="button" data-page="vocabulary"><span>Vocabulary</span></button>
           <button class="nav-item" type="button" data-page="kanji"><span>Kanji</span></button>
           <button class="nav-item" type="button" data-page="grammar"><span>Grammar</span></button>
+          <button class="nav-item" type="button" data-page="goals"><span>Goals</span></button>
+          <button class="nav-item" type="button" data-page="content"><span>Content</span></button>
+          <button class="nav-item" type="button" data-page="notes"><span>Notes</span></button>
+          <button class="nav-item" type="button" data-page="tags"><span>Tags</span></button>
+          <button class="nav-item" type="button" data-page="review"><span>Review</span></button>
           <button class="nav-item" type="button" data-page="statistics"><span>Statistics</span></button>
         </nav>
 

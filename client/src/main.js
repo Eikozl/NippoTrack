@@ -5,6 +5,8 @@ import { renderDashboard } from './pages/dashboard';
 import { ENTITY_CONFIGS, renderEntityPage } from './pages/entityPage';
 import { renderSessions } from './pages/sessions';
 import { renderStatistics } from './pages/statistics';
+import { renderV2Page } from './pages/v2Pages';
+import { renderReview } from './pages/review';
 import { showToast } from './ui';
 
 const content = document.getElementById('app-content');
@@ -17,6 +19,11 @@ const pages = {
   vocabulary: () => renderEntityPage(content, ENTITY_CONFIGS.vocabulary),
   kanji: () => renderEntityPage(content, ENTITY_CONFIGS.kanji),
   grammar: () => renderEntityPage(content, ENTITY_CONFIGS.grammar),
+  goals: () => renderV2Page(content, 'goals'),
+  content: () => renderV2Page(content, 'content'),
+  notes: () => renderV2Page(content, 'notes'),
+  tags: () => renderV2Page(content, 'tags'),
+  review: () => renderReview(content),
   statistics: () => renderStatistics(content)
 };
 

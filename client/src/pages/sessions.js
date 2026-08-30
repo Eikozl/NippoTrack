@@ -1,6 +1,7 @@
 import { apiRequest, queryString } from '../api';
 import { destroyCharts } from '../charts';
 import {
+  confirmDialog,
   element,
   emptyState,
   errorState,
@@ -47,9 +48,11 @@ function periodQuery(period, customFrom, customTo) {
   return {};
 }
 
-function sessionCard(session, onEdit, onDelete) {
+function sessionCard(session, onView, onEdit, onDelete) {
+  const viewButton = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5', text: 'View', attrs: { type: 'button' } });
   const editButton = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5', text: 'Edit', attrs: { type: 'button' } });
   const deleteButton = element('button', { className: 'button-danger', text: 'Delete', attrs: { type: 'button' } });
+  viewButton.addEventListener('click', () => onView(session));
   editButton.addEventListener('click', () => onEdit(session));
   deleteButton.addEventListener('click', () => onDelete(session));
 
@@ -64,7 +67,7 @@ function sessionCard(session, onEdit, onDelete) {
         element('p', { className: 'mt-3 text-sm text-ink/80', text: session.resource || 'No resource recorded' }),
         ...(session.notes ? [element('p', { className: 'mt-2 line-clamp-2 text-sm leading-6 text-muted', text: session.notes })] : [])
       ]),
-      element('div', { className: 'flex shrink-0 gap-2' }, [editButton, deleteButton])
+      element('div', { className: 'flex shrink-0 gap-2' }, [viewButton, editButton, deleteButton])
     ])
   ]);
 }
@@ -205,7 +208,7 @@ export function renderSessions(container) {
         load();
       });
       results.replaceChildren(
-        element('div', { className: 'grid gap-4' }, items.map((session) => sessionCard(session, editSession, deleteSession))),
+        element('div', { className: 'grid gap-4' }, items.map((session) => sessionCard(session, viewSession, editSession, deleteSession))),
         ...[pager].filter(Boolean)
       );
     } catch (error) {
@@ -258,6 +261,15 @@ export function renderSessions(container) {
         field({ name: 'category', label: 'Category', required: true, value: record.category || 'Vocabulary', options: CATEGORIES.map((value) => ({ value, label: value })) }),
         field({ name: 'resource', label: 'Resource', maxLength: 255, value: record.resource || '', placeholder: 'Genki, NHK, conversation…' }),
         field({ name: 'notes', label: 'Notes', type: 'textarea', maxLength: 1500, value: record.notes || '' }),
+        element('section', { className: 'rounded-lg border border-stone bg-paper/40 p-4 sm:col-span-2' }, [
+          element('h3', { className: 'font-semibold text-ink', text: 'Writing (optional)' }),
+          element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: 'Save a structured writing sample with this study session.' }),
+          element('div', { className: 'mt-4 grid gap-4 sm:grid-cols-2' }, [
+            field({ name: 'writing_title', label: 'Title', maxLength: 150, value: record.writing?.title || '' }),
+            field({ name: 'writing_notes', label: 'Writing notes', type: 'textarea', maxLength: 1500, value: record.writing?.notes || '' }),
+            element('div', { className: 'sm:col-span-2' }, [field({ name: 'writing_content', label: 'Writing content', type: 'textarea', maxLength: 10000, value: record.writing?.content || '' })])
+          ])
+        ]),
         searchableMultiSelect({
           name: 'vocabulary_ids',
           label: 'Related vocabulary',
@@ -310,6 +322,10 @@ export function renderSessions(container) {
             kanji_ids: selectedNumbers(form.elements.kanji_ids),
             grammar_ids: selectedNumbers(form.elements.grammar_ids)
           };
+          const writing = ['writing_title', 'writing_content', 'writing_notes'].map((name) => formData.get(name));
+          if (writing.some((value) => String(value || '').trim())) {
+            [payload.writing_title, payload.writing_content, payload.writing_notes] = writing;
+          }
           await apiRequest(record.id_session ? `/api/sessions/${record.id_session}` : '/api/sessions', {
             method: record.id_session ? 'PUT' : 'POST',
             body: payload
@@ -336,15 +352,45 @@ export function renderSessions(container) {
     }
   }
 
-  async function deleteSession(session) {
-    if (!window.confirm('Delete this study session? Its material links will also be removed.')) return;
+  async function viewSession(session) {
     try {
-      await apiRequest(`/api/sessions/${session.id_session}`, { method: 'DELETE' });
-      showToast('Study session deleted.');
-      await load();
+      const record = await apiRequest(`/api/sessions/${session.id_session}`);
+      const relatedList = (title, items, primary, secondary) => element('section', { className: 'rounded-lg border border-stone p-4' }, [
+        element('h3', { className: 'font-semibold text-ink', text: title }),
+        items.length
+          ? element('ul', { className: 'mt-3 grid gap-2' }, items.map((item) => element('li', { className: 'text-sm text-ink/80' }, [
+            element('span', { className: 'font-medium text-ink', text: primary(item) }),
+            ...(secondary(item) ? [element('span', { className: 'text-muted', text: ` — ${secondary(item)}` })] : [])
+          ])))
+          : element('p', { className: 'mt-2 text-sm text-muted', text: 'None linked to this session.' })
+      ]);
+      const details = element('div', { className: 'sm:col-span-2' }, [
+        element('dl', { className: 'grid gap-3 text-sm sm:grid-cols-2' }, [
+          element('div', {}, [element('dt', { className: 'text-muted', text: 'Date' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatDate(record.session_date) })]),
+          element('div', {}, [element('dt', { className: 'text-muted', text: 'Duration' }), element('dd', { className: 'mt-1 font-medium text-ink', text: `${record.duration_minutes} minutes` })]),
+          element('div', {}, [element('dt', { className: 'text-muted', text: 'Category' }), element('dd', { className: 'mt-1 font-medium text-ink', text: record.category })]),
+          element('div', {}, [element('dt', { className: 'text-muted', text: 'Resource' }), element('dd', { className: 'mt-1 font-medium text-ink', text: record.resource || 'Not recorded' })])
+        ]),
+        ...(record.notes ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Notes' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: record.notes })])] : []),
+        ...(record.writing ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: record.writing.title || 'Writing content' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: record.writing.content }), ...(record.writing.notes ? [element('p', { className: 'mt-3 whitespace-pre-wrap text-sm text-muted', text: record.writing.notes })] : [])])] : []),
+        element('div', { className: 'mt-5 grid gap-3 sm:grid-cols-3' }, [
+          relatedList('Vocabulary', record.vocabulary, (item) => item.word, (item) => item.meaning),
+          relatedList('Kanji', record.kanji, (item) => item.character_kanji, (item) => item.meaning),
+          relatedList('Grammar', record.grammar, (item) => item.grammar_point, (item) => item.meaning)
+        ])
+      ]);
+      openDialog({ title: 'Study session detail', content: [details], submitLabel: 'Close', onSubmit: async (form, close) => close() });
     } catch (error) {
       showToast(error.message, 'error');
     }
+  }
+
+  async function deleteSession(session) {
+    confirmDialog({
+      title: 'Delete study session?',
+      description: 'This will permanently delete the session and its material links. This cannot be undone.',
+      onConfirm: async () => { await apiRequest(`/api/sessions/${session.id_session}`, { method: 'DELETE' }); showToast('Study session deleted.'); await load(); }
+    });
   }
 
   addButton.addEventListener('click', () => openSessionDialog());
