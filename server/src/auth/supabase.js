@@ -6,35 +6,36 @@ const verificationTtlMs = 15_000;
 const verificationTimeoutMs = 5_000;
 const productionAuthRedirectUrl = 'https://japanese-learning-tracker.vercel.app/';
 const previewAuthRedirectUrl = 'https://japanese-learning-tracker-git-master-yeferson-sena.vercel.app/';
+const defaultSupabaseUrl = 'https://milayuvlajmgrcxmrxdg.supabase.co';
+const defaultSupabasePublishableKey = 'sb_publishable_UJQwQKZge3SKbj-j-BfVkg_2QmvbX4O';
 
 function isTestBypass() {
   return process.env.NODE_ENV === 'test' && process.env.JLT_AUTH_BYPASS_FOR_TESTS === 'true';
 }
 
-function required(name) {
+function configured(name, fallback) {
   const value = process.env[name];
-  if (!value || !value.trim()) throw new Error(`Missing required environment variable: ${name}`);
-  return value;
+  return value?.trim() || fallback;
 }
 
 let client;
 function authClient() {
   if (!client) {
-    client = createClient(required('SUPABASE_URL'), required('SUPABASE_PUBLISHABLE_KEY'), {
-      auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false }
-    });
+    client = createClient(
+      configured('SUPABASE_URL', defaultSupabaseUrl),
+      configured('SUPABASE_PUBLISHABLE_KEY', defaultSupabasePublishableKey),
+      { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } }
+    );
   }
   return client;
 }
 
 function authRedirectUrl() {
-  // Vercel exposes VERCEL_ENV automatically. Prefer stable aliases so auth links
-  // survive new deployments and no per-environment redirect variable is required.
   if (process.env.VERCEL_ENV === 'production') return productionAuthRedirectUrl;
   if (process.env.VERCEL_ENV === 'preview') return previewAuthRedirectUrl;
 
-  const configured = process.env.SUPABASE_AUTH_REDIRECT_URL;
-  if (configured?.trim()) return configured.trim();
+  const configuredRedirect = process.env.SUPABASE_AUTH_REDIRECT_URL;
+  if (configuredRedirect?.trim()) return configuredRedirect.trim();
 
   return 'http://localhost:5173/';
 }
