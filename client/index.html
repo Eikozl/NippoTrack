@@ -8,17 +8,7 @@
     <meta name="description" content="A focused personal tracker for Japanese study sessions and learning material." />
     <title>Japanese Learning Tracker</title>
     <link rel="icon" href="/src/assets/JLT-Favicon.png" type="image/png">
-    <script>
-      (() => {
-        const theme = localStorage.getItem('jlt-theme') || 'light';
-        document.documentElement.dataset.theme = theme;
-        document.documentElement.style.colorScheme = theme;
-        document.querySelector('meta[name="theme-color"]')?.setAttribute(
-          'content',
-          theme === 'dark' ? '#202428' : '#eef1f7'
-        );
-      })();
-    </script>
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="auth-root"></div>

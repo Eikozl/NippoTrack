@@ -12,6 +12,7 @@ This document prepares JLT for a future Vercel deployment. It does not create a 
 - `vercel.json` supplies a final SPA rewrite to `/index.html`; Vercel resolves functions and static files before this fallback.
 - The browser uses its existing relative `/api/*` requests. `VITE_API_BASE_URL` must be unset or empty for the deployed same-origin topology.
 - The serverless entrypoints export the Express application. They never call `listen()`, start Vite, or start Nodemon.
+- The theme bootstrap is the static `/theme-init.js` file, so Helmet can keep `script-src 'self'` without allowing inline JavaScript. During local development, the explicit Vite origins remain allowlisted; production uses the same-origin API and needs no permissive CORS origin.
 
 Vercel documents Node functions under `/api`, Express application exports, and SPA rewrites in its official documentation:
 
@@ -46,4 +47,3 @@ Never set migration credentials, Supabase secret/service-role keys, SMTP credent
 ## Deferred production decisions
 
 - Production site URL, Auth redirect URLs, confirmation URLs, recovery URLs, and SMTP configuration must wait for the approved Vercel domain/preview topology.
-- D3 will re-audit CSP and the same-origin CORS policy after the topology is exercised in a Vercel preview.
