@@ -100,6 +100,7 @@
 :root[data-theme="dark"] .button-primary { color: #121a32 !important; background: #9db4ff !important; }
 :root[data-theme="dark"] .button-primary:hover { background: #b7c8ff !important; }
 :root[data-theme="dark"] .button-secondary { color: #f4f7fb !important; }
+:root[data-theme="dark"] .field-control option { color:#f4f7fb; background:#202428; }
 :root[data-theme="dark"] .button-danger { color: #ffb8b0 !important; background: #3b292c !important; }
 :root[data-theme="dark"] .text-red-700,
 :root[data-theme="dark"] .text-red-800 { color:#ffc1bb !important; }

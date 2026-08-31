@@ -14,6 +14,8 @@ import { icon, moduleIconMap } from './icons';
 import { element } from './ui';
 
 const content = document.getElementById('app-content');
+const authRoot = document.getElementById('auth-root');
+const appShell = document.getElementById('app-shell');
 const sidebar = document.getElementById('sidebar');
 const backdrop = document.getElementById('mobile-backdrop');
 const navigationButtons = Array.from(document.querySelectorAll('[data-page]'));
@@ -38,6 +40,7 @@ const sidebarStreak = document.getElementById('sidebar-streak');
 const brandLogo = document.getElementById('brand-logo');
 const themeToggle = document.getElementById('theme-toggle');
 const mobileThemeToggle = document.getElementById('mobile-theme-toggle');
+const logoutButtons = [document.getElementById('logout-button'), document.getElementById('mobile-logout-button')];
 const themeColorMeta = document.querySelector('meta[name="theme-color"]');
 const savedTheme = localStorage.getItem('jlt-theme') || 'light';
 document.querySelectorAll('[data-jlt-icon]').forEach((holder) => {
@@ -76,6 +79,60 @@ window.addEventListener('jlt-theme-change', (event) => {
   refreshChartTheme();
 });
 
+function renderAuthGate(message = '') {
+  appShell.hidden = true;
+  const password = element('input', { className: 'field-control', attrs: { id: 'jlt-login-password', name: 'password', type: 'password', required: '', autocomplete: 'current-password', placeholder: 'Password' } });
+  const feedback = element('p', { className: `min-h-5 text-sm ${message ? 'text-red-700' : 'text-muted'}`, text: message, attrs: { 'aria-live': 'polite' } });
+  const submit = element('button', { className: 'button-primary w-full', text: 'Sign in', attrs: { type: 'submit' } });
+  const form = element('form', { className: 'mt-6 grid gap-4', attrs: { 'aria-label': 'Sign in to Japanese Learning Tracker' } }, [
+    element('label', { className: 'field', attrs: { for: 'jlt-login-password' } }, [element('span', { text: 'Password' }), password]),
+    feedback,
+    submit
+  ]);
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    submit.disabled = true;
+    submit.textContent = 'Signing in…';
+    feedback.textContent = '';
+    try {
+      await apiRequest('/api/auth/login', { method: 'POST', body: { password: password.value }, notifyAuth: false });
+      password.value = '';
+      await bootstrapApp();
+    } catch (error) {
+      feedback.textContent = error?.status === 429 ? 'Too many attempts. Please wait before trying again.' : 'The password is incorrect.';
+      submit.disabled = false;
+      submit.textContent = 'Sign in';
+      password.focus();
+    }
+  });
+  authRoot.replaceChildren(element('main', { className: 'grid min-h-screen place-items-center px-4 py-8' }, [
+    element('section', { className: 'surface w-full max-w-md p-6 sm:p-8', attrs: { 'aria-labelledby': 'login-title' } }, [
+      element('p', { className: 'eyebrow', text: 'Private workspace' }),
+      element('h1', { className: 'mt-2 text-2xl font-semibold tracking-tight text-ink', text: 'Japanese Learning Tracker', attrs: { id: 'login-title' } }),
+      element('p', { className: 'mt-2 text-sm leading-6 text-muted', text: 'Sign in to access your private study data.' }),
+      form
+    ])
+  ]));
+  password.focus();
+}
+
+async function bootstrapApp() {
+  try {
+    const session = await apiRequest('/api/auth/session', { notifyAuth: false });
+    if (!session.authenticated) return renderAuthGate();
+    authRoot.replaceChildren();
+    appShell.hidden = false;
+    await navigate(window.location.hash.slice(1) || 'dashboard', { updateHash: false });
+  } catch {
+    renderAuthGate('Authentication service is unavailable.');
+  }
+}
+
+window.addEventListener('jlt-auth-required', () => renderAuthGate('Your session has ended. Please sign in again.'));
+logoutButtons.forEach((button) => button?.addEventListener('click', async () => {
+  try { await apiRequest('/api/auth/logout', { method: 'POST', notifyAuth: false }); } finally { renderAuthGate(); }
+}));
+
 async function loadSidebarStreak() {
   if (!sidebarStreak) return;
   try {
@@ -101,7 +158,6 @@ async function loadSidebarStreak() {
     sidebarStreak.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Streak unavailable.' }));
   }
 }
-loadSidebarStreak();
 window.addEventListener('jlt-data-change', loadSidebarStreak);
 
 function closeSearch() { searchResults.classList.add('hidden'); searchResults.replaceChildren(); }
@@ -177,4 +233,4 @@ document.getElementById('export-data')?.addEventListener('click', async (event) 
   }
 });
 
-navigate(window.location.hash.slice(1) || 'dashboard', { updateHash: false });
+bootstrapApp();

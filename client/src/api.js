@@ -8,12 +8,13 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiRequest(path, { method = 'GET', body, signal } = {}) {
+export async function apiRequest(path, { method = 'GET', body, signal, notifyAuth = true } = {}) {
   let response;
 
   try {
     response = await fetch(`${API_BASE}${path}`, {
       method,
+      credentials: 'include',
       signal,
       headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body)
@@ -35,6 +36,7 @@ export async function apiRequest(path, { method = 'GET', body, signal } = {}) {
   const data = contentType.includes('application/json') ? await response.json() : null;
 
   if (!response.ok) {
+    if (response.status === 401 && notifyAuth) window.dispatchEvent(new CustomEvent('jlt-auth-required'));
     throw new ApiError(data?.error || 'Request failed.', response.status);
   }
 

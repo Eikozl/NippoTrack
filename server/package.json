@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "test": "node --test tests/*.test.js",
+    "test": "node --env-file=.env.test --test tests/*.test.js",
     "db:check": "node scripts/check-db.js",
     "postgres:migrate": "node scripts/run-postgres-migrations.js",
     "postgres:check": "node scripts/check-postgres-db.js",

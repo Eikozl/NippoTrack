@@ -23,6 +23,7 @@ const ICONS = {
   clock: Lucide.Clock,
   sun: Lucide.Sun,
   moon: Lucide.Moon,
+  logout: Lucide.LogOut,
   menu: Lucide.Menu,
   close: Lucide.X
 };

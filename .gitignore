@@ -6,6 +6,7 @@ node_modules/
 .env.*
 !.env.example
 !.env.postgres.example
+!.env.test
 
 # IDE
 .vs/

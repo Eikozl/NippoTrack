@@ -12,13 +12,23 @@ const grammarRoutes = require('./routes/grammar');
 const exportRoutes = require('./routes/export');
 const v2Routes = require('./routes/v2');
 const reviewRoutes = require('./routes/review');
+const authRoutes = require('./routes/auth');
+const { requireAuthentication } = require('./middleware/authentication');
+const { createRateLimiter } = require('./middleware/rateLimit');
 
 const app = express();
 
+app.set('trust proxy', 1);
 app.use(helmet({ contentSecurityPolicy: true }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false }));
 app.use(cors);
+
+const apiRateLimit = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 300, message: 'Too many requests. Please try again later.' });
+
+app.get('/api/health', getHealth);
+app.use('/api/auth', authRoutes);
+app.use('/api', apiRateLimit, requireAuthentication);
 
 app.get('/api', (req, res) => {
   res.json({
@@ -45,7 +55,6 @@ app.get('/api', (req, res) => {
   });
 });
 
-app.get('/api/health', getHealth);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/sessions', sessionsRoutes);
 app.use('/api/study-sessions', sessionsRoutes);

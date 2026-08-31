@@ -21,7 +21,8 @@
     </script>
   </head>
   <body>
-    <div id="app-shell" class="min-h-screen lg:grid lg:grid-cols-[17rem_1fr]">
+    <div id="auth-root"></div>
+    <div id="app-shell" class="min-h-screen lg:grid lg:grid-cols-[17rem_1fr]" hidden>
       <div id="mobile-backdrop" class="fixed inset-0 z-30 hidden bg-ink/25 backdrop-blur-[1px] lg:hidden"></div>
 
       <aside id="sidebar" class="fixed inset-y-0 left-0 z-40 flex w-68 -translate-x-full flex-col overflow-y-auto border-r border-stone bg-paper px-5 py-6 transition-transform duration-200 lg:sticky lg:top-0 lg:h-screen lg:translate-x-0">
@@ -70,12 +71,18 @@
             <kbd class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-xs text-muted shadow-[var(--shadow-inset-sm)]">/</kbd>
             <div id="global-search-results" class="absolute inset-x-0 top-[calc(100%+.6rem)] z-30 hidden max-h-96 overflow-y-auto rounded-[18px] p-2" aria-live="polite"></div>
           </div>
-          <button id="theme-toggle" class="icon-button ml-5 shrink-0" type="button" aria-label="Switch to dark mode" title="Switch to dark mode" aria-pressed="false"><span id="theme-toggle-icon" aria-hidden="true"></span></button>
+          <div class="ml-5 flex shrink-0 gap-2">
+            <button id="theme-toggle" class="icon-button" type="button" aria-label="Switch to dark mode" title="Switch to dark mode" aria-pressed="false"><span id="theme-toggle-icon" aria-hidden="true"></span></button>
+            <button id="logout-button" class="icon-button" type="button" aria-label="Sign out" title="Sign out"><span data-jlt-icon="logout" aria-hidden="true"></span></button>
+          </div>
         </header>
         <header class="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-stone bg-canvas/90 px-4 backdrop-blur-md sm:px-7 lg:hidden">
           <button id="open-navigation" class="icon-button" type="button" aria-label="Open navigation"><span data-jlt-icon="menu" aria-hidden="true"></span></button>
           <p class="text-sm font-semibold text-ink">Japanese Learning Tracker</p>
-          <button id="mobile-theme-toggle" class="icon-button" type="button" aria-label="Switch to dark mode" title="Switch to dark mode" aria-pressed="false"><span id="mobile-theme-toggle-icon" aria-hidden="true"></span></button>
+          <div class="flex gap-2">
+            <button id="mobile-theme-toggle" class="icon-button" type="button" aria-label="Switch to dark mode" title="Switch to dark mode" aria-pressed="false"><span id="mobile-theme-toggle-icon" aria-hidden="true"></span></button>
+            <button id="mobile-logout-button" class="icon-button" type="button" aria-label="Sign out" title="Sign out"><span data-jlt-icon="logout" aria-hidden="true"></span></button>
+          </div>
         </header>
 
         <main id="app-content" class="mx-auto min-h-screen max-w-[92rem] px-4 py-7 sm:px-7 sm:py-9 lg:px-10" tabindex="-1"></main>
