@@ -30,3 +30,6 @@ yarn-error.log*
 
 # Local database backups
 backups/
+
+# Supabase CLI local state
+supabase/.temp/
