@@ -14,20 +14,17 @@
 - Ownership verification passes: no null root ownership and no cross-user junction rows.
 - Migration runner is idempotent.
 - Phase 11 live isolation validation passed against the disposable `JLT testing` Supabase project. It verified per-user uniqueness, search and export isolation, safe foreign read/update/delete behavior, and cross-user session/note relationship rejection. The harness uses only ephemeral Auth users and test records.
-- Regression suite: 49 passing, 1 explicit real-PostgreSQL integration test skipped unless its dedicated integration environment is supplied.
+- Phase 12 automated Auth validation passed against `JLT testing`: unconfirmed sign-in is blocked, confirmation enables private API access, recovery updates the password, the old password is rejected, and reused or invalid recovery tokens fail safely.
+- A real `JLT testing` signup email was delivered through the dedicated custom SMTP configuration. Its confirmation redirect established a valid session and opened the private dashboard; the ephemeral user was deleted after verification.
+- The final Supabase project also delivered a real recovery email through its separate custom SMTP configuration, and the password update completed successfully. SMTP credentials remain outside Git.
+- Browser bearer authentication now passes CORS preflight from the local Vite origin, with a regression test covering the `Authorization` header.
+- Regression suite: 50 passing, 1 explicit real-PostgreSQL integration test skipped unless its dedicated integration environment is supplied.
 - Production client build passes.
-
-## Deferred external validation
-
-The two-user live isolation harness now provisions and deletes confirmed ephemeral users automatically through a dedicated integration target. It must never run against JLT DEV or production. The confirmation/recovery harness is also available, but JLT testing's Auth write operations (`generateLink` and Auth-user deletion) timed out during live validation despite the database and public Auth health endpoint responding. See `AUTOMATED_AUTH_AND_ISOLATION_TESTING.md`.
 
 ## Remaining blockers before deployment hardening may resume
 
-1. Repair or recreate the disposable JLT testing project's Supabase Auth write path; it currently times out for confirmation-link generation and Auth-user deletion.
-2. Execute the confirmation/recovery harness after that repair, then verify a real sign-up confirmation email and that an unverified account cannot access private data.
-3. Verify a real password-recovery email, redirect, password update, and expired-link behavior.
-4. Configure and validate a non-test SMTP provider before production; its credentials and production redirect URLs must remain outside Git.
-5. Run the explicitly configured real PostgreSQL/Supabase integration test environment.
+1. Replace or update the historical real-PostgreSQL integration test so it uses an authenticated ephemeral user and the empty disposable `JLT testing` dataset instead of fixed single-user row counts.
+2. Run that real PostgreSQL/Supabase integration test and repeat the final Phase 15 gate.
 
 No Vercel configuration or deployment work has been started.
 
