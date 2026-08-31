@@ -101,6 +101,7 @@ export async function renderDashboard(container) {
   async function load() {
     try {
       const [data, activity, review] = await Promise.all([apiRequest('/api/dashboard'), apiRequest('/api/dashboard/activity'), apiRequest('/api/review')]);
+      window.dispatchEvent(new CustomEvent('jlt-sidebar-activity', { detail: activity }));
       const weeklyCanvas = element('canvas', { attrs: { 'aria-label': 'Weekly study activity chart', role: 'img' } });
       const distributionCanvas = element('canvas', { attrs: { 'aria-label': 'Study category distribution chart', role: 'img' } });
       content.replaceChildren(

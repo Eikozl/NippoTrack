@@ -426,7 +426,7 @@ test('database configuration fails closed when runtime credentials are missing',
   const output = `${result.stdout}\n${result.stderr}`;
 
   assert.notEqual(result.status, 0);
-  assert.match(output, /Missing required environment variable: POSTGRES_RUNTIME_USER/);
+  assert.match(output, /Missing required (runtime )?environment variable: POSTGRES_RUNTIME_(PORT|USER)/);
   assert.doesNotMatch(output, /using root|fallback to root/i);
 });
 

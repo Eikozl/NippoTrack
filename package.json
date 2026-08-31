@@ -6,9 +6,6 @@
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
   },
-  "engines": {
-    "node": "^20.19.0 || >=22.12.0"
-  },
   "scripts": {
     "start": "node dev.js",
     "dev": "node dev.js",

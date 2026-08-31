@@ -32,30 +32,30 @@
               <img id="brand-logo" src="/src/assets/JLT_logo-png.png" alt="Japanese Learning Tracker" class="brand-logo" />
             </span>
             <div>
-              <p class="text-sm font-semibold text-ink">Japanese Learning</p>
-              <p class="text-xs text-muted">Study tracker</p>
+              <p class="text-sm font-semibold text-ink" data-i18n="Japanese Learning">Japanese Learning</p>
+              <p class="text-xs text-muted" data-i18n="Study tracker">Study tracker</p>
             </div>
           </div>
           <button id="close-navigation" class="icon-button lg:hidden" type="button" aria-label="Close navigation"><span data-jlt-icon="close" aria-hidden="true"></span></button>
         </div>
 
         <nav class="mt-10 grid gap-1" aria-label="Primary navigation">
-          <button class="nav-item is-active" type="button" data-page="dashboard"><span class="nav-icon" data-jlt-icon="dashboard" aria-hidden="true"></span><span>Dashboard</span></button>
-          <button class="nav-item" type="button" data-page="sessions"><span class="nav-icon" data-jlt-icon="sessions" aria-hidden="true"></span><span>Sessions</span></button>
-          <button class="nav-item" type="button" data-page="vocabulary"><span class="nav-icon" data-jlt-icon="vocabulary" aria-hidden="true"></span><span>Vocabulary</span></button>
-          <button class="nav-item" type="button" data-page="kanji"><span class="nav-icon" data-jlt-icon="kanji" aria-hidden="true"></span><span>Kanji</span></button>
-          <button class="nav-item" type="button" data-page="grammar"><span class="nav-icon" data-jlt-icon="grammar" aria-hidden="true"></span><span>Grammar</span></button>
-          <button class="nav-item" type="button" data-page="goals"><span class="nav-icon" data-jlt-icon="goals" aria-hidden="true"></span><span>Goals</span></button>
-          <button class="nav-item" type="button" data-page="content"><span class="nav-icon" data-jlt-icon="content" aria-hidden="true"></span><span>Content</span></button>
-          <button class="nav-item" type="button" data-page="notes"><span class="nav-icon" data-jlt-icon="notes" aria-hidden="true"></span><span>Notes</span></button>
-          <button class="nav-item" type="button" data-page="tags"><span class="nav-icon" data-jlt-icon="tags" aria-hidden="true"></span><span>Tags</span></button>
-          <button class="nav-item" type="button" data-page="review"><span class="nav-icon" data-jlt-icon="review" aria-hidden="true"></span><span>Review</span></button>
-          <button class="nav-item" type="button" data-page="statistics"><span class="nav-icon" data-jlt-icon="statistics" aria-hidden="true"></span><span>Statistics</span></button>
-          <button class="nav-item" type="button" data-page="settings"><span class="nav-icon" data-jlt-icon="settings" aria-hidden="true"></span><span>Settings</span></button>
+          <button class="nav-item is-active" type="button" data-page="dashboard"><span class="nav-icon" data-jlt-icon="dashboard" aria-hidden="true"></span><span data-i18n="Dashboard">Dashboard</span></button>
+          <button class="nav-item" type="button" data-page="sessions"><span class="nav-icon" data-jlt-icon="sessions" aria-hidden="true"></span><span data-i18n="Sessions">Sessions</span></button>
+          <button class="nav-item" type="button" data-page="vocabulary"><span class="nav-icon" data-jlt-icon="vocabulary" aria-hidden="true"></span><span data-i18n="Vocabulary">Vocabulary</span></button>
+          <button class="nav-item" type="button" data-page="kanji"><span class="nav-icon" data-jlt-icon="kanji" aria-hidden="true"></span><span data-i18n="Kanji">Kanji</span></button>
+          <button class="nav-item" type="button" data-page="grammar"><span class="nav-icon" data-jlt-icon="grammar" aria-hidden="true"></span><span data-i18n="Grammar">Grammar</span></button>
+          <button class="nav-item" type="button" data-page="goals"><span class="nav-icon" data-jlt-icon="goals" aria-hidden="true"></span><span data-i18n="Goals">Goals</span></button>
+          <button class="nav-item" type="button" data-page="content"><span class="nav-icon" data-jlt-icon="content" aria-hidden="true"></span><span data-i18n="Content">Content</span></button>
+          <button class="nav-item" type="button" data-page="notes"><span class="nav-icon" data-jlt-icon="notes" aria-hidden="true"></span><span data-i18n="Notes">Notes</span></button>
+          <button class="nav-item" type="button" data-page="tags"><span class="nav-icon" data-jlt-icon="tags" aria-hidden="true"></span><span data-i18n="Tags">Tags</span></button>
+          <button class="nav-item" type="button" data-page="review"><span class="nav-icon" data-jlt-icon="review" aria-hidden="true"></span><span data-i18n="Review">Review</span></button>
+          <button class="nav-item" type="button" data-page="statistics"><span class="nav-icon" data-jlt-icon="statistics" aria-hidden="true"></span><span data-i18n="Statistics">Statistics</span></button>
+          <button class="nav-item" type="button" data-page="settings"><span class="nav-icon" data-jlt-icon="settings" aria-hidden="true"></span><span data-i18n="Settings">Settings</span></button>
         </nav>
 
         <div class="mt-6 shrink-0 rounded-[22px] bg-white/70 p-4" aria-live="polite">
-          <p class="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-vermilion"><span class="streak-fire-icon" data-jlt-icon="streak" aria-hidden="true"></span><span>Study Streak</span></p>
+          <p class="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-vermilion"><span class="streak-fire-icon" data-jlt-icon="streak" aria-hidden="true"></span><span data-i18n="Study Streak">Study Streak</span></p>
           <div id="sidebar-streak" class="mt-3">
             <p class="text-2xl font-semibold tracking-tight text-ink">—</p>
             <p class="mt-1 text-xs text-muted">Loading active days…</p>
@@ -73,7 +73,7 @@
           </div>
           <div class="ml-5 flex shrink-0 gap-2">
             <button id="theme-toggle" class="icon-button" type="button" aria-label="Switch to dark mode" title="Switch to dark mode" aria-pressed="false"><span id="theme-toggle-icon" aria-hidden="true"></span></button>
-            <button id="logout-button" class="icon-button" type="button" aria-label="Sign out" title="Sign out"><span data-jlt-icon="logout" aria-hidden="true"></span></button>
+            <button id="account-button" class="icon-button" type="button" aria-label="Manage account" title="Manage account"><span data-jlt-icon="user" aria-hidden="true"></span></button>
           </div>
         </header>
         <header class="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-stone bg-canvas/90 px-4 backdrop-blur-md sm:px-7 lg:hidden">
@@ -81,7 +81,7 @@
           <p class="text-sm font-semibold text-ink">Japanese Learning Tracker</p>
           <div class="flex gap-2">
             <button id="mobile-theme-toggle" class="icon-button" type="button" aria-label="Switch to dark mode" title="Switch to dark mode" aria-pressed="false"><span id="mobile-theme-toggle-icon" aria-hidden="true"></span></button>
-            <button id="mobile-logout-button" class="icon-button" type="button" aria-label="Sign out" title="Sign out"><span data-jlt-icon="logout" aria-hidden="true"></span></button>
+            <button id="mobile-account-button" class="icon-button" type="button" aria-label="Manage account" title="Manage account"><span data-jlt-icon="user" aria-hidden="true"></span></button>
           </div>
         </header>
 

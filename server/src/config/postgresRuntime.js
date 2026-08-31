@@ -1,5 +1,7 @@
 const { Pool } = require('pg');
-require('dotenv').config({ path: process.env.POSTGRES_ENV_FILE || '.env.postgres' });
+const dotenv = require('dotenv');
+dotenv.config({ path: process.env.POSTGRES_ENV_FILE || '.env.postgres' });
+dotenv.config({ path: process.env.POSTGRES_RUNTIME_ENV_FILE || '.env.runtime' });
 
 function value(name, { allowEmpty = false } = {}) {
   const item = process.env[name];

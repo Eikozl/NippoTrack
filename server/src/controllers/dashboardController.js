@@ -3,34 +3,38 @@ const { sendRouteError } = require('../errors/http');
 
 async function getDashboard(req, res) {
   try {
-    const [todayData] = await pool.query(
-      "SELECT COALESCE(SUM(duration_minutes), 0) AS minutes_today FROM study_sessions WHERE session_date = CURRENT_DATE"
-    );
-    const [weekData] = await pool.query(
-      "SELECT COALESCE(SUM(duration_minutes), 0) AS minutes_week FROM study_sessions WHERE session_date >= date_trunc('week', CURRENT_DATE)::date AND session_date <= CURRENT_DATE"
-    );
-    const [vocabularyCount] = await pool.query('SELECT COUNT(*) AS total FROM vocabulary');
-    const [kanjiCount] = await pool.query('SELECT COUNT(*) AS total FROM kanji');
-    const [grammarCount] = await pool.query('SELECT COUNT(*) AS total FROM grammar_points');
-    const [recentSessions] = await pool.query(
-      'SELECT id_session, session_date, category, duration_minutes FROM study_sessions ORDER BY session_date DESC, id_session DESC LIMIT 5'
-    );
-    const [weeklyActivity] = await pool.query(
-      "SELECT session_date AS date, SUM(duration_minutes) AS minutes FROM study_sessions WHERE session_date BETWEEN CURRENT_DATE - 6 AND CURRENT_DATE GROUP BY session_date ORDER BY session_date"
-    );
-    const [studyDistribution] = await pool.query(
-      'SELECT category, SUM(duration_minutes) AS minutes FROM study_sessions GROUP BY category ORDER BY minutes DESC'
-    );
+    const [rows] = await pool.query(`
+      SELECT
+        COALESCE((SELECT SUM(duration_minutes) FROM study_sessions WHERE session_date = CURRENT_DATE), 0) AS minutes_today,
+        COALESCE((SELECT SUM(duration_minutes) FROM study_sessions WHERE session_date >= date_trunc('week', CURRENT_DATE)::date AND session_date <= CURRENT_DATE), 0) AS minutes_week,
+        (SELECT COUNT(*) FROM vocabulary) AS vocabulary_count,
+        (SELECT COUNT(*) FROM kanji) AS kanji_count,
+        (SELECT COUNT(*) FROM grammar_points) AS grammar_count,
+        COALESCE((SELECT json_agg(row_to_json(recent)) FROM (
+          SELECT id_session, session_date, category, duration_minutes
+          FROM study_sessions ORDER BY session_date DESC, id_session DESC LIMIT 5
+        ) recent), '[]'::json) AS recent_sessions,
+        COALESCE((SELECT json_agg(row_to_json(weekly) ORDER BY weekly.date) FROM (
+          SELECT session_date AS date, SUM(duration_minutes) AS minutes
+          FROM study_sessions WHERE session_date BETWEEN CURRENT_DATE - 6 AND CURRENT_DATE
+          GROUP BY session_date ORDER BY session_date
+        ) weekly), '[]'::json) AS weekly_activity,
+        COALESCE((SELECT json_agg(row_to_json(distribution) ORDER BY distribution.minutes DESC) FROM (
+          SELECT category, SUM(duration_minutes) AS minutes
+          FROM study_sessions GROUP BY category ORDER BY minutes DESC
+        ) distribution), '[]'::json) AS study_distribution
+    `);
+    const data = rows[0] || {};
 
     return res.json({
-      minutesToday: Number(todayData[0]?.minutes_today || 0),
-      minutesThisWeek: Number(weekData[0]?.minutes_week || 0),
-      vocabularyCount: Number(vocabularyCount[0]?.total || 0),
-      kanjiCount: Number(kanjiCount[0]?.total || 0),
-      grammarCount: Number(grammarCount[0]?.total || 0),
-      recentSessions: recentSessions || [],
-      weeklyActivity: weeklyActivity || [],
-      studyDistribution: studyDistribution || []
+      minutesToday: Number(data.minutes_today || 0),
+      minutesThisWeek: Number(data.minutes_week || 0),
+      vocabularyCount: Number(data.vocabulary_count || 0),
+      kanjiCount: Number(data.kanji_count || 0),
+      grammarCount: Number(data.grammar_count || 0),
+      recentSessions: data.recent_sessions || [],
+      weeklyActivity: data.weekly_activity || [],
+      studyDistribution: data.study_distribution || []
     });
   } catch (error) {
     return sendRouteError(res, error, {

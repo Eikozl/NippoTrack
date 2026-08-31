@@ -11,7 +11,9 @@ import { renderV2Page } from './pages/v2Pages';
 import { renderReview } from './pages/review';
 import { renderSettings } from './pages/settings';
 import { icon, moduleIconMap } from './icons';
-import { element } from './ui';
+import { confirmDialog, element, openDialog, showToast } from './ui';
+import { authConfigured, supabase } from './authClient';
+import { getLocale, setLocale, t, translateDocument } from './i18n';
 
 const content = document.getElementById('app-content');
 const authRoot = document.getElementById('auth-root');
@@ -40,13 +42,15 @@ const sidebarStreak = document.getElementById('sidebar-streak');
 const brandLogo = document.getElementById('brand-logo');
 const themeToggle = document.getElementById('theme-toggle');
 const mobileThemeToggle = document.getElementById('mobile-theme-toggle');
-const logoutButtons = [document.getElementById('logout-button'), document.getElementById('mobile-logout-button')];
+const accountButtons = [document.getElementById('account-button'), document.getElementById('mobile-account-button')];
 const themeColorMeta = document.querySelector('meta[name="theme-color"]');
 const savedTheme = localStorage.getItem('jlt-theme') || 'light';
 document.querySelectorAll('[data-jlt-icon]').forEach((holder) => {
   holder.appendChild(icon(moduleIconMap[holder.dataset.jltIcon] || holder.dataset.jltIcon, { size: 19 }));
 });
 document.documentElement.dataset.theme = savedTheme;
+document.documentElement.lang = getLocale();
+translateDocument();
 function updateThemeControls(theme) {
   const dark = theme === 'dark';
   document.documentElement.style.colorScheme = theme;
@@ -58,7 +62,7 @@ function updateThemeControls(theme) {
   [themeToggle, mobileThemeToggle].forEach((button) => {
     if (!button) return;
     button.setAttribute('aria-pressed', String(dark));
-    const label = dark ? 'Switch to light mode' : 'Switch to dark mode';
+    const label = t(dark ? 'Switch to light mode' : 'Switch to dark mode');
     button.setAttribute('aria-label', label);
     button.setAttribute('title', label);
     const iconHolder = button.querySelector('[id$="theme-toggle-icon"]');
@@ -79,47 +83,87 @@ window.addEventListener('jlt-theme-change', (event) => {
   refreshChartTheme();
 });
 
-function renderAuthGate(message = '') {
+let authMessage = '';
+let authView = 'sign-in';
+function renderAuthGate(message = '', view = 'sign-in') {
+  authMessage = message;
+  authView = view;
   appShell.hidden = true;
-  const password = element('input', { className: 'field-control', attrs: { id: 'jlt-login-password', name: 'password', type: 'password', required: '', autocomplete: 'current-password', placeholder: 'Password' } });
+  if (!authConfigured) { authRoot.textContent = 'Supabase Auth configuration is required.'; return; }
+  const email = element('input', { className: 'field-control', attrs: { type: 'email', required: '', autocomplete: 'email', placeholder: 'you@example.com' } });
+  const password = element('input', { className: 'field-control', attrs: { type: 'password', required: '', autocomplete: view === 'sign-up' ? 'new-password' : 'current-password', placeholder: 'Password' } });
+  const confirm = element('input', { className: 'field-control', attrs: { type: 'password', required: '', autocomplete: 'new-password', placeholder: 'Confirm password' } });
   const feedback = element('p', { className: `min-h-5 text-sm ${message ? 'text-red-700' : 'text-muted'}`, text: message, attrs: { 'aria-live': 'polite' } });
-  const submit = element('button', { className: 'button-primary w-full', text: 'Sign in', attrs: { type: 'submit' } });
+  const titles = { 'sign-in': 'Sign in', 'sign-up': 'Create your account', forgot: 'Reset your password', reset: 'Choose a new password' };
+  const submit = element('button', { className: 'button-primary w-full', text: titles[view], attrs: { type: 'submit' } });
+  const fields = [];
+  if (view !== 'reset') fields.push(element('label', { className: 'field' }, [element('span', { text: 'Email' }), email]));
+  if (view !== 'forgot') fields.push(element('label', { className: 'field' }, [element('span', { text: 'Password' }), password]));
+  if (view === 'sign-up' || view === 'reset') fields.push(element('label', { className: 'field' }, [element('span', { text: 'Confirm password' }), confirm]));
   const form = element('form', { className: 'mt-6 grid gap-4', attrs: { 'aria-label': 'Sign in to Japanese Learning Tracker' } }, [
-    element('label', { className: 'field', attrs: { for: 'jlt-login-password' } }, [element('span', { text: 'Password' }), password]),
-    feedback,
-    submit
+    ...fields, feedback, submit
   ]);
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     submit.disabled = true;
-    submit.textContent = 'Signing in…';
+    submit.textContent = 'Please wait…';
     feedback.textContent = '';
     try {
-      await apiRequest('/api/auth/login', { method: 'POST', body: { password: password.value }, notifyAuth: false });
-      password.value = '';
-      await bootstrapApp();
+      if ((view === 'sign-up' || view === 'reset') && password.value !== confirm.value) throw new Error('Passwords do not match.');
+      if (view === 'sign-in') { const data = await apiRequest('/api/auth/sign-in', { method: 'POST', body: { email: email.value, password: password.value }, notifyAuth: false }); const { error } = await supabase.auth.setSession(data.session); if (error) throw error; return bootstrapApp(); }
+      if (view === 'sign-up') { await apiRequest('/api/auth/sign-up', { method: 'POST', body: { email: email.value, password: password.value }, notifyAuth: false }); return renderAuthGate('Check your email to confirm your account before signing in.'); }
+      if (view === 'forgot') { await apiRequest('/api/auth/forgot-password', { method: 'POST', body: { email: email.value }, notifyAuth: false }); return renderAuthGate('If an account exists, recovery instructions have been sent.'); }
+      const { error } = await supabase.auth.updateUser({ password: password.value }); if (error) throw error; await supabase.auth.signOut(); return renderAuthGate('Password updated. Sign in with your new password.');
     } catch (error) {
-      feedback.textContent = error?.status === 429 ? 'Too many attempts. Please wait before trying again.' : 'The password is incorrect.';
+      feedback.textContent = error?.status === 429 ? 'Too many attempts. Please wait before trying again.' : error?.message || 'Unable to complete that request.';
       submit.disabled = false;
-      submit.textContent = 'Sign in';
-      password.focus();
+      submit.textContent = titles[view];
+      (view === 'forgot' ? email : password).focus();
     }
   });
-  authRoot.replaceChildren(element('main', { className: 'grid min-h-screen place-items-center px-4 py-8' }, [
-    element('section', { className: 'surface w-full max-w-md p-6 sm:p-8', attrs: { 'aria-labelledby': 'login-title' } }, [
-      element('p', { className: 'eyebrow', text: 'Private workspace' }),
-      element('h1', { className: 'mt-2 text-2xl font-semibold tracking-tight text-ink', text: 'Japanese Learning Tracker', attrs: { id: 'login-title' } }),
-      element('p', { className: 'mt-2 text-sm leading-6 text-muted', text: 'Sign in to access your private study data.' }),
-      form
+  const switcher = element('p', { className: 'auth-switcher' }, view === 'sign-in' ? [linkButton('Create account', () => renderAuthGate('', 'sign-up')), linkButton('Forgot password?', () => renderAuthGate('', 'forgot'))] : [linkButton('Back to sign in', () => renderAuthGate())]);
+  const formPanel = element('section', { className: 'auth-form-panel', attrs: { 'aria-labelledby': 'login-title' } }, [
+    element('p', { className: 'eyebrow', text: 'Japanese Learning Tracker' }),
+    element('h1', { className: 'auth-title', text: titles[view], attrs: { id: 'login-title' } }),
+    element('p', { className: 'auth-description', text: view === 'sign-up' ? 'Confirm your email before accessing your private workspace.' : view === 'forgot' ? 'We will email recovery instructions if the account exists.' : 'Your personal space to build a steady Japanese study practice.' }), form, switcher
+  ]);
+  const localeMenu = element('div', { className: 'auth-locale-menu', attrs: { role: 'menu', hidden: '' } }, [
+    ['en', 'English'], ['es', 'Spanish']
+  ].map(([value, label]) => {
+    const option = element('button', { className: 'auth-locale-option', text: label, attrs: { type: 'button', role: 'menuitem', 'aria-checked': String(getLocale() === value) } });
+    option.addEventListener('click', () => setLocale(value));
+    return option;
+  }));
+  const localeToggle = element('button', { className: 'auth-locale-toggle', attrs: { type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': 'Language', title: 'Language' } }, [icon('kanji', { size: 20 })]);
+  localeToggle.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const open = localeMenu.hasAttribute('hidden');
+    if (open) localeMenu.removeAttribute('hidden'); else localeMenu.setAttribute('hidden', '');
+    localeToggle.setAttribute('aria-expanded', String(open));
+  });
+  const localeControl = element('div', { className: 'auth-locale-control' }, [localeToggle, localeMenu]);
+  const brandPanel = element('aside', { className: 'auth-brand-panel', attrs: { 'aria-label': 'Japanese Learning Tracker' } }, [
+    element('div', { className: 'auth-brand-glow', attrs: { 'aria-hidden': 'true' } }),
+    element('div', { className: 'auth-brand-content' }, [
+      element('img', { className: 'auth-brand-logo', attrs: { src: lightBrandLogo, alt: 'Japanese Learning Tracker logo' } }),
+      element('p', { className: 'auth-brand-kicker', text: 'LEARN WITH INTENTION' }),
+      element('p', { className: 'auth-brand-copy', text: 'Small sessions become lasting progress.' })
     ])
-  ]));
-  password.focus();
+  ]);
+  authRoot.replaceChildren(element('main', { className: 'auth-screen' }, [localeControl, element('div', { className: 'auth-shell' }, [formPanel, brandPanel]) ]));
+  (view === 'forgot' || view === 'sign-up' ? email : password).focus();
 }
 
+function linkButton(text, action) { const button = element('button', { className: 'underline underline-offset-4', text, attrs: { type: 'button' } }); button.addEventListener('click', action); return button; }
+
 async function bootstrapApp() {
+  // Never leave the document blank while a stored session is checked remotely.
+  renderAuthGate();
   try {
+    const { data } = await supabase.auth.getSession();
+    if (!data.session) return;
     const session = await apiRequest('/api/auth/session', { notifyAuth: false });
-    if (!session.authenticated) return renderAuthGate();
+    if (!session.authenticated) return;
     authRoot.replaceChildren();
     appShell.hidden = false;
     await navigate(window.location.hash.slice(1) || 'dashboard', { updateHash: false });
@@ -128,15 +172,69 @@ async function bootstrapApp() {
   }
 }
 
-window.addEventListener('jlt-auth-required', () => renderAuthGate('Your session has ended. Please sign in again.'));
-logoutButtons.forEach((button) => button?.addEventListener('click', async () => {
-  try { await apiRequest('/api/auth/logout', { method: 'POST', notifyAuth: false }); } finally { renderAuthGate(); }
-}));
+window.addEventListener('jlt-auth-required', (event) => renderAuthGate(event.detail?.code === 'EMAIL_UNVERIFIED' ? 'Please verify your email before continuing.' : 'Your session has ended. Please sign in again.'));
 
-async function loadSidebarStreak() {
+async function signOut() {
+  try { await supabase.auth.signOut(); await apiRequest('/api/auth/logout', { method: 'POST', notifyAuth: false }); } finally { renderAuthGate(); }
+}
+
+function confirmSignOut() {
+  confirmDialog({
+    title: 'Sign out?',
+    description: 'You will need to sign in again to access your private learning data.',
+    confirmLabel: 'Sign out',
+    onConfirm: signOut
+  });
+}
+
+async function openAccountDialog() {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data.user?.email) throw error || new Error('Unable to load your account.');
+  const email = data.user.email;
+  let closeDialog = () => {};
+  const signOutButton = element('button', { className: 'button-danger w-full sm:w-auto', text: 'Sign out', attrs: { type: 'button' } });
+  signOutButton.addEventListener('click', () => {
+    closeDialog();
+    confirmSignOut();
+  });
+  closeDialog = openDialog({
+    title: 'Your account',
+    submitLabel: null,
+    showFooter: false,
+    showCloseButton: false,
+    content: [element('section', { className: 'sm:col-span-2 grid gap-5' }, [
+      element('div', { className: 'grid gap-1.5' }, [
+        element('p', { className: 'text-sm font-semibold text-ink', text: 'Signed in as' }),
+        element('p', { className: 'break-all text-sm text-muted', text: email })
+      ]),
+      element('div', { className: 'flex flex-col gap-3 sm:flex-row sm:items-center' }, [signOutButton])
+    ])]
+  });
+}
+
+accountButtons.forEach((button) => button?.addEventListener('click', () => {
+  openAccountDialog().catch((error) => showToast(error.message || 'Unable to load your account.', 'error'));
+}));
+window.addEventListener('jlt-locale-change', () => {
+  translateDocument();
+  accountButtons.forEach((button) => {
+    button?.setAttribute('aria-label', t('Manage account'));
+    button?.setAttribute('title', t('Manage account'));
+  });
+  updateThemeControls(document.documentElement.dataset.theme);
+  if (appShell.hidden) renderAuthGate(authMessage, authView);
+  else navigate(window.location.hash.slice(1) || 'dashboard', { updateHash: false });
+});
+supabase?.auth.onAuthStateChange((event) => { if (event === 'PASSWORD_RECOVERY') renderAuthGate('', 'reset'); });
+
+let sidebarActivitySnapshot = null;
+
+async function loadSidebarStreak({ force = false } = {}) {
   if (!sidebarStreak) return;
   try {
-    const activity = await apiRequest('/api/dashboard/activity');
+    const cached = !force && sidebarActivitySnapshot && Date.now() - sidebarActivitySnapshot.loadedAt < 30_000;
+    const activity = cached ? sidebarActivitySnapshot.activity : await apiRequest('/api/dashboard/activity');
+    if (!cached) sidebarActivitySnapshot = { activity, loadedAt: Date.now() };
     const current = Number(activity.currentStreak || 0);
     const longest = Number(activity.longestStreak || 0);
     const activeDates = new Set((activity.calendar || []).map((item) => String(item.date).slice(0, 10)));
@@ -158,7 +256,12 @@ async function loadSidebarStreak() {
     sidebarStreak.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Streak unavailable.' }));
   }
 }
-window.addEventListener('jlt-data-change', loadSidebarStreak);
+window.addEventListener('jlt-data-change', () => loadSidebarStreak({ force: true }));
+window.addEventListener('jlt-sidebar-activity', (event) => {
+  if (!event.detail) return;
+  sidebarActivitySnapshot = { activity: event.detail, loadedAt: Date.now() };
+  loadSidebarStreak();
+});
 
 function closeSearch() { searchResults.classList.add('hidden'); searchResults.replaceChildren(); }
 async function globalSearch(query) {

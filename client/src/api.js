@@ -1,4 +1,5 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
+import { accessToken } from './authClient';
 
 export class ApiError extends Error {
   constructor(message, status) {
@@ -12,11 +13,12 @@ export async function apiRequest(path, { method = 'GET', body, signal, notifyAut
   let response;
 
   try {
+    const token = await accessToken();
     response = await fetch(`${API_BASE}${path}`, {
       method,
       credentials: 'include',
       signal,
-      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body)
     });
   } catch (error) {
@@ -36,7 +38,7 @@ export async function apiRequest(path, { method = 'GET', body, signal, notifyAut
   const data = contentType.includes('application/json') ? await response.json() : null;
 
   if (!response.ok) {
-    if (response.status === 401 && notifyAuth) window.dispatchEvent(new CustomEvent('jlt-auth-required'));
+    if ((response.status === 401 || response.status === 403) && notifyAuth) window.dispatchEvent(new CustomEvent('jlt-auth-required', { detail: { status: response.status, code: data?.code } }));
     throw new ApiError(data?.error || 'Request failed.', response.status);
   }
 

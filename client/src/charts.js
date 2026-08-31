@@ -1,4 +1,5 @@
 import Chart from 'chart.js/auto';
+import { t } from './i18n';
 
 const activeCharts = new Set();
 
@@ -49,7 +50,7 @@ export function weeklyChart(canvas, activity) {
     data: {
       labels: activity.map((item) => String(item.date).slice(0, 10)),
       datasets: [{
-        label: 'Minutes',
+        label: t('Minutes'),
         data: activity.map((item) => Number(item.minutes || 0)),
         backgroundColor: '#c5533f',
         borderRadius: 6,
@@ -73,7 +74,7 @@ export function distributionChart(canvas, distribution) {
   const chart = new Chart(canvas, {
     type: 'doughnut',
     data: {
-      labels: distribution.map((item) => item.category),
+      labels: distribution.map((item) => t(item.category)),
       datasets: [{
         data: distribution.map((item) => Number(item.minutes || 0)),
         backgroundColor: distribution.map((item, index) => colors[index % colors.length]),

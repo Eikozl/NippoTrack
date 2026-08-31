@@ -1,5 +1,6 @@
 import { apiRequest } from '../api';
 import { element, pageHeader, showToast } from '../ui';
+import { getLocale, setLocale } from '../i18n';
 
 export async function renderSettings(container) {
   const current = document.documentElement.dataset.theme || 'light';
@@ -8,6 +9,11 @@ export async function renderSettings(container) {
   const setTheme = (theme) => { localStorage.setItem('jlt-theme', theme); document.documentElement.dataset.theme = theme; window.dispatchEvent(new CustomEvent('jlt-theme-change', { detail: theme })); showToast(`${theme === 'dark' ? 'Dark' : 'Light'} theme selected.`); renderSettings(container); };
   light.addEventListener('click', () => setTheme('light'));
   dark.addEventListener('click', () => setTheme('dark'));
+  const locale = getLocale();
+  const english = element('button', { className: `theme-option ${locale === 'en' ? 'button-primary' : 'button-secondary'}`, text: 'English', attrs: { type: 'button', 'aria-pressed': String(locale === 'en') } });
+  const spanish = element('button', { className: `theme-option ${locale === 'es' ? 'button-primary' : 'button-secondary'}`, text: 'Spanish', attrs: { type: 'button', 'aria-pressed': String(locale === 'es') } });
+  english.addEventListener('click', () => setLocale('en'));
+  spanish.addEventListener('click', () => setLocale('es'));
   const exportButton = element('button', { className: 'button-secondary mt-5', text: 'Export backup', attrs: { type: 'button' } });
   exportButton.addEventListener('click', async () => {
     exportButton.disabled = true;
@@ -36,6 +42,11 @@ export async function renderSettings(container) {
       element('h2', { className: 'text-lg font-semibold text-ink', text: 'Appearance' }),
       element('p', { className: 'mt-2 text-sm leading-6 text-muted', text: 'Choose a deliberate light or dark neumorphic surface. Your choice is remembered locally.' }),
       element('div', { className: 'mt-5 flex flex-wrap gap-3' }, [light, dark])
+    ]),
+    element('article', { className: 'surface mt-5 max-w-2xl p-6' }, [
+      element('h2', { className: 'text-lg font-semibold text-ink', text: 'Language' }),
+      element('p', { className: 'mt-2 text-sm leading-6 text-muted', text: 'Choose the interface language. Study content, Japanese text, and your own entries are never translated.' }),
+      element('div', { className: 'mt-5 flex flex-wrap gap-3' }, [english, spanish])
     ]),
     element('article', { className: 'surface mt-5 max-w-2xl p-6' }, [
       element('h2', { className: 'text-lg font-semibold text-ink', text: 'Study loop' }),

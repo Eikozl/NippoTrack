@@ -1,12 +1,13 @@
 import { icon, iconForTitle, iconTile } from './icons';
+import { t } from './i18n';
 
 export function element(tagName, { className, text, attrs, dataset } = {}, children = []) {
   const node = document.createElement(tagName);
   if (className) node.className = className;
-  if (text !== undefined && text !== null) node.textContent = String(text);
+  if (text !== undefined && text !== null) node.textContent = t(text);
 
   Object.entries(attrs || {}).forEach(([name, value]) => {
-    if (value !== undefined && value !== null) node.setAttribute(name, String(value));
+    if (value !== undefined && value !== null) node.setAttribute(name, ['placeholder', 'title', 'aria-label'].includes(name) ? t(value) : String(value));
   });
   Object.entries(dataset || {}).forEach(([name, value]) => {
     node.dataset[name] = String(value);
@@ -293,7 +294,7 @@ export function paginationControls(pagination, onPageChange) {
   ]);
 }
 
-export function openDialog({ title, content, submitLabel = 'Save', submitClassName = 'button-primary', onSubmit }) {
+export function openDialog({ title, content, submitLabel = 'Save', submitClassName = 'button-primary', cancelLabel = 'Cancel', showFooter = true, showCloseButton = true, onSubmit }) {
   const root = document.getElementById('modal-root');
   const overlay = element('div', {
     className: 'fixed inset-0 z-50 grid place-items-end bg-ink/35 p-0 sm:place-items-center sm:p-5',
@@ -304,8 +305,8 @@ export function openDialog({ title, content, submitLabel = 'Save', submitClassNa
     attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'dialog-title' }
   });
   const closeButton = element('button', { className: 'icon-button', attrs: { type: 'button', 'aria-label': 'Close dialog' } }, [icon('close', { size: 20 })]);
-  const submitButton = element('button', { className: submitClassName, text: submitLabel, attrs: { type: 'submit' } });
-  const cancelButton = element('button', { className: 'button-secondary', text: 'Cancel', attrs: { type: 'button' } });
+  const submitButton = submitLabel ? element('button', { className: submitClassName, text: submitLabel, attrs: { type: 'submit' } }) : null;
+  const cancelButton = element('button', { className: 'button-secondary', text: cancelLabel, attrs: { type: 'button' } });
   const close = () => {
     document.removeEventListener('keydown', onKeyDown);
     overlay.remove();
@@ -319,7 +320,7 @@ export function openDialog({ title, content, submitLabel = 'Save', submitClassNa
   overlay.addEventListener('click', (event) => {
     if (event.target === overlay) close();
   });
-  form.addEventListener('submit', async (event) => {
+  if (submitButton && typeof onSubmit === 'function') form.addEventListener('submit', async (event) => {
     event.preventDefault();
     submitButton.disabled = true;
     submitButton.textContent = 'Saving…';
@@ -335,10 +336,10 @@ export function openDialog({ title, content, submitLabel = 'Save', submitClassNa
   form.append(
     element('header', { className: 'sticky top-0 z-10 flex items-center justify-between border-b border-stone bg-white px-5 py-4 sm:px-6' }, [
       element('h2', { className: 'text-lg font-semibold text-ink', text: title, attrs: { id: 'dialog-title' } }),
-      closeButton
+      ...(showCloseButton ? [closeButton] : [])
     ]),
     element('div', { className: 'grid gap-4 p-5 sm:grid-cols-2 sm:p-6' }, content),
-    element('footer', { className: 'sticky bottom-0 flex justify-end gap-3 border-t border-stone bg-white px-5 py-4 sm:px-6' }, [cancelButton, submitButton])
+    ...(showFooter ? [element('footer', { className: 'sticky bottom-0 flex justify-end gap-3 border-t border-stone bg-white px-5 py-4 sm:px-6' }, [cancelButton, ...(submitButton ? [submitButton] : [])])] : [])
   );
   overlay.appendChild(form);
   root.replaceChildren(overlay);

@@ -1,31 +1,35 @@
-import * as Lucide from 'lucide/dist/cjs/lucide.js';
+import {
+  BookOpen, CalendarDays, CalendarRange, ChartNoAxesCombined, Circle, CircleUserRound,
+  Clock, createElement, FileText, Flame, History, LayoutDashboard, Library, Languages,
+  Menu, MessagesSquare, Moon, PieChart, RefreshCw, Settings, Sun, Tag, Target, X, Zap
+} from 'lucide';
 
 const ICONS = {
-  dashboard: Lucide.LayoutDashboard,
-  sessions: Lucide.CalendarDays,
-  vocabulary: Lucide.BookOpen,
-  kanji: Lucide.Languages,
-  grammar: Lucide.MessagesSquare,
-  goals: Lucide.Target,
-  content: Lucide.Library,
-  notes: Lucide.FileText,
-  tags: Lucide.Tag,
-  review: Lucide.RefreshCw,
-  statistics: Lucide.ChartNoAxesCombined,
-  settings: Lucide.Settings,
-  today: Lucide.CalendarDays,
-  week: Lucide.CalendarRange,
-  streak: Lucide.Flame,
-  quickAdd: Lucide.Zap,
-  activity: Lucide.ChartNoAxesCombined,
-  distribution: Lucide.PieChart,
-  recent: Lucide.History,
-  clock: Lucide.Clock,
-  sun: Lucide.Sun,
-  moon: Lucide.Moon,
-  logout: Lucide.LogOut,
-  menu: Lucide.Menu,
-  close: Lucide.X
+  dashboard: LayoutDashboard,
+  sessions: CalendarDays,
+  vocabulary: BookOpen,
+  kanji: Languages,
+  grammar: MessagesSquare,
+  goals: Target,
+  content: Library,
+  notes: FileText,
+  tags: Tag,
+  review: RefreshCw,
+  statistics: ChartNoAxesCombined,
+  settings: Settings,
+  today: CalendarDays,
+  week: CalendarRange,
+  streak: Flame,
+  quickAdd: Zap,
+  activity: ChartNoAxesCombined,
+  distribution: PieChart,
+  recent: History,
+  clock: Clock,
+  sun: Sun,
+  moon: Moon,
+  user: CircleUserRound,
+  menu: Menu,
+  close: X
 };
 
 const TITLES = {
@@ -44,7 +48,7 @@ const TITLES = {
 };
 
 export function icon(name, { className = '', size = 20, label } = {}) {
-  const node = Lucide.createElement(ICONS[name] || Lucide.Circle, {
+  const node = createElement(ICONS[name] || Circle, {
     width: size,
     height: size,
     class: `jlt-icon ${className}`.trim(),
