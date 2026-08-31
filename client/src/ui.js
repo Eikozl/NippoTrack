@@ -296,6 +296,7 @@ export function paginationControls(pagination, onPageChange) {
 
 export function openDialog({ title, content, submitLabel = 'Save', submitClassName = 'button-primary', cancelLabel = 'Cancel', showFooter = true, showCloseButton = true, onSubmit }) {
   const root = document.getElementById('modal-root');
+  const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const overlay = element('div', {
     className: 'fixed inset-0 z-50 grid place-items-end bg-ink/35 p-0 sm:place-items-center sm:p-5',
     attrs: { role: 'presentation' }
@@ -307,12 +308,24 @@ export function openDialog({ title, content, submitLabel = 'Save', submitClassNa
   const closeButton = element('button', { className: 'icon-button', attrs: { type: 'button', 'aria-label': 'Close dialog' } }, [icon('close', { size: 20 })]);
   const submitButton = submitLabel ? element('button', { className: submitClassName, text: submitLabel, attrs: { type: 'submit' } }) : null;
   const cancelButton = element('button', { className: 'button-secondary', text: cancelLabel, attrs: { type: 'button' } });
+  let closed = false;
+  const focusable = () => [...form.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')];
   const close = () => {
+    if (closed) return;
+    closed = true;
     document.removeEventListener('keydown', onKeyDown);
     overlay.remove();
+    if (previouslyFocused?.isConnected) requestAnimationFrame(() => previouslyFocused.focus({ preventScroll: true }));
   };
   const onKeyDown = (event) => {
-    if (event.key === 'Escape') close();
+    if (event.key === 'Escape') { event.preventDefault(); close(); }
+    if (event.key !== 'Tab') return;
+    const controls = focusable();
+    if (!controls.length) return event.preventDefault();
+    const first = controls[0];
+    const last = controls.at(-1);
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   };
 
   closeButton.addEventListener('click', close);
@@ -344,7 +357,7 @@ export function openDialog({ title, content, submitLabel = 'Save', submitClassNa
   overlay.appendChild(form);
   root.replaceChildren(overlay);
   document.addEventListener('keydown', onKeyDown);
-  form.querySelector('input, select, textarea')?.focus();
+  (form.querySelector('input, select, textarea') || focusable()[0])?.focus();
   return close;
 }
 
