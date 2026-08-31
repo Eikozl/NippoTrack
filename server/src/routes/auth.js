@@ -19,7 +19,7 @@ router.post('/sign-up', signInRateLimit, async (req, res) => {
   const values = credentials(req.body);
   if (!values || values.password.length < 8) return res.status(400).json({ error: 'Enter a valid email and a password of at least 8 characters.' });
   try {
-    await authClient().auth.signUp({ ...values, options: { emailRedirectTo: authRedirectUrl() } });
+    await authClient().auth.signUp({ ...values, options: { emailRedirectTo: authRedirectUrl(req) } });
     return res.status(202).json({ message: 'If the address can receive email, check it to confirm your account.' });
   } catch {
     return res.status(503).json({ error: 'Unable to create the account right now.' });
@@ -38,7 +38,7 @@ router.post('/sign-in', signInRateLimit, async (req, res) => {
 });
 router.post('/forgot-password', recoveryRateLimit, async (req, res) => {
   const email = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
-  try { if (email) await authClient().auth.resetPasswordForEmail(email, { redirectTo: authRedirectUrl() }); } catch { /* Keep the response non-enumerating. */ }
+  try { if (email) await authClient().auth.resetPasswordForEmail(email, { redirectTo: authRedirectUrl(req) }); } catch { /* Keep the response non-enumerating. */ }
   return res.status(202).json({ message: 'If an account exists for that email, recovery instructions have been sent.' });
 });
 router.post('/logout', (_req, res) => res.status(204).end());
