@@ -13,19 +13,17 @@
 - Supabase runtime security verification passes: 25 forced-RLS tables, 25 runtime CRUD policies, and no unexpected grants or role privileges.
 - Ownership verification passes: no null root ownership and no cross-user junction rows.
 - Migration runner is idempotent.
-- Phase 11 live isolation validation passed against the disposable `JLT testing` Supabase project. It verified per-user uniqueness, search and export isolation, safe foreign read/update/delete behavior, and cross-user session/note relationship rejection. The harness uses only ephemeral Auth users and test records.
+- Phase 11 live isolation validation passed against the disposable `JLT testing` Supabase project. It verified per-user uniqueness, search, dashboard/statistics, and export isolation, safe foreign read/update/delete behavior, and cross-user session/note relationship rejection. The harness uses only ephemeral Auth users and test records.
 - Phase 12 automated Auth validation passed against `JLT testing`: unconfirmed sign-in is blocked, confirmation enables private API access, recovery updates the password, the old password is rejected, and reused or invalid recovery tokens fail safely.
 - A real `JLT testing` signup email was delivered through the dedicated custom SMTP configuration. Its confirmation redirect established a valid session and opened the private dashboard; the ephemeral user was deleted after verification.
 - The final Supabase project also delivered a real recovery email through its separate custom SMTP configuration, and the password update completed successfully. SMTP credentials remain outside Git.
 - Browser bearer authentication now passes CORS preflight from the local Vite origin, with a regression test covering the `Authorization` header.
-- Regression suite: 50 passing, 1 explicit real-PostgreSQL integration test skipped unless its dedicated integration environment is supplied.
-- Production client build passes.
+- Regression suite: 50 passing; the one explicit real-PostgreSQL test remains skipped in the isolated unit command and passed when explicitly enabled against `JLT testing`.
+- The authenticated PostgreSQL/Supabase runtime test passed against `JLT testing`. It validates Japanese UTF-8, romaji search, transactional vocabulary/example creation, session relationships, America/Santo_Domingo dates, dashboard totals, and export output using an ephemeral confirmed user.
+- Final Phase 15 checks passed: Auth flows, two-user isolation, runtime integration, ownership verification, runtime security verification (25 forced-RLS tables and policies), migration idempotency (`0 applied`, `5 skipped`), API runtime checks, and the production client build.
 
-## Remaining blockers before deployment hardening may resume
+## Result
 
-1. Replace or update the historical real-PostgreSQL integration test so it uses an authenticated ephemeral user and the empty disposable `JLT testing` dataset instead of fixed single-user row counts.
-2. Run that real PostgreSQL/Supabase integration test and repeat the final Phase 15 gate.
+The multi-user authentication gate is complete. No Vercel configuration or deployment work has been started.
 
-No Vercel configuration or deployment work has been started.
-
-NOT READY TO RESUME DEPLOYMENT HARDENING
+READY TO RESUME DEPLOYMENT HARDENING
