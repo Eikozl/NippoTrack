@@ -7,7 +7,7 @@
     "node": "^20.19.0 || >=22.12.0"
   },
   "scripts": {
-    "start": "node dev.js",
+    "start": "npm --prefix server start",
     "dev": "node dev.js",
     "dev:server": "npm --prefix server run dev",
     "dev:client": "npm --prefix client run dev",
@@ -20,7 +20,7 @@
     "db:check": "npm --prefix server run db:check",
     "supabase:start": "supabase start",
     "supabase:stop": "supabase stop",
-    "install:all": "npm --prefix server install && npm --prefix client install",
+    "install:all": "npm ci && npm --prefix server ci && npm --prefix client ci",
     "audit": "npm audit --prefix server && npm audit --prefix client"
   },
   "devDependencies": {

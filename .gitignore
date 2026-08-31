@@ -33,3 +33,6 @@ backups/
 
 # Supabase CLI local state
 supabase/.temp/
+
+# Vercel CLI local build/link state
+.vercel/
