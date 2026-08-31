@@ -30,9 +30,14 @@ function authClient() {
   return client;
 }
 
-function authRedirectUrl() {
-  if (process.env.VERCEL_ENV === 'production') return productionAuthRedirectUrl;
-  if (process.env.VERCEL_ENV === 'preview') return previewAuthRedirectUrl;
+function authRedirectUrl(req) {
+  // Derive redirects from the public host rather than VERCEL_ENV so a verified
+  // Preview deployment can be promoted without rebuilding it for Production.
+  const host = (req?.get?.('host') || '').toLowerCase().split(':')[0];
+  if (host === 'japanese-learning-tracker.vercel.app' || host === 'japanese-learning-tracker-yeferson-sena.vercel.app') {
+    return productionAuthRedirectUrl;
+  }
+  if (host.endsWith('.vercel.app')) return previewAuthRedirectUrl;
 
   const configuredRedirect = process.env.SUPABASE_AUTH_REDIRECT_URL;
   if (configuredRedirect?.trim()) return configuredRedirect.trim();
