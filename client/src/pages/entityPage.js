@@ -12,6 +12,7 @@ import {
   paginationControls,
   showToast
 } from '../ui';
+import { iconForTitle, iconTile } from '../icons';
 
 const JLPT_OPTIONS = [
   { value: '', label: 'Any / not set' },
@@ -78,11 +79,16 @@ export const ENTITY_CONFIGS = {
     secondary: (item) => [item.onyomi, item.kunyomi].filter(Boolean).join(' · ') || 'Readings not recorded',
     detail: (item) => item.meaning,
     renderDetail: (item) => element('div', { className: 'sm:col-span-2' }, [
-      element('dl', { className: 'grid gap-3 text-sm sm:grid-cols-2' }, [
-        element('div', {}, [element('dt', { className: 'text-muted', text: 'Meaning' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.meaning })]),
-        element('div', {}, [element('dt', { className: 'text-muted', text: 'Onyomi' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.onyomi || 'Not recorded' })]),
-        element('div', {}, [element('dt', { className: 'text-muted', text: 'Kunyomi' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.kunyomi || 'Not recorded' })]),
-        element('div', {}, [element('dt', { className: 'text-muted', text: 'JLPT level' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.jlpt_level || 'Not set' })])
+      element('section', { className: 'kanji-detail-hero' }, [
+        element('dl', { className: 'kanji-detail-facts grid text-sm sm:grid-cols-2' }, [
+          element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Meaning' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.meaning })]),
+          element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Onyomi' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.onyomi || 'Not recorded' })]),
+          element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Kunyomi' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.kunyomi || 'Not recorded' })]),
+          element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'JLPT level' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.jlpt_level || 'Not set' })])
+        ]),
+        element('div', { className: 'kanji-glyph-panel', attrs: { role: 'img', 'aria-label': `Selected kanji: ${item.character_kanji}` } }, [
+          element('span', { className: 'kanji-glyph', text: item.character_kanji, attrs: { lang: 'ja' } })
+        ])
       ]),
       element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Related vocabulary' }), item.vocabulary?.length ? element('ul', { className: 'mt-3 grid gap-2' }, item.vocabulary.map((word) => element('li', { className: 'text-sm text-ink/80', text: `${word.word} · ${word.reading || 'reading not recorded'} · ${word.meaning}` }))) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No vocabulary linked.' })]),
       element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Usage through related words' }), item.usageExamples?.length ? element('div', { className: 'mt-3 grid gap-3' }, item.usageExamples.map((example) => element('article', { className: 'rounded-md bg-paper p-3' }, [element('p', { className: 'text-xs font-semibold text-vermilion', text: `${example.word} · ${example.reading || 'reading not recorded'}` }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm text-ink', text: example.sentence }), ...(example.translation ? [element('p', { className: 'mt-2 text-sm text-muted', text: example.translation })] : [])]))) : element('p', { className: 'mt-2 text-sm text-muted', text: 'Add examples to linked vocabulary to see real reading usage here.' })])
@@ -171,9 +177,12 @@ function recordCard(item, config, onView, onEdit, onDelete) {
 
   return element('article', { className: 'surface flex min-h-48 flex-col p-5' }, [
     element('div', { className: 'flex items-start justify-between gap-4' }, [
-      element('div', {}, [
-        element('h2', { className: 'text-lg font-semibold text-ink', text: config.primary(item) }),
-        element('p', { className: 'mt-1 text-sm text-muted', text: config.secondary(item) })
+      element('div', { className: 'flex items-start gap-3' }, [
+        iconTile(iconForTitle(config.title), { className: 'preview-icon shrink-0' }),
+        element('div', {}, [
+          element('h2', { className: 'text-lg font-semibold text-ink', text: config.primary(item) }),
+          element('p', { className: 'mt-1 text-sm text-muted', text: config.secondary(item) })
+        ])
       ]),
       element('span', { className: 'status-pill shrink-0', text: item.status || 'New' })
     ]),

@@ -2,12 +2,22 @@ import Chart from 'chart.js/auto';
 
 const activeCharts = new Set();
 
+function themeColors() {
+  const styles = getComputedStyle(document.documentElement);
+  return {
+    muted: styles.getPropertyValue('--jlt-muted').trim() || '#6f7472',
+    border: styles.getPropertyValue('--jlt-border').trim() || '#ebe9e2',
+    chartText: styles.getPropertyValue('--jlt-chart-text').trim() || '#4b5a74'
+  };
+}
+
 function commonOptions() {
+  const { chartText } = themeColors();
   return {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-      legend: { labels: { color: '#6f7472', usePointStyle: true, boxWidth: 8 } },
+      legend: { labels: { color: chartText, usePointStyle: true, boxWidth: 8 } },
       tooltip: { displayColors: false }
     }
   };
@@ -18,7 +28,22 @@ export function destroyCharts() {
   activeCharts.clear();
 }
 
+export function refreshChartTheme() {
+  const { chartText, border } = themeColors();
+  activeCharts.forEach((chart) => {
+    chart.options.plugins.legend.labels.color = chartText;
+    if (chart.options.scales) {
+      Object.values(chart.options.scales).forEach((scale) => {
+        if (scale.ticks) scale.ticks.color = chartText;
+        if (scale.grid && scale.grid.display !== false) scale.grid.color = border;
+      });
+    }
+    chart.update('none');
+  });
+}
+
 export function weeklyChart(canvas, activity) {
+  const { chartText, border } = themeColors();
   const chart = new Chart(canvas, {
     type: 'bar',
     data: {
@@ -34,8 +59,8 @@ export function weeklyChart(canvas, activity) {
     options: {
       ...commonOptions(),
       scales: {
-        x: { grid: { display: false }, ticks: { color: '#6f7472' } },
-        y: { beginAtZero: true, grid: { color: '#ebe9e2' }, ticks: { color: '#6f7472', precision: 0 } }
+        x: { grid: { display: false }, ticks: { color: chartText } },
+        y: { beginAtZero: true, grid: { color: border }, ticks: { color: chartText, precision: 0 } }
       }
     }
   });
@@ -52,8 +77,8 @@ export function distributionChart(canvas, distribution) {
       datasets: [{
         data: distribution.map((item) => Number(item.minutes || 0)),
         backgroundColor: distribution.map((item, index) => colors[index % colors.length]),
-        borderColor: '#ffffff',
-        borderWidth: 3
+        borderColor: 'transparent',
+        borderWidth: 0
       }]
     },
     options: {
@@ -61,7 +86,7 @@ export function distributionChart(canvas, distribution) {
       cutout: '68%',
       plugins: {
         ...commonOptions().plugins,
-        legend: { position: 'bottom', labels: { color: '#6f7472', usePointStyle: true, padding: 18, boxWidth: 8 } }
+        legend: { position: 'bottom', labels: { color: themeColors().chartText, usePointStyle: true, padding: 18, boxWidth: 8 } }
       }
     }
   });

@@ -1,4 +1,5 @@
 import { apiRequest } from '../api';
+import { iconTile } from '../icons';
 import { element, emptyState, errorState, loadingState, pageHeader, showToast } from '../ui';
 
 const RESULTS = [
@@ -15,7 +16,7 @@ function reviewCard(item, onReview) {
   });
   return element('article', { className: 'surface p-5 sm:p-6' }, [
     element('div', { className: 'flex flex-wrap items-start justify-between gap-3' }, [
-      element('div', {}, [element('span', { className: 'status-pill', text: item.item_type }), element('h2', { className: 'mt-3 text-xl font-semibold text-ink', text: item.title }), ...(item.reading ? [element('p', { className: 'mt-1 text-sm text-muted', text: item.reading })] : []), element('p', { className: 'mt-2 text-sm text-ink/80', text: item.meaning })]),
+      element('div', { className: 'flex items-start gap-3' }, [iconTile('review', { className: 'preview-icon shrink-0' }), element('div', {}, [element('span', { className: 'status-pill', text: item.item_type }), element('h2', { className: 'mt-3 text-xl font-semibold text-ink', text: item.title }), ...(item.reading ? [element('p', { className: 'mt-1 text-sm text-muted', text: item.reading })] : []), element('p', { className: 'mt-2 text-sm text-ink/80', text: item.meaning })])]),
       element('span', { className: 'text-xs font-semibold text-muted', text: item.last_result ? `Last result: ${item.last_result}` : 'First review' })
     ]),
     element('div', { className: 'mt-5 flex flex-wrap gap-3 border-t border-stone pt-5' }, actions)

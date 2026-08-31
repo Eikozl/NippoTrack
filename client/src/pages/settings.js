@@ -1,0 +1,55 @@
+import { apiRequest } from '../api';
+import { element, pageHeader, showToast } from '../ui';
+
+export async function renderSettings(container) {
+  const current = document.documentElement.dataset.theme || 'light';
+  const light = element('button', { className: `theme-option ${current === 'light' ? 'button-primary' : 'button-secondary'}`, text: 'Light mode', attrs: { type: 'button', 'aria-pressed': String(current === 'light') } });
+  const dark = element('button', { className: `theme-option ${current === 'dark' ? 'button-primary' : 'button-secondary'}`, text: 'Dark mode', attrs: { type: 'button', 'aria-pressed': String(current === 'dark') } });
+  const setTheme = (theme) => { localStorage.setItem('jlt-theme', theme); document.documentElement.dataset.theme = theme; window.dispatchEvent(new CustomEvent('jlt-theme-change', { detail: theme })); showToast(`${theme === 'dark' ? 'Dark' : 'Light'} theme selected.`); renderSettings(container); };
+  light.addEventListener('click', () => setTheme('light'));
+  dark.addEventListener('click', () => setTheme('dark'));
+  const exportButton = element('button', { className: 'button-secondary mt-5', text: 'Export backup', attrs: { type: 'button' } });
+  exportButton.addEventListener('click', async () => {
+    exportButton.disabled = true;
+    exportButton.textContent = 'Preparing…';
+    try {
+      const backup = await apiRequest('/api/export');
+      const blobUrl = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `jlt-backup-${backup.exportedAt.slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(blobUrl);
+      showToast('Backup exported.');
+    } catch (error) {
+      showToast(error.message || 'Unable to export backup.', 'error');
+    } finally {
+      exportButton.disabled = false;
+      exportButton.textContent = 'Export backup';
+    }
+  });
+  container.replaceChildren(element('section', {}, [
+    pageHeader({ eyebrow: 'Preferences', title: 'Settings', description: 'Personal interface preferences stored only in this browser.' }),
+    element('article', { className: 'surface max-w-2xl p-6' }, [
+      element('h2', { className: 'text-lg font-semibold text-ink', text: 'Appearance' }),
+      element('p', { className: 'mt-2 text-sm leading-6 text-muted', text: 'Choose a deliberate light or dark neumorphic surface. Your choice is remembered locally.' }),
+      element('div', { className: 'mt-5 flex flex-wrap gap-3' }, [light, dark])
+    ]),
+    element('article', { className: 'surface mt-5 max-w-2xl p-6' }, [
+      element('h2', { className: 'text-lg font-semibold text-ink', text: 'Study loop' }),
+      element('p', { className: 'mt-2 text-sm leading-6 text-muted', text: 'A simple cycle for building consistent study habits: study, record what you learned, review it later, and measure your progress over time.' }),
+      exportButton
+    ]),
+    element('article', { className: 'surface mt-5 max-w-2xl p-6' }, [
+      element('h2', { className: 'text-lg font-semibold text-ink', text: 'Keyboard shortcuts' }),
+      element('dl', { className: 'mt-4 grid gap-3 text-sm sm:grid-cols-2' }, [
+        element('div', {}, [element('dt', { className: 'font-semibold text-ink', text: '/' }), element('dd', { className: 'mt-1 text-muted', text: 'Focus global search' })]),
+        element('div', {}, [element('dt', { className: 'font-semibold text-ink', text: 'Esc' }), element('dd', { className: 'mt-1 text-muted', text: 'Close search or dialog' })]),
+        element('div', {}, [element('dt', { className: 'font-semibold text-ink', text: 'G + D' }), element('dd', { className: 'mt-1 text-muted', text: 'Open Dashboard' })]),
+        element('div', {}, [element('dt', { className: 'font-semibold text-ink', text: 'G + R' }), element('dd', { className: 'mt-1 text-muted', text: 'Open Review' })])
+      ])
+    ])
+  ]));
+}

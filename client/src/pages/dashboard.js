@@ -1,22 +1,23 @@
 import { apiRequest, queryString } from '../api';
 import { destroyCharts, distributionChart, weeklyChart } from '../charts';
+import { iconTile } from '../icons';
 import { element, errorState, field, formatDate, loadingState, pageHeader, searchableMultiSelect, showToast } from '../ui';
 
 const CATEGORIES = ['Grammar', 'Vocabulary', 'Kanji', 'Reading', 'Listening', 'Speaking', 'Writing', 'Mixed'];
 const todayInputValue = () => new Date().toLocaleDateString('en-CA');
 const selectedNumbers = (select) => select ? Array.from(select.selectedOptions, (option) => Number(option.value)) : [];
 
-function metric(label, value, note) {
-  return element('article', { className: 'surface p-5' }, [
-    element('p', { className: 'text-xs font-semibold uppercase tracking-[0.13em] text-muted', text: label }),
+function metric(iconName, label, value, note) {
+  return element('article', { className: 'surface metric-card p-5' }, [
+    element('div', { className: 'flex items-center gap-3' }, [iconTile(iconName, { className: 'metric-icon' }), element('p', { className: 'text-xs font-semibold uppercase tracking-[0.13em] text-muted', text: label })]),
     element('p', { className: 'mt-3 text-3xl font-semibold tracking-tight text-ink', text: value }),
     element('p', { className: 'mt-2 text-xs text-muted', text: note })
   ]);
 }
 
-function chartCard(title, description, canvas) {
-  return element('article', { className: 'surface min-h-88 p-5 sm:p-6' }, [
-    element('h2', { className: 'font-semibold text-ink', text: title }),
+function chartCard(iconName, title, description, canvas) {
+  return element('article', { className: 'surface chart-card min-h-88 p-5 sm:p-6' }, [
+    element('div', { className: 'flex items-center gap-3' }, [iconTile(iconName, { className: 'panel-icon' }), element('h2', { className: 'font-semibold text-ink', text: title })]),
     element('p', { className: 'mt-1 text-sm text-muted', text: description }),
     element('div', { className: 'mt-6 h-64' }, [canvas])
   ]);
@@ -29,9 +30,9 @@ function activityCalendar(items) {
     const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (34 - index));
     const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
     const minutes = minutesByDate.get(value) || 0;
-    return element('div', { className: `grid aspect-square place-items-center rounded-md text-xs font-semibold ${minutes ? 'bg-vermilion text-white' : 'bg-paper text-muted'}`, text: date.getDate(), attrs: { title: `${formatDate(value)} · ${minutes} minutes` } });
+    return element('div', { className: `activity-calendar-day grid aspect-square place-items-center rounded-md text-xs font-semibold ${minutes ? 'bg-vermilion' : 'bg-paper'}`, text: date.getDate(), attrs: { title: `${formatDate(value)} · ${minutes} minutes` } });
   });
-  return element('article', { className: 'surface p-5 sm:p-6' }, [element('h2', { className: 'font-semibold text-ink', text: 'Activity calendar' }), element('p', { className: 'mt-1 text-sm text-muted', text: 'The last 35 days. Highlighted days contain at least one study session.' }), element('div', { className: 'mt-5 grid grid-cols-7 gap-2' }, days)]);
+  return element('article', { className: 'surface activity-calendar p-5 sm:p-6' }, [element('div', { className: 'flex items-center gap-3' }, [iconTile('sessions', { className: 'panel-icon' }), element('h2', { className: 'font-semibold text-ink', text: 'Activity calendar' })]), element('p', { className: 'mt-1 text-sm text-muted', text: 'The last 35 days. Highlighted days contain at least one study session.' }), element('div', { className: 'mt-5 grid grid-cols-7 gap-2' }, days)]);
 }
 
 function recentSessions(items) {
@@ -39,11 +40,11 @@ function recentSessions(items) {
     element('div', {}, [element('p', { className: 'text-sm font-semibold text-ink', text: session.category }), element('p', { className: 'mt-1 text-xs text-muted', text: formatDate(session.session_date) })]),
     element('span', { className: 'status-pill', text: `${session.duration_minutes} min` })
   ]))) : element('p', { className: 'py-10 text-center text-sm text-muted', text: 'No study sessions recorded yet.' });
-  return element('article', { className: 'surface p-5 sm:p-6' }, [element('h2', { className: 'font-semibold text-ink', text: 'Recent sessions' }), element('p', { className: 'mt-1 text-sm text-muted', text: 'Your latest recorded study activity.' }), element('div', { className: 'mt-6' }, [body])]);
+  return element('article', { className: 'surface p-5 sm:p-6' }, [element('div', { className: 'flex items-center gap-3' }, [iconTile('recent', { className: 'panel-icon' }), element('h2', { className: 'font-semibold text-ink', text: 'Recent sessions' })]), element('p', { className: 'mt-1 text-sm text-muted', text: 'Your latest recorded study activity.' }), element('div', { className: 'mt-6' }, [body])]);
 }
 
 function quickAddPanel(reload) {
-  const form = element('form', { className: 'surface mb-5 p-5 sm:p-6' });
+  const form = element('form', { className: 'surface quick-add-card mb-5 p-5 sm:p-6' });
   const relationFields = element('div', { className: 'mt-4 grid gap-4 sm:grid-cols-3' });
   const visible = new Set();
   const submit = element('button', { className: 'button-primary shrink-0', text: 'Add session', attrs: { type: 'submit' } });
@@ -78,12 +79,15 @@ function quickAddPanel(reload) {
     element('div', { className: 'mt-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between' }, [element('div', {}, [element('p', { className: 'text-sm font-medium text-ink', text: 'Related to' }), element('div', { className: 'mt-2 flex flex-wrap gap-2' }, buttons)]), submit]),
     relationFields
   );
+  const quickAddHeading = form.firstElementChild?.firstElementChild;
+  quickAddHeading?.classList.add('flex', 'items-start', 'gap-3');
+  quickAddHeading?.prepend(iconTile('quickAdd', { className: 'panel-icon shrink-0' }));
   form.addEventListener('submit', async (event) => {
     event.preventDefault(); submit.disabled = true; submit.textContent = 'Adding…';
     try {
       const data = new FormData(form);
       await apiRequest('/api/sessions', { method: 'POST', body: { session_date: todayInputValue(), category: data.get('category'), duration_minutes: Number(data.get('duration_minutes')), resource: data.get('resource'), notes: data.get('notes'), vocabulary_ids: selectedNumbers(form.elements.vocabulary_ids), kanji_ids: selectedNumbers(form.elements.kanji_ids), grammar_ids: selectedNumbers(form.elements.grammar_ids) } });
-      showToast('Study session recorded.'); await reload();
+      showToast('Study session recorded.'); window.dispatchEvent(new Event('jlt-data-change')); await reload();
     } catch (error) { showToast(error.message || 'Unable to record the session.', 'error'); submit.disabled = false; submit.textContent = 'Add session'; }
   });
   return form;
@@ -101,9 +105,9 @@ export async function renderDashboard(container) {
       const distributionCanvas = element('canvas', { attrs: { 'aria-label': 'Study category distribution chart', role: 'img' } });
       content.replaceChildren(
         quickAddPanel(load),
-        element('div', { className: 'grid gap-4 sm:grid-cols-2 xl:grid-cols-4' }, [metric('Today', data.minutesToday, 'minutes studied'), metric('This week', data.minutesThisWeek, 'minutes studied'), metric('Current streak', activity.currentStreak, 'consecutive active days'), metric('Longest streak', activity.longestStreak, 'best run of active days'), metric('Due reviews', review.items.length, 'items ready to recall'), metric('Vocabulary', data.vocabularyCount, 'saved words'), metric('Kanji', data.kanjiCount, 'tracked characters'), metric('Grammar', data.grammarCount, 'saved patterns')]),
-        element('div', { className: 'mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]' }, [chartCard('Weekly activity', 'Minutes recorded over the last seven days.', weeklyCanvas), recentSessions(data.recentSessions)]),
-        element('div', { className: 'mt-5 grid gap-5 xl:grid-cols-2' }, [chartCard('Study distribution', 'How recorded minutes are distributed by category.', distributionCanvas), activityCalendar(activity.calendar)])
+        element('div', { className: 'grid gap-4 sm:grid-cols-2 xl:grid-cols-4' }, [metric('today', 'Today', data.minutesToday, 'minutes studied'), metric('week', 'This week', data.minutesThisWeek, 'minutes studied'), metric('streak', 'Current streak', activity.currentStreak, 'consecutive active days'), metric('streak', 'Longest streak', activity.longestStreak, 'best run of active days'), metric('review', 'Due reviews', review.items.length, 'items ready to recall'), metric('vocabulary', 'Vocabulary', data.vocabularyCount, 'saved words'), metric('kanji', 'Kanji', data.kanjiCount, 'tracked characters'), metric('grammar', 'Grammar', data.grammarCount, 'saved patterns')]),
+        element('div', { className: 'mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]' }, [chartCard('activity', 'Weekly activity', 'Minutes recorded over the last seven days.', weeklyCanvas), recentSessions(data.recentSessions)]),
+        element('div', { className: 'mt-5 grid gap-5 xl:grid-cols-2' }, [chartCard('distribution', 'Study distribution', 'How recorded minutes are distributed by category.', distributionCanvas), activityCalendar(activity.calendar)])
       );
       weeklyChart(weeklyCanvas, data.weeklyActivity); distributionChart(distributionCanvas, data.studyDistribution);
     } catch (error) { content.replaceChildren(errorState(error, load)); }

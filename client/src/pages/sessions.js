@@ -1,5 +1,6 @@
 import { apiRequest, queryString } from '../api';
 import { destroyCharts } from '../charts';
+import { iconTile } from '../icons';
 import {
   confirmDialog,
   element,
@@ -58,7 +59,9 @@ function sessionCard(session, onView, onEdit, onDelete) {
 
   return element('article', { className: 'surface p-5' }, [
     element('div', { className: 'flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between' }, [
-      element('div', {}, [
+      element('div', { className: 'flex items-start gap-3' }, [
+        iconTile('sessions', { className: 'preview-icon shrink-0' }),
+        element('div', {}, [
         element('div', { className: 'flex flex-wrap items-center gap-2' }, [
           element('h2', { className: 'font-semibold text-ink', text: session.category }),
           element('span', { className: 'status-pill', text: `${session.duration_minutes} min` })
@@ -66,6 +69,7 @@ function sessionCard(session, onView, onEdit, onDelete) {
         element('p', { className: 'mt-2 text-sm text-muted', text: formatDate(session.session_date) }),
         element('p', { className: 'mt-3 text-sm text-ink/80', text: session.resource || 'No resource recorded' }),
         ...(session.notes ? [element('p', { className: 'mt-2 line-clamp-2 text-sm leading-6 text-muted', text: session.notes })] : [])
+        ])
       ]),
       element('div', { className: 'flex shrink-0 gap-2' }, [viewButton, editButton, deleteButton])
     ])

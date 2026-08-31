@@ -1,3 +1,5 @@
+import { icon, iconForTitle, iconTile } from './icons';
+
 export function element(tagName, { className, text, attrs, dataset } = {}, children = []) {
   const node = document.createElement(tagName);
   if (className) node.className = className;
@@ -15,9 +17,14 @@ export function element(tagName, { className, text, attrs, dataset } = {}, child
 }
 
 export function pageHeader({ eyebrow, title, description, action }) {
+  const headerIcon = iconForTitle(title);
+  const heading = element('div', { className: 'flex items-center gap-3' }, [
+    ...(headerIcon ? [iconTile(headerIcon, { className: 'page-header-icon' })] : []),
+    element('h1', { className: 'text-2xl font-semibold tracking-tight text-ink sm:text-3xl', text: title })
+  ]);
   const copy = element('div', {}, [
     element('p', { className: 'eyebrow', text: eyebrow }),
-    element('h1', { className: 'mt-2 text-2xl font-semibold tracking-tight text-ink sm:text-3xl', text: title }),
+    element('div', { className: 'mt-2' }, [heading]),
     element('p', { className: 'mt-2 max-w-2xl text-sm leading-6 text-muted', text: description })
   ]);
   return element('header', { className: 'mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between' }, [copy, action]);
@@ -168,9 +175,8 @@ export function searchableMultiSelect({
     selectedValues.forEach((selectedValue) => {
       const removeButton = element('button', {
         className: 'ml-1 rounded-full px-1 text-muted transition hover:bg-white hover:text-vermilion',
-        text: '×',
         attrs: { type: 'button', 'aria-label': `Remove ${optionLabels.get(selectedValue)}` }
-      });
+      }, [icon('close', { size: 14 })]);
       removeButton.addEventListener('click', () => {
         selectedValues.delete(selectedValue);
         syncSelection();
@@ -297,7 +303,7 @@ export function openDialog({ title, content, submitLabel = 'Save', submitClassNa
     className: 'max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white shadow-2xl sm:max-w-2xl sm:rounded-2xl',
     attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'dialog-title' }
   });
-  const closeButton = element('button', { className: 'icon-button', text: '×', attrs: { type: 'button', 'aria-label': 'Close dialog' } });
+  const closeButton = element('button', { className: 'icon-button', attrs: { type: 'button', 'aria-label': 'Close dialog' } }, [icon('close', { size: 20 })]);
   const submitButton = element('button', { className: submitClassName, text: submitLabel, attrs: { type: 'submit' } });
   const cancelButton = element('button', { className: 'button-secondary', text: 'Cancel', attrs: { type: 'button' } });
   const close = () => {

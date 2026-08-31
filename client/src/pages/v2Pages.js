@@ -1,4 +1,5 @@
 import { apiRequest, queryString } from '../api';
+import { iconForTitle, iconTile } from '../icons';
 import { confirmDialog, element, emptyState, errorState, field, formatDate, loadingState, openDialog, pageHeader, paginationControls, searchableMultiSelect, showToast } from '../ui';
 
 const options = (values, blank = 'Not set') => [{ value: '', label: blank }, ...values.map((value) => ({ value, label: value }))];
@@ -177,7 +178,7 @@ export function renderV2Page(container, kind) {
     links?.addEventListener('click', () => openLinks(record));
     const del = element('button', { className: 'button-danger', text: 'Delete', attrs: { type: 'button' } }); del.addEventListener('click', () => remove(record));
     return element('article', { className: 'surface flex min-h-44 flex-col p-5' }, [
-      element('div', { className: 'flex items-start justify-between gap-3' }, [element('h2', { className: 'text-lg font-semibold text-ink', text: record.title || record.name }), element('span', { className: 'status-pill', text: meta })]),
+      element('div', { className: 'flex items-start justify-between gap-3' }, [element('div', { className: 'flex items-start gap-3' }, [iconTile(iconForTitle(config.title), { className: 'preview-icon shrink-0' }), element('h2', { className: 'text-lg font-semibold text-ink', text: record.title || record.name })]), element('span', { className: 'status-pill', text: meta })]),
       ...(detail ? [element('p', { className: 'mt-3 line-clamp-3 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: detail })] : []),
       ...(Array.isArray(footer) ? footer.map((line) => element('p', { className: 'mt-1 line-clamp-3 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: line })) : []),
       element('div', { className: 'mt-auto flex items-end justify-start gap-3 pt-5' }, [element('div', { className: 'flex shrink-0 flex-nowrap gap-2' }, [links, del, edit]), ...(Array.isArray(footer) || !footer ? [] : [element('span', { className: 'ml-auto text-xs font-semibold text-muted', text: footer })])])
