@@ -32,6 +32,10 @@ npm.cmd run build
 
 The production build is only `npm --prefix client run build`. The root `start` command launches only the Express server for local production-like API checks; Vercel invokes the exported functions and does not use a long-lived Node process.
 
+## Continuous integration
+
+GitHub Actions runs isolated backend tests, the production frontend build, and a high-severity runtime dependency audit on every push and pull request. Its separately named `multi-user-integration` job is intentionally conditional: it runs only when every disposable Supabase Testing secret, including the verified TLS CA, is configured. It creates only ephemeral test users/records and rejects a target that does not match the declared testing project reference.
+
 ## Future Vercel environment variables
 
 Set these only in Vercel project settings when deployment is explicitly approved:

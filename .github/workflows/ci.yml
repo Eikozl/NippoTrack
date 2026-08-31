@@ -35,8 +35,13 @@ jobs:
       - name: Build frontend
         run: npm --prefix client run build
 
+      - name: Audit runtime dependencies
+        run: |
+          npm --prefix server audit --omit=dev --audit-level=high
+          npm --prefix client audit --omit=dev --audit-level=high
+
   multi-user-integration:
-    if: ${{ secrets.SUPABASE_INTEGRATION_URL != '' && secrets.SUPABASE_INTEGRATION_PROJECT_REF != '' && secrets.SUPABASE_INTEGRATION_SECRET_KEY != '' && secrets.POSTGRES_RUNTIME_HOST != '' && secrets.POSTGRES_RUNTIME_SSL_CA != '' }}
+    if: ${{ secrets.SUPABASE_INTEGRATION_URL != '' && secrets.SUPABASE_INTEGRATION_PROJECT_REF != '' && secrets.SUPABASE_INTEGRATION_PUBLISHABLE_KEY != '' && secrets.SUPABASE_INTEGRATION_SECRET_KEY != '' && secrets.POSTGRES_RUNTIME_HOST != '' && secrets.POSTGRES_RUNTIME_PORT != '' && secrets.POSTGRES_RUNTIME_USER != '' && secrets.POSTGRES_RUNTIME_PASSWORD != '' && secrets.POSTGRES_RUNTIME_DB != '' && secrets.POSTGRES_RUNTIME_SSL_CA != '' }}
     needs: test-and-build
     runs-on: ubuntu-latest
     env:
