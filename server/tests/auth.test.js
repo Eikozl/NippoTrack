@@ -5,6 +5,11 @@ process.env.NODE_ENV = 'production';
 process.env.JLT_AUTH_BYPASS_FOR_TESTS = 'false';
 process.env.JLT_AUTH_PASSWORD = 'test-owner-password';
 process.env.JLT_SESSION_SECRET = 'test-session-secret-that-is-long-enough';
+process.env.POSTGRES_RUNTIME_HOST = '127.0.0.1';
+process.env.POSTGRES_RUNTIME_PORT = '5432';
+process.env.POSTGRES_RUNTIME_USER = 'jlt_runtime';
+process.env.POSTGRES_RUNTIME_PASSWORD = 'test-runtime-password';
+process.env.POSTGRES_RUNTIME_DB = 'jlt_postgres';
 
 const app = require('../src/app');
 

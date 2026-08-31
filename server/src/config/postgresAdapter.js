@@ -1,4 +1,4 @@
-const postgresPool = require('./postgres');
+const postgresPool = require('./postgresRuntime');
 const configuredClients = new WeakSet();
 const timezone = (process.env.POSTGRES_TIMEZONE || 'America/Santo_Domingo').replace(/'/g, "''");
 

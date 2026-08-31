@@ -9,6 +9,8 @@
     "test": "node --env-file=.env.test --test tests/*.test.js",
     "db:check": "node scripts/check-db.js",
     "postgres:migrate": "node scripts/run-postgres-migrations.js",
+    "postgres:provision-runtime-role": "node scripts/provision-postgres-runtime-role.js",
+    "postgres:verify-runtime-security": "node scripts/verify-postgres-runtime-security.js",
     "postgres:check": "node scripts/check-postgres-db.js",
     "postgres:import": "node scripts/migrate-backup-to-postgres.js",
     "mariadb:audit": "node scripts/audit-mariadb-source.js",

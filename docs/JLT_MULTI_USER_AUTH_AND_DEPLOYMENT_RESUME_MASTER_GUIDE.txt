@@ -1,0 +1,1004 @@
+JLT MULTI-USER AUTHENTICATION & DATA ISOLATION MASTER IMPLEMENTATION GUIDE
+=======================================================================
+
+PROJECT
+Japanese Learning Tracker (JLT)
+
+CURRENT STATUS
+--------------
+JLT V3 is functionally complete.
+
+Completed production-hardening work that MUST be preserved:
+- Express remains the only application/database boundary.
+- PostgreSQL/Supabase is the active database platform.
+- jlt_runtime exists as a dedicated least-privilege runtime role.
+- jlt_runtime is not a superuser and cannot manage roles/databases, replicate, bypass RLS, own JLT objects, or access schema_migrations.
+- All 25 application tables have RLS enabled and forced.
+- Each application table has one explicit CRUD policy scoped to jlt_runtime.
+- anon, authenticated, and PUBLIC have no application-data privileges.
+- Default privileges have been hardened so future migrations do not reintroduce public grants.
+- Runtime fails closed if jlt_runtime credentials are missing.
+- Admin/migration credentials remain separate from runtime credentials.
+- Runtime credential rotation is idempotent.
+- Database security verification is automated.
+- Supabase DEV has been verified with the hardened role.
+- Current regression suite passes against Supabase using jlt_runtime.
+- Production frontend build passes.
+- Rate limiting has already been introduced.
+- No Vercel deployment has started.
+
+IMPORTANT ROADMAP CHANGE
+------------------------
+Pause the remaining Vercel/deployment work.
+
+The architecture is changing from:
+    single-user protected application
+to:
+    simple multi-user application with strict per-user data isolation
+
+This is NOT a SaaS conversion.
+
+Do NOT add:
+- organizations
+- teams
+- billing
+- subscriptions
+- plans
+- tenant administration
+- public profiles
+- invitations
+- OAuth providers unless explicitly requested later
+- role-management infrastructure unless technically required
+- social features
+- admin dashboards
+- browser-direct PostgreSQL access
+
+The goal is only to add:
+- registration
+- email/password authentication
+- email verification
+- sign in
+- sign out
+- session persistence
+- forgot-password flow
+- password reset
+- strict per-user ownership and isolation of JLT data
+
+AUTHENTICATION STRATEGY
+-----------------------
+Use Supabase Auth for identity and authentication.
+
+Do NOT build password hashing, verification-token generation, recovery-token generation,
+refresh-token rotation, or password storage manually.
+
+Use Supabase Auth because it already provides:
+- user identity
+- password hashing
+- session lifecycle
+- access/refresh token handling
+- email verification
+- password recovery
+- account confirmation state
+
+For production email delivery:
+- DO NOT rely on Supabase's built-in test SMTP service.
+- Plan for a custom external SMTP provider.
+- Keep SMTP configuration outside Git.
+- Keep DEV and future PROD email/redirect configuration separate.
+
+TARGET ARCHITECTURE
+-------------------
+Browser
+  |
+  | Supabase Auth session / access token
+  v
+Express API
+  |
+  | Verify authenticated Supabase user
+  | Derive req.user.id server-side
+  | Enforce authorization and ownership
+  v
+jlt_runtime
+  |
+  | Parameterized SQL only
+  v
+Supabase PostgreSQL
+
+IMPORTANT:
+The browser must NEVER receive:
+- PostgreSQL connection strings
+- jlt_runtime credentials
+- migration/admin PostgreSQL credentials
+- Supabase service-role keys
+- private server secrets
+
+Express remains the only application-data boundary.
+
+The browser may use Supabase Auth client capabilities required for authentication,
+but application database reads/writes must still pass through Express.
+
+=======================================================================
+PHASE 0 — FREEZE DEPLOYMENT WORK
+=======================================================================
+
+Before making multi-user changes:
+
+1. STOP the remaining Vercel deployment-hardening plan.
+2. Do not create Vercel deployment infrastructure yet unless strictly required for local testing.
+3. Do not deploy preview or production environments.
+4. Preserve all completed hardening work listed above.
+5. Create a clear checkpoint/commit before schema changes.
+6. Record:
+   - current commit SHA
+   - current test count
+   - current production build result
+   - current Supabase security verification result
+
+The previous deployment plan is not discarded.
+It is PAUSED and will resume only after the multi-user phase is complete.
+
+=======================================================================
+PHASE 1 — OWNERSHIP ARCHITECTURE AUDIT
+=======================================================================
+
+DO NOT modify the schema immediately.
+
+First audit all 25 application tables and classify each table into one of these categories:
+
+A. USER-OWNED ROOT ENTITY
+   A table representing data directly owned by one user.
+   Likely examples:
+   - study_sessions
+   - vocabulary
+   - kanji
+   - grammar_points
+   - goals
+   - content_entries
+   - notes
+   - tags
+   - review_items
+
+B. USER-OWNED CHILD ENTITY
+   A table whose ownership may be derived from a user-owned parent.
+   Example:
+   - review_events through review_items
+   - usage_examples through vocabulary or kanji if that matches actual schema semantics
+   - session_writings through study_sessions
+
+C. JUNCTION / RELATIONSHIP TABLE
+   Ownership may be derived through both referenced parent entities.
+   Examples:
+   - session_vocabulary
+   - session_kanji
+   - session_grammar
+   - kanji_vocabulary
+   - note_study_sessions
+   - note_vocabulary
+   - note_kanji
+   - note_grammar
+   - tag_study_sessions
+   - tag_vocabulary
+   - tag_kanji
+   - tag_grammar
+   - content_entry_sessions
+
+D. GLOBAL / SYSTEM ENTITY
+   Only if the existing schema truly contains data intended to be shared globally.
+
+For every table, document:
+- table name
+- classification
+- direct user_id required? yes/no
+- ownership derivation path
+- relevant foreign keys
+- relevant unique constraints
+- relevant indexes
+- current query files touching it
+- current export/search/dashboard/statistics/review dependencies
+
+DO NOT add user_id blindly to all 25 tables.
+
+DELIVERABLE:
+Produce an ownership map before implementation.
+
+=======================================================================
+PHASE 2 — UNIQUE CONSTRAINT & INDEX AUDIT
+=======================================================================
+
+Audit every UNIQUE constraint.
+
+Any value that was globally unique in single-user mode may need to become user-scoped.
+
+Example:
+    UNIQUE(word)
+may need to become:
+    UNIQUE(user_id, word)
+
+Possible examples to inspect:
+- vocabulary term
+- kanji character
+- grammar identifier/name
+- tag name
+- user-created content identifiers
+
+Do NOT assume every UNIQUE must change.
+
+For each UNIQUE:
+- document current behavior
+- determine whether uniqueness should be global or per user
+- propose exact replacement constraint if needed
+
+Add indexes for ownership paths where query patterns require them.
+
+At minimum, root-owned tables should generally have efficient user_id filtering.
+
+Do not create redundant indexes where a composite unique/index already covers the access pattern.
+
+=======================================================================
+PHASE 3 — SUPABASE AUTH INTEGRATION DESIGN
+=======================================================================
+
+Replace the existing transitional single-password login system with Supabase Auth.
+
+Required authentication features:
+
+1. SIGN UP
+   - email
+   - password
+   - confirm password in UI
+   - request email confirmation
+
+2. EMAIL VERIFICATION
+   - unverified users must not receive full application access
+   - handle verification redirect safely
+   - show meaningful success/failure states
+
+3. SIGN IN
+   - email/password
+   - establish Supabase session
+   - restore session after page reload
+
+4. SIGN OUT
+   - invalidate session
+   - return to auth screen
+   - clear application state where needed
+
+5. FORGOT PASSWORD
+   - user submits email
+   - use Supabase Auth recovery flow
+   - return a non-enumerating response
+
+6. RESET PASSWORD
+   - handle recovery link
+   - allow user to set a new password
+   - handle invalid/expired recovery sessions safely
+
+7. SESSION RESTORATION
+   - application should restore authenticated state on reload
+   - expired session should cleanly return to login
+
+SECURITY REQUIREMENTS:
+- Do not store application passwords.
+- Do not hash passwords manually.
+- Do not put auth secrets into client code.
+- Do not expose service-role keys.
+- Do not trust localStorage as proof of identity.
+- Do not trust a user_id submitted by the browser.
+
+=======================================================================
+PHASE 4 — EXPRESS AUTHENTICATION BOUNDARY
+=======================================================================
+
+Every private API request must identify the authenticated Supabase user.
+
+Express must verify the authenticated identity and expose an internal identity such as:
+
+    req.user.id
+
+The canonical user ID must come from the verified Supabase session/token.
+
+NEVER derive authorization from:
+- req.body.user_id
+- req.query.user_id
+- req.params.user_id
+- client-side hidden fields
+- localStorage user IDs
+
+Private routes must fail with 401 when no valid identity exists.
+
+Authorization failures must not reveal another user's resource existence.
+
+Recommended behavior:
+- unauthenticated -> 401
+- authenticated but requesting another user's resource -> 404 or equivalent safe behavior
+
+Keep health/public auth endpoints intentionally public only where required.
+
+Rate limiting must remain active and should be reviewed for:
+- sign in
+- sign up
+- password recovery
+- general API access
+
+Auth-specific limits may be stricter than the generic API limit.
+
+=======================================================================
+PHASE 5 — CREATE THE OWNER ACCOUNT BEFORE DATA MIGRATION
+=======================================================================
+
+The existing JLT dataset belongs to the project owner.
+
+Before backfilling ownership:
+
+1. Create the owner's real Supabase Auth account.
+2. Confirm the email.
+3. Obtain the resulting auth.users UUID.
+4. Record that UUID only in the migration execution environment.
+5. Do NOT hardcode the UUID permanently into application source code.
+
+IMPORTANT:
+The owner does NOT require a special "admin" role merely to own existing data.
+
+Ownership is represented by:
+    user_id = owner's auth.users.id
+
+Do NOT add admin-role infrastructure unless a concrete product requirement appears later.
+
+=======================================================================
+PHASE 6 — STAGED DATABASE OWNERSHIP MIGRATION
+=======================================================================
+
+Use a safe staged migration.
+
+DO NOT:
+- recreate the database
+- delete existing study data
+- reset production-like data
+- disable constraints broadly
+- bypass verification
+
+STAGE 1 — Add ownership columns
+For each root-owned table requiring direct ownership:
+
+    user_id UUID NULL
+
+Add the column nullable first.
+
+Reference Supabase auth.users only if the architecture and permissions allow this cleanly.
+If using a direct FK to auth.users, verify migration/runtime implications carefully.
+
+STAGE 2 — Backfill existing data
+Set all existing root-owned rows to the owner's Supabase Auth UUID.
+
+STAGE 3 — Validate ownership
+Verify:
+- zero root rows with NULL user_id
+- zero broken parent/child ownership paths
+- zero junction relationships crossing users
+- all legacy rows resolve to the owner
+
+STAGE 4 — Add required constraints/indexes
+Add:
+- user_id indexes
+- composite UNIQUE constraints where required
+- ownership-related FK constraints if appropriate
+
+STAGE 5 — Enforce NOT NULL
+Only after verification:
+    ALTER COLUMN user_id SET NOT NULL
+
+STAGE 6 — Re-run verification
+Confirm:
+- row counts unchanged
+- relationships unchanged
+- data content unchanged
+- owner can access all migrated data
+- no new orphan rows
+- no cross-user relationships
+
+=======================================================================
+PHASE 7 — QUERY ISOLATION
+=======================================================================
+
+Audit every SQL query that touches user-owned data.
+
+This includes:
+- SELECT
+- INSERT
+- UPDATE
+- DELETE
+- UPSERT
+- search
+- dashboard
+- statistics
+- streak
+- review
+- export
+- calendar/history
+- notes
+- goals
+- tags
+- content
+- usage examples
+- relationship writes
+
+Every root-level operation must be scoped to the authenticated user.
+
+Example before:
+    SELECT * FROM vocabulary WHERE id = $1;
+
+Example after:
+    SELECT * FROM vocabulary
+    WHERE id = $1
+      AND user_id = $2;
+
+Example insert:
+The browser must NOT send user_id as trusted ownership input.
+
+Instead:
+    INSERT INTO vocabulary (..., user_id)
+    VALUES (..., req.user.id)
+
+The authenticated user ID must be passed server-side.
+
+AUDIT ALL QUERY-BUILDING HELPERS.
+Do not fix only obvious route handlers while leaving shared query helpers globally scoped.
+
+=======================================================================
+PHASE 8 — RELATIONSHIP / JUNCTION TABLE ISOLATION
+=======================================================================
+
+This phase is critical.
+
+A user must never be able to create a relationship between:
+- their own entity
+and
+- another user's entity
+
+Example:
+User A must not be able to link:
+    A's study_session
+to:
+    B's vocabulary
+
+Before inserting a relationship:
+- validate ownership of all referenced parents
+- preferably do so inside the same transaction where consistency matters
+
+For junction tables without direct user_id:
+ownership must be proven through their parent foreign keys.
+
+Audit:
+- kanji_vocabulary
+- session_vocabulary
+- session_kanji
+- session_grammar
+- content_entry_sessions
+- note_* links
+- tag_* links
+- any other relationship table
+
+Cross-user links must be impossible both:
+- through normal API calls
+- through manipulated IDs
+
+=======================================================================
+PHASE 9 — RLS STRATEGY AFTER MULTI-USER CONVERSION
+=======================================================================
+
+DO NOT weaken the current hardened database model.
+
+Preserve:
+- jlt_runtime as runtime role
+- forced RLS
+- no PUBLIC grants
+- no anon/authenticated table grants
+- no browser-direct application data access
+- admin/runtime separation
+- fail-closed credentials
+
+IMPORTANT ARCHITECTURAL FACT:
+Because Express connects as jlt_runtime, PostgreSQL sees jlt_runtime rather than the end user's Supabase role.
+
+Therefore:
+- per-user authorization remains an Express responsibility
+- SQL queries must be scoped by req.user.id
+- current jlt_runtime RLS remains a runtime-role boundary
+- do not pretend current RLS alone provides per-user tenant isolation
+
+Document this explicitly.
+
+OPTIONAL DEFENSE-IN-DEPTH:
+If a safe server-side session-context approach is considered later, evaluate it separately.
+Do not introduce unnecessary PostgreSQL session/JWT complexity during this phase unless justified.
+
+=======================================================================
+PHASE 10 — EXPORT, SEARCH, DASHBOARD & ANALYTICS ISOLATION
+=======================================================================
+
+Explicitly verify these areas.
+
+GLOBAL SEARCH
+- must never return another user's vocabulary, kanji, grammar, notes, sessions, tags, etc.
+
+DASHBOARD
+- totals only from authenticated user
+- recent sessions only from authenticated user
+- streak only from authenticated user
+
+STATISTICS
+- all aggregations scoped by user
+- no global totals
+
+REVIEW
+- queue only contains user's review items/events
+
+CALENDAR
+- only user's sessions/history
+
+EXPORT
+- export only authenticated user's data
+- no other user's rows
+- relationship exports must contain only relationships belonging to the user
+
+BACKUP/RESTORE
+- if restore/import exists, audit carefully
+- imported ownership must never be accepted blindly from uploaded data
+- ownership should be assigned server-side to authenticated user unless explicitly restoring trusted owner-specific backups
+
+=======================================================================
+PHASE 11 — TEST DATA: TWO-USER ISOLATION HARNESS
+=======================================================================
+
+Create at least two distinct users:
+
+    User A
+    User B
+
+Use deterministic test setup where practical.
+
+Required tests:
+
+READ ISOLATION
+- A cannot read B's vocabulary
+- A cannot read B's kanji
+- A cannot read B's grammar
+- A cannot read B's sessions
+- A cannot read B's notes/goals/content/tags/review data
+
+WRITE ISOLATION
+- A cannot edit B's records
+- A cannot delete B's records
+- A cannot overwrite B through upsert
+
+RELATIONSHIP ISOLATION
+- A cannot link A's session to B's vocabulary
+- A cannot link A's note to B's entity
+- A cannot attach B's tags
+- A cannot create any cross-user junction relation
+
+SEARCH ISOLATION
+- A search excludes B data
+
+ANALYTICS ISOLATION
+- A dashboard excludes B
+- A statistics exclude B
+- A streak excludes B
+
+EXPORT ISOLATION
+- A export contains zero B-owned rows
+
+UNIQUENESS
+- A and B may create the same user-scoped value where product semantics allow it
+
+DIRECT-ID ATTACKS
+Attempt requests with known IDs belonging to the other test user.
+Expected:
+- no data disclosure
+- no mutation
+- safe 404/authorization behavior
+
+=======================================================================
+PHASE 12 — EMAIL VERIFICATION & PASSWORD RECOVERY
+=======================================================================
+
+Keep Supabase Auth.
+
+Do not switch to fully custom auth merely because Supabase's built-in test email service is limited.
+
+Development:
+- Supabase built-in email may be used only for testing if sufficient
+
+Production:
+- configure custom SMTP provider
+- store SMTP credentials securely
+- do not commit credentials
+- configure production site URL and redirect URLs
+
+Verify:
+
+SIGNUP
+- registration request works
+- verification email is generated
+- unverified user cannot access private JLT data
+- verified user can sign in
+
+PASSWORD RECOVERY
+- request produces a safe generic response
+- response does not reveal whether account exists
+- recovery email redirects correctly
+- valid recovery session permits password update
+- expired/invalid recovery links fail safely
+- old password behavior is correct after reset
+
+REDIRECTS
+Maintain separate configurations for:
+- local development
+- Supabase DEV
+- Vercel preview later
+- Vercel production later
+
+DO NOT configure final production redirects until deployment topology is known.
+
+=======================================================================
+PHASE 13 — CLEANUP TRANSITIONAL SINGLE-USER AUTH
+=======================================================================
+
+Once Supabase Auth is proven functional:
+
+Audit and remove obsolete custom auth pieces that are no longer required.
+
+Likely transitional variables/components:
+- JLT_AUTH_PASSWORD
+- JLT_AUTH_PASSWORD_HASH
+- custom single-password verification
+- custom session-cookie code created only for the old single-user model
+
+Do NOT delete blindly.
+
+First identify whether any parts remain useful for:
+- generic middleware structure
+- rate limiting
+- logout UI
+- session-error handling
+- test infrastructure
+
+Remove only obsolete authentication logic.
+
+Update:
+- .env examples
+- tests
+- documentation
+- CI
+- production configuration
+
+=======================================================================
+PHASE 14 — SECURITY RE-VALIDATION AFTER MULTI-USER CHANGES
+=======================================================================
+
+Re-run the full existing database-security verification.
+
+Confirm again:
+- jlt_runtime owns nothing
+- jlt_runtime cannot access schema_migrations
+- RLS enabled on all 25 tables
+- RLS forced
+- policies remain scoped correctly
+- no anon/authenticated grants returned
+- PUBLIC remains revoked
+- default privileges remain hardened
+- no new SECURITY DEFINER function appeared
+- triggers remain safe
+- migration role/runtime role remain separate
+- runtime still fails closed
+- no browser database secrets
+- no service-role key exposed
+
+Also confirm:
+- Supabase Auth integration did not require widening table grants
+- no direct Data API access was introduced accidentally
+
+=======================================================================
+PHASE 15 — COMPLETE REGRESSION & BUILD GATE
+=======================================================================
+
+Before resuming deployment work, all of the following must pass:
+
+1. Existing unit tests
+2. Existing integration tests
+3. New authentication tests
+4. New cross-user isolation tests
+5. Real Supabase DEV runtime tests
+6. Database ownership verification
+7. Migration idempotency
+8. Production frontend build
+9. API startup/runtime check
+10. Auth session restoration
+11. Email verification flow
+12. Password recovery/reset flow
+13. Export isolation
+14. Search isolation
+15. Dashboard/statistics isolation
+
+No Vercel work resumes while any isolation blocker remains.
+
+FINAL RESULT OF THIS PHASE MUST BE ONE OF:
+
+    READY TO RESUME DEPLOYMENT HARDENING
+
+or
+
+    NOT READY TO RESUME DEPLOYMENT HARDENING
+
+If NOT READY:
+list only the unresolved blockers.
+
+=======================================================================
+WHEN TO RESUME THE PREVIOUS DEPLOYMENT PLAN
+=======================================================================
+
+Resume the old deployment-hardening plan ONLY AFTER:
+
+- Supabase Auth works
+- owner data migration is complete
+- all existing data belongs to the owner account
+- user_id constraints are enforced
+- relevant unique constraints are user-scoped
+- every route/query is user-scoped
+- cross-user relationship attacks fail
+- two-user isolation tests pass
+- email verification works
+- password recovery works
+- production build passes
+- database hardening remains intact
+- transitional single-user auth has been removed or intentionally retained
+- the agent concludes:
+      READY TO RESUME DEPLOYMENT HARDENING
+
+DO NOT start Vercel before this gate.
+
+=======================================================================
+RESUMED DEPLOYMENT HARDENING PLAN
+=======================================================================
+
+Once the multi-user gate passes, resume the previously paused deployment work.
+
+Re-audit the deployment plan because authentication assumptions changed.
+
+Do NOT blindly apply the old single-user deployment assumptions.
+
+RESUME PHASE D1 — VERCEL APPLICATION TOPOLOGY
+---------------------------------------------
+Implement/verify:
+- reproducible clean install from repository root
+- production frontend build
+- serverless Express entrypoint
+- /api/* routing
+- SPA fallback/rewrite behavior
+- no Nodemon/Vite dev server in production
+- no dependence on long-lived local Express process
+- no persistent local filesystem dependency
+
+Revisit:
+- cookie/token behavior under Vercel
+- same-origin vs cross-origin auth
+- redirect URLs
+- Supabase Auth production site URL
+- email confirmation URLs
+- recovery URLs
+
+RESUME PHASE D2 — SERVERLESS DATABASE CONNECTION
+------------------------------------------------
+Verify:
+- Supabase transaction pooler strategy for serverless
+- correct host/port
+- small/configurable pool
+- safe reuse under serverless execution
+- TLS certificate validation
+- no rejectUnauthorized:false unless explicitly justified
+- America/Santo_Domingo semantics preserved
+- jlt_runtime remains the only application DB role
+
+Run transaction/timezone tests using the FINAL pooler configuration.
+
+RESUME PHASE D3 — CSP / HTTP SECURITY
+-------------------------------------
+Resolve:
+- inline theme bootstrap conflict with Helmet CSP
+- auth-related redirect/script requirements
+- secure headers
+- same-origin CORS where possible
+- explicit allowlist if origins differ
+- no wildcard private API CORS
+
+Re-audit CSP after Supabase Auth integration.
+
+RESUME PHASE D4 — CI REPRODUCIBILITY
+------------------------------------
+CI should prove:
+- clean client install
+- clean server install
+- production build
+- unit tests
+- integration tests
+- auth tests
+- multi-user isolation tests
+
+If CI uses PostgreSQL/Supabase integration:
+- inject secrets safely
+- distinguish local PostgreSQL tests from Supabase DEV tests
+- never print secrets
+- never point destructive tests at production
+
+RESUME PHASE D5 — FINAL ASSET / ACCESSIBILITY POLISH
+----------------------------------------------------
+Complete remaining non-blocking items:
+- optimize oversized logo/favicon files
+- modal focus trap
+- focus restoration
+- final responsive audit
+- final dark/light contrast audit
+- review V3 export completeness
+- fix duplicate engines key if still present
+
+RESUME PHASE D6 — FINAL PRE-DEPLOYMENT AUDIT
+--------------------------------------------
+Run a new full audit that assumes MULTI-USER architecture.
+
+The old audit is no longer sufficient by itself.
+
+Audit:
+- auth
+- authorization
+- user ownership
+- cross-user isolation
+- password recovery
+- email verification
+- SMTP readiness
+- database role security
+- Vercel topology
+- serverless DB pooling
+- TLS
+- CSP
+- CORS
+- CI
+- assets
+- accessibility
+- responsive UI
+- production build
+- secrets
+- logs
+- safe error handling
+
+The final audit must conclude exactly:
+
+    READY FOR VERCEL DEPLOYMENT
+
+or
+
+    NOT READY FOR VERCEL DEPLOYMENT
+
+=======================================================================
+ACTUAL DEPLOYMENT — ONLY AFTER FINAL APPROVAL
+=======================================================================
+
+Do not deploy automatically after the audit.
+
+Wait for explicit approval.
+
+Only after:
+    READY FOR VERCEL DEPLOYMENT
+and
+    explicit owner approval
+
+may the deployment phase begin.
+
+Deployment order:
+
+1. Create/configure production Supabase/Auth settings as required.
+2. Configure production SMTP.
+3. Configure production redirect URLs.
+4. Configure Vercel environment variables.
+5. Deploy preview.
+6. Run production-like smoke test.
+7. Verify auth signup/login/logout.
+8. Verify email confirmation.
+9. Verify password recovery.
+10. Verify owner data.
+11. Verify a second user receives isolated empty/new data.
+12. Attempt cross-user access tests.
+13. Verify database uses jlt_runtime.
+14. Verify no admin credentials are loaded by runtime.
+15. Verify CSP/CORS/HTTPS.
+16. Promote/finalize production deployment only if all pass.
+
+=======================================================================
+NON-NEGOTIABLE SECURITY RULES
+=======================================================================
+
+1. Never trust client-supplied user_id.
+2. Never expose database credentials to browser.
+3. Never use migration/admin credentials for application runtime.
+4. Never widen anon/authenticated grants to bypass architecture problems.
+5. Never disable RLS to "make auth work".
+6. Never accept cross-user relationships.
+7. Never create a production deployment before isolation tests pass.
+8. Never run destructive tests against production.
+9. Never store plaintext passwords.
+10. Never implement custom password/recovery cryptography when Supabase Auth already provides it.
+11. Never commit SMTP secrets.
+12. Never reuse DEV credentials in PROD.
+13. Never assume a 404/401 UI check is authorization; enforce authorization in Express/SQL.
+14. Never allow runtime fallback to admin credentials.
+15. Never resume the old deployment plan without re-auditing its assumptions for multi-user auth.
+
+=======================================================================
+EXPECTED FINAL ARCHITECTURE
+=======================================================================
+
+User A Browser                  User B Browser
+      |                              |
+      +---------- Supabase Auth -----+
+                     |
+             verified identities
+                     |
+                     v
+                 Express API
+                     |
+          authentication middleware
+                     |
+          authorization / req.user.id
+                     |
+              scoped SQL queries
+                     |
+                 jlt_runtime
+                     |
+              forced RLS boundary
+                     |
+            Supabase PostgreSQL
+                     |
+              per-user data rows
+
+Existing owner dataset:
+    assigned to owner's Supabase Auth UUID
+
+New users:
+    start with their own isolated dataset
+
+Admin/migration operations:
+    remain separate from normal runtime
+
+=======================================================================
+FINAL AGENT REPORT FORMAT
+=======================================================================
+
+At the end of the multi-user phase, report:
+
+1. Audited starting commit
+2. Final commit
+3. Ownership map
+4. Tables with direct user_id
+5. Tables deriving ownership
+6. Changed UNIQUE constraints
+7. Added indexes
+8. Existing owner UUID migration status
+9. Existing row counts before/after
+10. Auth implementation status
+11. Email verification status
+12. Password recovery status
+13. Query isolation audit result
+14. Relationship isolation result
+15. Search/dashboard/statistics/export isolation result
+16. Supabase security re-verification
+17. Test totals
+18. Production build result
+19. Remaining blockers
+20. Whether old deployment plan may resume
+
+End with exactly:
+
+    READY TO RESUME DEPLOYMENT HARDENING
+
+or
+
+    NOT READY TO RESUME DEPLOYMENT HARDENING
