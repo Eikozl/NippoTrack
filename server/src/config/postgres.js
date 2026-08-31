@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+const { postgresSslConfig } = require('./postgresSsl');
 require('dotenv').config({ path: process.env.POSTGRES_ENV_FILE || '.env.postgres' });
 
 function requireEnvironment(name, { allowEmpty = false } = {}) {
@@ -18,7 +19,7 @@ const pool = new Pool({
   password: requireEnvironment('POSTGRES_PASSWORD', { allowEmpty: true }), database: requireEnvironment('POSTGRES_DB'),
   max: 10, idleTimeoutMillis: 30_000, application_name: 'jlt-postgres-migrations',
   options: `-c TimeZone=${timezone}`,
-  ssl: sslMode === 'require' ? { rejectUnauthorized: false } : undefined
+  ssl: postgresSslConfig(sslMode, process.env.POSTGRES_SSL_CA, 'POSTGRES_SSL_CA')
 });
 
 module.exports = pool;

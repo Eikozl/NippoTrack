@@ -36,7 +36,7 @@ jobs:
         run: npm --prefix client run build
 
   multi-user-integration:
-    if: ${{ secrets.SUPABASE_INTEGRATION_URL != '' && secrets.SUPABASE_INTEGRATION_PROJECT_REF != '' && secrets.SUPABASE_INTEGRATION_SECRET_KEY != '' && secrets.POSTGRES_RUNTIME_HOST != '' }}
+    if: ${{ secrets.SUPABASE_INTEGRATION_URL != '' && secrets.SUPABASE_INTEGRATION_PROJECT_REF != '' && secrets.SUPABASE_INTEGRATION_SECRET_KEY != '' && secrets.POSTGRES_RUNTIME_HOST != '' && secrets.POSTGRES_RUNTIME_SSL_CA != '' }}
     needs: test-and-build
     runs-on: ubuntu-latest
     env:
@@ -51,8 +51,9 @@ jobs:
       POSTGRES_RUNTIME_USER: ${{ secrets.POSTGRES_RUNTIME_USER }}
       POSTGRES_RUNTIME_PASSWORD: ${{ secrets.POSTGRES_RUNTIME_PASSWORD }}
       POSTGRES_RUNTIME_DB: ${{ secrets.POSTGRES_RUNTIME_DB }}
-      POSTGRES_RUNTIME_SSL: require
-      POSTGRES_RUNTIME_POOL_MAX: '3'
+      POSTGRES_RUNTIME_SSL: verify-full
+      POSTGRES_RUNTIME_SSL_CA: ${{ secrets.POSTGRES_RUNTIME_SSL_CA }}
+      POSTGRES_RUNTIME_POOL_MAX: '2'
       POSTGRES_TIMEZONE: America/Santo_Domingo
     steps:
       - name: Check out repository

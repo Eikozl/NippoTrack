@@ -1,6 +1,4 @@
 const postgresPool = require('./postgresRuntime');
-const configuredClients = new WeakSet();
-const timezone = (process.env.POSTGRES_TIMEZONE || 'America/Santo_Domingo').replace(/'/g, "''");
 
 const ID_COLUMNS = {
   vocabulary: 'id_vocabulary', kanji: 'id_kanji', grammar_points: 'id_grammar', study_sessions: 'id_session',
@@ -35,10 +33,9 @@ function prepare(sql) {
 }
 
 function wrap(client, { release = false } = {}) {
-  async function configure() { if (!configuredClients.has(client)) { await client.query(`SET TIME ZONE '${timezone}'`); configuredClients.add(client); } }
   return {
-    async execute(sql, params = []) { await configure(); const result = await client.query(convertSql(prepare(sql)), params); return mysqlLikeResult(result, sql); },
-    async query(sql, params = []) { await configure(); const result = await client.query(convertSql(prepare(sql)), params); return mysqlLikeResult(result, sql); },
+    async execute(sql, params = []) { const result = await client.query(convertSql(prepare(sql)), params); return mysqlLikeResult(result, sql); },
+    async query(sql, params = []) { const result = await client.query(convertSql(prepare(sql)), params); return mysqlLikeResult(result, sql); },
     beginTransaction() { return client.query('BEGIN'); },
     commit() { return client.query('COMMIT'); },
     rollback() { return client.query('ROLLBACK'); },

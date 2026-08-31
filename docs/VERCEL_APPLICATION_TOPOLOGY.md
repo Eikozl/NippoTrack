@@ -38,13 +38,12 @@ Set these only in Vercel project settings when deployment is explicitly approved
 | Purpose | Variables |
 | --- | --- |
 | Express authentication | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_AUTH_REDIRECT_URL` |
-| Runtime PostgreSQL role | `POSTGRES_RUNTIME_HOST`, `POSTGRES_RUNTIME_PORT`, `POSTGRES_RUNTIME_USER`, `POSTGRES_RUNTIME_PASSWORD`, `POSTGRES_RUNTIME_DB`, `POSTGRES_RUNTIME_SSL=require`, `POSTGRES_RUNTIME_POOL_MAX`, `POSTGRES_TIMEZONE=America/Santo_Domingo` |
+| Runtime PostgreSQL role | `POSTGRES_RUNTIME_HOST` (Supavisor transaction pooler), `POSTGRES_RUNTIME_PORT=6543`, `POSTGRES_RUNTIME_USER`, `POSTGRES_RUNTIME_PASSWORD`, `POSTGRES_RUNTIME_DB`, `POSTGRES_RUNTIME_SSL=verify-full`, `POSTGRES_RUNTIME_SSL_CA`, `POSTGRES_RUNTIME_POOL_MAX=2`, `POSTGRES_TIMEZONE=America/Santo_Domingo` |
 | Browser Supabase client | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` |
 
 Never set migration credentials, Supabase secret/service-role keys, SMTP credentials, or `SUPABASE_INTEGRATION_SECRET_KEY` in the browser build or the Vercel runtime.
 
 ## Deferred production decisions
 
-- D2 will finalize the production Supabase transaction-pooler host/port, small pool setting, and TLS behavior.
 - Production site URL, Auth redirect URLs, confirmation URLs, recovery URLs, and SMTP configuration must wait for the approved Vercel domain/preview topology.
 - D3 will re-audit CSP and the same-origin CORS policy after the topology is exercised in a Vercel preview.
