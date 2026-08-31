@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 
+// Keep this health check intentionally minimal; DB failures are logged server-side only.
 async function getHealth(req, res) {
   try {
     const [rows] = await pool.query('SELECT current_database() AS database_name');
