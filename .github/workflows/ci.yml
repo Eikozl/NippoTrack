@@ -34,3 +34,38 @@ jobs:
 
       - name: Build frontend
         run: npm --prefix client run build
+
+  multi-user-integration:
+    if: ${{ secrets.SUPABASE_INTEGRATION_URL != '' && secrets.SUPABASE_INTEGRATION_SECRET_KEY != '' && secrets.POSTGRES_RUNTIME_HOST != '' }}
+    needs: test-and-build
+    runs-on: ubuntu-latest
+    env:
+      JLT_ALLOW_DESTRUCTIVE_INTEGRATION_TESTS: 'true'
+      SUPABASE_INTEGRATION_URL: ${{ secrets.SUPABASE_INTEGRATION_URL }}
+      SUPABASE_INTEGRATION_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_INTEGRATION_PUBLISHABLE_KEY }}
+      SUPABASE_INTEGRATION_SECRET_KEY: ${{ secrets.SUPABASE_INTEGRATION_SECRET_KEY }}
+      SUPABASE_AUTH_REDIRECT_URL: ${{ secrets.SUPABASE_AUTH_REDIRECT_URL }}
+      POSTGRES_RUNTIME_HOST: ${{ secrets.POSTGRES_RUNTIME_HOST }}
+      POSTGRES_RUNTIME_PORT: ${{ secrets.POSTGRES_RUNTIME_PORT }}
+      POSTGRES_RUNTIME_USER: ${{ secrets.POSTGRES_RUNTIME_USER }}
+      POSTGRES_RUNTIME_PASSWORD: ${{ secrets.POSTGRES_RUNTIME_PASSWORD }}
+      POSTGRES_RUNTIME_DB: ${{ secrets.POSTGRES_RUNTIME_DB }}
+      POSTGRES_RUNTIME_SSL: require
+      POSTGRES_RUNTIME_POOL_MAX: '3'
+      POSTGRES_TIMEZONE: America/Santo_Domingo
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install server dependencies
+        run: npm ci --prefix server
+
+      - name: Run two-user isolation harness
+        run: npm --prefix server run postgres:test-multi-user-isolation

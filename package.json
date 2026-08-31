@@ -14,8 +14,14 @@
     "start:server": "npm --prefix server start",
     "build": "npm --prefix client run build",
     "test": "npm --prefix server test",
+    "test:multi-user-isolation": "npm --prefix server run postgres:test-multi-user-isolation",
     "db:check": "npm --prefix server run db:check",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
     "install:all": "npm --prefix server install && npm --prefix client install",
     "audit": "npm audit --prefix server && npm audit --prefix client"
+  },
+  "devDependencies": {
+    "supabase": "^2.116.0"
   }
 }

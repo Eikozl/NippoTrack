@@ -18,11 +18,11 @@
 
 ## Deferred external validation
 
-The two-user live isolation harness is intentionally deferred at the owner's request. It requires two confirmed Supabase Auth test accounts and verifies real authenticated API behavior (foreign read/write/delete, cross-user links, export isolation, and per-user uniqueness). The harness and instructions are ready in `server/scripts/test-multi-user-isolation.js` and `MULTI_USER_PHASE_6_OWNERSHIP_EXECUTION.md`.
+The two-user live isolation harness now provisions and deletes confirmed ephemeral users automatically through a dedicated integration target. It still requires a separate Supabase integration project and its server-only Auth-admin secret; it must never run against JLT DEV or production. See `AUTOMATED_AUTH_AND_ISOLATION_TESTING.md`.
 
 ## Remaining blockers before deployment hardening may resume
 
-1. Execute the two-user live isolation harness successfully.
+1. Provision the separate integration target and execute the automated two-user isolation harness successfully.
 2. Verify a real sign-up confirmation email and that an unverified account cannot access private data.
 3. Verify a real password-recovery email, redirect, password update, and expired-link behavior.
 4. Configure and validate a non-test SMTP provider before production; its credentials and production redirect URLs must remain outside Git.
