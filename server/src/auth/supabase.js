@@ -4,6 +4,8 @@ const { createHash } = require('node:crypto');
 const verifiedUsers = new Map();
 const verificationTtlMs = 15_000;
 const verificationTimeoutMs = 5_000;
+const productionAuthRedirectUrl = 'https://japanese-learning-tracker.vercel.app/';
+const previewAuthRedirectUrl = 'https://japanese-learning-tracker-git-master-yeferson-sena.vercel.app/';
 
 function isTestBypass() {
   return process.env.NODE_ENV === 'test' && process.env.JLT_AUTH_BYPASS_FOR_TESTS === 'true';
@@ -26,7 +28,15 @@ function authClient() {
 }
 
 function authRedirectUrl() {
-  return required('SUPABASE_AUTH_REDIRECT_URL');
+  // Vercel exposes VERCEL_ENV automatically. Prefer stable aliases so auth links
+  // survive new deployments and no per-environment redirect variable is required.
+  if (process.env.VERCEL_ENV === 'production') return productionAuthRedirectUrl;
+  if (process.env.VERCEL_ENV === 'preview') return previewAuthRedirectUrl;
+
+  const configured = process.env.SUPABASE_AUTH_REDIRECT_URL;
+  if (configured?.trim()) return configured.trim();
+
+  return 'http://localhost:5173/';
 }
 
 function withTimeout(promise, timeoutMs) {
