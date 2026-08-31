@@ -16,6 +16,7 @@
     "test": "npm --prefix server test",
     "test:multi-user-isolation": "npm --prefix server run postgres:test-multi-user-isolation",
     "test:auth-flows": "npm --prefix server run postgres:test-auth-flows",
+    "test:postgres-runtime": "npm --prefix server run postgres:test-runtime",
     "db:check": "npm --prefix server run db:check",
     "supabase:start": "supabase start",
     "supabase:stop": "supabase stop",

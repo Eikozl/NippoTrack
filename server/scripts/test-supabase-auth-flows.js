@@ -20,6 +20,13 @@ const integration = {
   publishableKey: required('SUPABASE_INTEGRATION_PUBLISHABLE_KEY'),
   secretKey: required('SUPABASE_INTEGRATION_SECRET_KEY')
 };
+const integrationProjectRef = required('SUPABASE_INTEGRATION_PROJECT_REF');
+if (new URL(integration.url).hostname !== `${integrationProjectRef}.supabase.co`) {
+  throw new Error('SUPABASE_INTEGRATION_URL does not match SUPABASE_INTEGRATION_PROJECT_REF.');
+}
+if (!`${required('POSTGRES_RUNTIME_HOST')} ${required('POSTGRES_RUNTIME_USER')}`.includes(integrationProjectRef)) {
+  throw new Error('PostgreSQL runtime is not connected to the declared disposable integration project.');
+}
 
 process.env.NODE_ENV = 'integration';
 process.env.SUPABASE_URL = integration.url;

@@ -20,6 +20,7 @@
     "postgres:verify-multi-user-ownership": "node scripts/verify-multi-user-ownership.js",
     "postgres:test-multi-user-isolation": "node scripts/test-multi-user-isolation.js",
     "postgres:test-auth-flows": "node scripts/test-supabase-auth-flows.js",
+    "postgres:test-runtime": "node --test tests/postgres-runtime.test.js",
     "postgres:validate-import": "node scripts/validate-postgres-import.js"
   },
   "keywords": [],

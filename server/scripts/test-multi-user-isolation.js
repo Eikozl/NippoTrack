@@ -16,8 +16,15 @@ const integration = {
   publishableKey: required('SUPABASE_INTEGRATION_PUBLISHABLE_KEY'),
   secretKey: required('SUPABASE_INTEGRATION_SECRET_KEY')
 };
+const integrationProjectRef = required('SUPABASE_INTEGRATION_PROJECT_REF');
 if (process.env.JLT_ALLOW_DESTRUCTIVE_INTEGRATION_TESTS !== 'true') {
   throw new Error('Set JLT_ALLOW_DESTRUCTIVE_INTEGRATION_TESTS=true only for the disposable integration project.');
+}
+if (new URL(integration.url).hostname !== `${integrationProjectRef}.supabase.co`) {
+  throw new Error('SUPABASE_INTEGRATION_URL does not match SUPABASE_INTEGRATION_PROJECT_REF.');
+}
+if (!`${required('POSTGRES_RUNTIME_HOST')} ${required('POSTGRES_RUNTIME_USER')}`.includes(integrationProjectRef)) {
+  throw new Error('PostgreSQL runtime is not connected to the declared disposable integration project.');
 }
 
 process.env.NODE_ENV = 'integration';
@@ -86,6 +93,14 @@ async function main() {
     created.aSession = session.data.id_session;
     assert.equal((await api(userA.token, `/api/sessions/${created.aSession}`, { method: 'PUT', body: { vocabulary_ids: [created.bVocabulary] } })).response.status, 400);
 
+    const [dashboardA, dashboardB] = await Promise.all([api(userA.token, '/api/dashboard'), api(userB.token, '/api/dashboard')]);
+    assert.equal(dashboardA.response.status, 200);
+    assert.equal(dashboardB.response.status, 200);
+    assert.equal(dashboardA.data.minutesToday, 1);
+    assert.equal(dashboardB.data.minutesToday, 0);
+    assert.equal(dashboardA.data.recentSessions[0].id_session, created.aSession);
+    assert.deepEqual(dashboardB.data.recentSessions, []);
+
     const note = await api(userA.token, '/api/notes', { method: 'POST', body: { body: marker, category: 'General' } });
     assert.equal(note.response.status, 201);
     created.aNote = note.data.id_note;
@@ -95,7 +110,7 @@ async function main() {
     assert.equal(exportB.response.status, 200);
     assert.equal(exportB.data.data.vocabulary.some((item) => item.id_vocabulary === created.aVocabulary), false);
     assert.equal(exportB.data.data.vocabulary.some((item) => item.id_vocabulary === created.bVocabulary), true);
-    console.log(JSON.stringify({ isolation: 'passed', users: 'ephemeral-and-cleaned', checks: ['per-user uniqueness', 'search isolation', 'foreign read/update/delete', 'session and note link rejection', 'export isolation'] }, null, 2));
+    console.log(JSON.stringify({ isolation: 'passed', users: 'ephemeral-and-cleaned', checks: ['per-user uniqueness', 'search isolation', 'foreign read/update/delete', 'session and note link rejection', 'dashboard/statistics isolation', 'export isolation'] }, null, 2));
   } finally {
     const [userA, userB] = users;
     if (userA && created.aNote) await api(userA.token, `/api/notes/${created.aNote}`, { method: 'DELETE' }).catch(() => undefined);

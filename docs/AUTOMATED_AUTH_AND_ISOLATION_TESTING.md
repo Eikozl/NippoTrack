@@ -18,6 +18,7 @@ It verifies:
 - foreign read, update, and delete attempts return `404`;
 - session-to-foreign-vocabulary and note-to-foreign-vocabulary links return `400`;
 - an export contains no rows owned by the other user.
+- dashboard minutes and recent sessions remain private to their owner.
 
 Create an ignored `server/.env.integration` from `integration.env.example`, using credentials for a dedicated integration target. Then run:
 
@@ -27,6 +28,18 @@ npm.cmd run postgres:test-multi-user-isolation
 ```
 
 The explicit `JLT_ALLOW_DESTRUCTIVE_INTEGRATION_TESTS=true` guard is mandatory. It prevents accidental execution without acknowledging temporary Auth-user creation/deletion.
+
+## Authenticated PostgreSQL runtime harness
+
+The real PostgreSQL runtime test creates a confirmed ephemeral Auth user and validates the Express/runtime path without relying on fixed rows from the former single-user database. It covers Japanese text, romaji search, transactional vocabulary/example creation, session relationships, Santo Domingo dates, dashboard totals, and export output. Run it only against the same disposable target:
+
+```powershell
+$env:INTEGRATION_TEST_ENV_FILE = '.env.integration'
+$env:JLT_RUN_POSTGRES_INTEGRATION = 'true'
+npm.cmd run postgres:test-runtime
+```
+
+`SUPABASE_INTEGRATION_PROJECT_REF` must match the Supabase URL and appear in either the PostgreSQL pooler host or its pooler username, preventing the Auth admin cleanup flow from running against a different database accidentally.
 
 ## Automated confirmation and recovery harness
 
@@ -41,9 +54,10 @@ It creates and deletes temporary Auth users, verifies that an unconfirmed user c
 
 ## CI
 
-The `multi-user-integration` GitHub Actions job runs only when the following repository secrets are configured for the dedicated integration target:
+The `multi-user-integration` GitHub Actions job runs the authentication, two-user isolation, and authenticated PostgreSQL runtime harnesses only when the following repository secrets are configured for the dedicated integration target:
 
 - `SUPABASE_INTEGRATION_URL`
+- `SUPABASE_INTEGRATION_PROJECT_REF`
 - `SUPABASE_INTEGRATION_PUBLISHABLE_KEY`
 - `SUPABASE_INTEGRATION_SECRET_KEY`
 - `SUPABASE_AUTH_REDIRECT_URL`
