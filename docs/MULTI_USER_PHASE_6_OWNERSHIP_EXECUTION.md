@@ -20,6 +20,10 @@
 
 The verified `req.user.id` now scopes root lists, searches, details, writes, dashboard/activity data, goals and progress, review lookup/recording, content/notes/tags, links, and exports. Child resources are reached only through an owned root. Relationship replacement verifies every target belongs to the caller within its transaction. A foreign resource returns `404` rather than confirming its existence.
 
+## Transitional authentication cleanup
+
+The obsolete local single-password session module and `JLT_AUTH_PASSWORD*` / `JLT_SESSION_SECRET` environment variables were removed. Supabase Auth is the only identity, session, verification, and password-recovery mechanism. Express continues to verify bearer tokens server-side before exposing `req.user.id`.
+
 ## Required integration-test environment (not committed)
 
 Create two distinct, confirmed Supabase Auth test accounts and provide either an access token for each or email/password credentials only in an ignored local file such as `server/.env.multi-user-test`:
