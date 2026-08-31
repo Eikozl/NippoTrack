@@ -70,6 +70,7 @@ async function listKanji(req, res) {
       params,
       orderBy,
       orderParams,
+      userId: req.user.id,
       page,
       limit,
       offset
@@ -86,8 +87,8 @@ async function listKanjiOptions(req, res) {
     const candidates = buildSearchCandidates(search || '');
     const normalizedOnyomi = normalizedJapaneseSql('onyomi');
     const normalizedKunyomi = normalizedJapaneseSql('kunyomi');
-    let query = 'SELECT id_kanji, character_kanji, meaning, onyomi, kunyomi FROM kanji';
-    let params = [limit];
+    let query = 'SELECT id_kanji, character_kanji, meaning, onyomi, kunyomi FROM kanji WHERE user_id = ?';
+    let params = [req.user.id, limit];
 
     if (search) {
       const rawContains = `%${candidates.raw}%`;
@@ -98,8 +99,8 @@ async function listKanjiOptions(req, res) {
       const kanaExact = buildComparisons([normalizedOnyomi, normalizedKunyomi], kanaValues, { operator: '=' });
       const kanaPrefix = buildComparisons([normalizedOnyomi, normalizedKunyomi], kanaValues, { pattern: 'prefix' });
       const candidateLimit = Math.min(limit * 5, 200);
-      query += ` WHERE character_kanji LIKE ? OR meaning LIKE ? OR onyomi LIKE ? OR kunyomi LIKE ?
-        ${kanaContains.sql ? `OR ${kanaContains.sql}` : ''}`;
+      query += ` AND (character_kanji LIKE ? OR meaning LIKE ? OR onyomi LIKE ? OR kunyomi LIKE ?
+        ${kanaContains.sql ? `OR ${kanaContains.sql}` : ''})`;
       query += ` ORDER BY CASE
         WHEN character_kanji = ? THEN 1
         WHEN onyomi = ? OR kunyomi = ? THEN 2
@@ -109,7 +110,7 @@ async function listKanjiOptions(req, res) {
         WHEN meaning LIKE ? OR CONCAT(' ', COALESCE(meaning, '')) LIKE ? THEN 6
         ELSE 7 END, id_kanji DESC LIMIT ?`;
       params = [
-        rawContains, rawContains, rawContains, rawContains, ...kanaContains.params,
+        req.user.id, rawContains, rawContains, rawContains, rawContains, ...kanaContains.params,
         candidates.raw, candidates.raw, candidates.raw, ...kanaExact.params,
         rawPrefix, rawPrefix, ...kanaPrefix.params, rawPrefix, meaningWordPrefix,
         candidateLimit
@@ -128,16 +129,16 @@ async function listKanjiOptions(req, res) {
 async function getKanji(req, res) {
   try {
     const id = parseIdParam(req, 'kanji entry');
-    const entry = await fetchEntityById('kanji', id);
+    const entry = await fetchEntityById('kanji', id, req.user.id);
     if (!entry) return res.status(404).json({ error: 'kanji entry not found' });
 
     const [vocabulary] = await pool.execute(
-      'SELECT v.id_vocabulary, v.word, v.reading, v.meaning, v.jlpt_level, v.status FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary WHERE kv.id_kanji = ? ORDER BY v.word',
-      [id]
+      'SELECT v.id_vocabulary, v.word, v.reading, v.meaning, v.jlpt_level, v.status FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary WHERE kv.id_kanji = ? AND v.user_id = ? ORDER BY v.word',
+      [id, req.user.id]
     );
     const [usageExamples] = await pool.execute(
-      'SELECT v.id_vocabulary, v.word, v.reading, ue.id_usage_example, ue.sentence, ue.translation FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary JOIN usage_examples ue ON ue.id_vocabulary = v.id_vocabulary WHERE kv.id_kanji = ? ORDER BY v.word, ue.id_usage_example DESC',
-      [id]
+      'SELECT v.id_vocabulary, v.word, v.reading, ue.id_usage_example, ue.sentence, ue.translation FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary JOIN usage_examples ue ON ue.id_vocabulary = v.id_vocabulary WHERE kv.id_kanji = ? AND v.user_id = ? ORDER BY v.word, ue.id_usage_example DESC',
+      [id, req.user.id]
     );
     return res.json({ ...entry, vocabulary, usageExamples });
   } catch (error) {
@@ -177,11 +178,11 @@ async function createKanji(req, res) {
       status: body.status === undefined || body.status === null || body.status === '' ? 'New' : body.status
     });
     const [result] = await pool.execute(
-      'INSERT INTO kanji (character_kanji, meaning, onyomi, kunyomi, jlpt_level, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [values.character, values.meaning, values.onyomi, values.kunyomi, values.jlptLevel, values.status, values.notes]
+      'INSERT INTO kanji (character_kanji, meaning, onyomi, kunyomi, jlpt_level, status, notes, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [values.character, values.meaning, values.onyomi, values.kunyomi, values.jlptLevel, values.status, values.notes, req.user.id]
     );
     await createReviewItem(pool, 'id_kanji', result.insertId);
-    return res.status(201).json(await fetchEntityById('kanji', result.insertId));
+    return res.status(201).json(await fetchEntityById('kanji', result.insertId, req.user.id));
   } catch (error) {
     return sendRouteError(res, error, {
       defaultMessage: 'Unable to create kanji entry.',
@@ -193,7 +194,7 @@ async function createKanji(req, res) {
 async function updateKanji(req, res) {
   try {
     const id = parseIdParam(req, 'kanji entry');
-    const current = await fetchEntityById('kanji', id);
+    const current = await fetchEntityById('kanji', id, req.user.id);
     if (!current) return res.status(404).json({ error: 'kanji entry not found' });
 
     const body = req.body || {};
@@ -201,10 +202,10 @@ async function updateKanji(req, res) {
     validateStandardRecordPayload(body, { requiredWord: false, requiredMeaning: false });
     const values = normalizeKanji(body, current);
     await pool.execute(
-      'UPDATE kanji SET character_kanji = ?, meaning = ?, onyomi = ?, kunyomi = ?, jlpt_level = ?, status = ?, notes = ? WHERE id_kanji = ?',
-      [values.character, values.meaning, values.onyomi, values.kunyomi, values.jlptLevel, values.status, values.notes, id]
+      'UPDATE kanji SET character_kanji = ?, meaning = ?, onyomi = ?, kunyomi = ?, jlpt_level = ?, status = ?, notes = ? WHERE id_kanji = ? AND user_id = ?',
+      [values.character, values.meaning, values.onyomi, values.kunyomi, values.jlptLevel, values.status, values.notes, id, req.user.id]
     );
-    return res.json(await fetchEntityById('kanji', id));
+    return res.json(await fetchEntityById('kanji', id, req.user.id));
   } catch (error) {
     return sendRouteError(res, error, {
       defaultMessage: 'Unable to update kanji entry.',
@@ -216,8 +217,8 @@ async function updateKanji(req, res) {
 async function deleteKanji(req, res) {
   try {
     const id = parseIdParam(req, 'kanji entry');
-    if (!await fetchEntityById('kanji', id)) return res.status(404).json({ error: 'kanji entry not found' });
-    await pool.execute('DELETE FROM kanji WHERE id_kanji = ?', [id]);
+    if (!await fetchEntityById('kanji', id, req.user.id)) return res.status(404).json({ error: 'kanji entry not found' });
+    await pool.execute('DELETE FROM kanji WHERE id_kanji = ? AND user_id = ?', [id, req.user.id]);
     return res.json({ success: true, deletedId: id });
   } catch (error) {
     return sendRouteError(res, error, { defaultMessage: 'Unable to delete kanji entry.' });

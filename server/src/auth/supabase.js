@@ -38,7 +38,7 @@ function withTimeout(promise, timeoutMs) {
 }
 
 async function verifiedUserFromRequest(req) {
-  if (isTestBypass()) return { id: '00000000-0000-4000-8000-000000000001', email: 'test@jlt.local', email_confirmed_at: new Date().toISOString() };
+  if (isTestBypass()) return { id: process.env.JLT_TEST_USER_ID || '00000000-0000-4000-8000-000000000001', email: 'test@jlt.local', email_confirmed_at: new Date().toISOString() };
   const authorization = req.get('authorization') || '';
   const match = authorization.match(/^Bearer\s+(.+)$/i);
   if (!match) return null;

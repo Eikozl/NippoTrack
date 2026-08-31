@@ -50,21 +50,21 @@ function goalValues(body) {
   return [title, goalType, targetValue, periodType, targetJlpt, targetStatus, startDate, dueDate, active];
 }
 
-async function getGoalProgress(goal) {
+async function getGoalProgress(goal, userId) {
   let sql;
   let params;
   if (goal.goal_type === 'study_minutes') {
     if (goal.period_type === 'weekly') {
-      sql = "SELECT COALESCE(SUM(duration_minutes), 0) AS progress FROM study_sessions WHERE session_date >= GREATEST(?, date_trunc('week', CURRENT_DATE)::date) AND session_date <= CURRENT_DATE";
-      params = [goal.start_date];
+      sql = "SELECT COALESCE(SUM(duration_minutes), 0) AS progress FROM study_sessions WHERE user_id = ? AND session_date >= GREATEST(?, date_trunc('week', CURRENT_DATE)::date) AND session_date <= CURRENT_DATE";
+      params = [userId, goal.start_date];
     } else {
-      sql = 'SELECT COALESCE(SUM(duration_minutes), 0) AS progress FROM study_sessions WHERE session_date >= ? AND session_date <= ?';
-      params = [goal.start_date, goal.due_date || '9999-12-31'];
+      sql = 'SELECT COALESCE(SUM(duration_minutes), 0) AS progress FROM study_sessions WHERE user_id = ? AND session_date >= ? AND session_date <= ?';
+      params = [userId, goal.start_date, goal.due_date || '9999-12-31'];
     }
   } else {
     const table = { vocabulary_count: 'vocabulary', kanji_count: 'kanji', grammar_count: 'grammar_points' }[goal.goal_type];
-    const clauses = ['created_at::date >= ?', 'created_at::date <= ?'];
-    params = [goal.start_date, goal.due_date || '9999-12-31'];
+    const clauses = ['user_id = ?', 'created_at::date >= ?', 'created_at::date <= ?'];
+    params = [userId, goal.start_date, goal.due_date || '9999-12-31'];
     if (goal.target_jlpt_level) { clauses.push('jlpt_level = ?'); params.push(goal.target_jlpt_level); }
     if (goal.target_status) { clauses.push('status = ?'); params.push(goal.target_status); }
     sql = `SELECT COUNT(*) AS progress FROM ${table} WHERE ${clauses.join(' AND ')}`;
@@ -79,8 +79,8 @@ async function listGoals(req, res) {
     const { page, limit, offset } = parsePagination(req.query);
     let whereSql = ' WHERE 1=1'; const params = [];
     if (req.query.active !== undefined) { if (!['0', '1'].includes(req.query.active)) throw new ValidationError('active must be 0 or 1.'); whereSql += ' AND is_active = ?'; params.push(req.query.active === '1'); }
-    const result = await executePaginatedList(pool, { table: 'goals', columns: 'id_goal, title, goal_type, target_value, period_type, target_jlpt_level, target_status, start_date, due_date, is_active', whereSql, params, orderBy: 'is_active DESC, due_date IS NULL, due_date ASC, id_goal DESC', page, limit, offset });
-    result.items = await Promise.all(result.items.map(getGoalProgress));
+    const result = await executePaginatedList(pool, { table: 'goals', columns: 'id_goal, title, goal_type, target_value, period_type, target_jlpt_level, target_status, start_date, due_date, is_active', whereSql, params, orderBy: 'is_active DESC, due_date IS NULL, due_date ASC, id_goal DESC', page, limit, offset, userId: req.user.id });
+    result.items = await Promise.all(result.items.map((goal) => getGoalProgress(goal, req.user.id)));
     return res.json(result);
   } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load goals.' }); }
 }
@@ -88,33 +88,33 @@ async function listGoals(req, res) {
 async function createGoal(req, res) {
   try {
     validateWriteFields(req.body || {}, ALLOWED_FIELDS.goals); const values = goalValues(req.body || {});
-    const [result] = await pool.execute('INSERT INTO goals (title, goal_type, target_value, period_type, target_jlpt_level, target_status, start_date, due_date, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', values);
-    const [rows] = await pool.execute('SELECT id_goal, title, goal_type, target_value, period_type, target_jlpt_level, target_status, start_date, due_date, is_active FROM goals WHERE id_goal = ?', [result.insertId]);
-    return res.status(201).json(await getGoalProgress(rows[0]));
+    const [result] = await pool.execute('INSERT INTO goals (title, goal_type, target_value, period_type, target_jlpt_level, target_status, start_date, due_date, is_active, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [...values, req.user.id]);
+    const [rows] = await pool.execute('SELECT id_goal, title, goal_type, target_value, period_type, target_jlpt_level, target_status, start_date, due_date, is_active FROM goals WHERE id_goal = ? AND user_id = ?', [result.insertId, req.user.id]);
+    return res.status(201).json(await getGoalProgress(rows[0], req.user.id));
   } catch (error) { return sendRouteError(res, error, { defaultMessage: 'Unable to create goal.' }); }
 }
 
 async function updateGoal(req, res) {
   try {
-    const id = parseIdParam(req, 'goal'); const [existing] = await pool.execute('SELECT * FROM goals WHERE id_goal = ?', [id]); if (!existing[0]) return res.status(404).json({ error: 'goal not found' });
+    const id = parseIdParam(req, 'goal'); const [existing] = await pool.execute('SELECT * FROM goals WHERE id_goal = ? AND user_id = ?', [id, req.user.id]); if (!existing[0]) return res.status(404).json({ error: 'goal not found' });
     validateWriteFields(req.body || {}, ALLOWED_FIELDS.goals); const values = goalValues({ ...existing[0], ...(req.body || {}) });
-    await pool.execute('UPDATE goals SET title=?, goal_type=?, target_value=?, period_type=?, target_jlpt_level=?, target_status=?, start_date=?, due_date=?, is_active=? WHERE id_goal=?', [...values, id]);
-    const [rows] = await pool.execute('SELECT id_goal, title, goal_type, target_value, period_type, target_jlpt_level, target_status, start_date, due_date, is_active FROM goals WHERE id_goal = ?', [id]); return res.json(await getGoalProgress(rows[0]));
+    await pool.execute('UPDATE goals SET title=?, goal_type=?, target_value=?, period_type=?, target_jlpt_level=?, target_status=?, start_date=?, due_date=?, is_active=? WHERE id_goal=? AND user_id=?', [...values, id, req.user.id]);
+    const [rows] = await pool.execute('SELECT id_goal, title, goal_type, target_value, period_type, target_jlpt_level, target_status, start_date, due_date, is_active FROM goals WHERE id_goal = ? AND user_id = ?', [id, req.user.id]); return res.json(await getGoalProgress(rows[0], req.user.id));
   } catch (error) { return sendRouteError(res, error, { defaultMessage: 'Unable to update goal.' }); }
 }
 
-async function deleteGoal(req, res) { try { const id = parseIdParam(req, 'goal'); const [result] = await pool.execute('DELETE FROM goals WHERE id_goal = ?', [id]); if (!result.affectedRows) return res.status(404).json({ error: 'goal not found' }); return res.json({ success: true, deletedId: id }); } catch (error) { return sendRouteError(res, error, { defaultMessage: 'Unable to delete goal.' }); } }
+async function deleteGoal(req, res) { try { const id = parseIdParam(req, 'goal'); const [result] = await pool.execute('DELETE FROM goals WHERE id_goal = ? AND user_id = ?', [id, req.user.id]); if (!result.affectedRows) return res.status(404).json({ error: 'goal not found' }); return res.json({ success: true, deletedId: id }); } catch (error) { return sendRouteError(res, error, { defaultMessage: 'Unable to delete goal.' }); } }
 
 function resourceHandlers({ key, table, idKey, columns, allowed, normalize, orderBy, searchColumns = [] }) {
   async function list(req, res) {
     try { const { page, limit, offset } = parsePagination(req.query); let whereSql = ' WHERE 1=1'; const params = [];
       if (req.query.search && searchColumns.length) { const term = `%${normalizeText(req.query.search, 255, 'search')}%`; whereSql += ` AND (${searchColumns.map((column) => `${column} LIKE ?`).join(' OR ')})`; params.push(...searchColumns.map(() => term)); }
-      return res.json(await executePaginatedList(pool, { table, columns, whereSql, params, orderBy, page, limit, offset }));
+      return res.json(await executePaginatedList(pool, { table, columns, whereSql, params, orderBy, page, limit, offset, userId: req.user.id }));
     } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: `Unable to load ${key}.` }); }
   }
-  async function create(req, res) { try { validateWriteFields(req.body || {}, allowed); const values = normalize(req.body || {}); const fields = Object.keys(values); const [result] = await pool.execute(`INSERT INTO ${table} (${fields.join(', ')}) VALUES (${fields.map(() => '?').join(', ')})`, Object.values(values)); const [rows] = await pool.execute(`SELECT ${columns} FROM ${table} WHERE ${idKey} = ?`, [result.insertId]); return res.status(201).json(rows[0]); } catch (error) { return sendRouteError(res, error, { defaultMessage: `Unable to create ${key}.` }); } }
-  async function update(req, res) { try { const id = parseIdParam(req, key); const [existing] = await pool.execute(`SELECT * FROM ${table} WHERE ${idKey} = ?`, [id]); if (!existing[0]) return res.status(404).json({ error: `${key} not found` }); validateWriteFields(req.body || {}, allowed); const values = normalize({ ...existing[0], ...(req.body || {}) }); const fields = Object.keys(values); await pool.execute(`UPDATE ${table} SET ${fields.map((field) => `${field} = ?`).join(', ')} WHERE ${idKey} = ?`, [...Object.values(values), id]); const [rows] = await pool.execute(`SELECT ${columns} FROM ${table} WHERE ${idKey} = ?`, [id]); return res.json(rows[0]); } catch (error) { return sendRouteError(res, error, { defaultMessage: `Unable to update ${key}.` }); } }
-  async function remove(req, res) { try { const id = parseIdParam(req, key); const [result] = await pool.execute(`DELETE FROM ${table} WHERE ${idKey} = ?`, [id]); if (!result.affectedRows) return res.status(404).json({ error: `${key} not found` }); return res.json({ success: true, deletedId: id }); } catch (error) { return sendRouteError(res, error, { defaultMessage: `Unable to delete ${key}.` }); } }
+  async function create(req, res) { try { validateWriteFields(req.body || {}, allowed); const values = { ...normalize(req.body || {}), user_id: req.user.id }; const fields = Object.keys(values); const [result] = await pool.execute(`INSERT INTO ${table} (${fields.join(', ')}) VALUES (${fields.map(() => '?').join(', ')})`, Object.values(values)); const [rows] = await pool.execute(`SELECT ${columns} FROM ${table} WHERE ${idKey} = ? AND user_id = ?`, [result.insertId, req.user.id]); return res.status(201).json(rows[0]); } catch (error) { return sendRouteError(res, error, { defaultMessage: `Unable to create ${key}.` }); } }
+  async function update(req, res) { try { const id = parseIdParam(req, key); const [existing] = await pool.execute(`SELECT * FROM ${table} WHERE ${idKey} = ? AND user_id = ?`, [id, req.user.id]); if (!existing[0]) return res.status(404).json({ error: `${key} not found` }); validateWriteFields(req.body || {}, allowed); const values = normalize({ ...existing[0], ...(req.body || {}) }); const fields = Object.keys(values); await pool.execute(`UPDATE ${table} SET ${fields.map((field) => `${field} = ?`).join(', ')} WHERE ${idKey} = ? AND user_id = ?`, [...Object.values(values), id, req.user.id]); const [rows] = await pool.execute(`SELECT ${columns} FROM ${table} WHERE ${idKey} = ? AND user_id = ?`, [id, req.user.id]); return res.json(rows[0]); } catch (error) { return sendRouteError(res, error, { defaultMessage: `Unable to update ${key}.` }); } }
+  async function remove(req, res) { try { const id = parseIdParam(req, key); const [result] = await pool.execute(`DELETE FROM ${table} WHERE ${idKey} = ? AND user_id = ?`, [id, req.user.id]); if (!result.affectedRows) return res.status(404).json({ error: `${key} not found` }); return res.json({ success: true, deletedId: id }); } catch (error) { return sendRouteError(res, error, { defaultMessage: `Unable to delete ${key}.` }); } }
   return { list, create, update, remove };
 }
 
@@ -125,24 +125,24 @@ const tags = resourceHandlers({ key: 'tag', table: 'tags', idKey: 'id_tag', colu
 const LINK_CONFIGS = {
   content: {
     entity: { table: 'content_entries', idColumn: 'id_content_entry', name: 'content entry' },
-    groups: [{ key: 'sessions', table: 'content_entry_sessions', entityColumn: 'id_content_entry', targetColumn: 'id_session', select: 'SELECT s.id_session, s.session_date, s.duration_minutes, s.category, s.resource FROM content_entry_sessions l JOIN study_sessions s ON s.id_session = l.id_session WHERE l.id_content_entry = ? ORDER BY s.session_date DESC, s.id_session DESC' }]
+    groups: [{ key: 'sessions', table: 'content_entry_sessions', entityColumn: 'id_content_entry', targetColumn: 'id_session', select: 'SELECT s.id_session, s.session_date, s.duration_minutes, s.category, s.resource FROM content_entry_sessions l JOIN study_sessions s ON s.id_session = l.id_session WHERE l.id_content_entry = ? AND s.user_id = ? ORDER BY s.session_date DESC, s.id_session DESC' }]
   },
   notes: {
     entity: { table: 'notes', idColumn: 'id_note', name: 'note' },
     groups: [
-      { key: 'sessions', table: 'note_study_sessions', entityColumn: 'id_note', targetColumn: 'id_session', select: 'SELECT s.id_session, s.session_date, s.duration_minutes, s.category, s.resource FROM note_study_sessions l JOIN study_sessions s ON s.id_session = l.id_session WHERE l.id_note = ? ORDER BY s.session_date DESC, s.id_session DESC' },
-      { key: 'vocabulary', table: 'note_vocabulary', entityColumn: 'id_note', targetColumn: 'id_vocabulary', select: 'SELECT v.id_vocabulary, v.word, v.reading, v.meaning FROM note_vocabulary l JOIN vocabulary v ON v.id_vocabulary = l.id_vocabulary WHERE l.id_note = ? ORDER BY v.word' },
-      { key: 'kanji', table: 'note_kanji', entityColumn: 'id_note', targetColumn: 'id_kanji', select: 'SELECT k.id_kanji, k.character_kanji, k.meaning FROM note_kanji l JOIN kanji k ON k.id_kanji = l.id_kanji WHERE l.id_note = ? ORDER BY k.character_kanji' },
-      { key: 'grammar', table: 'note_grammar', entityColumn: 'id_note', targetColumn: 'id_grammar', select: 'SELECT g.id_grammar, g.grammar_point, g.meaning FROM note_grammar l JOIN grammar_points g ON g.id_grammar = l.id_grammar WHERE l.id_note = ? ORDER BY g.grammar_point' }
+      { key: 'sessions', table: 'note_study_sessions', entityColumn: 'id_note', targetColumn: 'id_session', select: 'SELECT s.id_session, s.session_date, s.duration_minutes, s.category, s.resource FROM note_study_sessions l JOIN study_sessions s ON s.id_session = l.id_session WHERE l.id_note = ? AND s.user_id = ? ORDER BY s.session_date DESC, s.id_session DESC' },
+      { key: 'vocabulary', table: 'note_vocabulary', entityColumn: 'id_note', targetColumn: 'id_vocabulary', select: 'SELECT v.id_vocabulary, v.word, v.reading, v.meaning FROM note_vocabulary l JOIN vocabulary v ON v.id_vocabulary = l.id_vocabulary WHERE l.id_note = ? AND v.user_id = ? ORDER BY v.word' },
+      { key: 'kanji', table: 'note_kanji', entityColumn: 'id_note', targetColumn: 'id_kanji', select: 'SELECT k.id_kanji, k.character_kanji, k.meaning FROM note_kanji l JOIN kanji k ON k.id_kanji = l.id_kanji WHERE l.id_note = ? AND k.user_id = ? ORDER BY k.character_kanji' },
+      { key: 'grammar', table: 'note_grammar', entityColumn: 'id_note', targetColumn: 'id_grammar', select: 'SELECT g.id_grammar, g.grammar_point, g.meaning FROM note_grammar l JOIN grammar_points g ON g.id_grammar = l.id_grammar WHERE l.id_note = ? AND g.user_id = ? ORDER BY g.grammar_point' }
     ]
   },
   tags: {
     entity: { table: 'tags', idColumn: 'id_tag', name: 'tag' },
     groups: [
-      { key: 'sessions', table: 'tag_study_sessions', entityColumn: 'id_tag', targetColumn: 'id_session', select: 'SELECT s.id_session, s.session_date, s.duration_minutes, s.category, s.resource FROM tag_study_sessions l JOIN study_sessions s ON s.id_session = l.id_session WHERE l.id_tag = ? ORDER BY s.session_date DESC, s.id_session DESC' },
-      { key: 'vocabulary', table: 'tag_vocabulary', entityColumn: 'id_tag', targetColumn: 'id_vocabulary', select: 'SELECT v.id_vocabulary, v.word, v.reading, v.meaning FROM tag_vocabulary l JOIN vocabulary v ON v.id_vocabulary = l.id_vocabulary WHERE l.id_tag = ? ORDER BY v.word' },
-      { key: 'kanji', table: 'tag_kanji', entityColumn: 'id_tag', targetColumn: 'id_kanji', select: 'SELECT k.id_kanji, k.character_kanji, k.meaning FROM tag_kanji l JOIN kanji k ON k.id_kanji = l.id_kanji WHERE l.id_tag = ? ORDER BY k.character_kanji' },
-      { key: 'grammar', table: 'tag_grammar', entityColumn: 'id_tag', targetColumn: 'id_grammar', select: 'SELECT g.id_grammar, g.grammar_point, g.meaning FROM tag_grammar l JOIN grammar_points g ON g.id_grammar = l.id_grammar WHERE l.id_tag = ? ORDER BY g.grammar_point' }
+      { key: 'sessions', table: 'tag_study_sessions', entityColumn: 'id_tag', targetColumn: 'id_session', select: 'SELECT s.id_session, s.session_date, s.duration_minutes, s.category, s.resource FROM tag_study_sessions l JOIN study_sessions s ON s.id_session = l.id_session WHERE l.id_tag = ? AND s.user_id = ? ORDER BY s.session_date DESC, s.id_session DESC' },
+      { key: 'vocabulary', table: 'tag_vocabulary', entityColumn: 'id_tag', targetColumn: 'id_vocabulary', select: 'SELECT v.id_vocabulary, v.word, v.reading, v.meaning FROM tag_vocabulary l JOIN vocabulary v ON v.id_vocabulary = l.id_vocabulary WHERE l.id_tag = ? AND v.user_id = ? ORDER BY v.word' },
+      { key: 'kanji', table: 'tag_kanji', entityColumn: 'id_tag', targetColumn: 'id_kanji', select: 'SELECT k.id_kanji, k.character_kanji, k.meaning FROM tag_kanji l JOIN kanji k ON k.id_kanji = l.id_kanji WHERE l.id_tag = ? AND k.user_id = ? ORDER BY k.character_kanji' },
+      { key: 'grammar', table: 'tag_grammar', entityColumn: 'id_tag', targetColumn: 'id_grammar', select: 'SELECT g.id_grammar, g.grammar_point, g.meaning FROM tag_grammar l JOIN grammar_points g ON g.id_grammar = l.id_grammar WHERE l.id_tag = ? AND g.user_id = ? ORDER BY g.grammar_point' }
     ]
   }
 };
@@ -152,8 +152,10 @@ function linkIds(value, name) {
   return [...new Set(value)];
 }
 
-async function ensureLinkEntity(config, id) {
-  const [rows] = await pool.execute(`SELECT ${config.entity.idColumn} FROM ${config.entity.table} WHERE ${config.entity.idColumn} = ?`, [id]);
+const LINK_TARGETS = { id_session: 'study_sessions', id_vocabulary: 'vocabulary', id_kanji: 'kanji', id_grammar: 'grammar_points' };
+
+async function ensureLinkEntity(config, id, userId) {
+  const [rows] = await pool.execute(`SELECT ${config.entity.idColumn} FROM ${config.entity.table} WHERE ${config.entity.idColumn} = ? AND user_id = ?`, [id, userId]);
   if (!rows[0]) return false;
   return true;
 }
@@ -163,8 +165,8 @@ function linkHandlers(kind) {
   async function list(req, res) {
     try {
       const id = parseIdParam(req, config.entity.name);
-      if (!await ensureLinkEntity(config, id)) return res.status(404).json({ error: `${config.entity.name} not found` });
-      const rows = await Promise.all(config.groups.map(async (group) => [group.key, (await pool.execute(group.select, [id]))[0]]));
+      if (!await ensureLinkEntity(config, id, req.user.id)) return res.status(404).json({ error: `${config.entity.name} not found` });
+      const rows = await Promise.all(config.groups.map(async (group) => [group.key, (await pool.execute(group.select, [id, req.user.id]))[0]]));
       return res.json(Object.fromEntries(rows));
     } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: `Unable to load ${config.entity.name} links.` }); }
   }
@@ -172,12 +174,17 @@ function linkHandlers(kind) {
     let connection;
     try {
       const id = parseIdParam(req, config.entity.name);
-      if (!await ensureLinkEntity(config, id)) return res.status(404).json({ error: `${config.entity.name} not found` });
+      if (!await ensureLinkEntity(config, id, req.user.id)) return res.status(404).json({ error: `${config.entity.name} not found` });
       const body = req.body || {};
       validateWriteFields(body, config.groups.map((group) => group.key));
       const supplied = config.groups.filter((group) => body[group.key] !== undefined).map((group) => ({ group, ids: linkIds(body[group.key], group.key) }));
       connection = await pool.getConnection(); await connection.beginTransaction();
       for (const { group, ids } of supplied) {
+        const targetTable = LINK_TARGETS[group.targetColumn];
+        if (ids.length) {
+          const [owned] = await connection.execute(`SELECT ${group.targetColumn} FROM ${targetTable} WHERE user_id = ? AND ${group.targetColumn} = ANY(?)`, [req.user.id, ids]);
+          if (owned.length !== ids.length) throw new ValidationError('Linked entries must belong to the authenticated user.');
+        }
         await connection.execute(`DELETE FROM ${group.table} WHERE ${group.entityColumn} = ?`, [id]);
         for (const targetId of ids) await connection.execute(`INSERT INTO ${group.table} (${group.entityColumn}, ${group.targetColumn}) VALUES (?, ?)`, [id, targetId]);
       }

@@ -65,7 +65,7 @@ test('paginated lists bind validated LIMIT/OFFSET and expose records beyond the 
       assert.deepEqual(data.pagination, { page: 4, limit: 50, total: 151, totalPages: 4 });
 
       const listCall = calls.find(({ sql }) => /ORDER BY/.test(sql));
-      assert.deepEqual(listCall.params, [50, 150]);
+      assert.deepEqual(listCall.params, ['00000000-0000-4000-8000-000000000001', 50, 150]);
       assert.match(listCall.sql, /LIMIT \? OFFSET \?/);
       assert.doesNotMatch(listCall.sql, /LIMIT 50|OFFSET 150/);
     } finally {
@@ -302,7 +302,7 @@ test('PUT preserves omitted required fields and normalizes optional empty text t
         body: { reading: '', notes: '' }
       });
       assert.equal(response.status, 200);
-      assert.deepEqual(updateParams, ['日本語', null, 'Japanese language', 'N5', 'Learning', null, 7]);
+      assert.deepEqual(updateParams, ['日本語', null, 'Japanese language', 'N5', 'Learning', null, 7, '00000000-0000-4000-8000-000000000001']);
     } finally {
       await stopServer(server);
     }

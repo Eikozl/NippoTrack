@@ -15,6 +15,10 @@
     "postgres:check": "node scripts/check-postgres-db.js",
     "postgres:import": "node scripts/migrate-backup-to-postgres.js",
     "mariadb:audit": "node scripts/audit-mariadb-source.js",
+    "postgres:backup": "node scripts/backup-postgres.js",
+    "postgres:backfill-multi-user-ownership": "node scripts/backfill-multi-user-ownership.js",
+    "postgres:verify-multi-user-ownership": "node scripts/verify-multi-user-ownership.js",
+    "postgres:test-multi-user-isolation": "node scripts/test-multi-user-isolation.js",
     "postgres:validate-import": "node scripts/validate-postgres-import.js"
   },
   "keywords": [],

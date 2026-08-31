@@ -220,8 +220,8 @@ test('canonical /api/sessions supports category, exact-date and date-range filte
       }
 
       const listCalls = calls.filter(({ sql }) => /ORDER BY/.test(sql));
-      assert.deepEqual(listCalls[0].params, ['Reading', '2026-08-29', 50, 0]);
-      assert.deepEqual(listCalls[1].params, ['2026-08-01', '2026-08-29', 50, 0]);
+      assert.deepEqual(listCalls[0].params, ['Reading', '2026-08-29', '00000000-0000-4000-8000-000000000001', 50, 0]);
+      assert.deepEqual(listCalls[1].params, ['2026-08-01', '2026-08-29', '00000000-0000-4000-8000-000000000001', 50, 0]);
       assert.match(listCalls[0].sql, /category = \?.*session_date = \?/);
       assert.match(listCalls[1].sql, /session_date >= \?.*session_date <= \?/);
     } finally {
@@ -363,6 +363,7 @@ test('PUT /api/sessions replaces supplied relationship sets in one transaction',
     async beginTransaction() {},
     async execute(sql, params) {
       statements.push({ sql, params });
+      if (sql.startsWith('SELECT id_')) return [params[1].map((id) => ({ id }))];
       return [{ affectedRows: 1 }];
     },
     async commit() {

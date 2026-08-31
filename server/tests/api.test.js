@@ -182,6 +182,7 @@ test('POST /api/study-sessions writes all N:M relationships atomically and de-du
       if (sql.startsWith('INSERT INTO study_sessions')) {
         return [{ insertId: 41 }];
       }
+      if (sql.startsWith('SELECT id_')) return [params[1].map((id) => ({ id }))];
       return [{ affectedRows: 1 }];
     },
     async commit() {
@@ -198,8 +199,8 @@ test('POST /api/study-sessions writes all N:M relationships atomically and de-du
   await withPoolStubs({
     getConnection: async () => connection,
     execute: async (sql, params) => {
-      assert.match(sql, /FROM study_sessions WHERE id_session = \?/);
-      assert.deepEqual(params, [41]);
+      assert.match(sql, /FROM study_sessions WHERE id_session = \? AND user_id = \?/);
+      assert.deepEqual(params, [41, '00000000-0000-4000-8000-000000000001']);
       return [[{
         id_session: 41,
         session_date: '2026-08-29',

@@ -22,8 +22,8 @@ async function listDueReviews(req, res) {
       LEFT JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary
       LEFT JOIN kanji k ON k.id_kanji = ri.id_kanji
       LEFT JOIN grammar_points g ON g.id_grammar = ri.id_grammar
-      WHERE ri.due_on <= CURRENT_DATE
-      ORDER BY ri.due_on ASC, ri.id_review_item ASC`);
+      WHERE ri.due_on <= CURRENT_DATE AND (v.user_id = ? OR k.user_id = ? OR g.user_id = ?)
+      ORDER BY ri.due_on ASC, ri.id_review_item ASC`, [req.user.id, req.user.id, req.user.id]);
     return res.json({ items });
   } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load reviews.' }); }
 }
@@ -36,7 +36,12 @@ async function recordReview(req, res) {
     if (!Object.hasOwn(INTERVALS, result)) throw new ValidationError('result must be Again, Hard, or Good.');
     connection = await pool.getConnection();
     await connection.beginTransaction();
-    const [rows] = await connection.execute('SELECT id_review_item, interval_days FROM review_items WHERE id_review_item = ? FOR UPDATE', [id]);
+    const [rows] = await connection.execute(`SELECT ri.id_review_item, ri.interval_days
+      FROM review_items ri
+      LEFT JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary
+      LEFT JOIN kanji k ON k.id_kanji = ri.id_kanji
+      LEFT JOIN grammar_points g ON g.id_grammar = ri.id_grammar
+      WHERE ri.id_review_item = ? AND (v.user_id = ? OR k.user_id = ? OR g.user_id = ?) FOR UPDATE`, [id, req.user.id, req.user.id, req.user.id]);
     if (!rows[0]) { await connection.rollback(); connection.release(); connection = null; return res.status(404).json({ error: 'review item not found' }); }
     const previousInterval = Number(rows[0].interval_days || 0);
     const nextInterval = INTERVALS[result];

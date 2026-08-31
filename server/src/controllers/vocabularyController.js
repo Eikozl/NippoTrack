@@ -77,6 +77,7 @@ async function listVocabulary(req, res) {
       params,
       orderBy,
       orderParams,
+      userId: req.user.id,
       page,
       limit,
       offset
@@ -93,8 +94,8 @@ async function listVocabularyOptions(req, res) {
     const candidates = buildSearchCandidates(search || '');
     const normalizedWord = normalizedJapaneseSql('word');
     const normalizedReading = normalizedJapaneseSql('reading');
-    let query = 'SELECT id_vocabulary, word, reading, meaning FROM vocabulary';
-    let params = [limit];
+    let query = 'SELECT id_vocabulary, word, reading, meaning FROM vocabulary WHERE user_id = ?';
+    let params = [req.user.id, limit];
 
     if (search) {
       const rawContains = `%${candidates.raw}%`;
@@ -105,7 +106,7 @@ async function listVocabularyOptions(req, res) {
       const kanaExact = buildComparisons([normalizedWord, normalizedReading], kanaValues, { operator: '=' });
       const kanaPrefix = buildComparisons([normalizedWord, normalizedReading], kanaValues, { pattern: 'prefix' });
       const candidateLimit = Math.min(limit * 5, 200);
-      query += ` WHERE word LIKE ? OR reading LIKE ? OR meaning LIKE ?${kanaContains.sql ? ` OR ${kanaContains.sql}` : ''}`;
+      query += ` AND (word LIKE ? OR reading LIKE ? OR meaning LIKE ?${kanaContains.sql ? ` OR ${kanaContains.sql}` : ''})`;
       query += ` ORDER BY CASE
         WHEN word = ? THEN 1
         WHEN reading = ? THEN 2
@@ -116,7 +117,7 @@ async function listVocabularyOptions(req, res) {
         WHEN meaning LIKE ? OR CONCAT(' ', COALESCE(meaning, '')) LIKE ? THEN 7
         ELSE 8 END, id_vocabulary DESC LIMIT ?`;
       params = [
-        rawContains, rawContains, rawContains, ...kanaContains.params,
+        req.user.id, rawContains, rawContains, rawContains, ...kanaContains.params,
         candidates.raw, candidates.raw, ...kanaExact.params,
         rawPrefix, rawPrefix, ...kanaPrefix.params, rawPrefix, meaningWordPrefix,
         candidateLimit
@@ -135,15 +136,15 @@ async function listVocabularyOptions(req, res) {
 async function getVocabulary(req, res) {
   try {
     const id = parseIdParam(req, 'vocabulary entry');
-    const entry = await fetchEntityById('vocabulary', id);
+    const entry = await fetchEntityById('vocabulary', id, req.user.id);
 
     if (!entry) {
       return res.status(404).json({ error: 'vocabulary entry not found' });
     }
 
     const [kanji] = await pool.execute(
-      'SELECT k.id_kanji, k.character_kanji, k.meaning, k.jlpt_level, k.status FROM kanji_vocabulary kv JOIN kanji k ON kv.id_kanji = k.id_kanji WHERE kv.id_vocabulary = ? ORDER BY k.character_kanji',
-      [id]
+      'SELECT k.id_kanji, k.character_kanji, k.meaning, k.jlpt_level, k.status FROM kanji_vocabulary kv JOIN kanji k ON kv.id_kanji = k.id_kanji WHERE kv.id_vocabulary = ? AND k.user_id = ? ORDER BY k.character_kanji',
+      [id, req.user.id]
     );
     const [examples] = await pool.execute(
       'SELECT id_usage_example, sentence, translation, notes FROM usage_examples WHERE id_vocabulary = ? ORDER BY id_usage_example DESC',
@@ -174,24 +175,24 @@ async function createVocabulary(req, res) {
     const exampleNotes = normalizeText(body.example_notes, 1500, 'example_notes');
     if (!exampleSentence) {
       const [result] = await pool.execute(
-        'INSERT INTO vocabulary (word, reading, meaning, jlpt_level, status, notes) VALUES (?, ?, ?, ?, ?, ?)',
-        [values.word, values.reading, values.meaning, values.jlptLevel, values.status, values.notes]
+        'INSERT INTO vocabulary (word, reading, meaning, jlpt_level, status, notes, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [values.word, values.reading, values.meaning, values.jlptLevel, values.status, values.notes, req.user.id]
       );
       await createReviewItem(pool, 'id_vocabulary', result.insertId);
-      return res.status(201).json(await fetchEntityById('vocabulary', result.insertId));
+      return res.status(201).json(await fetchEntityById('vocabulary', result.insertId, req.user.id));
     }
     connection = await pool.getConnection();
     await connection.beginTransaction();
     const [result] = await connection.execute(
-      'INSERT INTO vocabulary (word, reading, meaning, jlpt_level, status, notes) VALUES (?, ?, ?, ?, ?, ?)',
-      [values.word, values.reading, values.meaning, values.jlptLevel, values.status, values.notes]
+      'INSERT INTO vocabulary (word, reading, meaning, jlpt_level, status, notes, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [values.word, values.reading, values.meaning, values.jlptLevel, values.status, values.notes, req.user.id]
     );
     await connection.execute('INSERT INTO usage_examples (id_vocabulary, sentence, translation, notes) VALUES (?, ?, ?, ?)', [result.insertId, exampleSentence, exampleTranslation, exampleNotes]);
     await createReviewItem(connection, 'id_vocabulary', result.insertId);
     await connection.commit();
     connection.release();
     connection = null;
-    const created = await fetchEntityById('vocabulary', result.insertId);
+    const created = await fetchEntityById('vocabulary', result.insertId, req.user.id);
     return res.status(201).json(created);
   } catch (error) {
     if (connection) await rollbackAndRelease(connection);
@@ -202,7 +203,7 @@ async function createVocabulary(req, res) {
 async function updateVocabulary(req, res) {
   try {
     const id = parseIdParam(req, 'vocabulary entry');
-    const current = await fetchEntityById('vocabulary', id);
+    const current = await fetchEntityById('vocabulary', id, req.user.id);
     if (!current) return res.status(404).json({ error: 'vocabulary entry not found' });
 
     const body = req.body || {};
@@ -221,10 +222,10 @@ async function updateVocabulary(req, res) {
       notes: body.notes !== undefined ? normalizeText(body.notes, 1500, 'notes') : current.notes
     };
     await pool.execute(
-      'UPDATE vocabulary SET word = ?, reading = ?, meaning = ?, jlpt_level = ?, status = ?, notes = ? WHERE id_vocabulary = ?',
-      [values.word, values.reading, values.meaning, values.jlptLevel, values.status, values.notes, id]
+      'UPDATE vocabulary SET word = ?, reading = ?, meaning = ?, jlpt_level = ?, status = ?, notes = ? WHERE id_vocabulary = ? AND user_id = ?',
+      [values.word, values.reading, values.meaning, values.jlptLevel, values.status, values.notes, id, req.user.id]
     );
-    return res.json(await fetchEntityById('vocabulary', id));
+    return res.json(await fetchEntityById('vocabulary', id, req.user.id));
   } catch (error) {
     return sendRouteError(res, error, { defaultMessage: 'Unable to update vocabulary entry.' });
   }
@@ -233,10 +234,10 @@ async function updateVocabulary(req, res) {
 async function deleteVocabulary(req, res) {
   try {
     const id = parseIdParam(req, 'vocabulary entry');
-    if (!await fetchEntityById('vocabulary', id)) {
+    if (!await fetchEntityById('vocabulary', id, req.user.id)) {
       return res.status(404).json({ error: 'vocabulary entry not found' });
     }
-    await pool.execute('DELETE FROM vocabulary WHERE id_vocabulary = ?', [id]);
+    await pool.execute('DELETE FROM vocabulary WHERE id_vocabulary = ? AND user_id = ?', [id, req.user.id]);
     return res.json({ success: true, deletedId: id });
   } catch (error) {
     return sendRouteError(res, error, { defaultMessage: 'Unable to delete vocabulary entry.' });
@@ -256,10 +257,10 @@ function exampleValues(body, { partial = false } = {}) {
 async function createVocabularyExample(req, res) {
   try {
     const vocabularyId = parseIdParam(req, 'vocabulary entry');
-    if (!await fetchEntityById('vocabulary', vocabularyId)) return res.status(404).json({ error: 'vocabulary entry not found' });
+    if (!await fetchEntityById('vocabulary', vocabularyId, req.user.id)) return res.status(404).json({ error: 'vocabulary entry not found' });
     const values = exampleValues(req.body || {});
     const [result] = await pool.execute('INSERT INTO usage_examples (id_vocabulary, sentence, translation, notes) VALUES (?, ?, ?, ?)', [vocabularyId, values.sentence, values.translation, values.notes]);
-    const [rows] = await pool.execute('SELECT id_usage_example, sentence, translation, notes FROM usage_examples WHERE id_usage_example = ?', [result.insertId]);
+    const [rows] = await pool.execute('SELECT id_usage_example, sentence, translation, notes FROM usage_examples WHERE id_usage_example = ? AND id_vocabulary = ?', [result.insertId, vocabularyId]);
     return res.status(201).json(rows[0]);
   } catch (error) { return sendRouteError(res, error, { defaultMessage: 'Unable to create usage example.' }); }
 }
@@ -269,12 +270,13 @@ async function updateVocabularyExample(req, res) {
     const vocabularyId = parseIdParam(req, 'vocabulary entry');
     const exampleId = Number(req.params.exampleId);
     if (!Number.isInteger(exampleId) || exampleId <= 0) throw new ValidationError('usage example id must be a positive integer');
+    if (!await fetchEntityById('vocabulary', vocabularyId, req.user.id)) return res.status(404).json({ error: 'vocabulary entry not found' });
     const [existing] = await pool.execute('SELECT id_usage_example, sentence, translation, notes FROM usage_examples WHERE id_usage_example = ? AND id_vocabulary = ?', [exampleId, vocabularyId]);
     if (!existing[0]) return res.status(404).json({ error: 'usage example not found' });
     const values = exampleValues(req.body || {}, { partial: true });
     const current = existing[0];
-    await pool.execute('UPDATE usage_examples SET sentence = ?, translation = ?, notes = ? WHERE id_usage_example = ?', [values.sentence ?? current.sentence, values.translation ?? current.translation, values.notes ?? current.notes, exampleId]);
-    const [rows] = await pool.execute('SELECT id_usage_example, sentence, translation, notes FROM usage_examples WHERE id_usage_example = ?', [exampleId]);
+    await pool.execute('UPDATE usage_examples SET sentence = ?, translation = ?, notes = ? WHERE id_usage_example = ? AND id_vocabulary = ?', [values.sentence ?? current.sentence, values.translation ?? current.translation, values.notes ?? current.notes, exampleId, vocabularyId]);
+    const [rows] = await pool.execute('SELECT id_usage_example, sentence, translation, notes FROM usage_examples WHERE id_usage_example = ? AND id_vocabulary = ?', [exampleId, vocabularyId]);
     return res.json(rows[0]);
   } catch (error) { return sendRouteError(res, error, { defaultMessage: 'Unable to update usage example.' }); }
 }
@@ -284,6 +286,7 @@ async function deleteVocabularyExample(req, res) {
     const vocabularyId = parseIdParam(req, 'vocabulary entry');
     const exampleId = Number(req.params.exampleId);
     if (!Number.isInteger(exampleId) || exampleId <= 0) throw new ValidationError('usage example id must be a positive integer');
+    if (!await fetchEntityById('vocabulary', vocabularyId, req.user.id)) return res.status(404).json({ error: 'vocabulary entry not found' });
     const [result] = await pool.execute('DELETE FROM usage_examples WHERE id_usage_example = ? AND id_vocabulary = ?', [exampleId, vocabularyId]);
     if (!result.affectedRows) return res.status(404).json({ error: 'usage example not found' });
     return res.json({ success: true, deletedId: exampleId });

@@ -68,6 +68,7 @@ async function listGrammar(req, res) {
       params,
       orderBy,
       orderParams,
+      userId: req.user.id,
       page,
       limit,
       offset
@@ -83,8 +84,8 @@ async function listGrammarOptions(req, res) {
     const search = normalizeText(req.query.search, 100, 'search');
     const candidates = buildSearchCandidates(search || '');
     const normalizedPoint = normalizedJapaneseSql('grammar_point');
-    let query = 'SELECT id_grammar, grammar_point, meaning, structure, example FROM grammar_points';
-    let params = [limit];
+    let query = 'SELECT id_grammar, grammar_point, meaning, structure, example FROM grammar_points WHERE user_id = ?';
+    let params = [req.user.id, limit];
 
     if (search) {
       const rawContains = `%${candidates.raw}%`;
@@ -95,8 +96,8 @@ async function listGrammarOptions(req, res) {
       const kanaExact = buildComparisons([normalizedPoint], kanaValues, { operator: '=' });
       const kanaPrefix = buildComparisons([normalizedPoint], kanaValues, { pattern: 'prefix' });
       const candidateLimit = Math.min(limit * 5, 200);
-      query += ` WHERE grammar_point LIKE ? OR meaning LIKE ? OR structure LIKE ? OR example LIKE ?
-        ${kanaContains.sql ? `OR ${kanaContains.sql}` : ''}`;
+      query += ` AND (grammar_point LIKE ? OR meaning LIKE ? OR structure LIKE ? OR example LIKE ?
+        ${kanaContains.sql ? `OR ${kanaContains.sql}` : ''})`;
       query += ` ORDER BY CASE
         WHEN grammar_point = ? THEN 1
         ${kanaExact.sql ? `WHEN ${kanaExact.sql} THEN 2` : ''}
@@ -105,7 +106,7 @@ async function listGrammarOptions(req, res) {
         WHEN meaning LIKE ? OR CONCAT(' ', COALESCE(meaning, '')) LIKE ? THEN 5
         ELSE 6 END, id_grammar DESC LIMIT ?`;
       params = [
-        rawContains, rawContains, rawContains, rawContains, ...kanaContains.params,
+        req.user.id, rawContains, rawContains, rawContains, rawContains, ...kanaContains.params,
         candidates.raw, ...kanaExact.params,
         rawPrefix, ...kanaPrefix.params, rawPrefix, meaningWordPrefix,
         candidateLimit
@@ -124,7 +125,7 @@ async function listGrammarOptions(req, res) {
 async function getGrammar(req, res) {
   try {
     const id = parseIdParam(req, 'grammar point');
-    const entry = await fetchEntityById('grammar', id);
+    const entry = await fetchEntityById('grammar', id, req.user.id);
     if (!entry) return res.status(404).json({ error: 'grammar point not found' });
     return res.json(entry);
   } catch (error) {
@@ -160,11 +161,11 @@ async function createGrammar(req, res) {
       status: body.status === undefined || body.status === null || body.status === '' ? 'New' : body.status
     });
     const [result] = await pool.execute(
-      'INSERT INTO grammar_points (grammar_point, meaning, structure, example, jlpt_level, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [values.grammarPoint, values.meaning, values.structure, values.example, values.jlptLevel, values.status, values.notes]
+      'INSERT INTO grammar_points (grammar_point, meaning, structure, example, jlpt_level, status, notes, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [values.grammarPoint, values.meaning, values.structure, values.example, values.jlptLevel, values.status, values.notes, req.user.id]
     );
     await createReviewItem(pool, 'id_grammar', result.insertId);
-    return res.status(201).json(await fetchEntityById('grammar', result.insertId));
+    return res.status(201).json(await fetchEntityById('grammar', result.insertId, req.user.id));
   } catch (error) {
     return sendRouteError(res, error, {
       defaultMessage: 'Unable to create grammar point.',
@@ -176,7 +177,7 @@ async function createGrammar(req, res) {
 async function updateGrammar(req, res) {
   try {
     const id = parseIdParam(req, 'grammar point');
-    const current = await fetchEntityById('grammar', id);
+    const current = await fetchEntityById('grammar', id, req.user.id);
     if (!current) return res.status(404).json({ error: 'grammar point not found' });
 
     const body = req.body || {};
@@ -184,10 +185,10 @@ async function updateGrammar(req, res) {
     validateStandardRecordPayload(body, { requiredWord: false, requiredMeaning: false });
     const values = normalizeGrammar(body, current);
     await pool.execute(
-      'UPDATE grammar_points SET grammar_point = ?, meaning = ?, structure = ?, example = ?, jlpt_level = ?, status = ?, notes = ? WHERE id_grammar = ?',
-      [values.grammarPoint, values.meaning, values.structure, values.example, values.jlptLevel, values.status, values.notes, id]
+      'UPDATE grammar_points SET grammar_point = ?, meaning = ?, structure = ?, example = ?, jlpt_level = ?, status = ?, notes = ? WHERE id_grammar = ? AND user_id = ?',
+      [values.grammarPoint, values.meaning, values.structure, values.example, values.jlptLevel, values.status, values.notes, id, req.user.id]
     );
-    return res.json(await fetchEntityById('grammar', id));
+    return res.json(await fetchEntityById('grammar', id, req.user.id));
   } catch (error) {
     return sendRouteError(res, error, {
       defaultMessage: 'Unable to update grammar point.',
@@ -199,8 +200,8 @@ async function updateGrammar(req, res) {
 async function deleteGrammar(req, res) {
   try {
     const id = parseIdParam(req, 'grammar point');
-    if (!await fetchEntityById('grammar', id)) return res.status(404).json({ error: 'grammar point not found' });
-    await pool.execute('DELETE FROM grammar_points WHERE id_grammar = ?', [id]);
+    if (!await fetchEntityById('grammar', id, req.user.id)) return res.status(404).json({ error: 'grammar point not found' });
+    await pool.execute('DELETE FROM grammar_points WHERE id_grammar = ? AND user_id = ?', [id, req.user.id]);
     return res.json({ success: true, deletedId: id });
   } catch (error) {
     return sendRouteError(res, error, { defaultMessage: 'Unable to delete grammar point.' });

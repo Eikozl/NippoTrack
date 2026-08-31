@@ -6,7 +6,11 @@ const migrationsDirectory = path.join(__dirname, '../db/migrations-postgres');
 const migrationPattern = /^\d{3}_[a-z0-9_]+\.sql$/;
 
 async function main() {
-  const files = (await fs.readdir(migrationsDirectory)).filter((name) => migrationPattern.test(name)).sort();
+  const target = process.argv[2] || process.env.POSTGRES_MIGRATION_TO;
+  if (target && !migrationPattern.test(target)) throw new Error('Migration target must be a valid migration filename.');
+  const available = (await fs.readdir(migrationsDirectory)).filter((name) => migrationPattern.test(name)).sort();
+  if (target && !available.includes(target)) throw new Error(`Migration target was not found: ${target}`);
+  const files = target ? available.filter((name) => name <= target) : available;
   if (!files.length) throw new Error('No PostgreSQL migrations were found.');
   const client = await pool.connect();
   try {

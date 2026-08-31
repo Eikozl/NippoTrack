@@ -56,7 +56,8 @@ async function listSessions(req, res) {
       orderBy: 'session_date DESC, id_session DESC',
       page,
       limit,
-      offset
+      offset,
+      userId: req.user.id
     }));
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Database unavailable' });
@@ -66,20 +67,20 @@ async function listSessions(req, res) {
 async function getSession(req, res) {
   try {
     const id = parseIdParam(req, 'study session');
-    const session = await fetchEntityById('sessions', id);
+    const session = await fetchEntityById('sessions', id, req.user.id);
     if (!session) return res.status(404).json({ error: 'study session not found' });
 
     const [vocabulary] = await pool.execute(
-      'SELECT v.id_vocabulary, v.word, v.reading, v.meaning, v.jlpt_level, v.status FROM session_vocabulary sv JOIN vocabulary v ON sv.id_vocabulary = v.id_vocabulary WHERE sv.id_session = ?',
-      [id]
+      'SELECT v.id_vocabulary, v.word, v.reading, v.meaning, v.jlpt_level, v.status FROM session_vocabulary sv JOIN vocabulary v ON sv.id_vocabulary = v.id_vocabulary WHERE sv.id_session = ? AND v.user_id = ?',
+      [id, req.user.id]
     );
     const [kanji] = await pool.execute(
-      'SELECT k.id_kanji, k.character_kanji, k.meaning, k.onyomi, k.kunyomi, k.jlpt_level, k.status FROM session_kanji sk JOIN kanji k ON sk.id_kanji = k.id_kanji WHERE sk.id_session = ?',
-      [id]
+      'SELECT k.id_kanji, k.character_kanji, k.meaning, k.onyomi, k.kunyomi, k.jlpt_level, k.status FROM session_kanji sk JOIN kanji k ON sk.id_kanji = k.id_kanji WHERE sk.id_session = ? AND k.user_id = ?',
+      [id, req.user.id]
     );
     const [grammar] = await pool.execute(
-      'SELECT g.id_grammar, g.grammar_point, g.meaning, g.structure, g.example, g.jlpt_level, g.status FROM session_grammar sg JOIN grammar_points g ON sg.id_grammar = g.id_grammar WHERE sg.id_session = ?',
-      [id]
+      'SELECT g.id_grammar, g.grammar_point, g.meaning, g.structure, g.example, g.jlpt_level, g.status FROM session_grammar sg JOIN grammar_points g ON sg.id_grammar = g.id_grammar WHERE sg.id_session = ? AND g.user_id = ?',
+      [id, req.user.id]
     );
     const [writingRows] = await pool.execute(
       'SELECT id_session_writing, title, content, notes FROM session_writings WHERE id_session = ?',
@@ -122,7 +123,16 @@ async function saveWriting(connection, sessionId, writing) {
   );
 }
 
-async function insertRelationships(connection, sessionId, relationships) {
+async function ensureOwnedRelationships(connection, table, idColumn, ids, userId) {
+  if (!ids?.length) return;
+  const [rows] = await connection.execute(`SELECT ${idColumn} FROM ${table} WHERE user_id = ? AND ${idColumn} = ANY(?)`, [userId, ids]);
+  if (rows.length !== ids.length) throw new ValidationError('Related entries must belong to the authenticated user.');
+}
+
+async function insertRelationships(connection, sessionId, relationships, userId) {
+  await ensureOwnedRelationships(connection, 'vocabulary', 'id_vocabulary', relationships.vocabularyIds, userId);
+  await ensureOwnedRelationships(connection, 'kanji', 'id_kanji', relationships.kanjiIds, userId);
+  await ensureOwnedRelationships(connection, 'grammar_points', 'id_grammar', relationships.grammarIds, userId);
   for (const vocabularyId of relationships.vocabularyIds || []) {
     await connection.execute(
       'INSERT INTO session_vocabulary (id_session, id_vocabulary) VALUES (?, ?)',
@@ -155,16 +165,16 @@ async function createSession(req, res) {
     connection = await pool.getConnection();
     await connection.beginTransaction();
     const [result] = await connection.execute(
-      'INSERT INTO study_sessions (session_date, duration_minutes, category, resource, notes) VALUES (?, ?, ?, ?, ?)',
-      [values.sessionDate, values.durationMinutes, values.category, values.resource, values.notes]
+      'INSERT INTO study_sessions (session_date, duration_minutes, category, resource, notes, user_id) VALUES (?, ?, ?, ?, ?, ?)',
+      [values.sessionDate, values.durationMinutes, values.category, values.resource, values.notes, req.user.id]
     );
-    await insertRelationships(connection, result.insertId, relationships);
+    await insertRelationships(connection, result.insertId, relationships, req.user.id);
     await saveWriting(connection, result.insertId, writing);
     await connection.commit();
     connection.release();
     connection = null;
 
-    return res.status(201).json(await fetchEntityById('sessions', result.insertId));
+    return res.status(201).json(await fetchEntityById('sessions', result.insertId, req.user.id));
   } catch (error) {
     if (connection) await rollbackAndRelease(connection);
     return sendRouteError(res, error, { defaultMessage: 'Unable to create study session.' });
@@ -175,7 +185,7 @@ async function updateSession(req, res) {
   let connection;
   try {
     const id = parseIdParam(req, 'study session');
-    const current = await fetchEntityById('sessions', id);
+    const current = await fetchEntityById('sessions', id, req.user.id);
     if (!current) return res.status(404).json({ error: 'study session not found' });
 
     const body = req.body || {};
@@ -188,8 +198,8 @@ async function updateSession(req, res) {
     const [writingRows] = await connection.execute('SELECT title, content, notes FROM session_writings WHERE id_session = ?', [id]);
     const writing = normalizeWriting(body, writingRows[0] || null);
     await connection.execute(
-      'UPDATE study_sessions SET session_date = ?, duration_minutes = ?, category = ?, resource = ?, notes = ? WHERE id_session = ?',
-      [values.sessionDate, values.durationMinutes, values.category, values.resource, values.notes, id]
+      'UPDATE study_sessions SET session_date = ?, duration_minutes = ?, category = ?, resource = ?, notes = ? WHERE id_session = ? AND user_id = ?',
+      [values.sessionDate, values.durationMinutes, values.category, values.resource, values.notes, id, req.user.id]
     );
 
     if (relationships.vocabularyIds) {
@@ -201,13 +211,13 @@ async function updateSession(req, res) {
     if (relationships.grammarIds) {
       await connection.execute('DELETE FROM session_grammar WHERE id_session = ?', [id]);
     }
-    await insertRelationships(connection, id, relationships);
+    await insertRelationships(connection, id, relationships, req.user.id);
     await saveWriting(connection, id, writing);
     await connection.commit();
     connection.release();
     connection = null;
 
-    return res.json(await fetchEntityById('sessions', id));
+    return res.json(await fetchEntityById('sessions', id, req.user.id));
   } catch (error) {
     if (connection) await rollbackAndRelease(connection);
     return sendRouteError(res, error, { defaultMessage: 'Unable to update study session.' });
@@ -217,8 +227,8 @@ async function updateSession(req, res) {
 async function deleteSession(req, res) {
   try {
     const id = parseIdParam(req, 'study session');
-    if (!await fetchEntityById('sessions', id)) return res.status(404).json({ error: 'study session not found' });
-    await pool.execute('DELETE FROM study_sessions WHERE id_session = ?', [id]);
+    if (!await fetchEntityById('sessions', id, req.user.id)) return res.status(404).json({ error: 'study session not found' });
+    await pool.execute('DELETE FROM study_sessions WHERE id_session = ? AND user_id = ?', [id, req.user.id]);
     return res.json({ success: true, deletedId: id });
   } catch (error) {
     return sendRouteError(res, error, { defaultMessage: 'Unable to delete study session.' });
