@@ -13,17 +13,18 @@
 - Supabase runtime security verification passes: 25 forced-RLS tables, 25 runtime CRUD policies, and no unexpected grants or role privileges.
 - Ownership verification passes: no null root ownership and no cross-user junction rows.
 - Migration runner is idempotent.
+- Phase 11 live isolation validation passed against the disposable `JLT testing` Supabase project. It verified per-user uniqueness, search and export isolation, safe foreign read/update/delete behavior, and cross-user session/note relationship rejection. The harness uses only ephemeral Auth users and test records.
 - Regression suite: 49 passing, 1 explicit real-PostgreSQL integration test skipped unless its dedicated integration environment is supplied.
 - Production client build passes.
 
 ## Deferred external validation
 
-The two-user live isolation harness now provisions and deletes confirmed ephemeral users automatically through a dedicated integration target. It still requires a separate Supabase integration project and its server-only Auth-admin secret; it must never run against JLT DEV or production. See `AUTOMATED_AUTH_AND_ISOLATION_TESTING.md`.
+The two-user live isolation harness now provisions and deletes confirmed ephemeral users automatically through a dedicated integration target. It must never run against JLT DEV or production. The confirmation/recovery harness is also available, but JLT testing's Auth write operations (`generateLink` and Auth-user deletion) timed out during live validation despite the database and public Auth health endpoint responding. See `AUTOMATED_AUTH_AND_ISOLATION_TESTING.md`.
 
 ## Remaining blockers before deployment hardening may resume
 
-1. Provision the separate integration target and execute the automated two-user isolation harness successfully.
-2. Verify a real sign-up confirmation email and that an unverified account cannot access private data.
+1. Repair or recreate the disposable JLT testing project's Supabase Auth write path; it currently times out for confirmation-link generation and Auth-user deletion.
+2. Execute the confirmation/recovery harness after that repair, then verify a real sign-up confirmation email and that an unverified account cannot access private data.
 3. Verify a real password-recovery email, redirect, password update, and expired-link behavior.
 4. Configure and validate a non-test SMTP provider before production; its credentials and production redirect URLs must remain outside Git.
 5. Run the explicitly configured real PostgreSQL/Supabase integration test environment.

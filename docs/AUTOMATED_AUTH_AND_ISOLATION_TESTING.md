@@ -28,6 +28,17 @@ npm.cmd run postgres:test-multi-user-isolation
 
 The explicit `JLT_ALLOW_DESTRUCTIVE_INTEGRATION_TESTS=true` guard is mandatory. It prevents accidental execution without acknowledging temporary Auth-user creation/deletion.
 
+## Automated confirmation and recovery harness
+
+The same disposable target can validate Supabase Auth confirmation and recovery without a second mailbox:
+
+```powershell
+$env:INTEGRATION_TEST_ENV_FILE = '.env.integration'
+npm.cmd run postgres:test-auth-flows
+```
+
+It creates and deletes temporary Auth users, verifies that an unconfirmed user cannot sign in, consumes a generated Supabase confirmation token, verifies private API access after confirmation, verifies the non-enumerating recovery response, replaces a password through a recovery token, and rejects reused or invalid recovery tokens. `generateLink` is an Auth-admin test mechanism; it does not prove external mailbox delivery. Confirmation/recovery email delivery and production redirect URLs remain a separate production-readiness check requiring a configured test mailbox/SMTP.
+
 ## CI
 
 The `multi-user-integration` GitHub Actions job runs only when the following repository secrets are configured for the dedicated integration target:
