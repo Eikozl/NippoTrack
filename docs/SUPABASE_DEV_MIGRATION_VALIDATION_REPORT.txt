@@ -1,0 +1,63 @@
+JLT — SUPABASE DEVELOPMENT MIGRATION / VALIDATION REPORT
+========================================================
+
+Date: 2026-08-30
+Result: ACCEPTED. Supabase DEV is the cloud PostgreSQL infrastructure for remaining JLT development.
+
+Scope and exclusions
+--------------------
+* No Vercel configuration, deployment preparation, domain work, or production deployment was performed.
+* MariaDB was not changed. It remains a temporary rollback/reference source only.
+* The source was the already validated immutable local backup, not a live MariaDB write path.
+
+Connection strategy
+-------------------
+* The supplied direct admin hostname was not resolvable from this network, consistent
+  with the direct endpoint's IPv6 requirement.
+* Supabase Shared Pooler / Session mode (port 5432) was selected as the approved IPv4
+  fallback for schema migration, transfer, and current persistent local JLT runtime.
+* SSL enforcement is active in the Supabase project. The Node configuration requires
+  SSL for this target. Certificate pinning/verify-full may be added later with the
+  Supabase CA; no password or URL is committed.
+* Migration operations and runtime connection strategy remain separate variables:
+  `SUPABASE_MIGRATION_URL` should designate the direct admin URL when IPv6 is available;
+  `SUPABASE_RUNTIME_URL` should designate the session-pooler URL from IPv4 environments.
+  Current local configuration uses ignored `.env.supabase` fields (`POSTGRES_HOST`,
+  `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`,
+  `POSTGRES_TIMEZONE`, `POSTGRES_SSL`).
+* DEV and future PROD must stay separate Supabase projects with separate credentials,
+  migration execution, validation records, and no shared test data.
+
+Schema and history
+------------------
+`001_jlt_postgres_baseline.sql` was applied through the existing transactional runner.
+It created all 25 application tables plus the JLT-owned `public.schema_migrations`.
+The baseline filename and SHA-256 checksum were recorded there. This is deliberately
+separate from any Supabase CLI-managed `supabase_migrations.schema_migrations` history.
+
+Data migration
+--------------
+The parameterized importer consumed the validated local backup in parent-before-child
+order with constraints enabled, explicit original IDs, nullable values, and all
+relationship rows preserved. It then aligned all 12 identity sequences.
+
+Validation results
+------------------
+* All 25 Supabase application-table row counts match the validated source.
+* Canonical deterministic data comparison passed for every table.
+* The baseline retained PK, FK, UNIQUE, and CHECK constraints; child inserts succeeded
+  under active FK enforcement.
+* All 12 generated-ID sequence tests passed above imported maxima.
+* Japanese text samples (一つ/ひとつ, 二つ/ふたつ, 三つ/みっつ) are preserved.
+* Timestamp instants match the validated source; runtime and check sessions report
+  America/Santo_Domingo for calendar/current-date behavior.
+* Romaji lookup `nihongo` -> 日本語 passed through the active Supabase runtime.
+* Existing route transaction tests pass, and runtime integration exercised migrated
+  health, vocabulary count, session detail, search, and dashboard workflows.
+* Full suite: 49 passed, 0 failed against Supabase DEV.
+
+Acceptance boundary
+-------------------
+Supabase DEV is accepted as the cloud database for continued JLT development. Stop
+here: do not begin any Vercel-related work. Vercel remains strictly post-V3 and
+post-final-audit work.

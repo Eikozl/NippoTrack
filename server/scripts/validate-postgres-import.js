@@ -1,0 +1,23 @@
+const fs = require('node:fs/promises');
+const pg = require('../src/config/postgres');
+const tables = ['vocabulary','kanji','grammar_points','study_sessions','goals','content_entries','notes','tags','kanji_vocabulary','session_vocabulary','session_kanji','session_grammar','session_writings','usage_examples','content_entry_sessions','note_study_sessions','note_vocabulary','note_kanji','note_grammar','tag_study_sessions','tag_vocabulary','tag_kanji','tag_grammar','review_items','review_events'];
+const ids = {vocabulary:'id_vocabulary',kanji:'id_kanji',grammar_points:'id_grammar',study_sessions:'id_session',session_writings:'id_session_writing',usage_examples:'id_usage_example',goals:'id_goal',content_entries:'id_content_entry',notes:'id_note',tags:'id_tag',review_items:'id_review_item',review_events:'id_review_event'};
+const q = (v) => `"${v}"`;
+const normalize = (v) => v instanceof Date ? v.toISOString() : typeof v === 'boolean' ? Number(v) : v;
+const canon = (rows) => rows.map((row) => Object.fromEntries(Object.keys(row).sort().map((key) => [key, normalize(row[key])]))).sort((a,b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+async function main() {
+  const backup = JSON.parse(await fs.readFile(process.argv[2], 'utf8')); const client = await pg.connect();
+  try {
+    const result = { counts: {}, parity: {}, sequenceTests: {}, japanese: [], timestamps: [] };
+    for (const table of tables) { const source = canon(backup.data[table]); const target = canon((await client.query(`SELECT * FROM ${q(table)}`)).rows); result.counts[table] = { source: source.length, target: target.length }; result.parity[table] = JSON.stringify(source) === JSON.stringify(target); }
+    await client.query('BEGIN');
+    const tests = {
+      vocabulary:["INSERT INTO vocabulary(word,meaning) VALUES ('__seq_vocab__','x') RETURNING id_vocabulary",'id_vocabulary'], kanji:["INSERT INTO kanji(character_kanji,meaning) VALUES ('序','x') RETURNING id_kanji",'id_kanji'], grammar_points:["INSERT INTO grammar_points(grammar_point,meaning) VALUES ('__seq_grammar__','x') RETURNING id_grammar",'id_grammar'], study_sessions:["INSERT INTO study_sessions(session_date,duration_minutes,category) VALUES (CURRENT_DATE,1,'Writing') RETURNING id_session",'id_session'], session_writings:["INSERT INTO session_writings(id_session,content) VALUES ((SELECT id_session FROM study_sessions ORDER BY id_session LIMIT 1),'x') RETURNING id_session_writing",'id_session_writing'], usage_examples:["INSERT INTO usage_examples(id_vocabulary,sentence) VALUES ((SELECT id_vocabulary FROM vocabulary ORDER BY id_vocabulary LIMIT 1),'x') RETURNING id_usage_example",'id_usage_example'], goals:["INSERT INTO goals(title,goal_type,target_value,period_type,start_date) VALUES ('__seq_goal__','study_minutes',1,'cumulative',CURRENT_DATE) RETURNING id_goal",'id_goal'], content_entries:["INSERT INTO content_entries(title,content_type,content_date) VALUES ('__seq_content__','Book',CURRENT_DATE) RETURNING id_content_entry",'id_content_entry'], notes:["INSERT INTO notes(body,category) VALUES ('__seq_note__','General') RETURNING id_note",'id_note'], tags:["INSERT INTO tags(name,normalized_name) VALUES ('__seq_tag__','__seq_tag__') RETURNING id_tag",'id_tag'], review_items:["INSERT INTO review_items(id_vocabulary,due_on) VALUES ((SELECT id_vocabulary FROM vocabulary WHERE word='__seq_vocab__'),CURRENT_DATE) RETURNING id_review_item",'id_review_item'], review_events:["INSERT INTO review_events(id_review_item,reviewed_at,result,previous_interval_days,next_interval_days) VALUES ((SELECT id_review_item FROM review_items ORDER BY id_review_item DESC LIMIT 1),CURRENT_TIMESTAMP,'Good',0,1) RETURNING id_review_event",'id_review_event'] };
+    for (const [table,id] of Object.entries(ids)) { const max = Number((await client.query(`SELECT coalesce(max(${q(id)}),0)::bigint value FROM ${q(table)}`)).rows[0].value); const r = await client.query(tests[table][0]); const generated = Number(r.rows[0][tests[table][1]]); result.sequenceTests[table] = { maxBefore:max, generated, pass:generated>max }; }
+    await client.query('ROLLBACK');
+    result.japanese = (await client.query("SELECT id_vocabulary,word,reading,meaning FROM vocabulary WHERE word ~ '[ぁ-んァ-ヶ一-龯]' ORDER BY id_vocabulary LIMIT 3")).rows;
+    result.timestamps = (await client.query('SELECT id_session,session_date,created_at,updated_at FROM study_sessions ORDER BY id_session LIMIT 3')).rows;
+    console.log(JSON.stringify(result,null,2));
+  } catch (error) { await client.query('ROLLBACK').catch(() => undefined); throw error; } finally { client.release(); }
+}
+main().catch((error)=>{console.error(error.message);process.exitCode=1;}).finally(()=>pg.end());

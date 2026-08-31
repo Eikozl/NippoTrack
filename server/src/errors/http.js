@@ -9,11 +9,11 @@ function sendRouteError(res, error, {
     return res.status(400).json({ error: error.message });
   }
 
-  if (error?.code === 'ER_DUP_ENTRY') {
+  if (error?.code === 'ER_DUP_ENTRY' || error?.code === '23505') {
     return res.status(409).json({ error: conflictMessage });
   }
 
-  if (error?.code === 'ER_NO_REFERENCED_ROW_2') {
+  if (error?.code === 'ER_NO_REFERENCED_ROW_2' || error?.code === '23503') {
     return res.status(400).json({ error: 'One or more related records do not exist.' });
   }
 

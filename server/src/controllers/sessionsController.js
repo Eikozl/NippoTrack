@@ -117,7 +117,7 @@ function normalizeWriting(body, current = null) {
 async function saveWriting(connection, sessionId, writing) {
   if (!writing) return;
   await connection.execute(
-    'INSERT INTO session_writings (id_session, title, content, notes) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE title = VALUES(title), content = VALUES(content), notes = VALUES(notes)',
+    'INSERT INTO session_writings (id_session, title, content, notes) VALUES (?, ?, ?, ?) ON CONFLICT (id_session) DO UPDATE SET title = EXCLUDED.title, content = EXCLUDED.content, notes = EXCLUDED.notes',
     [sessionId, writing.title, writing.content, writing.notes]
   );
 }

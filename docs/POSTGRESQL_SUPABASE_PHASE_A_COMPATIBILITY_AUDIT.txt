@@ -1,0 +1,491 @@
+JAPANESE LEARNING TRACKER (JLT)
+PHASE A - MYSQL/MARIADB TO POSTGRESQL COMPATIBILITY AUDIT
+
+Audit status: COMPLETE
+Date: 2026-08-30
+Scope: read-only repository inspection and read-only MariaDB validation.
+
+IMPORTANT ARCHITECTURAL DECISION
+========================================================================
+
+JLT will NOT become a permanent dual-engine MariaDB/MySQL + PostgreSQL
+application.
+
+MariaDB remains available only as a migration source, validation reference,
+backup source, and rollback point during the transition. The completed
+application runtime will use PostgreSQL as its single canonical database
+engine. Supabase is a later PostgreSQL hosting target, not a second runtime
+data-access architecture.
+
+No application code, schema, MariaDB data, PostgreSQL data, migration file,
+or Supabase configuration was changed during this audit.
+
+1. REPOSITORY AND LIVE DATABASE BASELINE
+========================================================================
+
+Repository commit inspected:
+  dd42f62958ea10e3325e1eadbd4064a5eb62b272
+  Japanse-Learning-Tracker V2
+
+Active database driver:
+  mysql2/promise
+
+Active database configuration:
+  server/src/config/db.js
+  - mysql.createPool(...)
+  - DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
+  - utf8mb4 connection charset
+  - connectionLimit: 10
+
+Live database inspected read-only:
+  - Server: MariaDB 12.3.3
+  - Database: jlt
+  - Character set: utf8mb4
+  - Collation: utf8mb4_uca1400_ai_ci
+  - Tables: 25
+
+Live row-count baseline:
+  content_entries          1
+  content_entry_sessions   1
+  goals                    2
+  grammar_points           9
+  kanji                    47
+  kanji_vocabulary         56
+  notes                    1
+  note_grammar             0
+  note_kanji               5
+  note_study_sessions      1
+  note_vocabulary          2
+  review_events            3
+  review_items             97
+  session_grammar          17
+  session_kanji            40
+  session_vocabulary       38
+  session_writings         0
+  study_sessions           13
+  tags                     0
+  tag_grammar              0
+  tag_kanji                0
+  tag_study_sessions       0
+  tag_vocabulary           0
+  usage_examples           0
+  vocabulary               41
+
+Live maximum primary keys relevant to an import:
+  study_sessions.id_session               15
+  vocabulary.id_vocabulary                43
+  kanji.id_kanji                          48
+  grammar_points.id_grammar               10
+  goals.id_goal                            2
+  content_entries.id_content_entry         1
+  notes.id_note                            1
+  tags.id_tag                              NULL (empty table)
+  review_items.id_review_item            135
+  review_events.id_review_event            3
+
+Read-only orphan checks:
+  - V1 junction relationships: 0 orphans.
+  - content_entry_sessions: 0 orphans.
+  - review_items targets: 0 orphans.
+  - review_events parents: 0 orphans.
+  - Approved note/tag relationship tables are foreign-key-backed and should
+    receive the same full table-by-table validation before data import.
+
+Japanese text check:
+  Live vocabulary values such as "一つ" / "ひとつ" and "二つ" / "ふたつ"
+  were returned correctly through the MariaDB driver. PostgreSQL acceptance
+  must repeat the same round-trip verification after import.
+
+2. CURRENT SCHEMA SUMMARY
+========================================================================
+
+V1 core entities:
+  - study_sessions
+  - vocabulary
+  - kanji
+  - grammar_points
+
+V1 junction tables:
+  - kanji_vocabulary
+  - session_vocabulary
+  - session_kanji
+  - session_grammar
+
+V2 additive tables:
+  - session_writings
+  - usage_examples
+  - goals
+  - content_entries
+  - content_entry_sessions
+  - notes
+  - note_study_sessions
+  - note_vocabulary
+  - note_kanji
+  - note_grammar
+  - tags
+  - tag_study_sessions
+  - tag_vocabulary
+  - tag_kanji
+  - tag_grammar
+  - review_items
+  - review_events
+
+Schema preservation requirements:
+  - Keep all table names, column names, PKs, FKs, uniqueness rules, indexes,
+    CHECK rules, and ON DELETE CASCADE behavior.
+  - Preserve V1/V2 model behavior; PostgreSQL conversion is not authorization
+    to redesign entities or relationships.
+  - Integer primary keys are currently MySQL AUTO_INCREMENT values.
+  - goals.is_active is TINYINT(1); PostgreSQL should use BOOLEAN.
+  - Review interval fields are SMALLINT UNSIGNED; PostgreSQL needs SMALLINT
+    plus CHECK (value >= 0).
+  - content_entries difficulty/comprehension fields are TINYINT and retain
+    their existing range CHECK constraints.
+  - MySQL timestamp ON UPDATE behavior needs PostgreSQL triggers or explicit
+    application-side updates. This is a manual-review schema item.
+
+3. MIGRATIONS AND DDL COMPATIBILITY
+========================================================================
+
+MySQL historical baseline:
+  server/db/JLT.sql
+
+Current V2 MySQL migrations (all require PostgreSQL DDL conversion):
+  001_v2_session_writings.sql
+  002_v2_usage_examples.sql
+  003_v2_goals.sql
+  004_v2_content_entries.sql
+  005_v2_content_entry_sessions.sql
+  006_v2_notes.sql
+  007_v2_note_links_v1_entities.sql
+  008_v2_tags.sql
+  009_v2_tag_links_v1_entities.sql
+  010_v2_review_items.sql
+  011_v2_review_events.sql
+
+MySQL-only DDL patterns found:
+  - INT ... AUTO_INCREMENT
+  - TINYINT and TINYINT(1)
+  - SMALLINT UNSIGNED
+  - ENGINE=InnoDB
+  - DEFAULT CHARSET=utf8mb4
+  - COLLATE=utf8mb4_general_ci
+  - TIMESTAMP ... ON UPDATE CURRENT_TIMESTAMP
+
+PostgreSQL schema plan:
+  - Preserve MySQL files as historical reference only.
+  - Create a separate PostgreSQL migration path, for example:
+      server/db/migrations-postgres/
+  - Create one PostgreSQL baseline preserving all current V1 and V2 tables.
+  - Use INTEGER GENERATED BY DEFAULT AS IDENTITY for current AUTO_INCREMENT
+    primary keys.
+  - Use TIMESTAMPTZ for event timestamps after confirming API serialization;
+    retain DATE for study/calendar dates and review due_on.
+  - Use BOOLEAN for is_active.
+  - Add required non-negative CHECK constraints in place of UNSIGNED.
+  - Implement updated_at behavior consistently, preferably with a shared
+    PostgreSQL trigger function; preserve current behavior rather than silently
+    removing it.
+  - Add schema_migrations(version PRIMARY KEY, applied_at TIMESTAMPTZ) and a
+    runner that records only successfully applied versions.
+
+4. DATABASE LAYER AND DRIVER COMPATIBILITY
+========================================================================
+
+Files requiring active database-layer conversion:
+  server/src/config/db.js
+  server/src/controllers/dashboardController.js
+  server/src/controllers/exportController.js
+  server/src/controllers/grammarController.js
+  server/src/controllers/healthController.js
+  server/src/controllers/helpers.js
+  server/src/controllers/kanjiController.js
+  server/src/controllers/listHelpers.js
+  server/src/controllers/reviewController.js
+  server/src/controllers/sessionsController.js
+  server/src/controllers/v2Controller.js
+  server/src/controllers/vocabularyController.js
+  server/src/search/sqlSearch.js
+  server/scripts/backup-db.js
+  server/scripts/check-db.js
+  server/scripts/run-migration.js
+
+Current API shape assumptions coupled to mysql2:
+  - pool.execute(...) resolves [rows, metadata].
+  - pool.query(...) resolves [rows, metadata].
+  - INSERT results use result.insertId and result.affectedRows.
+  - Transactions use pool.getConnection(), beginTransaction(), commit(),
+    rollback(), and release().
+
+PostgreSQL target shape:
+  - pool.query(sql, values) returns { rows, rowCount }.
+  - INSERT paths must use RETURNING <primary_key> rather than insertId.
+  - A transaction client comes from pool.connect(), uses BEGIN/COMMIT/ROLLBACK,
+    and must be released in finally.
+  - Implement a small database adapter/helper only if it removes mechanical
+    driver-result differences without hiding SQL behavior. Do not add an ORM.
+
+5. QUERY AND SQL COMPATIBILITY MAP
+========================================================================
+
+PLACEHOLDERS - REQUIRES CONVERSION
+  Current: ?
+  Target:  $1, $2, $3, ...
+  Affected: all controllers, helpers, listHelpers, scripts, and sqlSearch.
+  Requirement: create a safe numbered-parameter helper for dynamic SQL.
+
+PAGINATION - PORTABLE AFTER PLACEHOLDER CONVERSION
+  Current: LIMIT ? OFFSET ?
+  Target:  LIMIT $n OFFSET $n+1
+  Affected: listHelpers and paginated V1/V2 endpoints.
+
+SEARCH / ROMAJI - MANUAL REVIEW
+  Files:
+    server/src/search/sqlSearch.js
+    server/src/search/japaneseSearch.js
+    server/src/search/optionRanking.js
+    vocabularyController.js
+    kanjiController.js
+    grammarController.js
+  Current SQL uses COALESCE, REPLACE, LIKE, CASE ordering, CONCAT, and dynamic
+  comparison fragments with ? placeholders.
+  PostgreSQL supports COALESCE, REPLACE, CASE, and CONCAT, but LIKE casing and
+  collation semantics differ. Preserve the current matching/ranking contract
+  with focused Japanese and romaji regression tests; choose LIKE/ILIKE or an
+  explicit normalization strategy only after those tests pass.
+
+DATE/TIME - MANUAL REVIEW / HIGH RISK
+  Current MySQL patterns:
+    CURDATE()
+    NOW()
+    DATE_ADD(CURDATE(), INTERVAL ? DAY)
+    DATE_SUB(CURDATE(), INTERVAL N DAY)
+    WEEKDAY(CURDATE())
+    YEARWEEK(session_date, 1)
+    DATE_FORMAT(...)
+  Affected files:
+    dashboardController.js
+    reviewController.js
+    v2Controller.js
+  PostgreSQL candidates:
+    CURRENT_DATE
+    CURRENT_TIMESTAMP
+    CURRENT_DATE + ($n * INTERVAL '1 day')
+    CURRENT_DATE - INTERVAL 'N days'
+    EXTRACT(ISODOW FROM CURRENT_DATE)
+    date_trunc('week', CURRENT_DATE)
+    to_char(...)
+  Requirement: preserve the local calendar behavior for America/Santo_Domingo;
+  do not assume UTC server time is the user calendar. Test Monday boundaries,
+  dashboards, streaks, goals, and review due dates.
+
+UPSERT - REQUIRES CONVERSION
+  Current:
+    sessionsController.js: ON DUPLICATE KEY UPDATE for session_writings.
+    reviewController.js: ON DUPLICATE KEY UPDATE for review_items.
+  Target:
+    ON CONFLICT (<unique column>) DO UPDATE SET ...
+  Requirement: name the exact unique conflict targets and preserve no-op or
+  update semantics.
+
+HEALTH CHECK - REQUIRES CONVERSION
+  Current: SELECT DATABASE() AS database_name
+  Files: healthController.js, check-db.js, backup-db.js, run-migration.js.
+  Target: SELECT current_database() AS database_name.
+
+MYSQL ADMIN/INTROSPECTION - REQUIRES REPLACEMENT
+  Current:
+    SHOW TABLES
+    SHOW CREATE TABLE
+    backtick-delimited identifiers
+  Files: backup-db.js and check-db.js.
+  Target: pg_dump/pg_restore for canonical PostgreSQL backups, and
+  information_schema/pg_catalog only where an application diagnostic needs it.
+  Do not treat JSON schema dumps as a replacement for a verified pg_dump.
+
+ERROR MAPPING - REQUIRES CONVERSION
+  File: server/src/errors/http.js
+  Current MySQL codes:
+    ER_DUP_ENTRY
+    ER_NO_REFERENCED_ROW_2
+    ER_ROW_IS_REFERENCED_2
+  PostgreSQL SQLSTATE mapping:
+    23505 -> unique violation / HTTP 409
+    23503 -> foreign-key violation / safe related-record error
+    23514 -> CHECK violation / HTTP 400
+    23502 -> not-null violation / HTTP 400
+  Requirement: preserve safe public messages and keep raw DB errors server-side.
+
+6. TRANSACTION AUDIT
+========================================================================
+
+Current atomic-write paths:
+  - sessionsController.js
+    * create session + V1 relationships + optional structured writing
+    * update session + relationship replacement + optional writing
+  - vocabularyController.js
+    * create vocabulary + first usage example when one is supplied
+  - v2Controller.js
+    * replace content/note/tag relationship sets
+  - reviewController.js
+    * lock review item + write event + reschedule due date
+
+Current MySQL transaction API:
+  getConnection -> beginTransaction -> execute -> commit/rollback -> release
+
+PostgreSQL conversion requirement:
+  pool.connect -> BEGIN -> client.query -> COMMIT/ROLLBACK -> client.release
+
+High-priority transaction integration tests:
+  - Session create/update with all V1 relationships and writing.
+  - Vocabulary/example atomic creation.
+  - Content, note, and tag link replacement.
+  - Review event insertion plus due-date update.
+  - Rollback when one relationship insert fails.
+
+7. SCRIPTS, BACKUPS, AND MIGRATION HISTORY
+========================================================================
+
+Current scripts:
+  - scripts/check-db.js
+    MySQL health/table count script using SELECT DATABASE() and SHOW TABLES.
+  - scripts/backup-db.js
+    MySQL logical JSON backup using SHOW TABLES, SHOW CREATE TABLE, and SELECT
+    from each backtick-delimited table.
+  - scripts/run-migration.js
+    Executes one named MySQL V2 SQL file after confirming database jlt. It has
+    no schema_migrations tracking and splits statements by semicolons.
+
+PostgreSQL implementation plan:
+  - Preserve current MariaDB backup artifacts as rollback references.
+  - Add a PostgreSQL migration runner with schema_migrations tracking.
+  - Use pg_dump/pg_restore or psql for PostgreSQL backups/restores.
+  - Do not run migrations automatically on HTTP requests.
+  - Do not maintain ambiguous, competing migration histories. PostgreSQL
+    migrations become canonical only after local acceptance.
+
+8. TEST AUDIT
+========================================================================
+
+Current server test files:
+  - server/tests/api.test.js
+  - server/tests/api-expanded.test.js
+  - server/tests/v1-final.test.js
+  - server/tests/v1-1-romaji-search.test.js
+
+Current status before PostgreSQL implementation:
+  - 48 tests passing.
+  - Tests mock mysql2-style pool/query/execute result shapes through
+    withPoolStubs helpers.
+  - Tests assert parameterization, pagination, atomic session writes, error
+    safety, romaji ranking, data validation, and dashboard behavior.
+
+Required adaptation:
+  - Preserve behavioral API tests.
+  - Update mocks for pg result shapes or isolate them behind a narrow adapter.
+  - Add real PostgreSQL integration tests; mocks alone are insufficient for
+    syntax, constraints, transactions, identity sequences, and date behavior.
+
+Minimum real PostgreSQL coverage:
+  - health/current database
+  - all CRUD and pagination
+  - FK, unique, CHECK, and not-null errors
+  - cascade behavior
+  - transaction rollback
+  - romaji/Japanese search
+  - goals and week/date behavior
+  - review scheduling
+  - activity/streak calendar
+  - migrations, identity sequences, backup/restore
+
+9. RISK REGISTER
+========================================================================
+
+HIGH
+  1. Timezone behavior: current MySQL date functions use database server time;
+     PostgreSQL must preserve America/Santo_Domingo calendar semantics.
+  2. Search behavior: LIKE/collation differences can alter romaji/Japanese
+     matching and ranking.
+  3. Dynamic SQL placeholders: $n numbering must remain aligned with every
+     dynamic clause and ordering parameter.
+  4. Import sequences: explicit IDs require PostgreSQL identity sequences to
+     be advanced beyond current maximum IDs.
+  5. updated_at behavior: MySQL ON UPDATE timestamps require an explicit
+     PostgreSQL equivalent.
+
+MEDIUM
+  6. mysql2 result-shape assumptions are spread across controllers/tests.
+  7. Review upserts and session-writing upserts need exact ON CONFLICT targets.
+  8. Backup tooling changes from MySQL introspection to PostgreSQL-native tools.
+  9. Vercel/Supabase pooling must be decided only after local PostgreSQL works.
+
+LOW
+ 10. Japanese UTF-8 storage itself is well supported by PostgreSQL; the risk is
+     validation and import encoding, not lack of Unicode support.
+
+10. FILE-CHANGE PLAN FOR A LATER IMPLEMENTATION PHASE
+========================================================================
+
+Expected new files:
+  - server/db/migrations-postgres/001_jlt_postgres_baseline.sql
+  - further incremental PostgreSQL migration files
+  - PostgreSQL migration runner and backup/restore scripts
+  - PostgreSQL integration-test setup/configuration
+
+Expected modified files:
+  - server/package.json and package-lock.json (pg replaces active mysql2)
+  - server/.env.example
+  - server/src/config/db.js
+  - every database-using controller/helper listed in section 4
+  - server/src/search/sqlSearch.js
+  - server/src/errors/http.js
+  - server/scripts/check-db.js
+  - server/scripts/backup-db.js
+  - server/scripts/run-migration.js
+  - server tests using MySQL-shaped pool stubs
+  - deployment/environment documentation
+
+Expected preserved files/artifacts:
+  - MariaDB SQL baseline and migrations as historical/source reference.
+  - Existing MariaDB backup(s) until final PostgreSQL and Supabase acceptance.
+  - Express API architecture and client API contracts.
+
+11. IMPLEMENTATION ORDER AFTER APPROVAL
+========================================================================
+
+  1. Establish a local PostgreSQL target and a verified MariaDB backup point.
+  2. Create PostgreSQL schema baseline/migration tracking only.
+  3. Migrate the database adapter/driver and health endpoint.
+  4. Convert SQL incrementally, with focused tests after each controller group.
+  5. Migrate and validate data into local PostgreSQL.
+  6. Run the entire application locally against PostgreSQL.
+  7. Replace PostgreSQL backup/migration tooling and run real integration tests.
+  8. Only then configure Supabase development.
+  9. Only after Supabase-backed local acceptance, prepare Vercel.
+
+12. ROLLBACK PLAN
+========================================================================
+
+  - MariaDB remains unchanged during Phase A and as a rollback source during
+    the entire local PostgreSQL transition.
+  - Create a verified MariaDB backup before any later data operation.
+  - Do not delete or overwrite the migration-source database.
+  - Make PostgreSQL schema/data changes only against a separate local target
+    until local acceptance is complete.
+  - Keep engine selection transitional only; the production/runtime end state
+    is PostgreSQL alone, not permanent dual-engine support.
+  - Do not create, migrate, or use Supabase production until local PostgreSQL
+    acceptance and data validation are complete.
+
+PHASE A CONCLUSION
+========================================================================
+
+The repository is a suitable candidate for an incremental PostgreSQL migration,
+but no blind SQL replacement is safe. The PostgreSQL conversion must explicitly
+address driver result shapes, placeholders, migrations, date/time behavior,
+romaji search semantics, transactions, error codes, identity sequences, and
+backup tooling.
+
+Recommended next approval:
+  Approve Phase B/C preparation for a separate local PostgreSQL target and
+  PostgreSQL-native migration baseline. Do not connect to Supabase yet.

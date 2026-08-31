@@ -4,10 +4,10 @@ const { sendRouteError } = require('../errors/http');
 async function getDashboard(req, res) {
   try {
     const [todayData] = await pool.query(
-      'SELECT COALESCE(SUM(duration_minutes), 0) AS minutes_today FROM study_sessions WHERE session_date = CURDATE()'
+      "SELECT COALESCE(SUM(duration_minutes), 0) AS minutes_today FROM study_sessions WHERE session_date = CURRENT_DATE"
     );
     const [weekData] = await pool.query(
-      'SELECT COALESCE(SUM(duration_minutes), 0) AS minutes_week FROM study_sessions WHERE YEARWEEK(session_date, 1) = YEARWEEK(CURDATE(), 1)'
+      "SELECT COALESCE(SUM(duration_minutes), 0) AS minutes_week FROM study_sessions WHERE session_date >= date_trunc('week', CURRENT_DATE)::date AND session_date <= CURRENT_DATE"
     );
     const [vocabularyCount] = await pool.query('SELECT COUNT(*) AS total FROM vocabulary');
     const [kanjiCount] = await pool.query('SELECT COUNT(*) AS total FROM kanji');
@@ -16,7 +16,7 @@ async function getDashboard(req, res) {
       'SELECT id_session, session_date, category, duration_minutes FROM study_sessions ORDER BY session_date DESC, id_session DESC LIMIT 5'
     );
     const [weeklyActivity] = await pool.query(
-      'SELECT session_date AS date, SUM(duration_minutes) AS minutes FROM study_sessions WHERE session_date BETWEEN DATE_SUB(CURDATE(), INTERVAL 6 DAY) AND CURDATE() GROUP BY session_date ORDER BY session_date'
+      "SELECT session_date AS date, SUM(duration_minutes) AS minutes FROM study_sessions WHERE session_date BETWEEN CURRENT_DATE - 6 AND CURRENT_DATE GROUP BY session_date ORDER BY session_date"
     );
     const [studyDistribution] = await pool.query(
       'SELECT category, SUM(duration_minutes) AS minutes FROM study_sessions GROUP BY category ORDER BY minutes DESC'
@@ -51,9 +51,9 @@ function dayNumber(value) {
 async function getActivity(req, res) {
   try {
     const [[todayRows], [dateRows], [calendarRows]] = await Promise.all([
-      pool.query("SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS today"),
-      pool.query("SELECT DATE_FORMAT(session_date, '%Y-%m-%d') AS date FROM study_sessions GROUP BY session_date ORDER BY session_date ASC"),
-      pool.query("SELECT DATE_FORMAT(session_date, '%Y-%m-%d') AS date, SUM(duration_minutes) AS minutes FROM study_sessions WHERE session_date BETWEEN DATE_SUB(CURDATE(), INTERVAL 34 DAY) AND CURDATE() GROUP BY session_date ORDER BY session_date ASC")
+      pool.query("SELECT to_char(CURRENT_DATE, 'YYYY-MM-DD') AS today"),
+      pool.query("SELECT to_char(session_date, 'YYYY-MM-DD') AS date FROM study_sessions GROUP BY session_date ORDER BY session_date ASC"),
+      pool.query("SELECT to_char(session_date, 'YYYY-MM-DD') AS date, SUM(duration_minutes) AS minutes FROM study_sessions WHERE session_date BETWEEN CURRENT_DATE - 34 AND CURRENT_DATE GROUP BY session_date ORDER BY session_date ASC")
     ]);
     const today = isoDate(todayRows[0]?.today || new Date());
     const dates = dateRows.map((row) => isoDate(row.date));

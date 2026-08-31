@@ -411,7 +411,7 @@ test('PUT /api/sessions replaces supplied relationship sets in one transaction',
 });
 
 test('database configuration fails fast instead of silently using root', () => {
-  const environment = { ...process.env, DB_USER: '' };
+  const environment = { ...process.env, POSTGRES_ENV_FILE: path.join(__dirname, 'missing-postgres.env'), POSTGRES_USER: '' };
   const result = spawnSync(process.execPath, ['-e', "require('./src/config/db')"], {
     cwd: path.join(__dirname, '..'),
     env: environment,
@@ -420,7 +420,7 @@ test('database configuration fails fast instead of silently using root', () => {
   const output = `${result.stdout}\n${result.stderr}`;
 
   assert.notEqual(result.status, 0);
-  assert.match(output, /Missing required environment variable: DB_USER/);
+  assert.match(output, /Missing required environment variable: POSTGRES_USER/);
   assert.doesNotMatch(output, /using root|fallback to root/i);
 });
 

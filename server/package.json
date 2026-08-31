@@ -7,7 +7,12 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "test": "node --test tests/*.test.js",
-    "db:check": "node scripts/check-db.js"
+    "db:check": "node scripts/check-db.js",
+    "postgres:migrate": "node scripts/run-postgres-migrations.js",
+    "postgres:check": "node scripts/check-postgres-db.js",
+    "postgres:import": "node scripts/migrate-backup-to-postgres.js",
+    "mariadb:audit": "node scripts/audit-mariadb-source.js",
+    "postgres:validate-import": "node scripts/validate-postgres-import.js"
   },
   "keywords": [],
   "author": "",
@@ -17,7 +22,8 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "helmet": "^8.3.0",
-    "mysql2": "^3.24.2"
+    "mysql2": "^3.24.2",
+    "pg": "^8.23.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"

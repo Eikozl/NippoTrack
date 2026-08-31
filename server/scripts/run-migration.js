@@ -1,6 +1,6 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const pool = require('../src/config/db');
+const pool = require('../src/config/mariadbSource');
 
 async function main() {
   const filename = process.argv[2];

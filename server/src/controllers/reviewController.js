@@ -6,7 +6,7 @@ const INTERVALS = { Again: 1, Hard: 3, Good: 7 };
 
 async function createReviewItem(executor, targetColumn, targetId) {
   await executor.execute(
-    `INSERT INTO review_items (${targetColumn}, due_on, interval_days) VALUES (?, CURDATE(), 0) ON DUPLICATE KEY UPDATE ${targetColumn} = VALUES(${targetColumn})`,
+    `INSERT INTO review_items (${targetColumn}, due_on, interval_days) VALUES (?, CURRENT_DATE, 0) ON CONFLICT (${targetColumn}) DO NOTHING`,
     [targetId]
   );
 }
@@ -22,7 +22,7 @@ async function listDueReviews(req, res) {
       LEFT JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary
       LEFT JOIN kanji k ON k.id_kanji = ri.id_kanji
       LEFT JOIN grammar_points g ON g.id_grammar = ri.id_grammar
-      WHERE ri.due_on <= CURDATE()
+      WHERE ri.due_on <= CURRENT_DATE
       ORDER BY ri.due_on ASC, ri.id_review_item ASC`);
     return res.json({ items });
   } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load reviews.' }); }
@@ -40,8 +40,8 @@ async function recordReview(req, res) {
     if (!rows[0]) { await connection.rollback(); connection.release(); connection = null; return res.status(404).json({ error: 'review item not found' }); }
     const previousInterval = Number(rows[0].interval_days || 0);
     const nextInterval = INTERVALS[result];
-    await connection.execute('INSERT INTO review_events (id_review_item, reviewed_at, result, previous_interval_days, next_interval_days) VALUES (?, NOW(), ?, ?, ?)', [id, result, previousInterval, nextInterval]);
-    await connection.execute('UPDATE review_items SET due_on = DATE_ADD(CURDATE(), INTERVAL ? DAY), interval_days = ?, last_reviewed_at = NOW(), last_result = ? WHERE id_review_item = ?', [nextInterval, nextInterval, result, id]);
+    await connection.execute('INSERT INTO review_events (id_review_item, reviewed_at, result, previous_interval_days, next_interval_days) VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?)', [id, result, previousInterval, nextInterval]);
+    await connection.execute('UPDATE review_items SET due_on = CURRENT_DATE + ?, interval_days = ?, last_reviewed_at = CURRENT_TIMESTAMP, last_result = ? WHERE id_review_item = ?', [nextInterval, nextInterval, result, id]);
     await connection.commit(); connection.release(); connection = null;
     return res.json({ success: true, result, nextIntervalDays: nextInterval });
   } catch (error) {

@@ -1,0 +1,53 @@
+JLT PHASE D — LOCAL POSTGRESQL DATA MIGRATION REPORT
+=====================================================
+
+Date: 2026-08-30
+Result: accepted for local PostgreSQL use; no Supabase work started.
+
+Safety
+------
+MariaDB `jlt` stayed read-only and unchanged as source/rollback. A fresh logical
+backup was made at `server/backups/jlt-mariadb-pre-phase-d-20260830.json` (107,397
+bytes; import SHA-256 `1c5ad64f1bdc065a533a71d019935fc2167e36c0e5a68ec421d89e5eb8ae2ad1`).
+The import reads that immutable backup, not live MariaDB. Supabase was not contacted.
+
+Pre-copy audit
+--------------
+All 25 tables existed. Counts were: vocabulary 41, kanji 47, grammar_points 9,
+study_sessions 13, goals 2, content_entries 1, notes 1, tags 0, kanji_vocabulary 56,
+session_vocabulary 38, session_kanji 40, session_grammar 17, session_writings 0,
+usage_examples 0, content_entry_sessions 1, note_study_sessions 1, note_vocabulary 2,
+note_kanji 5, note_grammar 0, all four tag links 0, review_items 97, review_events 3.
+All 32 FK orphan checks and all source unique/duplicate checks returned zero.
+
+Identity maxima: vocabulary 43, kanji 48, grammar_points 10, study_sessions 15,
+goals 2, content_entries 1, notes 1, review_items 135, review_events 3. The other
+three identity tables were empty. Japanese samples 一つ/ひとつ, 二つ/ふたつ, and
+三つ/みっつ plus representative timestamps were captured before copying.
+
+Import order
+------------
+1. vocabulary, kanji, grammar_points, study_sessions, goals, content_entries, notes, tags
+2. V1 junctions; session_writings; usage_examples; content_entry_sessions
+3. normalized note links; normalized tag links; review_items; review_events
+
+Execution and validation
+------------------------
+The parameterized importer verified an empty PostgreSQL target, imported explicit IDs
+inside one transaction with constraints active, and aligned all 12 identity sequences.
+It preserved nullable fields and relationships. Row counts and canonical deterministic
+row comparison passed for every one of the 25 tables. FK enforcement remained enabled;
+all 32 relationship sets imported successfully with zero source orphans. Japanese text
+and timestamp instants compare exactly. PostgreSQL uses America/Santo_Domingo for date
+and calendar semantics.
+
+Generated-ID tests passed for all 12 identity sequences, each above its source maximum,
+inside a rolled-back transaction. Sequence advancement is safe and prevents collisions.
+
+Local acceptance
+----------------
+`npm test` passed 49/49. The local integration test launched JLT against migrated
+PostgreSQL and verified health, vocabulary count 41, `nihongo` -> 日本語, session detail,
+and dashboard data. No real MariaDB data was modified.
+
+Stop here before Supabase work, external copying, or MariaDB retirement.

@@ -45,7 +45,7 @@ function goalValues(body) {
   if (periodType === 'weekly' && goalType !== 'study_minutes') throw new ValidationError('weekly goals may only use study_minutes.');
   if (periodType === 'by_deadline' && !dueDate) throw new ValidationError('due_date is required for by_deadline goals.');
   if (dueDate && dueDate < startDate) throw new ValidationError('due_date cannot be earlier than start_date.');
-  const active = body.is_active === undefined ? 1 : (body.is_active === true || body.is_active === 1 || body.is_active === '1' ? 1 : body.is_active === false || body.is_active === 0 || body.is_active === '0' ? 0 : null);
+  const active = body.is_active === undefined ? true : (body.is_active === true || body.is_active === 1 || body.is_active === '1' ? true : body.is_active === false || body.is_active === 0 || body.is_active === '0' ? false : null);
   if (active === null) throw new ValidationError('is_active must be true or false.');
   return [title, goalType, targetValue, periodType, targetJlpt, targetStatus, startDate, dueDate, active];
 }
@@ -55,7 +55,7 @@ async function getGoalProgress(goal) {
   let params;
   if (goal.goal_type === 'study_minutes') {
     if (goal.period_type === 'weekly') {
-      sql = 'SELECT COALESCE(SUM(duration_minutes), 0) AS progress FROM study_sessions WHERE session_date >= GREATEST(?, DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)) AND session_date <= CURDATE()';
+      sql = "SELECT COALESCE(SUM(duration_minutes), 0) AS progress FROM study_sessions WHERE session_date >= GREATEST(?, date_trunc('week', CURRENT_DATE)::date) AND session_date <= CURRENT_DATE";
       params = [goal.start_date];
     } else {
       sql = 'SELECT COALESCE(SUM(duration_minutes), 0) AS progress FROM study_sessions WHERE session_date >= ? AND session_date <= ?';
@@ -63,7 +63,7 @@ async function getGoalProgress(goal) {
     }
   } else {
     const table = { vocabulary_count: 'vocabulary', kanji_count: 'kanji', grammar_count: 'grammar_points' }[goal.goal_type];
-    const clauses = ['DATE(created_at) >= ?', 'DATE(created_at) <= ?'];
+    const clauses = ['created_at::date >= ?', 'created_at::date <= ?'];
     params = [goal.start_date, goal.due_date || '9999-12-31'];
     if (goal.target_jlpt_level) { clauses.push('jlpt_level = ?'); params.push(goal.target_jlpt_level); }
     if (goal.target_status) { clauses.push('status = ?'); params.push(goal.target_status); }
@@ -78,7 +78,7 @@ async function listGoals(req, res) {
   try {
     const { page, limit, offset } = parsePagination(req.query);
     let whereSql = ' WHERE 1=1'; const params = [];
-    if (req.query.active !== undefined) { if (!['0', '1'].includes(req.query.active)) throw new ValidationError('active must be 0 or 1.'); whereSql += ' AND is_active = ?'; params.push(req.query.active); }
+    if (req.query.active !== undefined) { if (!['0', '1'].includes(req.query.active)) throw new ValidationError('active must be 0 or 1.'); whereSql += ' AND is_active = ?'; params.push(req.query.active === '1'); }
     const result = await executePaginatedList(pool, { table: 'goals', columns: 'id_goal, title, goal_type, target_value, period_type, target_jlpt_level, target_status, start_date, due_date, is_active', whereSql, params, orderBy: 'is_active DESC, due_date IS NULL, due_date ASC, id_goal DESC', page, limit, offset });
     result.items = await Promise.all(result.items.map(getGoalProgress));
     return res.json(result);

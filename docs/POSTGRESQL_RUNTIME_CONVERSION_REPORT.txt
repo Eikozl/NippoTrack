@@ -1,0 +1,66 @@
+JLT — POSTGRESQL RUNTIME / QUERY CONVERSION REPORT
+===================================================
+
+Date: 2026-08-30
+Outcome: PASS — ready for Phase D approval gate; no real data migration performed.
+
+Scope completed
+---------------
+* The active application database module (`server/src/config/db.js`) now exposes the
+  PostgreSQL runtime layer. Routes and controllers no longer use MariaDB at runtime.
+* MariaDB remains isolated in `server/src/config/mariadbSource.js`, used only by the
+  source/rollback utilities: `backup-db`, `check-db`, and historical MySQL migration
+  runner. No MariaDB table, data, or migration was modified in this phase.
+* Supabase was not contacted or configured.
+* The PostgreSQL target contains no imported JLT data. Runtime tests used temporary
+  records and truncate them after each run.
+
+Runtime layer
+-------------
+`postgresAdapter.js` presents the existing controller-facing `execute`, `query`, and
+transaction interface over `pg`. It translates parameter markers to PostgreSQL `$n`,
+returns MySQL-compatible controller result shapes (`rows`, `affectedRows`, `insertId`),
+and uses `RETURNING` for identity inserts. Transaction clients retain BEGIN/COMMIT/
+ROLLBACK/release behavior.
+
+Explicit PostgreSQL conversions
+-------------------------------
+* Health: `current_database()` while preserving API response `database: "jlt"`.
+* Dashboard: PostgreSQL CURRENT_DATE, date arithmetic, date_trunc('week'), and to_char.
+* Goals: PostgreSQL week boundary/date casts and actual boolean writes/filters.
+* Review: CURRENT_DATE/CURRENT_TIMESTAMP, date addition, and ON CONFLICT DO NOTHING.
+* Structured session writing: PostgreSQL ON CONFLICT ... DO UPDATE with EXCLUDED.
+* Search: prepared parameters remain bound; PostgreSQL ILIKE preserves the source
+  case-insensitive matching behavior. Japanese/kana normalization and the existing
+  romaji ranking helper are unchanged.
+* `updated_at` remains enforced by the verified PostgreSQL triggers.
+* Connection sessions set America/Santo_Domingo through PostgreSQL startup options,
+  so CURRENT_DATE/current-week behavior uses the intended operating timezone.
+* PostgreSQL SQLSTATE 23505/23503 maps to the established safe conflict/related-record
+  API error contracts.
+
+Preserved API behavior
+----------------------
+The public routes, payload validation, response fields, pagination, relationship
+transactions, review behavior, search ranking, and health response contract remain
+unchanged. `goals.is_active` is stored as PostgreSQL boolean but normalized to 1/0 in
+controller result rows to preserve the existing client contract.
+
+Verification
+------------
+* `npm test`: 49 passed, 0 failed.
+* New PostgreSQL integration test exercises the active runtime against local PostgreSQL:
+  health response, vocabulary creation with optional usage example and review item,
+  romaji search (`nihongo` -> 日本語), a session relationship write, and dashboard
+  current-day aggregation.
+* The integration test truncates its temporary test records in cleanup.
+* Final target health check: PostgreSQL 18.6, user jlt_agent, timezone
+  America/Santo_Domingo, 26 public tables (25 JLT tables plus schema_migrations).
+* Final direct check: vocabulary row count is 0. No MariaDB data was imported.
+
+Approval gate
+-------------
+Do not start Phase D until approved. Phase D must independently define the immutable
+MariaDB export, ordered import, ID/sequence alignment, row-count and checksum
+comparison, foreign-key validation, and rollback decision point before any production
+data is copied.
