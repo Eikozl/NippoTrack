@@ -1,6 +1,8 @@
 const { Pool } = require('pg');
 const dotenv = require('dotenv');
 const { postgresSslConfig } = require('./postgresSsl');
+const supabaseCa = require('./supabaseCa');
+
 dotenv.config({ path: process.env.POSTGRES_ENV_FILE || '.env.postgres' });
 dotenv.config({ path: process.env.POSTGRES_RUNTIME_ENV_FILE || '.env.runtime' });
 
@@ -12,8 +14,19 @@ function value(name, { allowEmpty = false } = {}) {
 
 const allowTestFallback = process.env.NODE_ENV === 'test' && process.env.JLT_AUTH_BYPASS_FOR_TESTS === 'true';
 
+const defaults = {
+  POSTGRES_RUNTIME_HOST: 'aws-0-us-east-2.pooler.supabase.com',
+  POSTGRES_RUNTIME_PORT: '6543',
+  POSTGRES_RUNTIME_USER: 'jlt_runtime.milayuvlajmgrcxmrxdg',
+  POSTGRES_RUNTIME_DB: 'postgres',
+  POSTGRES_RUNTIME_SSL: 'verify-full',
+  POSTGRES_RUNTIME_POOL_MAX: '2',
+  POSTGRES_TIMEZONE: 'America/Santo_Domingo'
+};
+
 function runtimeValue(name, fallbackName, options) {
   if (process.env[name] !== undefined) return value(name, options);
+  if (defaults[name] !== undefined) return defaults[name];
   if (!allowTestFallback) throw new Error(`Missing required runtime environment variable: ${name}`);
   return value(fallbackName, options);
 }
@@ -21,10 +34,10 @@ function runtimeValue(name, fallbackName, options) {
 const port = Number(runtimeValue('POSTGRES_RUNTIME_PORT', 'POSTGRES_PORT'));
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('POSTGRES_RUNTIME_PORT must be an integer between 1 and 65535');
 
-const sslMode = process.env.POSTGRES_RUNTIME_SSL || process.env.POSTGRES_SSL;
-const timezone = process.env.POSTGRES_TIMEZONE || 'America/Santo_Domingo';
+const sslMode = process.env.POSTGRES_RUNTIME_SSL || process.env.POSTGRES_SSL || defaults.POSTGRES_RUNTIME_SSL;
+const timezone = process.env.POSTGRES_TIMEZONE || defaults.POSTGRES_TIMEZONE;
 const user = runtimeValue('POSTGRES_RUNTIME_USER', 'POSTGRES_USER');
-const poolMax = Number(process.env.POSTGRES_RUNTIME_POOL_MAX || 2);
+const poolMax = Number(process.env.POSTGRES_RUNTIME_POOL_MAX || defaults.POSTGRES_RUNTIME_POOL_MAX);
 
 if (!Number.isInteger(poolMax) || poolMax < 1 || poolMax > 10) {
   throw new Error('POSTGRES_RUNTIME_POOL_MAX must be an integer between 1 and 10');
@@ -45,5 +58,5 @@ module.exports = new Pool({
   connectionTimeoutMillis: 5_000,
   application_name: 'jlt-runtime',
   options: `-c TimeZone=${timezone}`,
-  ssl: postgresSslConfig(sslMode, process.env.POSTGRES_RUNTIME_SSL_CA)
+  ssl: postgresSslConfig(sslMode, process.env.POSTGRES_RUNTIME_SSL_CA || supabaseCa)
 });
