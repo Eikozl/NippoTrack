@@ -1,0 +1,135 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+process.env.NODE_ENV = 'test';
+process.env.JLT_AUTH_BYPASS_FOR_TESTS = 'true';
+process.env.POSTGRES_HOST = process.env.POSTGRES_HOST || '127.0.0.1';
+process.env.POSTGRES_PORT = process.env.POSTGRES_PORT || '5432';
+process.env.POSTGRES_USER = process.env.POSTGRES_USER || 'jlt_test';
+process.env.POSTGRES_PASSWORD = process.env.POSTGRES_PASSWORD ?? 'test-only';
+process.env.POSTGRES_DB = process.env.POSTGRES_DB || 'jlt';
+
+const app = require('../src/app');
+const pool = require('../src/config/db');
+const {
+  importKanjiReferences,
+  isSingleHanCodePoint
+} = require('../src/services/kanjiReference');
+
+async function startServer() {
+  const server = app.listen(0);
+  await new Promise((resolve) => server.once('listening', resolve));
+  return server;
+}
+
+async function stopServer(server) {
+  await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+}
+
+async function withPoolStub(stub, callback) {
+  const original = pool.execute;
+  pool.execute = stub;
+  try {
+    await callback();
+  } finally {
+    pool.execute = original;
+  }
+}
+
+test.after(async () => {
+  await pool.end();
+});
+
+test('validates one Han Unicode code point rather than UTF-16 string length', () => {
+  assert.equal(isSingleHanCodePoint('日'), true);
+  assert.equal(isSingleHanCodePoint('𠮟'), true);
+  assert.equal(isSingleHanCodePoint('日本'), false);
+  assert.equal(isSingleHanCodePoint('あ'), false);
+});
+
+test('GET /api/kanji/lookup/:character returns shared reference metadata only', async () => {
+  const calls = [];
+  await withPoolStub(async (sql, params) => {
+    calls.push({ sql, params });
+    return [[{
+      reference_id: 12,
+      character: '日',
+      jlpt_level: 'N5',
+      onyomi: ['ニチ', 'ジツ'],
+      kunyomi: ['ひ', 'か'],
+      meanings: ['day', 'sun'],
+      stroke_count: 4
+    }]];
+  }, async () => {
+    const server = await startServer();
+    try {
+      const response = await fetch(`http://127.0.0.1:${server.address().port}/api/kanji/lookup/%E6%97%A5`);
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), {
+        referenceId: 12,
+        character: '日',
+        jlptLevel: 'N5',
+        onyomi: ['ニチ', 'ジツ'],
+        kunyomi: ['ひ', 'か'],
+        meanings: ['day', 'sun'],
+        strokeCount: 4
+      });
+      assert.equal(calls.length, 1);
+      assert.match(calls[0].sql, /FROM kanji_reference/i);
+      assert.doesNotMatch(calls[0].sql, /\bFROM kanji\b|user_id/i);
+      assert.deepEqual(calls[0].params, ['日']);
+    } finally {
+      await stopServer(server);
+    }
+  });
+});
+
+test('GET /api/kanji/lookup/:character rejects anything other than one Han code point before querying', async () => {
+  let queried = false;
+  await withPoolStub(async () => {
+    queried = true;
+    return [[]];
+  }, async () => {
+    const server = await startServer();
+    try {
+      for (const character of ['%E6%97%A5%E6%9C%AC', '%E3%81%82']) {
+        const response = await fetch(`http://127.0.0.1:${server.address().port}/api/kanji/lookup/${character}`);
+        assert.equal(response.status, 400);
+      }
+      assert.equal(queried, false);
+    } finally {
+      await stopServer(server);
+    }
+  });
+});
+
+test('importer uses upsert plus a backfill and remains repeatable', async () => {
+  const statements = [];
+  const client = {
+    async query(sql, params = []) {
+      statements.push({ sql, params });
+      return { rowCount: 1, rows: [] };
+    }
+  };
+  const references = [{
+    character: '日',
+    jlpt_level: 'N5',
+    onyomi: ['ニチ'],
+    kunyomi: ['ひ'],
+    meanings: ['day'],
+    stroke_count: 4,
+    source_metadata: { source: 'fixture' }
+  }];
+
+  await importKanjiReferences(client, references);
+  await importKanjiReferences(client, references);
+
+  const upserts = statements.filter(({ sql }) => /INSERT INTO kanji_reference/i.test(sql));
+  const backfills = statements.filter(({ sql }) => /UPDATE kanji AS k/i.test(sql));
+  assert.equal(upserts.length, 2);
+  assert.equal(backfills.length, 2);
+  upserts.forEach(({ sql, params }) => {
+    assert.match(sql, /ON CONFLICT \(character\) DO UPDATE/i);
+    assert.equal(params[0], '日');
+  });
+});

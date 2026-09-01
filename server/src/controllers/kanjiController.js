@@ -14,6 +14,7 @@ const {
 const { fetchEntityById } = require('./helpers');
 const { executePaginatedList } = require('./listHelpers');
 const { createReviewItem } = require('./reviewController');
+const { findKanjiReferenceId, lookupKanjiReference: lookupReference } = require('../services/kanjiReference');
 
 async function listKanji(req, res) {
   try {
@@ -146,6 +147,16 @@ async function getKanji(req, res) {
   }
 }
 
+async function lookupKanjiReference(req, res) {
+  try {
+    const reference = await lookupReference(req.params.character);
+    if (!reference) return res.status(404).json({ error: 'Kanji reference not found.' });
+    return res.json(reference);
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to look up kanji reference.' });
+  }
+}
+
 function normalizeKanji(body, current = {}) {
   const character = body.character_kanji !== undefined
     ? normalizeText(body.character_kanji, 4, 'character_kanji')
@@ -177,9 +188,10 @@ async function createKanji(req, res) {
       ...body,
       status: body.status === undefined || body.status === null || body.status === '' ? 'New' : body.status
     });
+    const referenceId = await findKanjiReferenceId(values.character);
     const [result] = await pool.execute(
-      'INSERT INTO kanji (character_kanji, meaning, onyomi, kunyomi, jlpt_level, status, notes, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [values.character, values.meaning, values.onyomi, values.kunyomi, values.jlptLevel, values.status, values.notes, req.user.id]
+      'INSERT INTO kanji (character_kanji, meaning, onyomi, kunyomi, jlpt_level, status, notes, user_id, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [values.character, values.meaning, values.onyomi, values.kunyomi, values.jlptLevel, values.status, values.notes, req.user.id, referenceId]
     );
     await createReviewItem(pool, 'id_kanji', result.insertId);
     return res.status(201).json(await fetchEntityById('kanji', result.insertId, req.user.id));
@@ -201,9 +213,10 @@ async function updateKanji(req, res) {
     validateWriteFields(body, ALLOWED_FIELDS.kanji);
     validateStandardRecordPayload(body, { requiredWord: false, requiredMeaning: false });
     const values = normalizeKanji(body, current);
+    const referenceId = await findKanjiReferenceId(values.character);
     await pool.execute(
-      'UPDATE kanji SET character_kanji = ?, meaning = ?, onyomi = ?, kunyomi = ?, jlpt_level = ?, status = ?, notes = ? WHERE id_kanji = ? AND user_id = ?',
-      [values.character, values.meaning, values.onyomi, values.kunyomi, values.jlptLevel, values.status, values.notes, id, req.user.id]
+      'UPDATE kanji SET character_kanji = ?, meaning = ?, onyomi = ?, kunyomi = ?, jlpt_level = ?, status = ?, notes = ?, reference_id = ? WHERE id_kanji = ? AND user_id = ?',
+      [values.character, values.meaning, values.onyomi, values.kunyomi, values.jlptLevel, values.status, values.notes, referenceId, id, req.user.id]
     );
     return res.json(await fetchEntityById('kanji', id, req.user.id));
   } catch (error) {
@@ -225,4 +238,4 @@ async function deleteKanji(req, res) {
   }
 }
 
-module.exports = { createKanji, deleteKanji, getKanji, listKanji, listKanjiOptions, updateKanji };
+module.exports = { createKanji, deleteKanji, getKanji, listKanji, listKanjiOptions, lookupKanjiReference, updateKanji };

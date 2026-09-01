@@ -1,0 +1,131 @@
+const pool = require('../config/db');
+const { JLPT_LEVELS } = require('../constants');
+const { ValidationError } = require('../errors/http');
+
+const singleHanCodePoint = /^\p{Script=Han}$/u;
+
+function isSingleHanCodePoint(value) {
+  return typeof value === 'string' && singleHanCodePoint.test(value);
+}
+
+function requireSingleHanCodePoint(value) {
+  if (!isSingleHanCodePoint(value)) {
+    throw new ValidationError('character must be exactly one Han Unicode code point.');
+  }
+  return value;
+}
+
+function publicReference(row) {
+  if (!row) return null;
+  return {
+    referenceId: row.reference_id,
+    character: row.character,
+    jlptLevel: row.jlpt_level,
+    onyomi: row.onyomi || [],
+    kunyomi: row.kunyomi || [],
+    meanings: row.meanings || [],
+    strokeCount: row.stroke_count
+  };
+}
+
+async function lookupKanjiReference(character, database = pool) {
+  requireSingleHanCodePoint(character);
+  const [rows] = await database.execute(
+    'SELECT id_kanji_reference AS reference_id, character, jlpt_level, onyomi, kunyomi, meanings, stroke_count FROM kanji_reference WHERE character = ?',
+    [character]
+  );
+  return publicReference(rows[0]);
+}
+
+async function findKanjiReferenceId(character, database = pool) {
+  const [rows] = await database.execute(
+    'SELECT id_kanji_reference AS reference_id FROM kanji_reference WHERE character = ?',
+    [character]
+  );
+  return rows[0]?.reference_id ?? null;
+}
+
+function normalizeStringArray(value, fieldName) {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
+    throw new ValidationError(`${fieldName} must be an array of strings.`);
+  }
+  return [...new Set(value.map((item) => item.trim()).filter(Boolean))];
+}
+
+function normalizeSourceMetadata(value) {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new ValidationError('source_metadata must be an object.');
+  }
+  return value;
+}
+
+function normalizeImportedReference(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ValidationError('Each reference entry must be an object.');
+  }
+  const character = requireSingleHanCodePoint(value.character);
+  const jlptLevel = value.jlpt_level === undefined || value.jlpt_level === null || value.jlpt_level === ''
+    ? null
+    : String(value.jlpt_level).trim().toUpperCase();
+  if (jlptLevel && !JLPT_LEVELS.includes(jlptLevel)) {
+    throw new ValidationError(`jlpt_level must be one of: ${JLPT_LEVELS.join(', ')}`);
+  }
+  const strokeCount = value.stroke_count === undefined || value.stroke_count === null || value.stroke_count === ''
+    ? null
+    : Number(value.stroke_count);
+  if (strokeCount !== null && (!Number.isInteger(strokeCount) || strokeCount < 1 || strokeCount > 255)) {
+    throw new ValidationError('stroke_count must be a positive integer no greater than 255.');
+  }
+  return {
+    character,
+    jlptLevel,
+    onyomi: normalizeStringArray(value.onyomi, 'onyomi'),
+    kunyomi: normalizeStringArray(value.kunyomi, 'kunyomi'),
+    meanings: normalizeStringArray(value.meanings, 'meanings'),
+    strokeCount,
+    sourceMetadata: normalizeSourceMetadata(value.source_metadata)
+  };
+}
+
+async function importKanjiReferences(client, references) {
+  if (!Array.isArray(references)) throw new ValidationError('Import JSON must be an array of reference entries.');
+  const normalized = references.map(normalizeImportedReference);
+  const unique = new Map(normalized.map((reference) => [reference.character, reference]));
+  let upserted = 0;
+
+  for (const reference of unique.values()) {
+    const result = await client.query(
+      `INSERT INTO kanji_reference (character, jlpt_level, onyomi, kunyomi, meanings, stroke_count, source_metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+       ON CONFLICT (character) DO UPDATE
+       SET jlpt_level = EXCLUDED.jlpt_level,
+           onyomi = EXCLUDED.onyomi,
+           kunyomi = EXCLUDED.kunyomi,
+           meanings = EXCLUDED.meanings,
+           stroke_count = EXCLUDED.stroke_count,
+           source_metadata = EXCLUDED.source_metadata,
+           updated_at = CURRENT_TIMESTAMP`,
+      [reference.character, reference.jlptLevel, reference.onyomi, reference.kunyomi, reference.meanings, reference.strokeCount, JSON.stringify(reference.sourceMetadata)]
+    );
+    upserted += result.rowCount;
+  }
+
+  const backfill = await client.query(
+    `UPDATE kanji AS k
+     SET reference_id = r.id_kanji_reference
+     FROM kanji_reference AS r
+     WHERE k.character_kanji = r.character
+       AND k.reference_id IS DISTINCT FROM r.id_kanji_reference`
+  );
+
+  return { received: references.length, upserted, backfilled: backfill.rowCount };
+}
+
+module.exports = {
+  findKanjiReferenceId,
+  importKanjiReferences,
+  isSingleHanCodePoint,
+  lookupKanjiReference
+};
