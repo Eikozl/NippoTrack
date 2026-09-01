@@ -61,7 +61,7 @@ export async function renderSettings(container) {
         className: 'mt-4 inline-flex text-sm font-semibold text-vermilion transition hover:text-vermilion-dark',
         text: 'Third-Party Notices',
         attrs: {
-          href: 'https://github.com/Eikozl/Japanese-Learning-Tracker/blob/phase0/openjlpt-integration/THIRD_PARTY_NOTICES.md',
+          href: 'https://github.com/Eikozl/Japanese-Learning-Tracker/blob/dddabb5/THIRD_PARTY_NOTICES.md',
           target: '_blank',
           rel: 'noreferrer'
         }
