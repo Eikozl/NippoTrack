@@ -1,12 +1,10 @@
 const { spawn } = require('node:child_process');
 const path = require('node:path');
+const { selectDevelopmentServices } = require('./scripts/development-environment');
 
 const npmCli = process.env.npm_execpath;
 const npmExecutable = npmCli ? process.execPath : process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const services = [
-  { name: 'API', directory: 'server' },
-  { name: 'frontend', directory: 'client' }
-];
+const services = selectDevelopmentServices(process.argv.slice(2));
 
 let shuttingDown = false;
 const children = [];
@@ -24,10 +22,10 @@ function stop(exitCode = 0) {
 
 for (const service of services) {
   console.log(`Starting ${service.name} from ./${service.directory}...`);
-  const npmArguments = npmCli ? [npmCli, 'run', 'dev'] : ['run', 'dev'];
+  const npmArguments = npmCli ? [npmCli, ...service.npmArguments] : service.npmArguments;
   const child = spawn(npmExecutable, npmArguments, {
     cwd: path.join(__dirname, service.directory),
-    env: process.env,
+    env: { ...process.env, ...service.environment },
     stdio: 'inherit',
     shell: !npmCli && process.platform === 'win32'
   });
