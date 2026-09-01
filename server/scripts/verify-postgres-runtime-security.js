@@ -8,6 +8,20 @@ const applicationTables = `
   WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname <> 'schema_migrations'
   ORDER BY c.relname`;
 
+const readOnlyRuntimeTables = new Set(['kanji_reference']);
+
+function expectedPolicy(tableName) {
+  return readOnlyRuntimeTables.has(tableName)
+    ? { name: 'kanji_reference_runtime_select', command: 'SELECT' }
+    : { name: 'jlt_runtime_crud', command: 'ALL' };
+}
+
+function expectedRuntimePrivileges(tableName) {
+  return readOnlyRuntimeTables.has(tableName)
+    ? ['SELECT']
+    : ['SELECT', 'INSERT', 'UPDATE', 'DELETE'];
+}
+
 async function main() {
   try {
     const [roleResult, tablesResult, ownershipResult, policiesResult, apiTablePrivileges, apiSequencePrivileges, publicPrivileges, functionsResult, triggerFunctions, defaultPrivileges, schemaPrivileges, migrationPrivileges, runtimeTablePrivileges, runtimeSequencePrivileges] = await Promise.all([
@@ -29,16 +43,25 @@ async function main() {
 
     const role = roleResult.rows[0];
     const tables = tablesResult.rows;
-    const expectedPolicies = new Set(tables.map(({ relname }) => `${relname}:jlt_runtime_crud`));
-    const actualPolicies = policiesResult.rows.filter(({ tablename }) => expectedPolicies.has(`${tablename}:jlt_runtime_crud`));
-    const unexpectedPolicies = policiesResult.rows.filter(({ roles, cmd }) => roles.includes('public') || !roles.includes('jlt_runtime') || cmd !== 'ALL');
-    const runtimeTableExtra = runtimeTablePrivileges.rows.filter(({ privilege_type }) => !['SELECT', 'INSERT', 'UPDATE', 'DELETE'].includes(privilege_type));
+    const expectedPolicies = new Map(tables.map(({ relname }) => [relname, expectedPolicy(relname)]));
+    const actualPolicies = policiesResult.rows.filter(({ tablename, policyname, cmd }) => {
+      const expected = expectedPolicies.get(tablename);
+      return expected?.name === policyname && expected.command === cmd;
+    });
+    const unexpectedPolicies = policiesResult.rows.filter(({ tablename, policyname, roles, cmd }) => {
+      const expected = expectedPolicies.get(tablename);
+      return roles.includes('public') || !roles.includes('jlt_runtime') || !expected || expected.name !== policyname || expected.command !== cmd;
+    });
+    const runtimeTableExtra = runtimeTablePrivileges.rows.filter(({ relname, privilege_type }) => !expectedRuntimePrivileges(relname).includes(privilege_type));
+    const runtimeTableMissing = tables.flatMap(({ relname }) => expectedRuntimePrivileges(relname)
+      .filter((privilege) => !runtimeTablePrivileges.rows.some((row) => row.relname === relname && row.privilege_type === privilege))
+      .map((privilege) => `${relname}:${privilege}`));
     const runtimeSequenceExtra = runtimeSequencePrivileges.rows.filter(({ privilege_type }) => !['USAGE', 'SELECT'].includes(privilege_type));
     const failures = [
       !role || !role.rolcanlogin || role.rolsuper || role.rolcreaterole || role.rolcreatedb || role.rolreplication || role.rolbypassrls || role.rolinherit ? 'jlt_runtime attributes are not least-privilege' : null,
-      tables.length !== 25 ? `expected 25 application tables, found ${tables.length}` : null,
+      tables.length !== 26 ? `expected 26 application tables, found ${tables.length}` : null,
       tables.some(({ rls_enabled, rls_forced }) => !rls_enabled || !rls_forced) ? 'RLS is not enabled and forced on every application table' : null,
-      actualPolicies.length !== tables.length ? 'missing explicit jlt_runtime CRUD policies' : null,
+      actualPolicies.length !== tables.length ? 'missing explicit least-privilege jlt_runtime policies' : null,
       unexpectedPolicies.length ? 'unexpected or broad RLS policies exist' : null,
       ownershipResult.rowCount ? 'jlt_runtime owns one or more application relations' : null,
       apiTablePrivileges.rowCount ? 'anon or authenticated retains an application-table privilege' : null,
@@ -50,7 +73,7 @@ async function main() {
       defaultPrivileges.rowCount ? 'a default privilege can grant anon, authenticated, or PUBLIC future access' : null,
       schemaPrivileges.rows.some(({ rolname, privilege_type }) => ['anon','authenticated'].includes(rolname) || (rolname === 'jlt_runtime' && privilege_type !== 'USAGE')) ? 'schema privileges are broader than intended' : null,
       migrationPrivileges.rowCount ? 'jlt_runtime can access schema_migrations' : null,
-      runtimeTableExtra.length ? 'jlt_runtime has non-CRUD table privileges' : null,
+      runtimeTableExtra.length || runtimeTableMissing.length ? 'jlt_runtime table privileges are broader or narrower than intended' : null,
       runtimeSequenceExtra.length ? 'jlt_runtime has non-identity sequence privileges' : null
     ].filter(Boolean);
     const report = { role, applicationTables: tables.length, policies: actualPolicies.length, triggers: triggerFunctions.rows.length, failures };

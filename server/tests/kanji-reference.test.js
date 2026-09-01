@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 process.env.NODE_ENV = 'test';
 process.env.JLT_AUTH_BYPASS_FOR_TESTS = 'true';
@@ -161,4 +163,15 @@ test('importer uses upsert plus a backfill and remains repeatable', async () => 
     assert.match(sql, /ON CONFLICT \(character\) DO UPDATE/i);
     assert.equal(params[0], '日');
   });
+});
+
+test('migration and runtime verifier preserve read-only access to shared references', () => {
+  const migration = fs.readFileSync(path.join(__dirname, '../db/migrations-postgres/006_kanji_reference_engine.sql'), 'utf8');
+  const verifier = fs.readFileSync(path.join(__dirname, '../scripts/verify-postgres-runtime-security.js'), 'utf8');
+
+  assert.match(migration, /ENABLE ROW LEVEL SECURITY/i);
+  assert.match(migration, /FORCE ROW LEVEL SECURITY/i);
+  assert.match(migration, /GRANT SELECT ON TABLE kanji_reference TO jlt_runtime/i);
+  assert.doesNotMatch(migration, /GRANT (?:SELECT, )?INSERT.*kanji_reference.*jlt_runtime/i);
+  assert.match(verifier, /kanji_reference/);
 });
