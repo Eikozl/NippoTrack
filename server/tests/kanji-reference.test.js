@@ -103,6 +103,35 @@ test('GET /api/kanji/lookup/:character rejects anything other than one Han code 
   });
 });
 
+test('creating a known kanji stores its canonical reference relationship', async () => {
+  const calls = [];
+  await withPoolStub(async (sql, params) => {
+    calls.push({ sql, params });
+    if (/SELECT id_kanji_reference AS reference_id FROM kanji_reference/i.test(sql)) return [[{ reference_id: 12 }]];
+    if (/INSERT INTO kanji /i.test(sql)) return [{ insertId: 9 }];
+    if (/INSERT INTO review_items/i.test(sql)) return [{ affectedRows: 1 }];
+    if (/FROM kanji WHERE id_kanji = \? AND user_id = \?/i.test(sql)) {
+      return [[{ id_kanji: 9, character_kanji: '日', meaning: 'day', reference_id: 12 }]];
+    }
+    throw new Error(`Unexpected SQL: ${sql}`);
+  }, async () => {
+    const server = await startServer();
+    try {
+      const response = await fetch(`http://127.0.0.1:${server.address().port}/api/kanji`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ character_kanji: '日', meaning: 'day' })
+      });
+      assert.equal(response.status, 201);
+      assert.equal((await response.json()).reference_id, 12);
+      const insert = calls.find(({ sql }) => /INSERT INTO kanji /i.test(sql));
+      assert.equal(insert.params.at(-1), 12);
+    } finally {
+      await stopServer(server);
+    }
+  });
+});
+
 test('importer uses upsert plus a backfill and remains repeatable', async () => {
   const statements = [];
   const client = {

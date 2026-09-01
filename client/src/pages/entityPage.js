@@ -1,4 +1,5 @@
 import { apiRequest, queryString } from '../api';
+import { applyPristineKanjiAutofill, isSingleHanCodePoint } from '../kanjiReference';
 import {
   debounce,
   confirmDialog,
@@ -167,6 +168,39 @@ function formPayload(form, config) {
   return Object.fromEntries(config.fields.map(({ name }) => [name, formData.get(name) ?? '']));
 }
 
+function enableKanjiReferenceAutofill(content) {
+  const fieldNames = ['character_kanji', 'meaning', 'onyomi', 'kunyomi', 'jlpt_level'];
+  const fields = Object.fromEntries(fieldNames.map((name) => [
+    name,
+    content.find((item) => item.querySelector?.(`[name="${name}"]`))?.querySelector(`[name="${name}"]`)
+  ]));
+  const characterField = fields.character_kanji;
+  if (!characterField) return;
+
+  const dirtyFields = new Set();
+  ['meaning', 'onyomi', 'kunyomi', 'jlpt_level'].forEach((name) => {
+    fields[name]?.addEventListener('input', () => dirtyFields.add(name));
+    fields[name]?.addEventListener('change', () => dirtyFields.add(name));
+  });
+
+  let requestSequence = 0;
+  const lookup = debounce(async () => {
+    const character = characterField.value.trim();
+    const sequence = ++requestSequence;
+    if (!isSingleHanCodePoint(character)) return;
+
+    try {
+      const reference = await apiRequest(`/api/kanji/lookup/${encodeURIComponent(character)}`);
+      if (sequence !== requestSequence || characterField.value.trim() !== character) return;
+      applyPristineKanjiAutofill(fields, dirtyFields, reference);
+    } catch (error) {
+      if (error.status !== 404) return;
+    }
+  }, 300);
+
+  characterField.addEventListener('input', lookup);
+}
+
 function recordCard(item, config, onView, onEdit, onDelete) {
   const viewButton = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5', text: 'View', attrs: { type: 'button' } });
   const editButton = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5', text: 'Edit', attrs: { type: 'button' } });
@@ -264,9 +298,13 @@ export function renderEntityPage(container, config) {
   }
 
   function openRecordDialog(record = {}) {
+    const content = buildFields(config, record);
+    if (config === ENTITY_CONFIGS.kanji && !record[config.idKey]) {
+      enableKanjiReferenceAutofill(content);
+    }
     openDialog({
       title: record[config.idKey] ? `Edit ${config.singular}` : `Add ${config.singular}`,
-      content: buildFields(config, record),
+      content,
       submitLabel: record[config.idKey] ? 'Save changes' : 'Create record',
       onSubmit: (form, close) => saveRecord(record, form, close)
     });
