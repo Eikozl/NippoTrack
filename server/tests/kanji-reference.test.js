@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -163,6 +164,15 @@ test('importer uses upsert plus a backfill and remains repeatable', async () => 
     assert.match(sql, /ON CONFLICT \(character\) DO UPDATE/i);
     assert.equal(params[0], '日');
   });
+});
+
+test('reference importer helpers do not initialize the normal runtime database pool', () => {
+  const result = spawnSync(process.execPath, ['-e', "require('./src/services/kanjiReference')"], {
+    cwd: path.join(__dirname, '..'),
+    env: { PATH: process.env.PATH },
+    encoding: 'utf8'
+  });
+  assert.equal(result.status, 0, result.stderr);
 });
 
 test('migration and runtime verifier preserve read-only access to shared references', () => {

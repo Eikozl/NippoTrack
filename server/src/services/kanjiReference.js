@@ -1,4 +1,3 @@
-const pool = require('../config/db');
 const { JLPT_LEVELS } = require('../constants');
 const { ValidationError } = require('../errors/http');
 
@@ -28,7 +27,11 @@ function publicReference(row) {
   };
 }
 
-async function lookupKanjiReference(character, database = pool) {
+function runtimeDatabase() {
+  return require('../config/db');
+}
+
+async function lookupKanjiReference(character, database = runtimeDatabase()) {
   requireSingleHanCodePoint(character);
   const [rows] = await database.execute(
     'SELECT id_kanji_reference AS reference_id, character, jlpt_level, onyomi, kunyomi, meanings, stroke_count FROM kanji_reference WHERE character = ?',
@@ -37,7 +40,7 @@ async function lookupKanjiReference(character, database = pool) {
   return publicReference(rows[0]);
 }
 
-async function findKanjiReferenceId(character, database = pool) {
+async function findKanjiReferenceId(character, database = runtimeDatabase()) {
   const [rows] = await database.execute(
     'SELECT id_kanji_reference AS reference_id FROM kanji_reference WHERE character = ?',
     [character]
