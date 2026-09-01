@@ -22,7 +22,8 @@
     "postgres:test-auth-flows": "node scripts/test-supabase-auth-flows.js",
     "postgres:test-runtime": "node --test tests/postgres-runtime.test.js",
     "postgres:validate-import": "node scripts/validate-postgres-import.js",
-    "kanji-reference:import": "node scripts/import-kanji-reference.js"
+    "kanji-reference:import": "node scripts/import-kanji-reference.js",
+    "kanji-reference:normalize-openjlpt": "node scripts/normalize-openjlpt-kanji.js"
   },
   "keywords": [],
   "author": "",

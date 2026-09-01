@@ -2,6 +2,7 @@ const { JLPT_LEVELS } = require('../constants');
 const { ValidationError } = require('../errors/http');
 
 const singleHanCodePoint = /^\p{Script=Han}$/u;
+const IMPORT_BATCH_SIZE = 200;
 
 function isSingleHanCodePoint(value) {
   return typeof value === 'string' && singleHanCodePoint.test(value);
@@ -95,13 +96,27 @@ function normalizeImportedReference(value) {
 async function importKanjiReferences(client, references) {
   if (!Array.isArray(references)) throw new ValidationError('Import JSON must be an array of reference entries.');
   const normalized = references.map(normalizeImportedReference);
-  const unique = new Map(normalized.map((reference) => [reference.character, reference]));
+  const unique = [...new Map(normalized.map((reference) => [reference.character, reference])).values()];
   let upserted = 0;
 
-  for (const reference of unique.values()) {
+  for (let start = 0; start < unique.length; start += IMPORT_BATCH_SIZE) {
+    const batch = unique.slice(start, start + IMPORT_BATCH_SIZE);
+    const values = batch.map((_, rowIndex) => {
+      const parameter = rowIndex * 7;
+      return `($${parameter + 1}, $${parameter + 2}, $${parameter + 3}, $${parameter + 4}, $${parameter + 5}, $${parameter + 6}, $${parameter + 7}::jsonb)`;
+    }).join(', ');
+    const parameters = batch.flatMap((reference) => [
+      reference.character,
+      reference.jlptLevel,
+      reference.onyomi,
+      reference.kunyomi,
+      reference.meanings,
+      reference.strokeCount,
+      JSON.stringify(reference.sourceMetadata)
+    ]);
     const result = await client.query(
       `INSERT INTO kanji_reference (character, jlpt_level, onyomi, kunyomi, meanings, stroke_count, source_metadata)
-       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+       VALUES ${values}
        ON CONFLICT (character) DO UPDATE
        SET jlpt_level = EXCLUDED.jlpt_level,
            onyomi = EXCLUDED.onyomi,
@@ -110,7 +125,7 @@ async function importKanjiReferences(client, references) {
            stroke_count = EXCLUDED.stroke_count,
            source_metadata = EXCLUDED.source_metadata,
            updated_at = CURRENT_TIMESTAMP`,
-      [reference.character, reference.jlptLevel, reference.onyomi, reference.kunyomi, reference.meanings, reference.strokeCount, JSON.stringify(reference.sourceMetadata)]
+      parameters
     );
     upserted += result.rowCount;
   }
@@ -130,5 +145,6 @@ module.exports = {
   findKanjiReferenceId,
   importKanjiReferences,
   isSingleHanCodePoint,
-  lookupKanjiReference
+  lookupKanjiReference,
+  normalizeImportedReference
 };

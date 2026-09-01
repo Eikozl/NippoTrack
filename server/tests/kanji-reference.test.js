@@ -166,6 +166,30 @@ test('importer uses upsert plus a backfill and remains repeatable', async () => 
   });
 });
 
+test('importer batches canonical reference upserts to avoid long remote transactions', async () => {
+  const statements = [];
+  const client = {
+    async query(sql, params = []) {
+      statements.push({ sql, params });
+      return { rowCount: /INSERT INTO kanji_reference/i.test(sql) ? params.length / 7 : 0, rows: [] };
+    }
+  };
+  const references = Array.from({ length: 201 }, (_, index) => ({
+    character: String.fromCodePoint(0x4e00 + index),
+    jlpt_level: 'N5',
+    meanings: [`meaning-${index}`],
+    source_metadata: { source: 'fixture' }
+  }));
+
+  const result = await importKanjiReferences(client, references);
+  const upserts = statements.filter(({ sql }) => /INSERT INTO kanji_reference/i.test(sql));
+
+  assert.equal(result.upserted, 201);
+  assert.equal(upserts.length, 2);
+  assert.equal(upserts[0].params.length, 200 * 7);
+  assert.equal(upserts[1].params.length, 7);
+});
+
 test('reference importer helpers do not initialize the normal runtime database pool', () => {
   const result = spawnSync(process.execPath, ['-e', "require('./src/services/kanjiReference')"], {
     cwd: path.join(__dirname, '..'),

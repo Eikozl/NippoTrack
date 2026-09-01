@@ -54,6 +54,20 @@ export async function renderSettings(container) {
       exportButton
     ]),
     element('article', { className: 'surface mt-5 max-w-2xl p-6' }, [
+      element('h2', { className: 'text-lg font-semibold text-ink', text: 'Data sources' }),
+      element('p', { className: 'mt-2 text-sm leading-6 text-muted', text: 'JLPT reference data provided in part by OpenJLPT and its upstream sources.' }),
+      element('p', { className: 'mt-2 text-sm leading-6 text-muted', text: 'JLPT classifications are community/reference data and are not an official JLPT syllabus.' }),
+      element('a', {
+        className: 'mt-4 inline-flex text-sm font-semibold text-vermilion transition hover:text-vermilion-dark',
+        text: 'Third-Party Notices',
+        attrs: {
+          href: 'https://github.com/Eikozl/Japanese-Learning-Tracker/blob/phase0/openjlpt-integration/THIRD_PARTY_NOTICES.md',
+          target: '_blank',
+          rel: 'noreferrer'
+        }
+      })
+    ]),
+    element('article', { className: 'surface mt-5 max-w-2xl p-6' }, [
       element('h2', { className: 'text-lg font-semibold text-ink', text: 'Keyboard shortcuts' }),
       element('dl', { className: 'mt-4 grid gap-3 text-sm sm:grid-cols-2' }, [
         element('div', {}, [element('dt', { className: 'font-semibold text-ink', text: '/' }), element('dd', { className: 'mt-1 text-muted', text: 'Focus global search' })]),
