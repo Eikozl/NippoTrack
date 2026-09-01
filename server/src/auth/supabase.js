@@ -8,9 +8,28 @@ const productionAuthRedirectUrl = 'https://japanese-learning-tracker.vercel.app/
 const previewAuthRedirectUrl = 'https://japanese-learning-tracker-git-master-yeferson-sena.vercel.app/';
 const defaultSupabaseUrl = 'https://milayuvlajmgrcxmrxdg.supabase.co';
 const defaultSupabasePublishableKey = 'sb_publishable_UJQwQKZge3SKbj-j-BfVkg_2QmvbX4O';
+const localDevelopmentToken = 'jlt-local-development';
+const localAddresses = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
 function isTestBypass() {
   return process.env.NODE_ENV === 'test' && process.env.JLT_AUTH_BYPASS_FOR_TESTS === 'true';
+}
+
+function localBypassUserFromRequest(req) {
+  if (process.env.JLT_LOCAL_AUTH_BYPASS !== 'true' || process.env.NODE_ENV === 'production' || process.env.VERCEL === '1') return null;
+  if (!localAddresses.has(req.socket?.remoteAddress || '')) return null;
+
+  const authorization = req.get('authorization') || '';
+  if (authorization !== `Bearer ${localDevelopmentToken}`) return null;
+
+  const source = req.get('origin') || `http://${req.get('host') || ''}`;
+  let hostname;
+  try { hostname = new URL(source).hostname; } catch { return null; }
+  if (hostname !== 'localhost' && !localAddresses.has(hostname)) return null;
+
+  const id = process.env.JLT_LOCAL_AUTH_USER_ID || '';
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) return null;
+  return { id, email: 'local-development@jlt.invalid', email_confirmed_at: 'local-development' };
 }
 
 function configured(name, fallback) {
@@ -55,6 +74,8 @@ function withTimeout(promise, timeoutMs) {
 
 async function verifiedUserFromRequest(req) {
   if (isTestBypass()) return { id: process.env.JLT_TEST_USER_ID || '00000000-0000-4000-8000-000000000001', email: 'test@jlt.local', email_confirmed_at: new Date().toISOString() };
+  const localUser = localBypassUserFromRequest(req);
+  if (localUser) return localUser;
   const authorization = req.get('authorization') || '';
   const match = authorization.match(/^Bearer\s+(.+)$/i);
   if (!match) return null;
@@ -75,4 +96,4 @@ async function verifiedUserFromRequest(req) {
   return data.user;
 }
 
-module.exports = { authClient, authRedirectUrl, isTestBypass, verifiedUserFromRequest };
+module.exports = { authClient, authRedirectUrl, isTestBypass, localBypassUserFromRequest, verifiedUserFromRequest };

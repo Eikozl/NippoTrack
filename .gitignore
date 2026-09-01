@@ -36,3 +36,4 @@ supabase/.temp/
 
 # Vercel CLI local build/link state
 .vercel/
+.env*

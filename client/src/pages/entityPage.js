@@ -1,5 +1,5 @@
 import { apiRequest, queryString } from '../api';
-import { applyPristineKanjiAutofill, isSingleHanCodePoint } from '../kanjiReference';
+import { applyPristineKanjiAutofill, changedKanjiReferenceFields, isSingleHanCodePoint, transliteratedValue } from '../kanjiReference';
 import {
   debounce,
   confirmDialog,
@@ -34,6 +34,7 @@ export const ENTITY_CONFIGS = {
     primary: (item) => item.word,
     secondary: (item) => item.reading || 'Reading not recorded',
     detail: (item) => item.meaning,
+    japaneseTextFields: { word: 'hiragana', reading: 'hiragana', example_sentence: 'hiragana' },
     renderDetail: (item, actions) => element('div', { className: 'sm:col-span-2' }, [
       element('dl', { className: 'grid gap-3 text-sm sm:grid-cols-2' }, [
         element('div', {}, [element('dt', { className: 'text-muted', text: 'Reading' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.reading || 'Not recorded' })]),
@@ -79,6 +80,7 @@ export const ENTITY_CONFIGS = {
     primary: (item) => item.character_kanji,
     secondary: (item) => [item.onyomi, item.kunyomi].filter(Boolean).join(' · ') || 'Readings not recorded',
     detail: (item) => item.meaning,
+    japaneseTextFields: { onyomi: 'katakana', kunyomi: 'hiragana' },
     renderDetail: (item) => element('div', { className: 'sm:col-span-2' }, [
       element('section', { className: 'kanji-detail-hero' }, [
         element('dl', { className: 'kanji-detail-facts grid text-sm sm:grid-cols-2' }, [
@@ -116,6 +118,7 @@ export const ENTITY_CONFIGS = {
     primary: (item) => item.grammar_point,
     secondary: (item) => item.structure || 'Structure not recorded',
     detail: (item) => item.meaning,
+    japaneseTextFields: { grammar_point: 'hiragana', structure: 'hiragana', example: 'hiragana' },
     renderDetail: (item) => element('div', { className: 'sm:col-span-2' }, [
       element('dl', { className: 'grid gap-3 text-sm sm:grid-cols-2' }, [
         element('div', {}, [element('dt', { className: 'text-muted', text: 'Grammar point' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.grammar_point })]),
@@ -168,14 +171,99 @@ function formPayload(form, config) {
   return Object.fromEntries(config.fields.map(({ name }) => [name, formData.get(name) ?? '']));
 }
 
+function inputFor(content, name) {
+  return content.map((item) => item.matches?.(`[name="${name}"]`) ? item : item.querySelector?.(`[name="${name}"]`)).find(Boolean);
+}
+
+function enableRomajiConversion(content, config) {
+  Object.entries(config.japaneseTextFields || {}).forEach(([name, script]) => {
+    const input = inputFor(content, name);
+    if (!input) return;
+    input.addEventListener('blur', async () => {
+      const original = input.value.trim();
+      if (!original) return;
+      try {
+        const result = await apiRequest(`/api/kanji/reference?search=${encodeURIComponent(original)}&limit=1`);
+        const converted = transliteratedValue(result.transliteration, script);
+        if (converted && input.value.trim() === original) input.value = converted;
+      } catch {
+        // Leave the user's value unchanged when the reference service is unavailable.
+      }
+    });
+  });
+}
+
 function enableKanjiReferenceAutofill(content) {
   const fieldNames = ['character_kanji', 'meaning', 'onyomi', 'kunyomi', 'jlpt_level'];
   const fields = Object.fromEntries(fieldNames.map((name) => [
     name,
-    content.find((item) => item.querySelector?.(`[name="${name}"]`))?.querySelector(`[name="${name}"]`)
+    inputFor(content, name)
   ]));
   const characterField = fields.character_kanji;
   if (!characterField) return;
+
+  const status = element('p', {
+    className: 'kanji-reference-status hidden sm:col-span-2',
+    text: 'Looking up kanji reference…',
+    attrs: { role: 'status', 'aria-live': 'polite' }
+  });
+  content.unshift(status);
+  const candidates = element('div', {
+    className: 'kanji-reference-candidates hidden sm:col-span-2',
+    attrs: { role: 'listbox', 'aria-label': 'Kanji reference matches' }
+  });
+  content.unshift(candidates);
+
+  const setLoading = (loading) => {
+    ['meaning', 'onyomi', 'kunyomi', 'jlpt_level'].forEach((name) => {
+      const field = fields[name];
+      field?.closest('.field')?.classList.toggle('field-autofill-loading', loading);
+      if (loading) field?.setAttribute('aria-busy', 'true');
+      else field?.removeAttribute('aria-busy');
+    });
+    status.classList.toggle('hidden', !loading);
+  };
+  const setJlptLocked = (locked) => {
+    const field = fields.jlpt_level;
+    if (!field) return;
+    field.classList.toggle('field-reference-locked', locked);
+    field.setAttribute('aria-disabled', String(locked));
+    field.tabIndex = locked ? -1 : 0;
+    field.closest('.field')?.classList.toggle('field-reference-locked', locked);
+  };
+  const clearCandidates = () => {
+    candidates.classList.add('hidden');
+    candidates.replaceChildren();
+  };
+  const showCandidates = (items, transliteration) => {
+    if (!items.length) return clearCandidates();
+    const reading = [transliteratedValue(transliteration, 'hiragana'), transliteratedValue(transliteration, 'katakana')].filter(Boolean).join(' / ');
+    candidates.replaceChildren(
+      element('p', { className: 'px-1 text-xs font-semibold text-muted', text: 'Matching kanji' }),
+      ...(reading ? [element('p', { className: 'px-1 text-xs text-muted', text: reading })] : []),
+      ...items.map((reference) => {
+        const button = element('button', {
+          className: 'kanji-reference-candidate',
+          text: `${reference.character} · ${reference.meanings.join(', ')} · ${reference.jlptLevel || 'JLPT not set'}`,
+          attrs: { type: 'button', role: 'option', 'aria-label': `Select ${reference.character}` }
+        });
+        button.addEventListener('click', () => {
+          characterField.value = reference.character;
+          applyPristineKanjiAutofill(fields, dirtyFields, reference);
+          clearCandidates();
+        });
+        return button;
+      })
+    );
+    candidates.classList.remove('hidden');
+  };
+  ['pointerdown', 'keydown'].forEach((eventName) => {
+    fields.jlpt_level?.addEventListener(eventName, (event) => {
+      if (!fields.jlpt_level.classList.contains('field-reference-locked')) return;
+      event.preventDefault();
+    });
+  });
+  setJlptLocked(true);
 
   const dirtyFields = new Set();
   ['meaning', 'onyomi', 'kunyomi', 'jlpt_level'].forEach((name) => {
@@ -187,18 +275,52 @@ function enableKanjiReferenceAutofill(content) {
   const lookup = debounce(async () => {
     const character = characterField.value.trim();
     const sequence = ++requestSequence;
-    if (!isSingleHanCodePoint(character)) return;
+    if (!character) return clearCandidates();
+    setLoading(true);
 
     try {
-      const reference = await apiRequest(`/api/kanji/lookup/${encodeURIComponent(character)}`);
-      if (sequence !== requestSequence || characterField.value.trim() !== character) return;
-      applyPristineKanjiAutofill(fields, dirtyFields, reference);
+      if (isSingleHanCodePoint(character)) {
+        const reference = await apiRequest(`/api/kanji/lookup/${encodeURIComponent(character)}`);
+        if (sequence !== requestSequence || characterField.value.trim() !== character) return;
+        clearCandidates();
+        applyPristineKanjiAutofill(fields, dirtyFields, reference);
+      } else {
+        const result = await apiRequest(`/api/kanji/reference?search=${encodeURIComponent(character)}&limit=8`);
+        if (sequence !== requestSequence || characterField.value.trim() !== character) return;
+        showCandidates(result.items, result.transliteration);
+      }
     } catch (error) {
       if (error.status !== 404) return;
+    } finally {
+      if (sequence === requestSequence) setLoading(false);
     }
   }, 300);
 
-  characterField.addEventListener('input', lookup);
+  characterField.addEventListener('input', () => {
+    requestSequence += 1;
+    setLoading(false);
+    clearCandidates();
+    lookup();
+  });
+}
+
+function enableKanjiReferenceEditWarning(content, record) {
+  const fields = Object.fromEntries(['character_kanji', 'meaning', 'onyomi', 'kunyomi', 'jlpt_level'].map((name) => [
+    name,
+    inputFor(content, name)
+  ]));
+  const warning = element('p', {
+    className: 'kanji-reference-warning hidden sm:col-span-2',
+    text: 'You are changing reference-derived kanji data. Verify the character, meaning, readings, and JLPT level before saving.',
+    attrs: { role: 'status', 'aria-live': 'polite' }
+  });
+  content.unshift(warning);
+  const updateWarning = () => {
+    const values = Object.fromEntries(Object.entries(fields).map(([name, field]) => [name, field?.value ?? '']));
+    warning.classList.toggle('hidden', changedKanjiReferenceFields(record, values).length === 0);
+  };
+  Object.values(fields).forEach((field) => field?.addEventListener('input', updateWarning));
+  fields.jlpt_level?.addEventListener('change', updateWarning);
 }
 
 function recordCard(item, config, onView, onEdit, onDelete) {
@@ -299,8 +421,11 @@ export function renderEntityPage(container, config) {
 
   function openRecordDialog(record = {}) {
     const content = buildFields(config, record);
+    enableRomajiConversion(content, config);
     if (config === ENTITY_CONFIGS.kanji && !record[config.idKey]) {
       enableKanjiReferenceAutofill(content);
+    } else if (config === ENTITY_CONFIGS.kanji) {
+      enableKanjiReferenceEditWarning(content, record);
     }
     openDialog({
       title: record[config.idKey] ? `Edit ${config.singular}` : `Add ${config.singular}`,

@@ -10,9 +10,11 @@ import { renderStatistics } from './pages/statistics';
 import { renderV2Page } from './pages/v2Pages';
 import { renderReview } from './pages/review';
 import { renderSettings } from './pages/settings';
+import { renderKanjiReference } from './pages/kanjiReference';
+import { kanjiReferenceRoute, parseKanjiReferenceRoute } from './kanjiReference';
 import { icon, moduleIconMap } from './icons';
 import { confirmDialog, element, openDialog, showToast } from './ui';
-import { authConfigured, supabase } from './authClient';
+import { authConfigured, localAuthBypass, localAuthBypassEmail, supabase } from './authClient';
 import { getLocale, setLocale, t, translateDocument } from './i18n';
 
 const content = document.getElementById('app-content');
@@ -160,8 +162,10 @@ async function bootstrapApp() {
   // Never leave the document blank while a stored session is checked remotely.
   renderAuthGate();
   try {
-    const { data } = await supabase.auth.getSession();
-    if (!data.session) return;
+    if (!localAuthBypass) {
+      const { data } = await supabase.auth.getSession();
+      if (!data.session) return;
+    }
     const session = await apiRequest('/api/auth/session', { notifyAuth: false });
     if (!session.authenticated) return;
     authRoot.replaceChildren();
@@ -188,9 +192,12 @@ function confirmSignOut() {
 }
 
 async function openAccountDialog() {
-  const { data, error } = await supabase.auth.getUser();
-  if (error || !data.user?.email) throw error || new Error('Unable to load your account.');
-  const email = data.user.email;
+  let email = localAuthBypassEmail;
+  if (!localAuthBypass) {
+    const { data, error } = await supabase.auth.getUser();
+    if (error || !data.user?.email) throw error || new Error('Unable to load your account.');
+    email = data.user.email;
+  }
   let closeDialog = () => {};
   const signOutButton = element('button', { className: 'button-danger w-full sm:w-auto', text: 'Sign out', attrs: { type: 'button' } });
   signOutButton.addEventListener('click', () => {
@@ -269,11 +276,21 @@ async function globalSearch(query) {
   searchResults.classList.remove('hidden'); searchResults.className = 'absolute inset-x-0 top-[calc(100%+.6rem)] z-30 max-h-96 overflow-y-auto rounded-[18px] p-2 surface';
   searchResults.textContent = 'Searching…';
   try {
-    const [vocabulary, kanji, grammar, sessions, notes] = await Promise.all([
-      apiRequest(`/api/vocabulary?search=${encodeURIComponent(query)}&limit=5`), apiRequest(`/api/kanji?search=${encodeURIComponent(query)}&limit=5`), apiRequest(`/api/grammar?search=${encodeURIComponent(query)}&limit=5`), apiRequest(`/api/sessions?search=${encodeURIComponent(query)}&limit=5`).catch(() => ({ items: [] })), apiRequest(`/api/notes?search=${encodeURIComponent(query)}&limit=5`).catch(() => ({ items: [] }))
+    const referenceRequest = apiRequest(`/api/kanji/reference?search=${encodeURIComponent(query)}&limit=5`)
+      .then((data) => data.items)
+      .catch(() => []);
+    const [vocabulary, kanji, grammar, sessions, notes, references] = await Promise.all([
+      apiRequest(`/api/vocabulary?search=${encodeURIComponent(query)}&limit=5`), apiRequest(`/api/kanji?search=${encodeURIComponent(query)}&limit=5`), apiRequest(`/api/grammar?search=${encodeURIComponent(query)}&limit=5`), apiRequest(`/api/sessions?search=${encodeURIComponent(query)}&limit=5`).catch(() => ({ items: [] })), apiRequest(`/api/notes?search=${encodeURIComponent(query)}&limit=5`).catch(() => ({ items: [] })), referenceRequest
     ]);
-    const groups = [['Vocabulary', vocabulary.items, 'vocabulary', (x) => `${x.word} · ${x.meaning}`], ['Kanji', kanji.items, 'kanji', (x) => `${x.character_kanji} · ${x.meaning}`], ['Grammar', grammar.items, 'grammar', (x) => `${x.grammar_point} · ${x.meaning}`], ['Sessions', sessions.items, 'sessions', (x) => `${x.category} · ${x.session_date}`], ['Notes', notes.items, 'notes', (x) => x.title || x.category]];
-    searchResults.replaceChildren(...groups.filter(([, items]) => items?.length).map(([label, items, page, text]) => element('section', { className: 'p-2' }, [element('p', { className: 'eyebrow', text: label }), ...items.map((item) => { const button = element('button', { className: 'block w-full rounded-xl px-3 py-2 text-left text-sm text-ink hover:bg-paper', text: text(item), attrs: { type: 'button' } }); button.addEventListener('click', () => { closeSearch(); searchInput.value = ''; navigate(page); }); return button; })])));
+    const groups = [
+      ['Kanji reference', references, null, (x) => `${x.character} · ${x.meanings.join(', ')}`],
+      ['Vocabulary', vocabulary.items, 'vocabulary', (x) => `${x.word} · ${x.meaning}`],
+      ['Kanji', kanji.items, 'kanji', (x) => `${x.character_kanji} · ${x.meaning}`],
+      ['Grammar', grammar.items, 'grammar', (x) => `${x.grammar_point} · ${x.meaning}`],
+      ['Sessions', sessions.items, 'sessions', (x) => `${x.category} · ${x.session_date}`],
+      ['Notes', notes.items, 'notes', (x) => x.title || x.category]
+    ];
+    searchResults.replaceChildren(...groups.filter(([, items]) => items?.length).map(([label, items, page, text]) => element('section', { className: 'p-2' }, [element('p', { className: 'eyebrow', text: label }), ...items.map((item) => { const button = element('button', { className: 'block w-full rounded-xl px-3 py-2 text-left text-sm text-ink hover:bg-paper', text: text(item), attrs: { type: 'button' } }); button.addEventListener('click', () => { closeSearch(); searchInput.value = ''; navigate(page || kanjiReferenceRoute(item.character)); }); return button; })])));
     if (!searchResults.childNodes.length) searchResults.textContent = 'No matching study records.';
   } catch { searchResults.textContent = 'Unable to search right now.'; }
 }
@@ -291,7 +308,8 @@ function openNavigation() {
 }
 
 async function navigate(pageName, { updateHash = true } = {}) {
-  const page = pages[pageName] ? pageName : 'dashboard';
+  const referenceCharacter = parseKanjiReferenceRoute(pageName);
+  const page = referenceCharacter ? pageName : (pages[pageName] ? pageName : 'dashboard');
   destroyCharts();
   navigationButtons.forEach((button) => {
     const active = button.dataset.page === page;
@@ -301,7 +319,8 @@ async function navigate(pageName, { updateHash = true } = {}) {
   });
   closeNavigation();
   if (updateHash && window.location.hash !== `#${page}`) history.pushState(null, '', `#${page}`);
-  await pages[page]();
+  if (referenceCharacter) await renderKanjiReference(content, referenceCharacter);
+  else await pages[page]();
   loadSidebarStreak();
   content.focus({ preventScroll: true });
   window.scrollTo({ top: 0, behavior: 'smooth' });

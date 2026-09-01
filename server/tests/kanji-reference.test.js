@@ -106,6 +106,45 @@ test('GET /api/kanji/lookup/:character rejects anything other than one Han code 
   });
 });
 
+test('GET /api/kanji/reference searches shared kanji by romaji without using user records', async () => {
+  const calls = [];
+  await withPoolStub(async (sql, params) => {
+    calls.push({ sql, params });
+    return [[{
+      reference_id: 22,
+      character: '食',
+      jlpt_level: 'N5',
+      onyomi: ['ショク'],
+      kunyomi: ['た.べる'],
+      meanings: ['eat', 'food'],
+      stroke_count: 9
+    }]];
+  }, async () => {
+    const server = await startServer();
+    try {
+      const response = await fetch(`http://127.0.0.1:${server.address().port}/api/kanji/reference?search=shoku&limit=5`);
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), {
+        items: [{
+          referenceId: 22,
+          character: '食',
+          jlptLevel: 'N5',
+          onyomi: ['ショク'],
+          kunyomi: ['た.べる'],
+          meanings: ['eat', 'food'],
+          strokeCount: 9
+        }],
+        transliteration: { hiragana: 'しょく', katakana: 'ショク' }
+      });
+      assert.match(calls[0].sql, /FROM kanji_reference/i);
+      assert.doesNotMatch(calls[0].sql, /\bFROM kanji\b|user_id/i);
+      assert.equal(calls[0].params.includes('%ショク%'), true);
+    } finally {
+      await stopServer(server);
+    }
+  });
+});
+
 test('creating a known kanji stores its canonical reference relationship', async () => {
   const calls = [];
   await withPoolStub(async (sql, params) => {

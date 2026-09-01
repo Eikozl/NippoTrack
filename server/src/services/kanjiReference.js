@@ -1,5 +1,7 @@
 const { JLPT_LEVELS } = require('../constants');
 const { ValidationError } = require('../errors/http');
+const { buildSearchCandidates } = require('../search/japaneseSearch');
+const { kanaSearchValues } = require('../search/sqlSearch');
 
 const singleHanCodePoint = /^\p{Script=Han}$/u;
 const IMPORT_BATCH_SIZE = 200;
@@ -39,6 +41,29 @@ async function lookupKanjiReference(character, database = runtimeDatabase()) {
     [character]
   );
   return publicReference(rows[0]);
+}
+
+async function searchKanjiReferences(search, limit, database = runtimeDatabase()) {
+  const candidates = buildSearchCandidates(search);
+  const readingValues = kanaSearchValues(candidates).map((value) => `%${value}%`);
+  const normalizedReadings = "REPLACE(REPLACE(REPLACE(REPLACE(array_to_string(r.onyomi || r.kunyomi, ' '), '.', ''), '．', ''), '・', ''), ' ', '')";
+  const readingWhere = readingValues.length
+    ? ` OR (${readingValues.map(() => `${normalizedReadings} ILIKE ?`).join(' OR ')})`
+    : '';
+  const [rows] = await database.execute(
+    `SELECT r.id_kanji_reference AS reference_id, r.character, r.jlpt_level, r.onyomi, r.kunyomi, r.meanings, r.stroke_count
+     FROM kanji_reference AS r
+     WHERE r.character ILIKE ? OR array_to_string(r.meanings, ' ') ILIKE ?${readingWhere}
+     ORDER BY CASE WHEN r.character = ? THEN 0 ELSE 1 END,
+              CASE r.jlpt_level WHEN 'N5' THEN 1 WHEN 'N4' THEN 2 WHEN 'N3' THEN 3 WHEN 'N2' THEN 4 WHEN 'N1' THEN 5 ELSE 6 END,
+              r.character ASC
+     LIMIT ?`,
+    [`%${candidates.raw}%`, `%${candidates.raw}%`, ...readingValues, candidates.raw, limit]
+  );
+  return {
+    items: rows.map(publicReference),
+    transliteration: candidates.romajiComplete ? { hiragana: candidates.hiragana, katakana: candidates.katakana } : null
+  };
 }
 
 async function findKanjiReferenceId(character, database = runtimeDatabase()) {
@@ -146,5 +171,6 @@ module.exports = {
   importKanjiReferences,
   isSingleHanCodePoint,
   lookupKanjiReference,
+  searchKanjiReferences,
   normalizeImportedReference
 };

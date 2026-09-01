@@ -14,7 +14,7 @@ const {
 const { fetchEntityById } = require('./helpers');
 const { executePaginatedList } = require('./listHelpers');
 const { createReviewItem } = require('./reviewController');
-const { findKanjiReferenceId, lookupKanjiReference: lookupReference } = require('../services/kanjiReference');
+const { findKanjiReferenceId, lookupKanjiReference: lookupReference, searchKanjiReferences } = require('../services/kanjiReference');
 
 async function listKanji(req, res) {
   try {
@@ -157,6 +157,16 @@ async function lookupKanjiReference(req, res) {
   }
 }
 
+async function listKanjiReferences(req, res) {
+  try {
+    const limit = parseOptionLimit(req.query.limit);
+    const search = normalizeText(req.query.search, 100, 'search');
+    return res.json(await searchKanjiReferences(search, limit));
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to search kanji references.' });
+  }
+}
+
 function normalizeKanji(body, current = {}) {
   const character = body.character_kanji !== undefined
     ? normalizeText(body.character_kanji, 4, 'character_kanji')
@@ -238,4 +248,4 @@ async function deleteKanji(req, res) {
   }
 }
 
-module.exports = { createKanji, deleteKanji, getKanji, listKanji, listKanjiOptions, lookupKanjiReference, updateKanji };
+module.exports = { createKanji, deleteKanji, getKanji, listKanji, listKanjiOptions, listKanjiReferences, lookupKanjiReference, updateKanji };
