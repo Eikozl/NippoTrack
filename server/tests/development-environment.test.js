@@ -1,7 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { selectDevelopmentServices } = require('../../scripts/development-environment');
+const { selectDevelopmentServices, selectNpmExecutable } = require('../../scripts/development-environment');
+
+test('uses the native npm executable instead of nesting the parent npm CLI', () => {
+  assert.equal(selectNpmExecutable('win32'), 'npm.cmd');
+  assert.equal(selectNpmExecutable('linux'), 'npm');
+});
 
 test('normal development starts the API and browser with their default environment', () => {
   const services = selectDevelopmentServices([]);

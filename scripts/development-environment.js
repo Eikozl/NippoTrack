@@ -17,4 +17,8 @@ function selectDevelopmentServices(argumentsList = []) {
   ];
 }
 
-module.exports = { selectDevelopmentServices };
+function selectNpmExecutable(platform = process.platform) {
+  return platform === 'win32' ? 'npm.cmd' : 'npm';
+}
+
+module.exports = { selectDevelopmentServices, selectNpmExecutable };
