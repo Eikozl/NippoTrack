@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   applyPristineKanjiAutofill,
   changedKanjiReferenceFields,
+  existingKanjiFromDuplicateError,
   isSingleHanCodePoint,
   kanjiReferenceRoute,
   parseKanjiReferenceRoute,
@@ -58,4 +59,12 @@ test('selects the requested kana script from a complete romaji transliteration',
   assert.equal(transliteratedValue({ hiragana: 'しょく', katakana: 'ショク' }, 'hiragana'), 'しょく');
   assert.equal(transliteratedValue({ hiragana: 'しょく', katakana: 'ショク' }, 'katakana'), 'ショク');
   assert.equal(transliteratedValue(null, 'hiragana'), null);
+});
+
+test('accepts only a valid same-user kanji payload from a duplicate API error', () => {
+  assert.deepEqual(
+    existingKanjiFromDuplicateError({ status: 409, data: { existingKanji: { idKanji: 31, character: '食', meaning: 'eat', jlptLevel: 'N5', status: 'Learning' } } }),
+    { idKanji: 31, character: '食', meaning: 'eat', jlptLevel: 'N5', status: 'Learning' }
+  );
+  assert.equal(existingKanjiFromDuplicateError({ status: 409, data: { existingKanji: { idKanji: 31, character: '日本' } } }), null);
 });

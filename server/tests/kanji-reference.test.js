@@ -149,6 +149,7 @@ test('creating a known kanji stores its canonical reference relationship', async
   const calls = [];
   await withPoolStub(async (sql, params) => {
     calls.push({ sql, params });
+    if (/FROM kanji WHERE user_id = \? AND character_kanji = \?/i.test(sql)) return [[]];
     if (/SELECT id_kanji_reference AS reference_id FROM kanji_reference/i.test(sql)) return [[{ reference_id: 12 }]];
     if (/INSERT INTO kanji /i.test(sql)) return [{ insertId: 9 }];
     if (/INSERT INTO review_items/i.test(sql)) return [{ affectedRows: 1 }];

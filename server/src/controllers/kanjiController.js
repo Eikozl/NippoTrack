@@ -15,6 +15,15 @@ const { fetchEntityById } = require('./helpers');
 const { executePaginatedList } = require('./listHelpers');
 const { createReviewItem } = require('./reviewController');
 const { findKanjiReferenceId, lookupKanjiReference: lookupReference, searchKanjiReferences } = require('../services/kanjiReference');
+const { findUserKanjiByCharacter } = require('../services/kanjiLearning');
+
+function isUniqueViolation(error) {
+  return error?.code === 'ER_DUP_ENTRY' || error?.code === '23505';
+}
+
+function duplicateKanjiResponse(res, existingKanji) {
+  return res.status(409).json({ error: 'Already learning this kanji.', existingKanji });
+}
 
 async function listKanji(req, res) {
   try {
@@ -187,6 +196,7 @@ function normalizeKanji(body, current = {}) {
 }
 
 async function createKanji(req, res) {
+  let requestedCharacter;
   try {
     const body = req.body || {};
     validateWriteFields(body, ALLOWED_FIELDS.kanji);
@@ -198,6 +208,9 @@ async function createKanji(req, res) {
       ...body,
       status: body.status === undefined || body.status === null || body.status === '' ? 'New' : body.status
     });
+    requestedCharacter = values.character;
+    const existingKanji = await findUserKanjiByCharacter(req.user.id, values.character);
+    if (existingKanji) return duplicateKanjiResponse(res, existingKanji);
     const referenceId = await findKanjiReferenceId(values.character);
     const [result] = await pool.execute(
       'INSERT INTO kanji (character_kanji, meaning, onyomi, kunyomi, jlpt_level, status, notes, user_id, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -206,6 +219,14 @@ async function createKanji(req, res) {
     await createReviewItem(pool, 'id_kanji', result.insertId);
     return res.status(201).json(await fetchEntityById('kanji', result.insertId, req.user.id));
   } catch (error) {
+    if (isUniqueViolation(error)) {
+      try {
+        const existingKanji = await findUserKanjiByCharacter(req.user.id, requestedCharacter);
+        if (existingKanji) return duplicateKanjiResponse(res, existingKanji);
+      } catch {
+        // Preserve the safe generic conflict response if the recovery lookup is unavailable.
+      }
+    }
     return sendRouteError(res, error, {
       defaultMessage: 'Unable to create kanji entry.',
       conflictMessage: 'Kanji already exists.'

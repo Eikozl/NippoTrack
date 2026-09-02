@@ -25,6 +25,18 @@ export function transliteratedValue(transliteration, script) {
   return typeof transliteration[script] === 'string' && transliteration[script] ? transliteration[script] : null;
 }
 
+export function existingKanjiFromDuplicateError(error) {
+  const existing = error?.status === 409 ? error.data?.existingKanji : null;
+  if (!existing || !Number.isInteger(existing.idKanji) || existing.idKanji < 1 || !isSingleHanCodePoint(existing.character)) return null;
+  return {
+    idKanji: existing.idKanji,
+    character: existing.character,
+    meaning: typeof existing.meaning === 'string' ? existing.meaning : '',
+    jlptLevel: typeof existing.jlptLevel === 'string' ? existing.jlptLevel : null,
+    status: typeof existing.status === 'string' ? existing.status : null
+  };
+}
+
 export function applyPristineKanjiAutofill(fields, dirtyFields, reference) {
   const values = {
     meaning: reference.meanings?.join(', ') || '',

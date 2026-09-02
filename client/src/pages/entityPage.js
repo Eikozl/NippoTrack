@@ -1,5 +1,5 @@
 import { apiRequest, queryString } from '../api';
-import { applyPristineKanjiAutofill, changedKanjiReferenceFields, isSingleHanCodePoint, transliteratedValue } from '../kanjiReference';
+import { applyPristineKanjiAutofill, changedKanjiReferenceFields, existingKanjiFromDuplicateError, isSingleHanCodePoint, transliteratedValue } from '../kanjiReference';
 import {
   debounce,
   confirmDialog,
@@ -407,12 +407,18 @@ export function renderEntityPage(container, config) {
     }
   }
 
-  async function saveRecord(record, form, close) {
+  async function saveRecord(record, form, close, { onDuplicateKanji } = {}) {
     const id = record?.[config.idKey];
-    await apiRequest(id ? `${config.endpoint}/${id}` : config.endpoint, {
-      method: id ? 'PUT' : 'POST',
-      body: formPayload(form, config)
-    });
+    try {
+      await apiRequest(id ? `${config.endpoint}/${id}` : config.endpoint, {
+        method: id ? 'PUT' : 'POST',
+        body: formPayload(form, config)
+      });
+    } catch (error) {
+      const existingKanji = config === ENTITY_CONFIGS.kanji && !id ? existingKanjiFromDuplicateError(error) : null;
+      if (existingKanji) onDuplicateKanji?.(existingKanji);
+      throw error;
+    }
     close();
     showToast(id ? `${config.title} record updated.` : `${config.title} record created.`);
     if (!id) currentPage = 1;
@@ -421,17 +427,36 @@ export function renderEntityPage(container, config) {
 
   function openRecordDialog(record = {}) {
     const content = buildFields(config, record);
+    let closeDialog = () => {};
+    const duplicateNotice = element('div', {
+      className: 'hidden rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 sm:col-span-2',
+      attrs: { role: 'status', 'aria-live': 'polite' }
+    });
+    const showDuplicateKanji = (existingKanji) => {
+      const viewButton = element('button', { className: 'button-secondary mt-3 min-h-9 px-3 py-1.5', text: 'View Kanji', attrs: { type: 'button' } });
+      viewButton.addEventListener('click', async () => {
+        closeDialog();
+        await viewRecord({ id_kanji: existingKanji.idKanji });
+      });
+      duplicateNotice.replaceChildren(
+        element('p', { className: 'font-semibold', text: 'Already learning this kanji.' }),
+        element('p', { className: 'mt-1', text: `${existingKanji.character} · ${existingKanji.meaning || 'Meaning not recorded'}${existingKanji.jlptLevel ? ` · ${existingKanji.jlptLevel}` : ''}` }),
+        viewButton
+      );
+      duplicateNotice.classList.remove('hidden');
+    };
     enableRomajiConversion(content, config);
     if (config === ENTITY_CONFIGS.kanji && !record[config.idKey]) {
+      content.unshift(duplicateNotice);
       enableKanjiReferenceAutofill(content);
     } else if (config === ENTITY_CONFIGS.kanji) {
       enableKanjiReferenceEditWarning(content, record);
     }
-    openDialog({
+    closeDialog = openDialog({
       title: record[config.idKey] ? `Edit ${config.singular}` : `Add ${config.singular}`,
       content,
       submitLabel: record[config.idKey] ? 'Save changes' : 'Create record',
-      onSubmit: (form, close) => saveRecord(record, form, close)
+      onSubmit: (form, close) => saveRecord(record, form, close, { onDuplicateKanji: showDuplicateKanji })
     });
   }
 

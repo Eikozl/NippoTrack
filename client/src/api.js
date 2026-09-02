@@ -2,10 +2,11 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 import { accessToken } from './authClient';
 
 export class ApiError extends Error {
-  constructor(message, status) {
+  constructor(message, status, data = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.data = data;
   }
 }
 
@@ -39,7 +40,7 @@ export async function apiRequest(path, { method = 'GET', body, signal, notifyAut
 
   if (!response.ok) {
     if ((response.status === 401 || response.status === 403) && notifyAuth) window.dispatchEvent(new CustomEvent('jlt-auth-required', { detail: { status: response.status, code: data?.code } }));
-    throw new ApiError(data?.error || 'Request failed.', response.status);
+    throw new ApiError(data?.error || 'Request failed.', response.status, data);
   }
 
   return data;

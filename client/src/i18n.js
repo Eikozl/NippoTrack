@@ -74,6 +74,8 @@ const translations = {
     'Matching kanji': 'Kanji coincidentes',
     'Looking up kanji reference…': 'Buscando referencia de kanji…',
     'You are changing reference-derived kanji data. Verify the character, meaning, readings, and JLPT level before saving.': 'Estás modificando datos de referencia del kanji. Verifica el carácter, significado, lecturas y nivel JLPT antes de guardar.',
+    'Already learning this kanji.': 'Ya estás aprendiendo este kanji.',
+    'View Kanji': 'Ver kanji',
     'A simple cycle for building consistent study habits: study, record what you learned, review it later, and measure your progress over time.': 'Un ciclo simple para crear hábitos de estudio constantes: estudia, registra lo aprendido, repásalo después y mide tu progreso con el tiempo.',
     'Export backup': 'Exportar copia de seguridad',
     'Keyboard shortcuts': 'Atajos de teclado',
