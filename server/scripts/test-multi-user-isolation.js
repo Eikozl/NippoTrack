@@ -49,7 +49,7 @@ async function createTestUser(label) {
 
 async function main() {
   const users = [];
-  const created = { aVocabulary: null, bVocabulary: null, aSession: null, aNote: null };
+  const created = { aVocabulary: null, bVocabulary: null, aSession: null, aNote: null, aKanji: null, bKanji: null };
   const instance = app.listen(0);
   await new Promise((resolve) => instance.once('listening', resolve));
   const baseUrl = `http://127.0.0.1:${instance.address().port}`;
@@ -110,13 +110,54 @@ async function main() {
     assert.equal(exportB.response.status, 200);
     assert.equal(exportB.data.data.vocabulary.some((item) => item.id_vocabulary === created.aVocabulary), false);
     assert.equal(exportB.data.data.vocabulary.some((item) => item.id_vocabulary === created.bVocabulary), true);
-    console.log(JSON.stringify({ isolation: 'passed', users: 'ephemeral-and-cleaned', checks: ['per-user uniqueness', 'search isolation', 'foreign read/update/delete', 'session and note link rejection', 'dashboard/statistics isolation', 'export isolation'] }, null, 2));
+
+    const kanjiMarker = `__kanji_${Date.now()}`;
+    const [kanjiA, kanjiB] = await Promise.all([
+      api(userA.token, '/api/kanji', { method: 'POST', body: { character_kanji: kanjiMarker + 'A', meaning: 'account A kanji' } }),
+      api(userB.token, '/api/kanji', { method: 'POST', body: { character_kanji: kanjiMarker + 'B', meaning: 'account B kanji' } })
+    ]);
+    assert.equal(kanjiA.response.status, 201);
+    assert.equal(kanjiB.response.status, 201);
+    created.aKanji = kanjiA.data.id_kanji;
+    created.bKanji = kanjiB.data.id_kanji;
+    assert.notEqual(created.aKanji, created.bKanji);
+
+    const [kanjiListA, kanjiListB] = await Promise.all([api(userA.token, `/api/kanji?search=${encodeURIComponent(kanjiMarker)}`), api(userB.token, `/api/kanji?search=${encodeURIComponent(kanjiMarker)}`)]);
+    assert.deepEqual(kanjiListA.data.items.map((item) => item.id_kanji), [created.aKanji]);
+    assert.deepEqual(kanjiListB.data.items.map((item) => item.id_kanji), [created.bKanji]);
+
+    const [foreignKanjiRead, foreignKanjiUpdate, foreignKanjiDelete] = await Promise.all([
+      api(userB.token, `/api/kanji/${created.aKanji}`),
+      api(userB.token, `/api/kanji/${created.aKanji}`, { method: 'PUT', body: { meaning: 'cross-user mutation' } }),
+      api(userB.token, `/api/kanji/${created.aKanji}`, { method: 'DELETE' })
+    ]);
+    assert.equal(foreignKanjiRead.response.status, 404);
+    assert.equal(foreignKanjiUpdate.response.status, 404);
+    assert.equal(foreignKanjiDelete.response.status, 404);
+
+    const detailA = await api(userA.token, `/api/kanji/${created.aKanji}`);
+    assert.equal(detailA.response.status, 200);
+    assert.equal(detailA.data.character_kanji, kanjiMarker + 'A');
+    assert.equal(detailA.data.meaning, 'account A kanji');
+    assert.ok(detailA.data.reference);
+    assert.ok(detailA.data.encounters);
+    assert.deepEqual(detailA.data.vocabulary, []);
+    assert.deepEqual(detailA.data.usageExamples, []);
+    assert.equal(detailA.data.review, null);
+    assert.equal(detailA.data.notes, null);
+
+    const foreignDetail = await api(userB.token, `/api/kanji/${created.aKanji}`);
+    assert.equal(foreignDetail.response.status, 404);
+
+    console.log(JSON.stringify({ isolation: 'passed', users: 'ephemeral-and-cleaned', checks: ['per-user uniqueness', 'search isolation', 'foreign read/update/delete', 'session and note link rejection', 'dashboard/statistics isolation', 'export isolation', 'kanji list isolation', 'kanji detail isolation', 'foreign kanji detail blocked'] }, null, 2));
   } finally {
     const [userA, userB] = users;
     if (userA && created.aNote) await api(userA.token, `/api/notes/${created.aNote}`, { method: 'DELETE' }).catch(() => undefined);
     if (userA && created.aSession) await api(userA.token, `/api/sessions/${created.aSession}`, { method: 'DELETE' }).catch(() => undefined);
     if (userA && created.aVocabulary) await api(userA.token, `/api/vocabulary/${created.aVocabulary}`, { method: 'DELETE' }).catch(() => undefined);
+    if (userA && created.aKanji) await api(userA.token, `/api/kanji/${created.aKanji}`, { method: 'DELETE' }).catch(() => undefined);
     if (userB && created.bVocabulary) await api(userB.token, `/api/vocabulary/${created.bVocabulary}`, { method: 'DELETE' }).catch(() => undefined);
+    if (userB && created.bKanji) await api(userB.token, `/api/kanji/${created.bKanji}`, { method: 'DELETE' }).catch(() => undefined);
     for (const user of users) await admin.auth.admin.deleteUser(user.id).catch(() => undefined);
     await new Promise((resolve, reject) => instance.close((error) => error ? reject(error) : resolve()));
   }

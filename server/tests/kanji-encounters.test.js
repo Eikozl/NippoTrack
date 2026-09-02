@@ -219,6 +219,9 @@ test('GET /api/kanji/:id includes the authenticated user encounter summary only'
       if (/FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary JOIN usage_examples ue ON ue.id_vocabulary = v.id_vocabulary/i.test(sql)) {
         return [[]];
       }
+      if (/FROM note_kanji nk\s+JOIN notes n ON n.id_note = nk.id_note/i.test(sql)) {
+        return [[]];
+      }
       throw new Error(`Unexpected SQL: ${sql}`);
     }
   }, async () => {
@@ -234,6 +237,413 @@ test('GET /api/kanji/:id includes the authenticated user encounter summary only'
         recent: []
       });
       assert.equal(summaryQueryCount, 3);
+    } finally {
+      await stopServer(server);
+    }
+  });
+});
+
+test('GET /api/kanji/:id returns null reference when lookup fails', async () => {
+  await withPoolStubs({
+    execute: async (sql, params) => {
+      if (/FROM kanji WHERE id_kanji = \? AND user_id = \?/i.test(sql)) return [[{ id_kanji: 11, character_kanji: '💩', meaning: 'poop', onyomi: null, kunyomi: null, jlpt_level: null, status: 'New', notes: null, reference_id: null }]];
+      if (/FROM kanji_vocabulary/i.test(sql)) return [[]];
+      if (/FROM kanji_encounters/i.test(sql)) {
+        if (/GROUP BY source_type/i.test(sql)) return [[]];
+        if (/ORDER BY ke.encountered_at DESC/i.test(sql)) return [[]];
+        return [[{ count: '0', first_encountered_at: null, last_encountered_at: null }]];
+      }
+      if (/FROM review_items ri\s+JOIN kanji k ON k.id_kanji = ri.id_kanji/i.test(sql)) return [[]];
+      if (/FROM kanji_reference WHERE character = \?/i.test(sql)) throw new Error('Reference lookup failed');
+      if (/FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary JOIN usage_examples ue ON ue.id_vocabulary = v.id_vocabulary/i.test(sql)) return [[]];
+      if (/FROM note_kanji nk\s+JOIN notes n ON n.id_note = nk.id_note/i.test(sql)) return [[]];
+      throw new Error(`Unexpected SQL: ${sql}`);
+    }
+  }, async () => {
+    const server = await startServer();
+    try {
+      const response = await requestJson(server, '/api/kanji/11', undefined, 'GET');
+      assert.equal(response.status, 200);
+      const data = await response.json();
+      assert.equal(data.reference, null);
+      assert.equal(data.review, null);
+      assert.deepEqual(data.vocabulary, []);
+      assert.deepEqual(data.usageExamples, []);
+      assert.deepEqual(data.encounters, { count: 0, firstEncounteredAt: null, lastEncounteredAt: null, bySource: [], recent: [] });
+      assert.equal(data.notes, null);
+    } finally {
+      await stopServer(server);
+    }
+  });
+});
+
+test('GET /api/kanji/:id returns null review when no review item exists', async () => {
+  await withPoolStubs({
+    execute: async (sql, params) => {
+      if (/FROM kanji WHERE id_kanji = \? AND user_id = \?/i.test(sql)) return [[{ id_kanji: 11, character_kanji: '食', meaning: 'eat', onyomi: 'ショク', kunyomi: 'た', jlpt_level: 'N5', status: 'Learning', notes: 'my note', reference_id: 1 }]];
+      if (/FROM kanji_vocabulary/i.test(sql)) return [[]];
+      if (/FROM kanji_encounters/i.test(sql)) {
+        if (/GROUP BY source_type/i.test(sql)) return [[]];
+        if (/ORDER BY ke.encountered_at DESC/i.test(sql)) return [[]];
+        return [[{ count: '0', first_encountered_at: null, last_encountered_at: null }]];
+      }
+      if (/FROM review_items ri\s+JOIN kanji k ON k.id_kanji = ri.id_kanji/i.test(sql)) return [[]];
+      if (/FROM kanji_reference WHERE character = \?/i.test(sql)) return [[{ reference_id: 1, character: '食', jlpt_level: 'N5', onyomi: ['ショク'], kunyomi: ['た', 'く'], meanings: ['eat', 'food'], stroke_count: 9 }]];
+      if (/FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary JOIN usage_examples ue ON ue.id_vocabulary = v.id_vocabulary/i.test(sql)) return [[]];
+      if (/FROM note_kanji nk\s+JOIN notes n ON n.id_note = nk.id_note/i.test(sql)) return [[]];
+      throw new Error(`Unexpected SQL: ${sql}`);
+    }
+  }, async () => {
+    const server = await startServer();
+    try {
+      const response = await requestJson(server, '/api/kanji/11', undefined, 'GET');
+      assert.equal(response.status, 200);
+      const data = await response.json();
+      assert.equal(data.review, null);
+      assert.equal(data.notes, 'my note');
+    } finally {
+      await stopServer(server);
+    }
+  });
+});
+
+test('GET /api/kanji/:id returns empty vocabulary array when no links exist', async () => {
+  await withPoolStubs({
+    execute: async (sql, params) => {
+      if (/FROM kanji WHERE id_kanji = \? AND user_id = \?/i.test(sql)) return [[{ id_kanji: 11, character_kanji: '食', meaning: 'eat', onyomi: 'ショク', kunyomi: 'た', jlpt_level: 'N5', status: 'Learning', notes: null, reference_id: 1 }]];
+      if (/FROM kanji_vocabulary/i.test(sql)) return [[]];
+      if (/FROM kanji_encounters/i.test(sql)) {
+        if (/GROUP BY source_type/i.test(sql)) return [[]];
+        if (/ORDER BY ke.encountered_at DESC/i.test(sql)) return [[]];
+        return [[{ count: '0', first_encountered_at: null, last_encountered_at: null }]];
+      }
+      if (/FROM review_items ri\s+JOIN kanji k ON k.id_kanji = ri.id_kanji/i.test(sql)) return [[]];
+      if (/FROM kanji_reference WHERE character = \?/i.test(sql)) return [[{ reference_id: 1, character: '食', jlpt_level: 'N5', onyomi: ['ショク'], kunyomi: ['た', 'く'], meanings: ['eat', 'food'], stroke_count: 9 }]];
+      if (/FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary JOIN usage_examples ue ON ue.id_vocabulary = v.id_vocabulary/i.test(sql)) return [[]];
+      if (/FROM note_kanji nk\s+JOIN notes n ON n.id_note = nk.id_note/i.test(sql)) return [[]];
+      throw new Error(`Unexpected SQL: ${sql}`);
+    }
+  }, async () => {
+    const server = await startServer();
+    try {
+      const response = await requestJson(server, '/api/kanji/11', undefined, 'GET');
+      assert.equal(response.status, 200);
+      const data = await response.json();
+      assert.deepEqual(data.vocabulary, []);
+      assert.deepEqual(data.usageExamples, []);
+    } finally {
+      await stopServer(server);
+    }
+  });
+});
+
+test('GET /api/kanji/:id returns notes null when column is null', async () => {
+  await withPoolStubs({
+    execute: async (sql, params) => {
+      if (/FROM kanji WHERE id_kanji = \? AND user_id = \?/i.test(sql)) return [[{ id_kanji: 11, character_kanji: '食', meaning: 'eat', onyomi: 'ショク', kunyomi: 'た', jlpt_level: 'N5', status: 'Learning', notes: null, reference_id: 1 }]];
+      if (/FROM kanji_vocabulary/i.test(sql)) return [[]];
+      if (/FROM kanji_encounters/i.test(sql)) {
+        if (/GROUP BY source_type/i.test(sql)) return [[]];
+        if (/ORDER BY ke.encountered_at DESC/i.test(sql)) return [[]];
+        return [[{ count: '0', first_encountered_at: null, last_encountered_at: null }]];
+      }
+      if (/FROM review_items ri\s+JOIN kanji k ON k.id_kanji = ri.id_kanji/i.test(sql)) return [[]];
+      if (/FROM kanji_reference WHERE character = \?/i.test(sql)) return [[{ reference_id: 1, character: '食', jlpt_level: 'N5', onyomi: ['ショク'], kunyomi: ['た', 'く'], meanings: ['eat', 'food'], stroke_count: 9 }]];
+      if (/FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary JOIN usage_examples ue ON ue.id_vocabulary = v.id_vocabulary/i.test(sql)) return [[]];
+      if (/FROM note_kanji nk\s+JOIN notes n ON n.id_note = nk.id_note/i.test(sql)) return [[]];
+      throw new Error(`Unexpected SQL: ${sql}`);
+    }
+  }, async () => {
+    const server = await startServer();
+    try {
+      const response = await requestJson(server, '/api/kanji/11', undefined, 'GET');
+      assert.equal(response.status, 200);
+      const data = await response.json();
+      assert.equal(data.notes, null);
+    } finally {
+      await stopServer(server);
+    }
+  });
+});
+
+test('GET /api/kanji/:id review isolation - another user review never leaks', async () => {
+  const OTHER_USER = '00000000-0000-4000-8000-000000000002';
+  await withPoolStubs({
+    execute: async (sql, params) => {
+      if (/FROM kanji WHERE id_kanji = \? AND user_id = \?/i.test(sql)) {
+        assert.deepEqual(params, [11, USER_ID]);
+        return [[{ id_kanji: 11, character_kanji: '食', meaning: 'eat', onyomi: 'ショク', kunyomi: 'た', jlpt_level: 'N5', status: 'Learning', notes: null, reference_id: 1 }]];
+      }
+      if (/FROM kanji_vocabulary/i.test(sql)) return [[]];
+      if (/FROM kanji_encounters/i.test(sql)) {
+        if (/GROUP BY source_type/i.test(sql)) return [[]];
+        if (/ORDER BY ke.encountered_at DESC/i.test(sql)) return [[]];
+        return [[{ count: '0', first_encountered_at: null, last_encountered_at: null }]];
+      }
+      if (/FROM review_items ri\s+JOIN kanji k ON k.id_kanji = ri.id_kanji/i.test(sql)) {
+        assert.deepEqual(params, [11, USER_ID]);
+        return [[{ id_review_item: 99, due_on: '2026-09-10', interval_days: 5, last_reviewed_at: '2026-09-01T10:00:00.000Z', last_result: 'again' }]];
+      }
+      if (/FROM kanji_reference WHERE character = \?/i.test(sql)) return [[{ reference_id: 1, character: '食', jlpt_level: 'N5', onyomi: ['ショク'], kunyomi: ['た', 'く'], meanings: ['eat', 'food'], stroke_count: 9 }]];
+      if (/FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary JOIN usage_examples ue ON ue.id_vocabulary = v.id_vocabulary/i.test(sql)) return [[]];
+      if (/FROM note_kanji nk\s+JOIN notes n ON n.id_note = nk.id_note/i.test(sql)) return [[]];
+      throw new Error(`Unexpected SQL: ${sql}`);
+    }
+  }, async () => {
+    const server = await startServer();
+    try {
+      const response = await requestJson(server, '/api/kanji/11', undefined, 'GET');
+      assert.equal(response.status, 200);
+      const data = await response.json();
+      assert.ok(data.review);
+      assert.equal(data.review.idReviewItem, 99);
+      assert.equal(data.review.dueOn, '2026-09-10');
+    } finally {
+      await stopServer(server);
+    }
+  });
+});
+
+test('GET /api/kanji/:id consolidated response - all sections populated', async () => {
+  await withPoolStubs({
+    execute: async (sql, params) => {
+      if (/FROM kanji WHERE id_kanji = \? AND user_id = \?/i.test(sql)) return [[{ id_kanji: 11, character_kanji: '食', meaning: 'eat', onyomi: 'ショク', kunyomi: 'た', jlpt_level: 'N5', status: 'Learning', notes: 'personal note', reference_id: 1 }]];
+      if (/FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary WHERE kv.id_kanji = \? AND v.user_id = \?/i.test(sql)) return [[{ id_vocabulary: 21, word: '食べ物', reading: 'たべもの', meaning: 'food', jlpt_level: 'N5', status: 'Learning' }]];
+      if (/FROM kanji_encounters/i.test(sql)) {
+        if (/GROUP BY source_type/i.test(sql)) return [[{ source_type: 'vocabulary', count: '3' }]];
+        if (/ORDER BY ke.encountered_at DESC/i.test(sql)) return [[{ id_kanji_encounter: 101, source_type: 'vocabulary', source_id: 21, encountered_at: '2026-09-02T12:00:00.000Z', source_title: '食べ物' }]];
+        return [[{ count: '3', first_encountered_at: '2026-09-01T10:00:00.000Z', last_encountered_at: '2026-09-02T12:00:00.000Z' }]];
+      }
+      if (/FROM review_items ri\s+JOIN kanji k ON k.id_kanji = ri.id_kanji/i.test(sql)) return [[{ id_review_item: 5, due_on: '2026-09-10', interval_days: 3, last_reviewed_at: '2026-09-01T10:00:00.000Z', last_result: 'good' }]];
+      if (/FROM kanji_reference WHERE character = \?/i.test(sql)) return [[{ reference_id: 1, character: '食', jlpt_level: 'N5', onyomi: ['ショク'], kunyomi: ['た', 'く'], meanings: ['eat', 'food'], stroke_count: 9 }]];
+      if (/FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary JOIN usage_examples ue ON ue.id_vocabulary = v.id_vocabulary/i.test(sql)) return [[{ id_vocabulary: 21, word: '食べ物', reading: 'たべもの', id_usage_example: 1, sentence: '食べ物が美味しい。', translation: 'The food is delicious.' }]];
+      if (/FROM note_kanji nk\s+JOIN notes n ON n.id_note = nk.id_note/i.test(sql)) return [[]];
+      throw new Error(`Unexpected SQL: ${sql}`);
+    }
+  }, async () => {
+    const server = await startServer();
+    try {
+      const response = await requestJson(server, '/api/kanji/11', undefined, 'GET');
+      assert.equal(response.status, 200);
+      const data = await response.json();
+      assert.ok(data.reference);
+      assert.equal(data.reference.meanings.length, 2);
+      assert.ok(data.review);
+      assert.equal(data.review.intervalDays, 3);
+      assert.equal(data.vocabulary.length, 1);
+      assert.equal(data.vocabulary[0].word, '食べ物');
+      assert.equal(data.usageExamples.length, 1);
+      assert.equal(data.usageExamples[0].sentence, '食べ物が美味しい。');
+      assert.equal(data.encounters.count, 3);
+      assert.equal(data.encounters.recent.length, 1);
+      assert.equal(data.encounters.recent[0].sourceTitle, '食べ物');
+      assert.equal(data.notes, 'personal note');
+    } finally {
+      await stopServer(server);
+    }
+  });
+});
+
+test('GET /api/kanji/:id consolidated response - missing reference', async () => {
+  await withPoolStubs({
+    execute: async (sql, params) => {
+      if (/FROM kanji WHERE id_kanji = \? AND user_id = \?/i.test(sql)) return [[{ id_kanji: 11, character_kanji: '💩', meaning: 'poop', onyomi: null, kunyomi: null, jlpt_level: null, status: 'New', notes: null, reference_id: null }]];
+      if (/FROM kanji_vocabulary/i.test(sql)) return [[]];
+      if (/FROM kanji_encounters/i.test(sql)) {
+        if (/GROUP BY source_type/i.test(sql)) return [[]];
+        if (/ORDER BY ke.encountered_at DESC/i.test(sql)) return [[]];
+        return [[{ count: '0', first_encountered_at: null, last_encountered_at: null }]];
+      }
+      if (/FROM review_items ri\s+JOIN kanji k ON k.id_kanji = ri.id_kanji/i.test(sql)) return [[]];
+      if (/FROM kanji_reference WHERE character = \?/i.test(sql)) throw new Error('Not found');
+      if (/FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary JOIN usage_examples ue ON ue.id_vocabulary = v.id_vocabulary/i.test(sql)) return [[]];
+      if (/FROM note_kanji nk\s+JOIN notes n ON n.id_note = nk.id_note/i.test(sql)) return [[]];
+      throw new Error(`Unexpected SQL: ${sql}`);
+    }
+  }, async () => {
+    const server = await startServer();
+    try {
+      const response = await requestJson(server, '/api/kanji/11', undefined, 'GET');
+      assert.equal(response.status, 200);
+      const data = await response.json();
+      assert.equal(data.reference, null);
+      assert.equal(data.review, null);
+      assert.deepEqual(data.vocabulary, []);
+      assert.deepEqual(data.usageExamples, []);
+      assert.deepEqual(data.encounters, { count: 0, firstEncounteredAt: null, lastEncounteredAt: null, bySource: [], recent: [] });
+    } finally {
+      await stopServer(server);
+    }
+  });
+});
+
+test('GET /api/kanji/:id consolidated response - linked vocabulary with nested usage examples', async () => {
+  await withPoolStubs({
+    execute: async (sql, params) => {
+      if (/FROM kanji WHERE id_kanji = \? AND user_id = \?/i.test(sql)) return [[{ id_kanji: 11, character_kanji: '食', meaning: 'eat', onyomi: 'ショク', kunyomi: 'た', jlpt_level: 'N5', status: 'Learning', notes: null, reference_id: 1 }]];
+      if (/FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary WHERE kv.id_kanji = \? AND v.user_id = \?/i.test(sql)) return [[{ id_vocabulary: 21, word: '食べ物', reading: 'たべもの', meaning: 'food', jlpt_level: 'N5', status: 'Learning' }, { id_vocabulary: 22, word: '食事', reading: 'しょくじ', meaning: 'meal', jlpt_level: 'N4', status: 'Familiar' }]];
+      if (/FROM kanji_encounters/i.test(sql)) {
+        if (/GROUP BY source_type/i.test(sql)) return [[{ source_type: 'vocabulary', count: '2' }]];
+        if (/ORDER BY ke.encountered_at DESC/i.test(sql)) return [[{ id_kanji_encounter: 101, source_type: 'vocabulary', source_id: 21, encountered_at: '2026-09-02T12:00:00.000Z', source_title: '食べ物' }, { id_kanji_encounter: 102, source_type: 'vocabulary', source_id: 22, encountered_at: '2026-09-02T11:00:00.000Z', source_title: '食事' }]];
+        return [[{ count: '2', first_encountered_at: '2026-09-01T10:00:00.000Z', last_encountered_at: '2026-09-02T12:00:00.000Z' }]];
+      }
+      if (/FROM review_items ri\s+JOIN kanji k ON k.id_kanji = ri.id_kanji/i.test(sql)) return [[]];
+      if (/FROM kanji_reference WHERE character = \?/i.test(sql)) return [[{ reference_id: 1, character: '食', jlpt_level: 'N5', onyomi: ['ショク'], kunyomi: ['た', 'く'], meanings: ['eat', 'food'], stroke_count: 9 }]];
+      if (/FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary JOIN usage_examples ue ON ue.id_vocabulary = v.id_vocabulary/i.test(sql)) return [[{ id_vocabulary: 21, word: '食べ物', reading: 'たべもの', id_usage_example: 1, sentence: '食べ物が美味しい。', translation: 'The food is delicious.' }, { id_vocabulary: 21, word: '食べ物', reading: 'たべもの', id_usage_example: 2, sentence: '朝食を食べる。', translation: 'Eat breakfast.' }, { id_vocabulary: 22, word: '食事', reading: 'しょくじ', id_usage_example: 3, sentence: '夕食の準備。', translation: 'Preparing dinner.' }]];
+      if (/FROM note_kanji nk\s+JOIN notes n ON n.id_note = nk.id_note/i.test(sql)) return [[]];
+      throw new Error(`Unexpected SQL: ${sql}`);
+    }
+  }, async () => {
+    const server = await startServer();
+    try {
+      const response = await requestJson(server, '/api/kanji/11', undefined, 'GET');
+      assert.equal(response.status, 200);
+      const data = await response.json();
+      assert.equal(data.vocabulary.length, 2);
+      assert.equal(data.usageExamples.length, 3);
+      const vocab21Examples = data.usageExamples.filter(e => e.id_vocabulary === 21);
+      const vocab22Examples = data.usageExamples.filter(e => e.id_vocabulary === 22);
+      assert.equal(vocab21Examples.length, 2);
+      assert.equal(vocab22Examples.length, 1);
+    } finally {
+      await stopServer(server);
+    }
+  });
+});
+
+test('GET /api/kanji/:id consolidated response - recent encounters bounded to 5', async () => {
+  const manyRecent = Array.from({ length: 7 }, (_, i) => ({
+    id_kanji_encounter: 200 + i,
+    source_type: 'vocabulary',
+    source_id: 100 + i,
+    encountered_at: `2026-09-0${2 + i}T10:00:00.000Z`,
+    source_title: `Word ${100 + i}`
+  }));
+  const limitedRecent = manyRecent.slice(-5).reverse();
+  await withPoolStubs({
+    execute: async (sql, params) => {
+      if (/FROM kanji WHERE id_kanji = \? AND user_id = \?/i.test(sql)) return [[{ id_kanji: 11, character_kanji: '食', meaning: 'eat', onyomi: 'ショク', kunyomi: 'た', jlpt_level: 'N5', status: 'Learning', notes: null, reference_id: 1 }]];
+      if (/FROM kanji_vocabulary/i.test(sql)) return [[]];
+      if (/FROM kanji_encounters/i.test(sql)) {
+        if (/GROUP BY source_type/i.test(sql)) return [[{ source_type: 'vocabulary', count: '7' }]];
+        if (/ORDER BY ke.encountered_at DESC/i.test(sql)) return [limitedRecent];
+        return [[{ count: '7', first_encountered_at: '2026-09-01T10:00:00.000Z', last_encountered_at: '2026-09-08T10:00:00.000Z' }]];
+      }
+      if (/FROM review_items ri\s+JOIN kanji k ON k.id_kanji = ri.id_kanji/i.test(sql)) return [[]];
+      if (/FROM kanji_reference WHERE character = \?/i.test(sql)) return [[{ reference_id: 1, character: '食', jlpt_level: 'N5', onyomi: ['ショク'], kunyomi: ['た', 'く'], meanings: ['eat', 'food'], stroke_count: 9 }]];
+      if (/FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary JOIN usage_examples ue ON ue.id_vocabulary = v.id_vocabulary/i.test(sql)) return [[]];
+      if (/FROM note_kanji nk\s+JOIN notes n ON n.id_note = nk.id_note/i.test(sql)) return [[]];
+      throw new Error(`Unexpected SQL: ${sql}`);
+    }
+  }, async () => {
+    const server = await startServer();
+    try {
+      const response = await requestJson(server, '/api/kanji/11', undefined, 'GET');
+      assert.equal(response.status, 200);
+      const data = await response.json();
+      assert.equal(data.encounters.count, 7);
+      assert.equal(data.encounters.recent.length, 5);
+      assert.equal(data.encounters.recent[0].sourceTitle, 'Word 106');
+      assert.equal(data.encounters.recent[4].sourceTitle, 'Word 102');
+    } finally {
+      await stopServer(server);
+    }
+  });
+});
+
+test('POST /api/review/:id records kanji review result', async () => {
+  const statements = [];
+  let queryStep = 0;
+  const connection = {
+    async beginTransaction() {},
+    async execute(sql, params = []) {
+      statements.push({ sql, params });
+      queryStep++;
+      if (queryStep === 1) {
+        // SELECT FOR UPDATE
+        return [[{ id_review_item: 99, interval_days: 3, id_vocabulary: null, id_kanji: 11, id_grammar: null }]];
+      }
+      if (queryStep === 2) {
+        // ownership check
+        return [[{ 1: 1 }]];
+      }
+      if (queryStep === 3) {
+        // INSERT review_events
+        return [{ affectedRows: 1 }];
+      }
+      if (queryStep === 4) {
+        // UPDATE review_items
+        return [{ affectedRows: 1 }];
+      }
+      return [{ affectedRows: 1 }];
+    },
+    async commit() {},
+    async rollback() { throw new Error('rollback should not be called'); },
+    release() {}
+  };
+
+  await withPoolStubs({
+    getConnection: async () => connection,
+    execute: async () => [[{ id_kanji: 11, character_kanji: '食' }]]
+  }, async () => {
+    const server = await startServer();
+    try {
+      const response = await requestJson(server, '/api/review/99', { result: 'Good' });
+      assert.equal(response.status, 200);
+      const data = await response.json();
+      assert.equal(data.success, true);
+      assert.equal(data.result, 'Good');
+      assert.equal(data.nextIntervalDays, 7);
+    } finally {
+      await stopServer(server);
+    }
+  });
+});
+
+test('POST /api/review/:id rejects invalid result', async () => {
+  await withPoolStubs({
+    getConnection: async () => ({ async beginTransaction() {}, async execute() { return [[]]; }, async commit() {}, async rollback() {}, release() {} }),
+    execute: async () => [[{ id_kanji: 11 }]]
+  }, async () => {
+    const server = await startServer();
+    try {
+      const response = await requestJson(server, '/api/review/99', { result: 'Invalid' });
+      assert.equal(response.status, 400);
+    } finally {
+      await stopServer(server);
+    }
+  });
+});
+
+test('POST /api/review/:id returns 404 for another user review', async () => {
+  let queryStep = 0;
+  let rollbackCalled = false;
+  const connection = {
+    async beginTransaction() {},
+    async execute(sql, params = []) {
+      queryStep++;
+      if (queryStep === 1) {
+        return [[{ id_review_item: 99, interval_days: 3, id_vocabulary: null, id_kanji: 11, id_grammar: null }]];
+      }
+      if (queryStep === 2) {
+        return [[]];
+      }
+      return [{ affectedRows: 1 }];
+    },
+    async commit() {},
+    async rollback() { rollbackCalled = true; },
+    release() {}
+  };
+
+  await withPoolStubs({
+    getConnection: async () => connection,
+    execute: async () => [[{ id_kanji: 11 }]]
+  }, async () => {
+    const server = await startServer();
+    try {
+      const response = await requestJson(server, '/api/review/99', { result: 'Good' });
+      assert.equal(response.status, 404);
+      assert.equal(rollbackCalled, true);
     } finally {
       await stopServer(server);
     }

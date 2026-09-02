@@ -36,14 +36,24 @@ async function recordReview(req, res) {
     if (!Object.hasOwn(INTERVALS, result)) throw new ValidationError('result must be Again, Hard, or Good.');
     connection = await pool.getConnection();
     await connection.beginTransaction();
-    const [rows] = await connection.execute(`SELECT ri.id_review_item, ri.interval_days
+    const [rows] = await connection.execute(`SELECT ri.id_review_item, ri.interval_days, ri.id_vocabulary, ri.id_kanji, ri.id_grammar
       FROM review_items ri
-      LEFT JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary
-      LEFT JOIN kanji k ON k.id_kanji = ri.id_kanji
-      LEFT JOIN grammar_points g ON g.id_grammar = ri.id_grammar
-      WHERE ri.id_review_item = ? AND (v.user_id = ? OR k.user_id = ? OR g.user_id = ?) FOR UPDATE`, [id, req.user.id, req.user.id, req.user.id]);
+      WHERE ri.id_review_item = ? FOR UPDATE`, [id]);
     if (!rows[0]) { await connection.rollback(); connection.release(); connection = null; return res.status(404).json({ error: 'review item not found' }); }
-    const previousInterval = Number(rows[0].interval_days || 0);
+    const reviewItem = rows[0];
+    let isOwner = false;
+    if (reviewItem.id_vocabulary) {
+      const [v] = await connection.execute('SELECT 1 FROM vocabulary WHERE id_vocabulary = ? AND user_id = ?', [reviewItem.id_vocabulary, req.user.id]);
+      isOwner = v.length > 0;
+    } else if (reviewItem.id_kanji) {
+      const [k] = await connection.execute('SELECT 1 FROM kanji WHERE id_kanji = ? AND user_id = ?', [reviewItem.id_kanji, req.user.id]);
+      isOwner = k.length > 0;
+    } else if (reviewItem.id_grammar) {
+      const [g] = await connection.execute('SELECT 1 FROM grammar_points WHERE id_grammar = ? AND user_id = ?', [reviewItem.id_grammar, req.user.id]);
+      isOwner = g.length > 0;
+    }
+    if (!isOwner) { await connection.rollback(); connection.release(); connection = null; return res.status(404).json({ error: 'review item not found' }); }
+    const previousInterval = Number(reviewItem.interval_days || 0);
     const nextInterval = INTERVALS[result];
     await connection.execute('INSERT INTO review_events (id_review_item, reviewed_at, result, previous_interval_days, next_interval_days) VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?)', [id, result, previousInterval, nextInterval]);
     await connection.execute('UPDATE review_items SET due_on = CURRENT_DATE + ?, interval_days = ?, last_reviewed_at = CURRENT_TIMESTAMP, last_result = ? WHERE id_review_item = ?', [nextInterval, nextInterval, result, id]);

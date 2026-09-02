@@ -192,21 +192,19 @@
 .kanji-fact { min-width:0; padding:.25rem 0; }
 .kanji-glyph-panel { display:grid; min-height:9rem; place-items:center; overflow:hidden; border-radius:18px; color:var(--jlt-ink); background:color-mix(in srgb,var(--jlt-surface) 90%,var(--jlt-primary-soft)); box-shadow:var(--shadow-inset-md); }
 .kanji-glyph { font-family:"Yu Mincho","Hiragino Mincho ProN","Noto Serif JP",serif; font-size:clamp(5.5rem,28vw,8rem); font-weight:600; line-height:1; }
+.kanji-glyph-panel-large { display:grid; min-height:12rem; place-items:center; overflow:hidden; border-radius:20px; color:var(--jlt-ink); background:color-mix(in srgb,var(--jlt-surface) 88%,var(--jlt-primary-soft)); box-shadow:var(--shadow-inset-lg); }
+.kanji-glyph-large { font-family:"Yu Mincho","Hiragino Mincho ProN","Noto Serif JP",serif; font-size:clamp(7rem,25vw,10rem); font-weight:600; line-height:1; }
 .kanji-reference-overview { display:grid; gap:1.5rem; }
 .kanji-reference-copy { min-width:0; }
 .kanji-reference-glyph { display:grid; min-height:13rem; place-items:center; overflow:hidden; border-radius:20px; color:var(--jlt-ink); background:color-mix(in srgb,var(--jlt-surface) 86%,var(--jlt-primary-soft)); box-shadow:var(--shadow-inset-md); }
 .kanji-reference-glyph span { font-family:"Yu Mincho","Hiragino Mincho ProN","Noto Serif JP",serif; font-size:clamp(7rem,30vw,11rem); font-weight:600; line-height:1; }
-.kanji-reference-facts { display:flex; flex-wrap:wrap; gap:.75rem; margin-top:1.5rem; }
-.kanji-reference-fact { min-width:7.5rem; padding:.75rem 1rem; border-radius:15px; background:var(--jlt-surface); box-shadow:var(--shadow-raised-sm); }
-.kanji-reference-fact dt { color:var(--jlt-muted); font-size:.72rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
-.kanji-reference-fact dd { margin:.25rem 0 0; color:var(--jlt-primary); font-size:1.05rem; font-weight:700; }
-.kanji-reference-reading { min-height:8.5rem; }
-@media (min-width:640px) { .kanji-reference-overview { grid-template-columns:minmax(0,1.2fr) minmax(12rem,.8fr); align-items:stretch; } .kanji-reference-glyph { min-height:17rem; } }
 @media (min-width:640px) {
   .kanji-detail-hero { grid-template-columns:minmax(0,1.45fr) minmax(9.5rem,.7fr); align-items:stretch; }
   .kanji-detail-facts { align-content:center; }
   .kanji-glyph-panel { min-height:10.5rem; }
   .kanji-glyph { font-size:clamp(6.5rem,15vw,9rem); }
+  .kanji-glyph-panel-large { min-height:15rem; }
+  .kanji-glyph-large { font-size:clamp(8rem,18vw,12rem); }
 }
 :root[data-theme="dark"] body { background:var(--jlt-bg); }
 @media (max-width: 1023px) { .surface { border-radius: 18px; } }

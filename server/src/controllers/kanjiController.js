@@ -173,8 +173,18 @@ const [reviewRows] = await pool.execute(
       lastResult: reviewRows[0].last_result || null
     } : null;
 
-    const encounters = await getKanjiEncounterSummary(pool, req.user.id, id);
-    return res.json({ ...entry, reference, review, vocabulary, usageExamples, encounters });
+const encounters = await getKanjiEncounterSummary(pool, req.user.id, id);
+
+    const [linkedNotes] = await pool.execute(
+      `SELECT n.id_note, n.title, n.body, n.category, n.created_at, n.updated_at
+       FROM note_kanji nk
+       JOIN notes n ON n.id_note = nk.id_note
+       WHERE nk.id_kanji = ? AND n.user_id = ?
+       ORDER BY n.updated_at DESC`,
+      [id, req.user.id]
+    );
+
+    return res.json({ ...entry, reference, review, vocabulary, usageExamples, encounters, linkedNotes });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load kanji entry.' });
   }

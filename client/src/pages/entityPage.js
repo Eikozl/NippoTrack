@@ -88,6 +88,7 @@ renderDetail: (item) => {
       const vocab = item.vocabulary || [];
       const usageExamples = item.usageExamples || [];
       const notes = item.notes || null;
+      const linkedNotes = item.linkedNotes || [];
       const status = item.status || 'New';
 
       const refMeanings = ref?.meanings?.length ? ref.meanings : [];
@@ -125,7 +126,7 @@ renderDetail: (item) => {
             element('span', { className: 'kanji-glyph-large', text: item.character_kanji, attrs: { lang: 'ja' } })
           ]),
           element('div', { className: 'kanji-hero-meta' }, [
-            element('h2', { className: 'text-2xl font-semibold text-ink' }, refMeanings.length ? refMeanings.join(' · ') : (item.meaning || 'Meaning not recorded')),
+            element('h2', { className: 'text-2xl font-semibold text-ink', text: refMeanings.length ? refMeanings.join(' · ') : (item.meaning || 'Meaning not recorded') }),
             element('div', { className: 'mt-2 flex flex-wrap items-center gap-2' }, [
               refJlpt && element('span', { className: 'status-pill status-jlpt', text: `JLPT ${refJlpt} (Reference)` }),
               element('span', { className: `status-pill ${statusColors[status] || 'bg-stone text-stone-foreground'}`, text: status }),
@@ -138,23 +139,11 @@ renderDetail: (item) => {
         // 2. Readings
         element('section', { className: 'rounded-lg border border-stone p-4' }, [
           element('h3', { className: 'font-semibold text-ink', text: 'Readings' }),
-          element('div', { className: 'mt-3 grid gap-4 sm:grid-cols-2' }, [
-            element('div', {}, [
-              element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'On\'yomi (Reference)' }),
-              element('p', { className: 'mt-1 text-sm text-ink/80' }, refOnyomi.length ? refOnyomi.join(' · ') : '—')
-            ]),
-            element('div', {}, [
-              element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'On\'yomi (Your record)' }),
-              element('p', { className: 'mt-1 text-sm text-ink/80' }, userOnyomi || 'Not recorded')
-            ]),
-            element('div', {}, [
-              element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Kun\'yomi (Reference)' }),
-              element('p', { className: 'mt-1 text-sm text-ink/80' }, refKunyomi.length ? refKunyomi.join(' · ') : '—')
-            ]),
-            element('div', {}, [
-              element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Kun\'yomi (Your record)' }),
-              element('p', { className: 'mt-1 text-sm text-ink/80' }, userKunyomi || 'Not recorded')
-            ])
+          element('dl', { className: 'mt-3 grid gap-4 sm:grid-cols-2' }, [
+            element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'On\'yomi (Reference)' }), element('dd', { className: 'mt-1 text-sm text-ink/80', text: refOnyomi.length ? refOnyomi.join(' · ') : '—' })]),
+            element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'On\'yomi (Your record)' }), element('dd', { className: 'mt-1 text-sm text-ink/80', text: userOnyomi || 'Not recorded' })]),
+            element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Kun\'yomi (Reference)' }), element('dd', { className: 'mt-1 text-sm text-ink/80', text: refKunyomi.length ? refKunyomi.join(' · ') : '—' })]),
+            element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Kun\'yomi (Your record)' }), element('dd', { className: 'mt-1 text-sm text-ink/80', text: userKunyomi || 'Not recorded' })])
           ])
         ]),
 
@@ -172,7 +161,7 @@ renderDetail: (item) => {
         // 4. Encounter Intelligence
         element('section', { className: 'rounded-lg border border-stone p-4' }, [
           element('h3', { className: 'font-semibold text-ink', text: 'Encounter Intelligence' }),
-          element('div', { className: 'mt-3 grid gap-4 sm:grid-cols-2' }, [
+          element('dl', { className: 'mt-3 grid gap-4 sm:grid-cols-2' }, [
             element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Total Encounters' }), element('dd', { className: 'mt-1 font-medium text-ink', text: String(encounters.count) })]),
             element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'First Seen' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatDate(encounters.firstEncounteredAt) })]),
             element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Last Seen' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatDate(encounters.lastEncounteredAt) })]),
@@ -217,7 +206,19 @@ renderDetail: (item) => {
         // 6. Personal Notes
         element('section', { className: 'rounded-lg border border-stone p-4' }, [
           element('h3', { className: 'font-semibold text-ink', text: 'Personal Notes' }),
-          notes ? element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: notes }) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No personal notes' })
+          notes ? element('div', { className: 'mt-2' }, [
+            element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Kanji Notes' }),
+            element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: notes })
+          ]) : null,
+          linkedNotes.length ? element('div', { className: 'mt-4' }, [
+            element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Linked Notes' }),
+            element('div', { className: 'mt-2 grid gap-2' }, linkedNotes.map((note) => element('article', { className: 'rounded-md bg-paper p-3' }, [
+              element('h5', { className: 'font-medium text-ink', text: note.title || 'Untitled' }),
+              element('p', { className: 'mt-1 text-sm text-muted', text: note.category }),
+              element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: note.body })
+            ])))
+          ]) : null,
+          !notes && !linkedNotes.length ? element('p', { className: 'mt-2 text-sm text-muted', text: 'No personal notes' }) : null
         ])
       ]);
     },
@@ -448,6 +449,67 @@ function enableKanjiReferenceEditWarning(content, record) {
   fields.jlpt_level?.addEventListener('change', updateWarning);
 }
 
+function enableKanjiReferenceRestore(content, record) {
+  const fields = Object.fromEntries(['character_kanji', 'meaning', 'onyomi', 'kunyomi', 'jlpt_level'].map((name) => [
+    name,
+    inputFor(content, name)
+  ]));
+  const characterField = fields.character_kanji;
+  if (!characterField) return;
+
+  const restoreButton = element('button', {
+    className: 'button-secondary mt-2 min-h-9 px-3 py-1.5 sm:col-span-2',
+    text: 'Restore from OpenJLPT',
+    attrs: { type: 'button' }
+  });
+  content.unshift(restoreButton);
+
+  restoreButton.addEventListener('click', async () => {
+    const character = characterField.value.trim();
+    if (!character) return;
+
+    try {
+      const reference = await apiRequest(`/api/kanji/lookup/${encodeURIComponent(character)}`);
+      if (!reference) {
+        showToast('No OpenJLPT reference found for this character.', 'error');
+        return;
+      }
+
+      const referenceMeanings = reference.meanings?.join(', ') || '';
+      const referenceOnyomi = reference.onyomi?.join(', ') || '';
+      const referenceKunyomi = reference.kunyomi?.join(', ') || '';
+      const referenceJlpt = reference.jlptLevel || '';
+
+      const changes = [];
+      if (referenceMeanings && fields.meaning?.value !== referenceMeanings) changes.push('Meaning');
+      if (referenceOnyomi && fields.onyomi?.value !== referenceOnyomi) changes.push('On\'yomi');
+      if (referenceKunyomi && fields.kunyomi?.value !== referenceKunyomi) changes.push('Kun\'yomi');
+      if (referenceJlpt && fields.jlpt_level?.value !== referenceJlpt) changes.push('JLPT level');
+
+      if (changes.length === 0) {
+        showToast('All reference-derived fields already match OpenJLPT data.');
+        return;
+      }
+
+      const confirmed = window.confirm(
+        `Replace the following fields with OpenJLPT reference data?\n\n` +
+        changes.map(c => `• ${c}`).join('\n') +
+        `\n\nYour personal notes, status, SRS/review data, encounters, and linked vocabulary will NOT be changed.`
+      );
+      if (!confirmed) return;
+
+      if (referenceMeanings) fields.meaning.value = referenceMeanings;
+      if (referenceOnyomi) fields.onyomi.value = referenceOnyomi;
+      if (referenceKunyomi) fields.kunyomi.value = referenceKunyomi;
+      if (referenceJlpt) fields.jlpt_level.value = referenceJlpt;
+
+      showToast('Reference values restored. Review and save to persist.');
+    } catch (error) {
+      showToast(error.message || 'Failed to restore reference data.', 'error');
+    }
+  });
+}
+
 function recordCard(item, config, onView, onEdit, onDelete) {
   const viewButton = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5', text: 'View', attrs: { type: 'button' } });
   const editButton = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5', text: 'Edit', attrs: { type: 'button' } });
@@ -570,12 +632,13 @@ export function renderEntityPage(container, config) {
       );
       duplicateNotice.classList.remove('hidden');
     };
-    enableRomajiConversion(content, config);
+enableRomajiConversion(content, config);
     if (config === ENTITY_CONFIGS.kanji && !record[config.idKey]) {
       content.unshift(duplicateNotice);
       enableKanjiReferenceAutofill(content);
     } else if (config === ENTITY_CONFIGS.kanji) {
       enableKanjiReferenceEditWarning(content, record);
+      enableKanjiReferenceRestore(content, record);
     }
     closeDialog = openDialog({
       title: record[config.idKey] ? `Edit ${config.singular}` : `Add ${config.singular}`,
