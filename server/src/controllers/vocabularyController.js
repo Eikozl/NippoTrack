@@ -15,6 +15,7 @@ const { fetchEntityById, rollbackAndRelease } = require('./helpers');
 const { executePaginatedList } = require('./listHelpers');
 const { createReviewItem } = require('./reviewController');
 const { syncVocabularyKanjiLinks } = require('../services/kanjiVocabularyLinks');
+const { ENCOUNTER_SOURCE_TYPES, recordKanjiEncounters } = require('../services/kanjiEncounters');
 
 async function listVocabulary(req, res) {
   try {
@@ -181,6 +182,7 @@ async function createVocabulary(req, res) {
       [values.word, values.reading, values.meaning, values.jlptLevel, values.status, values.notes, req.user.id]
     );
     await syncVocabularyKanjiLinks(connection, { userId: req.user.id, vocabularyId: result.insertId, word: values.word });
+    await recordKanjiEncounters(connection, req.user.id, values.word, { type: ENCOUNTER_SOURCE_TYPES.VOCABULARY, sourceId: result.insertId });
     if (exampleSentence) {
       await connection.execute('INSERT INTO usage_examples (id_vocabulary, sentence, translation, notes) VALUES (?, ?, ?, ?)', [result.insertId, exampleSentence, exampleTranslation, exampleNotes]);
     }
@@ -225,6 +227,7 @@ async function updateVocabulary(req, res) {
       [values.word, values.reading, values.meaning, values.jlptLevel, values.status, values.notes, id, req.user.id]
     );
     await syncVocabularyKanjiLinks(connection, { userId: req.user.id, vocabularyId: id, word: values.word });
+    await recordKanjiEncounters(connection, req.user.id, values.word, { type: ENCOUNTER_SOURCE_TYPES.VOCABULARY, sourceId: id });
     await connection.commit();
     connection.release();
     connection = null;

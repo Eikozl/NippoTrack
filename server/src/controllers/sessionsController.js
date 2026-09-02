@@ -11,6 +11,7 @@ const {
 } = require('../validation');
 const { fetchEntityById, rollbackAndRelease } = require('./helpers');
 const { executePaginatedList } = require('./listHelpers');
+const { ENCOUNTER_SOURCE_TYPES, recordKanjiEncounters } = require('../services/kanjiEncounters');
 
 async function listSessions(req, res) {
   try {
@@ -170,6 +171,7 @@ async function createSession(req, res) {
     );
     await insertRelationships(connection, result.insertId, relationships, req.user.id);
     await saveWriting(connection, result.insertId, writing);
+    if (writing) await recordKanjiEncounters(connection, req.user.id, writing.content, { type: ENCOUNTER_SOURCE_TYPES.SESSION_WRITING, sourceId: result.insertId });
     await connection.commit();
     connection.release();
     connection = null;
@@ -213,6 +215,7 @@ async function updateSession(req, res) {
     }
     await insertRelationships(connection, id, relationships, req.user.id);
     await saveWriting(connection, id, writing);
+    if (writing) await recordKanjiEncounters(connection, req.user.id, writing.content, { type: ENCOUNTER_SOURCE_TYPES.SESSION_WRITING, sourceId: id });
     await connection.commit();
     connection.release();
     connection = null;

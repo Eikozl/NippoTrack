@@ -16,6 +16,7 @@ const { executePaginatedList } = require('./listHelpers');
 const { createReviewItem } = require('./reviewController');
 const { findKanjiReferenceId, lookupKanjiReference: lookupReference, searchKanjiReferences } = require('../services/kanjiReference');
 const { findUserKanjiByCharacter } = require('../services/kanjiLearning');
+const { getKanjiEncounterSummary } = require('../services/kanjiEncounters');
 
 function isUniqueViolation(error) {
   return error?.code === 'ER_DUP_ENTRY' || error?.code === '23505';
@@ -150,7 +151,8 @@ async function getKanji(req, res) {
       'SELECT v.id_vocabulary, v.word, v.reading, ue.id_usage_example, ue.sentence, ue.translation FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary JOIN usage_examples ue ON ue.id_vocabulary = v.id_vocabulary WHERE kv.id_kanji = ? AND v.user_id = ? ORDER BY v.word, ue.id_usage_example DESC',
       [id, req.user.id]
     );
-    return res.json({ ...entry, vocabulary, usageExamples });
+    const encounters = await getKanjiEncounterSummary(pool, req.user.id, id);
+    return res.json({ ...entry, vocabulary, usageExamples, encounters });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load kanji entry.' });
   }
