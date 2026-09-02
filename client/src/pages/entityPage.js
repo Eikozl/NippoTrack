@@ -81,21 +81,146 @@ export const ENTITY_CONFIGS = {
     secondary: (item) => [item.onyomi, item.kunyomi].filter(Boolean).join(' · ') || 'Readings not recorded',
     detail: (item) => item.meaning,
     japaneseTextFields: { onyomi: 'katakana', kunyomi: 'hiragana' },
-    renderDetail: (item) => element('div', { className: 'sm:col-span-2' }, [
-      element('section', { className: 'kanji-detail-hero' }, [
-        element('dl', { className: 'kanji-detail-facts grid text-sm sm:grid-cols-2' }, [
-          element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Meaning' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.meaning })]),
-          element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Onyomi' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.onyomi || 'Not recorded' })]),
-          element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Kunyomi' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.kunyomi || 'Not recorded' })]),
-          element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'JLPT level' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.jlpt_level || 'Not set' })])
+renderDetail: (item) => {
+      const ref = item.reference || null;
+      const review = item.review || null;
+      const encounters = item.encounters || { count: 0, firstEncounteredAt: null, lastEncounteredAt: null, bySource: [], recent: [] };
+      const vocab = item.vocabulary || [];
+      const usageExamples = item.usageExamples || [];
+      const notes = item.notes || null;
+      const status = item.status || 'New';
+
+      const refMeanings = ref?.meanings?.length ? ref.meanings : [];
+      const refOnyomi = ref?.onyomi?.length ? ref.onyomi : [];
+      const refKunyomi = ref?.kunyomi?.length ? ref.kunyomi : [];
+      const refJlpt = ref?.jlptLevel || null;
+      const refStrokeCount = ref?.strokeCount || null;
+
+      const userOnyomi = item.onyomi || null;
+      const userKunyomi = item.kunyomi || null;
+
+      const formatDate = (iso) => {
+        if (!iso) return '—';
+        const d = new Date(iso);
+        return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+      };
+
+      const formatDateTime = (iso) => {
+        if (!iso) return '—';
+        const d = new Date(iso);
+        return d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      };
+
+      const statusColors = {
+        New: 'bg-sky text-sky-foreground',
+        Learning: 'bg-amber text-amber-foreground',
+        Familiar: 'bg-emerald text-emerald-foreground',
+        Mastered: 'bg-violet text-violet-foreground'
+      };
+
+      return element('div', { className: 'sm:col-span-2 space-y-5' }, [
+        // 1. Hero / Identity
+        element('section', { className: 'kanji-intel-hero' }, [
+          element('div', { className: 'kanji-glyph-panel-large', attrs: { role: 'img', 'aria-label': `Selected kanji: ${item.character_kanji}` } }, [
+            element('span', { className: 'kanji-glyph-large', text: item.character_kanji, attrs: { lang: 'ja' } })
+          ]),
+          element('div', { className: 'kanji-hero-meta' }, [
+            element('h2', { className: 'text-2xl font-semibold text-ink' }, refMeanings.length ? refMeanings.join(' · ') : (item.meaning || 'Meaning not recorded')),
+            element('div', { className: 'mt-2 flex flex-wrap items-center gap-2' }, [
+              refJlpt && element('span', { className: 'status-pill status-jlpt', text: `JLPT ${refJlpt} (Reference)` }),
+              element('span', { className: `status-pill ${statusColors[status] || 'bg-stone text-stone-foreground'}`, text: status }),
+              refStrokeCount && element('span', { className: 'status-pill bg-stone text-stone-foreground', text: `${refStrokeCount} strokes (Ref)` })
+            ]),
+            element('p', { className: 'mt-2 text-sm text-muted', text: `Character: ${item.character_kanji}` })
+          ])
         ]),
-        element('div', { className: 'kanji-glyph-panel', attrs: { role: 'img', 'aria-label': `Selected kanji: ${item.character_kanji}` } }, [
-          element('span', { className: 'kanji-glyph', text: item.character_kanji, attrs: { lang: 'ja' } })
+
+        // 2. Readings
+        element('section', { className: 'rounded-lg border border-stone p-4' }, [
+          element('h3', { className: 'font-semibold text-ink', text: 'Readings' }),
+          element('div', { className: 'mt-3 grid gap-4 sm:grid-cols-2' }, [
+            element('div', {}, [
+              element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'On\'yomi (Reference)' }),
+              element('p', { className: 'mt-1 text-sm text-ink/80' }, refOnyomi.length ? refOnyomi.join(' · ') : '—')
+            ]),
+            element('div', {}, [
+              element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'On\'yomi (Your record)' }),
+              element('p', { className: 'mt-1 text-sm text-ink/80' }, userOnyomi || 'Not recorded')
+            ]),
+            element('div', {}, [
+              element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Kun\'yomi (Reference)' }),
+              element('p', { className: 'mt-1 text-sm text-ink/80' }, refKunyomi.length ? refKunyomi.join(' · ') : '—')
+            ]),
+            element('div', {}, [
+              element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Kun\'yomi (Your record)' }),
+              element('p', { className: 'mt-1 text-sm text-ink/80' }, userKunyomi || 'Not recorded')
+            ])
+          ])
+        ]),
+
+        // 3. SRS Review
+        element('section', { className: 'rounded-lg border border-stone p-4' }, [
+          element('h3', { className: 'font-semibold text-ink', text: 'SRS Review' }),
+          review ? element('dl', { className: 'mt-3 grid gap-3 text-sm sm:grid-cols-2' }, [
+            element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Next Review' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatDate(review.dueOn) })]),
+            element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Interval' }), element('dd', { className: 'mt-1 font-medium text-ink', text: `${review.intervalDays || 0} days` })]),
+            element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Last Reviewed' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatDateTime(review.lastReviewedAt) })]),
+            element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Last Result' }), element('dd', { className: 'mt-1 font-medium text-ink', text: review.lastResult || '—' })])
+          ]) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No review scheduled' })
+        ]),
+
+        // 4. Encounter Intelligence
+        element('section', { className: 'rounded-lg border border-stone p-4' }, [
+          element('h3', { className: 'font-semibold text-ink', text: 'Encounter Intelligence' }),
+          element('div', { className: 'mt-3 grid gap-4 sm:grid-cols-2' }, [
+            element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Total Encounters' }), element('dd', { className: 'mt-1 font-medium text-ink', text: String(encounters.count) })]),
+            element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'First Seen' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatDate(encounters.firstEncounteredAt) })]),
+            element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Last Seen' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatDate(encounters.lastEncounteredAt) })]),
+            element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Vocabulary Sources' }), element('dd', { className: 'mt-1 font-medium text-ink', text: String(encounters.bySource.find(s => s.sourceType === 'vocabulary')?.count || 0) })]),
+            element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Session Writing Sources' }), element('dd', { className: 'mt-1 font-medium text-ink', text: String(encounters.bySource.find(s => s.sourceType === 'session_writing')?.count || 0) })])
+          ]),
+          encounters.recent?.length ? element('div', { className: 'mt-4' }, [
+            element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Recent Encounters (max 5)' }),
+            element('ul', { className: 'mt-2 grid gap-2' }, encounters.recent.map((enc) => element('li', { className: 'text-sm text-ink/80 flex items-center gap-2' }, [
+              element('span', { className: 'status-pill text-xs', text: enc.sourceType === 'vocabulary' ? 'Vocab' : 'Writing' }),
+              element('span', { text: enc.sourceTitle || `Source #${enc.sourceId}` }),
+              element('span', { className: 'text-muted ml-auto', text: formatDateTime(enc.encounteredAt) })
+            ])))
+          ]) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No encounters yet' })
+        ]),
+
+        // 5. Connected Vocabulary
+        element('section', { className: 'rounded-lg border border-stone p-4' }, [
+          element('h3', { className: 'font-semibold text-ink', text: 'Connected Vocabulary' }),
+          vocab.length ? element('div', { className: 'mt-3 grid gap-3' }, vocab.map((word) => {
+            const wordExamples = usageExamples.filter((ex) => ex.id_vocabulary === word.id_vocabulary);
+            return element('article', { className: 'rounded-md bg-paper p-3' }, [
+              element('div', { className: 'flex items-start justify-between gap-3' }, [
+                element('div', {}, [
+                  element('p', { className: 'font-medium text-ink', text: word.word }),
+                  element('p', { className: 'text-sm text-muted', text: word.reading || 'Reading not recorded' }),
+                  element('p', { className: 'mt-1 text-sm text-ink/80', text: word.meaning })
+                ]),
+                element('div', { className: 'flex flex-col items-end gap-1' }, [
+                  word.jlpt_level && element('span', { className: 'status-pill status-jlpt text-xs', text: word.jlpt_level }),
+                  element('span', { className: `status-pill text-xs ${statusColors[word.status] || 'bg-stone text-stone-foreground'}`, text: word.status || 'New' })
+                ])
+              ]),
+              wordExamples.length ? element('div', { className: 'mt-3 grid gap-2' }, wordExamples.map((ex) => element('div', { className: 'rounded bg-white/50 p-2 text-xs' }, [
+                element('p', { className: 'whitespace-pre-wrap text-ink', text: ex.sentence }),
+                ex.translation && element('p', { className: 'mt-1 text-muted', text: ex.translation })
+              ]))) : null
+            ]);
+          })) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No connected vocabulary yet' })
+        ]),
+
+        // 6. Personal Notes
+        element('section', { className: 'rounded-lg border border-stone p-4' }, [
+          element('h3', { className: 'font-semibold text-ink', text: 'Personal Notes' }),
+          notes ? element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: notes }) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No personal notes' })
         ])
-      ]),
-      element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Related vocabulary' }), item.vocabulary?.length ? element('ul', { className: 'mt-3 grid gap-2' }, item.vocabulary.map((word) => element('li', { className: 'text-sm text-ink/80', text: `${word.word} · ${word.reading || 'reading not recorded'} · ${word.meaning}` }))) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No vocabulary linked.' })]),
-      element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Usage through related words' }), item.usageExamples?.length ? element('div', { className: 'mt-3 grid gap-3' }, item.usageExamples.map((example) => element('article', { className: 'rounded-md bg-paper p-3' }, [element('p', { className: 'text-xs font-semibold text-vermilion', text: `${example.word} · ${example.reading || 'reading not recorded'}` }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm text-ink', text: example.sentence }), ...(example.translation ? [element('p', { className: 'mt-2 text-sm text-muted', text: example.translation })] : [])]))) : element('p', { className: 'mt-2 text-sm text-muted', text: 'Add examples to linked vocabulary to see real reading usage here.' })])
-    ]),
+      ]);
+    },
     fields: [
       { name: 'character_kanji', label: 'Character', required: true, maxLength: 4 },
       { name: 'meaning', label: 'Meaning', required: true, maxLength: 255 },

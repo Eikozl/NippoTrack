@@ -54,12 +54,34 @@ async function getKanjiEncounterSummary(executor, userId, kanjiId) {
      WHERE user_id = ? AND id_kanji = ? GROUP BY source_type ORDER BY source_type`,
     [userId, kanjiId]
   );
+  const [recentRows] = await executor.execute(
+    `SELECT ke.id_kanji_encounter, ke.source_type, ke.source_id, ke.encountered_at,
+            CASE
+              WHEN ke.source_type = 'vocabulary' THEN v.word
+              WHEN ke.source_type = 'session_writing' THEN COALESCE(sw.title, 'Session writing')
+              ELSE NULL
+            END AS source_title
+     FROM kanji_encounters ke
+     LEFT JOIN vocabulary v ON ke.source_type = 'vocabulary' AND v.id_vocabulary = ke.source_id AND v.user_id = ke.user_id
+     LEFT JOIN session_writings sw ON ke.source_type = 'session_writing' AND sw.id_session = ke.source_id
+     WHERE ke.user_id = ? AND ke.id_kanji = ?
+     ORDER BY ke.encountered_at DESC, ke.id_kanji_encounter DESC
+     LIMIT 5`,
+    [userId, kanjiId]
+  );
   const summary = summaryRows[0] || {};
   return {
     count: Number(summary.count || 0),
     firstEncounteredAt: summary.first_encountered_at || null,
     lastEncounteredAt: summary.last_encountered_at || null,
-    bySource: bySourceRows.map((row) => ({ sourceType: row.source_type, count: Number(row.count || 0) }))
+    bySource: bySourceRows.map((row) => ({ sourceType: row.source_type, count: Number(row.count || 0) })),
+    recent: (recentRows || []).map((row) => ({
+      idEncounter: row.id_kanji_encounter,
+      sourceType: row.source_type,
+      sourceId: row.source_id,
+      encounteredAt: row.encountered_at,
+      sourceTitle: row.source_title || null
+    }))
   };
 }
 

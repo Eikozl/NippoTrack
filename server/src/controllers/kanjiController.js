@@ -143,6 +143,13 @@ async function getKanji(req, res) {
     const entry = await fetchEntityById('kanji', id, req.user.id);
     if (!entry) return res.status(404).json({ error: 'kanji entry not found' });
 
+    let reference = null;
+    try {
+      reference = await lookupReference(entry.character_kanji);
+    } catch {
+      reference = null;
+    }
+
     const [vocabulary] = await pool.execute(
       'SELECT v.id_vocabulary, v.word, v.reading, v.meaning, v.jlpt_level, v.status FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary WHERE kv.id_kanji = ? AND v.user_id = ? ORDER BY v.word',
       [id, req.user.id]
@@ -151,8 +158,23 @@ async function getKanji(req, res) {
       'SELECT v.id_vocabulary, v.word, v.reading, ue.id_usage_example, ue.sentence, ue.translation FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary JOIN usage_examples ue ON ue.id_vocabulary = v.id_vocabulary WHERE kv.id_kanji = ? AND v.user_id = ? ORDER BY v.word, ue.id_usage_example DESC',
       [id, req.user.id]
     );
+const [reviewRows] = await pool.execute(
+      `SELECT ri.id_review_item, ri.due_on, ri.interval_days, ri.last_reviewed_at, ri.last_result
+       FROM review_items ri
+       JOIN kanji k ON k.id_kanji = ri.id_kanji
+       WHERE ri.id_kanji = ? AND k.user_id = ?`,
+      [id, req.user.id]
+    );
+    const review = reviewRows[0] ? {
+      idReviewItem: reviewRows[0].id_review_item,
+      dueOn: reviewRows[0].due_on,
+      intervalDays: Number(reviewRows[0].interval_days || 0),
+      lastReviewedAt: reviewRows[0].last_reviewed_at || null,
+      lastResult: reviewRows[0].last_result || null
+    } : null;
+
     const encounters = await getKanjiEncounterSummary(pool, req.user.id, id);
-    return res.json({ ...entry, vocabulary, usageExamples, encounters });
+    return res.json({ ...entry, reference, review, vocabulary, usageExamples, encounters });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load kanji entry.' });
   }

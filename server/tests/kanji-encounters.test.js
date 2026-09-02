@@ -106,6 +106,9 @@ test('getKanjiEncounterSummary returns bounded aggregate data scoped to one user
       if (/GROUP BY source_type/i.test(sql)) {
         return [[{ source_type: 'session_writing', count: '2' }, { source_type: 'vocabulary', count: '1' }]];
       }
+      if (/ORDER BY ke.encountered_at DESC/i.test(sql)) {
+        return [[]];
+      }
       return [[{ count: '3', first_encountered_at: '2026-09-01T10:00:00.000Z', last_encountered_at: '2026-09-02T10:00:00.000Z' }]];
     }
   };
@@ -117,7 +120,8 @@ test('getKanjiEncounterSummary returns bounded aggregate data scoped to one user
     bySource: [
       { sourceType: 'session_writing', count: 2 },
       { sourceType: 'vocabulary', count: 1 }
-    ]
+    ],
+    recent: []
   });
 });
 
@@ -198,9 +202,22 @@ test('GET /api/kanji/:id includes the authenticated user encounter summary only'
       if (/FROM kanji_encounters/i.test(sql)) {
         summaryQueryCount += 1;
         assert.deepEqual(params, [USER_ID, 11]);
-        return /GROUP BY source_type/i.test(sql)
-          ? [[{ source_type: 'vocabulary', count: '1' }]]
-          : [[{ count: '1', first_encountered_at: '2026-09-01T10:00:00.000Z', last_encountered_at: '2026-09-01T10:00:00.000Z' }]];
+        if (/GROUP BY source_type/i.test(sql)) {
+          return [[{ source_type: 'vocabulary', count: '1' }]];
+        }
+        if (/ORDER BY ke.encountered_at DESC/i.test(sql)) {
+          return [[]];
+        }
+        return [[{ count: '1', first_encountered_at: '2026-09-01T10:00:00.000Z', last_encountered_at: '2026-09-01T10:00:00.000Z' }]];
+      }
+      if (/FROM review_items ri\s+JOIN kanji k ON k.id_kanji = ri.id_kanji/i.test(sql)) {
+        return [[]];
+      }
+      if (/FROM kanji_reference WHERE character = \?/i.test(sql)) {
+        return [[{ reference_id: 1, character: '食', jlpt_level: 'N5', onyomi: ['ショク'], kunyomi: ['た', 'く'], meanings: ['eat', 'food'], stroke_count: 9 }]];
+      }
+      if (/FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary JOIN usage_examples ue ON ue.id_vocabulary = v.id_vocabulary/i.test(sql)) {
+        return [[]];
       }
       throw new Error(`Unexpected SQL: ${sql}`);
     }
@@ -213,9 +230,10 @@ test('GET /api/kanji/:id includes the authenticated user encounter summary only'
         count: 1,
         firstEncounteredAt: '2026-09-01T10:00:00.000Z',
         lastEncounteredAt: '2026-09-01T10:00:00.000Z',
-        bySource: [{ sourceType: 'vocabulary', count: 1 }]
+        bySource: [{ sourceType: 'vocabulary', count: 1 }],
+        recent: []
       });
-      assert.equal(summaryQueryCount, 2);
+      assert.equal(summaryQueryCount, 3);
     } finally {
       await stopServer(server);
     }
