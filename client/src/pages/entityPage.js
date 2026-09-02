@@ -429,7 +429,7 @@ export function renderEntityPage(container, config) {
     const content = buildFields(config, record);
     let closeDialog = () => {};
     const duplicateNotice = element('div', {
-      className: 'hidden rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 sm:col-span-2',
+      className: 'kanji-duplicate-notice hidden sm:col-span-2',
       attrs: { role: 'status', 'aria-live': 'polite' }
     });
     const showDuplicateKanji = (existingKanji) => {

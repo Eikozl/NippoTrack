@@ -71,6 +71,10 @@
 .kanji-reference-candidates { display:grid; gap:.35rem; padding:.75rem; border-radius:18px; background:var(--jlt-surface); box-shadow:var(--shadow-inset-sm); }
 .kanji-reference-candidate { width:100%; padding:.7rem .85rem; border-radius:13px; color:var(--jlt-ink); font-size:.875rem; text-align:left; }
 .kanji-reference-candidate:hover,.kanji-reference-candidate:focus-visible { color:var(--jlt-primary); background:color-mix(in srgb,var(--jlt-primary-soft) 65%,transparent); }
+.kanji-duplicate-notice { display:grid; gap:.35rem; padding:1rem; border-radius:20px; color:var(--jlt-ink); background:var(--jlt-surface); box-shadow:var(--shadow-raised-md); }
+.kanji-duplicate-notice > p:first-child { color:var(--jlt-primary); font-weight:700; }
+.kanji-duplicate-notice > p:nth-child(2) { color:var(--jlt-muted); }
+.kanji-duplicate-notice .button-secondary { justify-self:start; margin-top:.35rem; }
   .eyebrow { @apply text-xs font-semibold uppercase tracking-[0.16em] text-vermilion; }
   .status-pill { @apply inline-flex rounded-full px-2.5 py-1 text-xs font-semibold text-muted; background:color-mix(in srgb,var(--jlt-surface) 80%,var(--jlt-primary-soft)); }
   .skeleton { @apply animate-pulse rounded-xl; box-shadow:var(--shadow-inset-sm); }
