@@ -233,16 +233,18 @@ test('canonical /api/sessions supports category, exact-date and date-range filte
 test('SQL-injection strings stay in parameter arrays and never alter SQL text', async () => {
   const injection = "x%' OR 1=1; DROP TABLE vocabulary; --";
   const calls = [];
+  const execute = async (sql, params) => {
+    calls.push({ sql, params });
+    if (sql.startsWith('INSERT INTO vocabulary')) return [{ insertId: 7 }];
+    if (sql.includes('WHERE id_vocabulary = ?')) {
+      return [[{ id_vocabulary: 7, word: injection, meaning: injection }]];
+    }
+    return [[]];
+  };
 
   await withPoolStubs({
-    execute: async (sql, params) => {
-      calls.push({ sql, params });
-      if (sql.startsWith('INSERT INTO vocabulary')) return [{ insertId: 7 }];
-      if (sql.includes('WHERE id_vocabulary = ?')) {
-        return [[{ id_vocabulary: 7, word: injection, meaning: injection }]];
-      }
-      return [[]];
-    }
+    execute,
+    getConnection: async () => ({ beginTransaction: async () => {}, execute, commit: async () => {}, rollback: async () => {}, release: () => {} })
   }, async () => {
     const server = await startServer();
 

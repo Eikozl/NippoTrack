@@ -210,11 +210,13 @@ test('text fields reject objects and arrays before any database write', async ()
 });
 
 test('valid Japanese text remains accepted', async () => {
+  const execute = async (sql) => {
+    if (sql.startsWith('INSERT INTO vocabulary')) return [{ insertId: 151 }];
+    return [[{ id_vocabulary: 151, word: '勉強', reading: 'べんきょう', meaning: 'study', status: 'New' }]];
+  };
   await withPoolStubs({
-    execute: async (sql) => {
-      if (sql.startsWith('INSERT INTO vocabulary')) return [{ insertId: 151 }];
-      return [[{ id_vocabulary: 151, word: '勉強', reading: 'べんきょう', meaning: 'study', status: 'New' }]];
-    }
+    execute,
+    getConnection: async () => ({ beginTransaction: async () => {}, execute, commit: async () => {}, rollback: async () => {}, release: () => {} })
   }, async () => {
     const server = await startServer();
     try {
@@ -287,13 +289,17 @@ test('PUT preserves omitted required fields and normalizes optional empty text t
     notes: 'Current note'
   };
   let updateParams;
+  const transactionExecute = async (sql, params) => {
+    if (sql.startsWith('UPDATE vocabulary')) updateParams = params;
+    return [{ affectedRows: 1 }];
+  };
 
   await withPoolStubs({
     execute: async (sql, params) => {
       if (sql.startsWith('SELECT')) return [[current]];
-      if (sql.startsWith('UPDATE vocabulary')) updateParams = params;
       return [{ affectedRows: 1 }];
-    }
+    },
+    getConnection: async () => ({ beginTransaction: async () => {}, execute: transactionExecute, commit: async () => {}, rollback: async () => {}, release: () => {} })
   }, async () => {
     const server = await startServer();
     try {

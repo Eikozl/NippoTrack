@@ -14,6 +14,7 @@ const {
 const { fetchEntityById, rollbackAndRelease } = require('./helpers');
 const { executePaginatedList } = require('./listHelpers');
 const { createReviewItem } = require('./reviewController');
+const { syncVocabularyKanjiLinks } = require('../services/kanjiVocabularyLinks');
 
 async function listVocabulary(req, res) {
   try {
@@ -173,21 +174,16 @@ async function createVocabulary(req, res) {
     const exampleSentence = normalizeText(body.example_sentence, 2000, 'example_sentence');
     const exampleTranslation = normalizeText(body.example_translation, 2000, 'example_translation');
     const exampleNotes = normalizeText(body.example_notes, 1500, 'example_notes');
-    if (!exampleSentence) {
-      const [result] = await pool.execute(
-        'INSERT INTO vocabulary (word, reading, meaning, jlpt_level, status, notes, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [values.word, values.reading, values.meaning, values.jlptLevel, values.status, values.notes, req.user.id]
-      );
-      await createReviewItem(pool, 'id_vocabulary', result.insertId);
-      return res.status(201).json(await fetchEntityById('vocabulary', result.insertId, req.user.id));
-    }
     connection = await pool.getConnection();
     await connection.beginTransaction();
     const [result] = await connection.execute(
       'INSERT INTO vocabulary (word, reading, meaning, jlpt_level, status, notes, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [values.word, values.reading, values.meaning, values.jlptLevel, values.status, values.notes, req.user.id]
     );
-    await connection.execute('INSERT INTO usage_examples (id_vocabulary, sentence, translation, notes) VALUES (?, ?, ?, ?)', [result.insertId, exampleSentence, exampleTranslation, exampleNotes]);
+    await syncVocabularyKanjiLinks(connection, { userId: req.user.id, vocabularyId: result.insertId, word: values.word });
+    if (exampleSentence) {
+      await connection.execute('INSERT INTO usage_examples (id_vocabulary, sentence, translation, notes) VALUES (?, ?, ?, ?)', [result.insertId, exampleSentence, exampleTranslation, exampleNotes]);
+    }
     await createReviewItem(connection, 'id_vocabulary', result.insertId);
     await connection.commit();
     connection.release();
@@ -201,6 +197,7 @@ async function createVocabulary(req, res) {
 }
 
 async function updateVocabulary(req, res) {
+  let connection;
   try {
     const id = parseIdParam(req, 'vocabulary entry');
     const current = await fetchEntityById('vocabulary', id, req.user.id);
@@ -221,12 +218,19 @@ async function updateVocabulary(req, res) {
       status: body.status !== undefined ? normalizeText(body.status, 20, 'status') || current.status : current.status,
       notes: body.notes !== undefined ? normalizeText(body.notes, 1500, 'notes') : current.notes
     };
-    await pool.execute(
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    await connection.execute(
       'UPDATE vocabulary SET word = ?, reading = ?, meaning = ?, jlpt_level = ?, status = ?, notes = ? WHERE id_vocabulary = ? AND user_id = ?',
       [values.word, values.reading, values.meaning, values.jlptLevel, values.status, values.notes, id, req.user.id]
     );
+    await syncVocabularyKanjiLinks(connection, { userId: req.user.id, vocabularyId: id, word: values.word });
+    await connection.commit();
+    connection.release();
+    connection = null;
     return res.json(await fetchEntityById('vocabulary', id, req.user.id));
   } catch (error) {
+    if (connection) await rollbackAndRelease(connection);
     return sendRouteError(res, error, { defaultMessage: 'Unable to update vocabulary entry.' });
   }
 }

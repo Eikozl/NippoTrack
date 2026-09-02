@@ -343,6 +343,9 @@ test('unknown database errors are logged but never returned to clients', async (
     await withPoolStubs({
       execute: async () => {
         throw new Error(privateMessage);
+      },
+      getConnection: async () => {
+        throw new Error(privateMessage);
       }
     }, async () => {
       const server = await startServer();
