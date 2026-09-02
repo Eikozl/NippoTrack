@@ -8,18 +8,31 @@ const applicationTables = `
   WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname <> 'schema_migrations'
   ORDER BY c.relname`;
 
+// Tables where jlt_runtime has only SELECT (no writes permitted at runtime).
 const readOnlyRuntimeTables = new Set(['kanji_reference']);
 
-function expectedPolicy(tableName) {
-  return readOnlyRuntimeTables.has(tableName)
-    ? { name: 'kanji_reference_runtime_select', command: 'SELECT' }
-    : { name: 'jlt_runtime_crud', command: 'ALL' };
+// Tables where jlt_runtime has only SELECT + INSERT (append-only; no UPDATE/DELETE).
+// These use per-command policies instead of a single jlt_runtime_crud/ALL policy.
+const appendOnlyRuntimeTables = new Set(['kanji_encounters']);
+
+// Returns the list of { name, command } policy descriptors expected for a table.
+function expectedPolicies(tableName) {
+  if (readOnlyRuntimeTables.has(tableName)) {
+    return [{ name: 'kanji_reference_runtime_select', command: 'SELECT' }];
+  }
+  if (appendOnlyRuntimeTables.has(tableName)) {
+    return [
+      { name: 'kanji_encounters_runtime_select', command: 'SELECT' },
+      { name: 'kanji_encounters_runtime_insert', command: 'INSERT' },
+    ];
+  }
+  return [{ name: 'jlt_runtime_crud', command: 'ALL' }];
 }
 
 function expectedRuntimePrivileges(tableName) {
-  return readOnlyRuntimeTables.has(tableName)
-    ? ['SELECT']
-    : ['SELECT', 'INSERT', 'UPDATE', 'DELETE'];
+  if (readOnlyRuntimeTables.has(tableName)) return ['SELECT'];
+  if (appendOnlyRuntimeTables.has(tableName)) return ['SELECT', 'INSERT'];
+  return ['SELECT', 'INSERT', 'UPDATE', 'DELETE'];
 }
 
 async function main() {
@@ -43,15 +56,20 @@ async function main() {
 
     const role = roleResult.rows[0];
     const tables = tablesResult.rows;
-    const expectedPolicies = new Map(tables.map(({ relname }) => [relname, expectedPolicy(relname)]));
-    const actualPolicies = policiesResult.rows.filter(({ tablename, policyname, cmd }) => {
-      const expected = expectedPolicies.get(tablename);
-      return expected?.name === policyname && expected.command === cmd;
-    });
+
+    // Build a flat list of all expected { tablename, name, command } policy descriptors.
+    const expectedPolicySet = tables.flatMap(({ relname }) =>
+      expectedPolicies(relname).map((p) => ({ tablename: relname, ...p }))
+    );
+    // Count how many actual policies exactly satisfy an expected descriptor.
+    const actualMatchCount = policiesResult.rows.filter(({ tablename, policyname, cmd }) =>
+      expectedPolicySet.some((e) => e.tablename === tablename && e.name === policyname && e.command === cmd)
+    ).length;
     const unexpectedPolicies = policiesResult.rows.filter(({ tablename, policyname, roles, cmd }) => {
-      const expected = expectedPolicies.get(tablename);
-      return roles.includes('public') || !roles.includes('jlt_runtime') || !expected || expected.name !== policyname || expected.command !== cmd;
+      if (roles.includes('public') || !roles.includes('jlt_runtime')) return true;
+      return !expectedPolicySet.some((e) => e.tablename === tablename && e.name === policyname && e.command === cmd);
     });
+
     const runtimeTableExtra = runtimeTablePrivileges.rows.filter(({ relname, privilege_type }) => !expectedRuntimePrivileges(relname).includes(privilege_type));
     const runtimeTableMissing = tables.flatMap(({ relname }) => expectedRuntimePrivileges(relname)
       .filter((privilege) => !runtimeTablePrivileges.rows.some((row) => row.relname === relname && row.privilege_type === privilege))
@@ -59,9 +77,9 @@ async function main() {
     const runtimeSequenceExtra = runtimeSequencePrivileges.rows.filter(({ privilege_type }) => !['USAGE', 'SELECT'].includes(privilege_type));
     const failures = [
       !role || !role.rolcanlogin || role.rolsuper || role.rolcreaterole || role.rolcreatedb || role.rolreplication || role.rolbypassrls || role.rolinherit ? 'jlt_runtime attributes are not least-privilege' : null,
-      tables.length !== 26 ? `expected 26 application tables, found ${tables.length}` : null,
+      tables.length !== 27 ? `expected 27 application tables, found ${tables.length}` : null,
       tables.some(({ rls_enabled, rls_forced }) => !rls_enabled || !rls_forced) ? 'RLS is not enabled and forced on every application table' : null,
-      actualPolicies.length !== tables.length ? 'missing explicit least-privilege jlt_runtime policies' : null,
+      actualMatchCount !== expectedPolicySet.length ? 'missing explicit least-privilege jlt_runtime policies' : null,
       unexpectedPolicies.length ? 'unexpected or broad RLS policies exist' : null,
       ownershipResult.rowCount ? 'jlt_runtime owns one or more application relations' : null,
       apiTablePrivileges.rowCount ? 'anon or authenticated retains an application-table privilege' : null,
@@ -76,7 +94,7 @@ async function main() {
       runtimeTableExtra.length || runtimeTableMissing.length ? 'jlt_runtime table privileges are broader or narrower than intended' : null,
       runtimeSequenceExtra.length ? 'jlt_runtime has non-identity sequence privileges' : null
     ].filter(Boolean);
-    const report = { role, applicationTables: tables.length, policies: actualPolicies.length, triggers: triggerFunctions.rows.length, failures };
+    const report = { role, applicationTables: tables.length, policies: actualMatchCount, triggers: triggerFunctions.rows.length, failures };
     console.log(JSON.stringify(report, null, 2));
     if (failures.length) process.exitCode = 1;
   } finally { /* pool shutdown happens below */ }
