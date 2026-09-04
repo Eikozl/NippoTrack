@@ -56,7 +56,8 @@ async function recordReview(req, res) {
     const previousInterval = Number(reviewItem.interval_days || 0);
     const nextInterval = INTERVALS[result];
     await connection.execute('INSERT INTO review_events (id_review_item, reviewed_at, result, previous_interval_days, next_interval_days) VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?)', [id, result, previousInterval, nextInterval]);
-    await connection.execute('UPDATE review_items SET due_on = CURRENT_DATE + ?, interval_days = ?, last_reviewed_at = CURRENT_TIMESTAMP, last_result = ? WHERE id_review_item = ?', [nextInterval, nextInterval, result, id]);
+    await connection.execute(
+  'UPDATE review_items SET due_on = CURRENT_DATE + CAST(? AS INTEGER), interval_days = ?, last_reviewed_at = CURRENT_TIMESTAMP, last_result = ? WHERE id_review_item = ?',[nextInterval, nextInterval, result, id]);
     await connection.commit(); connection.release(); connection = null;
     return res.json({ success: true, result, nextIntervalDays: nextInterval });
   } catch (error) {
