@@ -62,8 +62,9 @@ async function getKanjiEncounterSummary(executor, userId, kanjiId) {
               ELSE NULL
             END AS source_title
      FROM kanji_encounters ke
-     LEFT JOIN vocabulary v ON ke.source_type = 'vocabulary' AND v.id_vocabulary = ke.source_id AND v.user_id = ke.user_id
-     LEFT JOIN session_writings sw ON ke.source_type = 'session_writing' AND sw.id_session = ke.source_id
+      LEFT JOIN vocabulary v ON ke.source_type = 'vocabulary' AND v.id_vocabulary = ke.source_id AND v.user_id = ke.user_id
+      LEFT JOIN study_sessions ss ON ke.source_type = 'session_writing' AND ss.id_session = ke.source_id AND ss.user_id = ke.user_id
+      LEFT JOIN session_writings sw ON ke.source_type = 'session_writing' AND sw.id_session = ss.id_session
      WHERE ke.user_id = ? AND ke.id_kanji = ?
      ORDER BY ke.encountered_at DESC, ke.id_kanji_encounter DESC
      LIMIT 5`,

@@ -125,6 +125,51 @@ test('getKanjiEncounterSummary returns bounded aggregate data scoped to one user
   });
 });
 
+test('getKanjiEncounterSummary gates session_writing titles through owned study_sessions', async () => {
+  const seen = [];
+  const executor = {
+    async execute(sql, params) {
+      seen.push(sql);
+      assert.deepEqual(params, [USER_ID, 11]);
+      if (/GROUP BY source_type/i.test(sql)) return [[{ source_type: 'session_writing', count: '1' }]];
+      if (/ORDER BY ke.encountered_at DESC/i.test(sql)) {
+        // What the fixed SQL returns for a poisoned row (A-encounter -> B-session):
+        // ss misses on user_id, sw is NULL, COALESCE falls back to 'Session writing'.
+        return [[{ id_kanji_encounter: 901, source_type: 'session_writing', source_id: 999, encountered_at: '2026-09-02T12:00:00.000Z', source_title: 'Session writing' }]];
+      }
+      return [[{ count: '1', first_encountered_at: '2026-09-02T12:00:00.000Z', last_encountered_at: '2026-09-02T12:00:00.000Z' }]];
+    }
+  };
+
+  const summary = await getKanjiEncounterSummary(executor, USER_ID, 11);
+  assert.equal(summary.recent.length, 1);
+  assert.equal(summary.recent[0].sourceType, 'session_writing');
+  assert.equal(summary.recent[0].sourceTitle, 'Session writing');
+  assert.notEqual(summary.recent[0].sourceTitle, 'B Private Title');
+
+  const recentSql = seen.find((sql) => /ORDER BY ke.encountered_at DESC/i.test(sql));
+  assert.match(recentSql, /LEFT JOIN study_sessions ss/i);
+  assert.match(recentSql, /ss\.user_id\s*=\s*ke\.user_id/i);
+  assert.match(recentSql, /sw\.id_session\s*=\s*ss\.id_session/i);
+  assert.doesNotMatch(recentSql, /session_writings sw ON ke\.source_type[^;]*sw\.id_session\s*=\s*ke\.source_id/i);
+});
+
+test('getKanjiEncounterSummary still returns own session_writing title', async () => {
+  const executor = {
+    async execute(sql, params) {
+      assert.deepEqual(params, [USER_ID, 11]);
+      if (/GROUP BY source_type/i.test(sql)) return [[{ source_type: 'session_writing', count: '1' }]];
+      if (/ORDER BY ke.encountered_at DESC/i.test(sql)) {
+        return [[{ id_kanji_encounter: 902, source_type: 'session_writing', source_id: 61, encountered_at: '2026-09-02T12:00:00.000Z', source_title: '朝の書く練習' }]];
+      }
+      return [[{ count: '1', first_encountered_at: '2026-09-02T12:00:00.000Z', last_encountered_at: '2026-09-02T12:00:00.000Z' }]];
+    }
+  };
+
+  const summary = await getKanjiEncounterSummary(executor, USER_ID, 11);
+  assert.equal(summary.recent[0].sourceTitle, '朝の書く練習');
+});
+
 test('POST /api/vocabulary records encounters transactionally for the saved word', async () => {
   const statements = [];
   let committed = false;
