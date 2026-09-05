@@ -1,29 +1,39 @@
-// Phase 9 UX refinement — compact header level-estimate control.
+// Phase 9 UX refinement — morphing header level-estimate control.
 //
 // The estimate logic/API is untouched: this module renders the existing
-// GET /api/level/estimate payload (via levelEstimateModel) as a collapsed
-// pill in the application header that expands into a floating panel.
-// Conceptually inspired by an expandable compact status surface; visually
-// plain JLT (surface card, status pills, native <details>).
+// GET /api/level/estimate payload (via levelEstimateModel) as ONE surface
+// in the application header that morphs between compact and expanded.
+//
+// Interaction principle (not visual copy): the collapsed pill — whose only
+// visual identity is the level itself (N5…N1, or — when there is not enough
+// evidence; no decorative icon) — smoothly grows into the detail surface
+// and contracts back. There is deliberately NO detached dropdown, popover,
+// modal, or second card: expansion toggles `.is-open` on the same
+// `.level-estimate-morph` node, and CSS grid-template-rows + width +
+// border-radius transitions do the morph. Detail content fades/slides in
+// via opacity/transform on the inner wrapper.
 //
 // Design notes:
 // - Dependency-injected DOM (`createElement`) and window/fetch so the full
 //   interaction is unit-testable without a browser. Production passes the
 //   shared `element` helper from ui.js.
-// - One panel node exists; it is reparented into whichever header host
-//   opened it (desktop / mobile headers each get a collapsed button, only
-//   one is ever visible — same precedent as the theme toggles).
-// - Panel content reuses the CACHED model: opening never fetches. Refresh
+// - Desktop / mobile headers each get one morph (only one header is ever
+//   visible — same precedent as the theme toggles); at most one is ever
+//   open. The morph is absolutely anchored inside its fixed-size host, so
+//   expansion never pushes the theme/account buttons and always originates
+//   from the exact pill location, growing leftward/downward within the
+//   viewport.
+// - Detail content reuses the CACHED model: opening never fetches. Refresh
 //   happens on initial load and on `jlt-review-complete` only. Analyzer
 //   analysis and unreviewed imports cannot change the estimate, so nothing
 //   listens for them.
-// - CSS-only animation (~300ms ease-out, transform/opacity/border-radius);
-//   `prefers-reduced-motion` expands/collapses without motion.
+// - Zero JS timers: visibility is handled with a delayed `visibility`
+//   transition, so `prefers-reduced-motion` (global reset + explicit rule)
+//   makes state changes instant without breaking functionality.
 
 import { levelEstimateModel } from './levelEstimate.js';
 
-export const LEVEL_ESTIMATE_PANEL_ID = 'level-estimate-panel';
-export const PANEL_TRANSITION_MS = 300;
+export const LEVEL_ESTIMATE_MORPH_CLASS = 'level-estimate-morph';
 
 export function levelControlLabel(model) {
   if (!model) return 'JLT estimated study level';
@@ -36,43 +46,40 @@ export function levelControlShortText(model) {
   return '—';
 }
 
-function prefersReducedMotion(win) {
-  try {
-    return Boolean(win && typeof win.matchMedia === 'function' && win.matchMedia('(prefers-reduced-motion: reduce)').matches);
-  } catch {
-    return false;
-  }
-}
-
 function bulletList(h, items) {
   return h('ul', { className: 'level-estimate-list' }, items.map((text) => h('li', { text })));
 }
 
-// Renders the expanded panel body from the cached model. Pure w.r.t. the
-// injected element factory; called on open so content is always current.
-export function renderLevelPanel(h, model) {
-  const pills = h('div', { className: 'level-estimate-pills' }, model.bandRows.map((row) =>
-    h('span', { className: 'status-pill', text: `${row.band} · ${row.eligible} reviewed` })
-  ));
-  const details = h('details', { className: 'level-estimate-details' }, [
-    h('summary', { text: 'How this is estimated' }),
-    h('h3', { text: 'Evidence used' }),
-    bulletList(h, model.evidenceLines),
-    h('h3', { text: 'Explicitly not used' }),
-    bulletList(h, model.notUsedLines),
-    ...(model.limitationLines.length
-      ? [h('h3', { text: 'Limitations' }), bulletList(h, model.limitationLines)]
-      : [])
-  ]);
+// Renders the expandable detail body from the cached model. Pure w.r.t.
+// the injected element factory; called on open so content is always
+// current. The always-visible face (title + level) is built in mount, so
+// detail starts with the confidence line — no duplicated level heading.
+export function renderLevelDetail(h, model) {
   return [
-    h('p', { className: 'eyebrow', text: 'JLT study estimate' }),
-    h('h2', { text: model.headline }),
     h('p', { className: 'level-estimate-subline', text: model.subline }),
-    ...(model.status === 'estimated' ? [h('p', { className: 'level-estimate-confidence', text: model.metricNote }), pills] : []),
-    details,
+    ...(model.status === 'estimated'
+      ? [
+        h('p', { className: 'level-estimate-confidence', text: model.metricNote }),
+        h('div', { className: 'level-estimate-pills' }, model.bandRows.map((row) =>
+          h('span', { className: 'status-pill', text: `${row.band} · ${row.eligible} reviewed` })
+        ))
+      ]
+      : []),
+    h('details', { className: 'level-estimate-details' }, [
+      h('summary', { text: 'How this is estimated' }),
+      h('h3', { text: 'Evidence used' }),
+      bulletList(h, model.evidenceLines),
+      h('h3', { text: 'Explicitly not used' }),
+      bulletList(h, model.notUsedLines),
+      ...(model.limitationLines.length
+        ? [h('h3', { text: 'Limitations' }), bulletList(h, model.limitationLines)]
+        : [])
+    ]),
     h('p', { className: 'level-estimate-disclaimer', text: model.disclaimer })
   ];
 }
+
+let detailIdCounter = 0;
 
 export function createLevelEstimateControl({ fetchEstimate, createElement, doc, win }) {
   const h = createElement;
@@ -81,30 +88,16 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
     loaded: false,
     loading: false,
     stale: false,
-    open: false,
-    activeHost: null,
+    openHost: null,
     hosts: [],
-    buttonByHost: new Map(),
-    panel: null,
-    closeTimer: null
+    partsByHost: new Map()
   };
 
-  function panel() {
-    if (!state.panel) {
-      state.panel = h('section', {
-        className: 'level-estimate-panel hidden',
-        attrs: { id: LEVEL_ESTIMATE_PANEL_ID, role: 'region', 'aria-label': 'Estimated study level details' }
-      });
-    }
-    return state.panel;
-  }
-
-  function syncButtons() {
-    for (const button of state.buttonByHost.values()) {
-      const label = button.querySelector('[data-level-text]');
-      if (label) label.textContent = levelControlShortText(state.model);
-      button.setAttribute('aria-label', levelControlLabel(state.model));
-      button.setAttribute('aria-expanded', String(state.open));
+  function syncFaces() {
+    for (const [host, parts] of state.partsByHost.entries()) {
+      if (parts.valueNode) parts.valueNode.textContent = levelControlShortText(state.model);
+      parts.face.setAttribute('aria-label', levelControlLabel(state.model));
+      parts.face.setAttribute('aria-expanded', String(state.openHost === host));
     }
   }
 
@@ -117,64 +110,60 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
 
   function isOutside(target) {
     if (!target || typeof target.closest !== 'function') return true;
-    if (target.closest(`#${LEVEL_ESTIMATE_PANEL_ID}`)) return false;
-    for (const button of state.buttonByHost.values()) {
-      if (button === target || (typeof button.contains === 'function' && button.contains(target))) return false;
-    }
-    return true;
+    // The morph surface (face + detail) is one connected node: anything
+    // inside it is "inside", everything else collapses the control.
+    return !target.closest(`.${LEVEL_ESTIMATE_MORPH_CLASS}`);
   }
 
   function onDocumentClick(event) {
-    if (state.open && isOutside(event && event.target)) close();
+    if (state.openHost && isOutside(event && event.target)) close();
   }
 
   function onDocumentKeydown(event) {
-    if (state.open && event && event.key === 'Escape') {
+    if (state.openHost && event && event.key === 'Escape') {
+      const parts = state.partsByHost.get(state.openHost);
       close();
-      if (state.activeHost && state.buttonByHost.has(state.activeHost)) {
-        const button = state.buttonByHost.get(state.activeHost);
-        if (button && typeof button.focus === 'function') button.focus();
-      }
+      if (parts && parts.face && typeof parts.face.focus === 'function') parts.face.focus();
     }
+  }
+
+  function renderOpenContent() {
+    const parts = state.openHost ? state.partsByHost.get(state.openHost) : null;
+    if (parts && state.model) parts.detailInner.replaceChildren(...renderLevelDetail(h, state.model));
   }
 
   function open(host) {
-    if (!state.model || state.open) return;
-    state.open = true;
-    state.activeHost = host;
-    const node = panel();
-    node.replaceChildren(...renderLevelPanel(h, state.model));
-    if (node.parentNode !== host) host.appendChild(node);
-    node.classList.remove('hidden');
-    if (state.closeTimer) { win.clearTimeout(state.closeTimer); state.closeTimer = null; }
-    // Unhide-then-class ordering lets the CSS transition run on open.
-    win.setTimeout(() => { if (state.open) node.classList.add('is-open'); }, 20);
+    if (!state.model || !state.partsByHost.has(host)) return;
+    if (state.openHost && state.openHost !== host) setOpen(state.openHost, false);
+    state.openHost = host;
+    renderOpenContent();
+    setOpen(host, true);
     doc.addEventListener('click', onDocumentClick);
     doc.addEventListener('keydown', onDocumentKeydown);
-    syncButtons();
+    syncFaces();
+  }
+
+  function setOpen(host, isOpen) {
+    const parts = state.partsByHost.get(host);
+    if (!parts) return;
+    if (isOpen) parts.morph.classList.add('is-open');
+    else parts.morph.classList.remove('is-open');
   }
 
   function close() {
-    if (!state.open) return;
-    state.open = false;
-    const node = state.panel;
+    if (!state.openHost) return;
+    setOpen(state.openHost, false);
+    state.openHost = null;
     doc.removeEventListener('click', onDocumentClick);
     doc.removeEventListener('keydown', onDocumentKeydown);
-    if (node) {
-      node.classList.remove('is-open');
-      const hide = () => node.classList.add('hidden');
-      if (prefersReducedMotion(win)) hide();
-      else {
-        if (state.closeTimer) win.clearTimeout(state.closeTimer);
-        state.closeTimer = win.setTimeout(hide, PANEL_TRANSITION_MS);
-      }
-    }
-    syncButtons();
+    syncFaces();
   }
 
   function toggle(host, event) {
     if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-    if (state.open) close();
+    // open() already collapses a different open host, so cross-header
+    // activation transfers instead of just closing.
+    if (state.openHost === host) close();
     else open(host);
   }
 
@@ -188,13 +177,13 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
       // Fetch failure degrades to hidden: never show a stale or
       // placeholder estimate in the header.
       setHostsVisible(Boolean(state.model));
-      if (!state.model && state.open) close();
-      if (state.open && state.model) panel().replaceChildren(...renderLevelPanel(h, state.model));
-      syncButtons();
+      if (!state.model && state.openHost) close();
+      if (state.openHost && state.model) renderOpenContent();
+      syncFaces();
     } catch {
       state.model = null;
       setHostsVisible(false);
-      if (state.open) close();
+      if (state.openHost) close();
     } finally {
       state.loading = false;
       if (state.stale) { state.stale = false; load(); }
@@ -202,20 +191,36 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
   }
 
   function mount(host, { position = 'prepend' } = {}) {
+    detailIdCounter += 1;
+    const detailId = `level-estimate-detail-${detailIdCounter}`;
     const wrapper = h('div', { className: 'level-estimate-host hidden' });
-    const button = h('button', {
-      className: 'level-estimate-toggle',
-      attrs: { type: 'button', 'aria-expanded': 'false', 'aria-controls': LEVEL_ESTIMATE_PANEL_ID, 'aria-label': levelControlLabel(null) }
+    const morph = h('section', { className: LEVEL_ESTIMATE_MORPH_CLASS });
+    const face = h('button', {
+      className: 'level-estimate-face',
+      attrs: { type: 'button', 'aria-expanded': 'false', 'aria-controls': detailId, 'aria-label': levelControlLabel(null) }
     }, [
-      h('span', { className: 'level-estimate-dot', text: '◎', attrs: { 'aria-hidden': 'true' } }),
-      h('span', { attrs: { 'data-level-text': 'true' }, text: '—' })
+      h('span', { className: 'level-estimate-title', text: 'Estimated study level' }),
+      h('span', { className: 'level-estimate-value', attrs: { 'data-level-text': 'true' }, text: '—' })
     ]);
-    button.addEventListener('click', (event) => toggle(wrapper, event));
-    wrapper.appendChild(button);
+    const detailInner = h('div', { className: 'level-estimate-detail-inner' });
+    const detail = h('div', {
+      className: 'level-estimate-detail',
+      attrs: { id: detailId, role: 'region', 'aria-label': 'Estimated study level details' }
+    }, [detailInner]);
+    face.addEventListener('click', (event) => toggle(wrapper, event));
+    morph.appendChild(face);
+    morph.appendChild(detail);
+    wrapper.appendChild(morph);
     if (position === 'prepend' && typeof host.prepend === 'function') host.prepend(wrapper);
     else host.appendChild(wrapper);
     state.hosts.push(wrapper);
-    state.buttonByHost.set(wrapper, button);
+    state.partsByHost.set(wrapper, {
+      morph,
+      face,
+      detail,
+      detailInner,
+      valueNode: face.querySelector('[data-level-text]')
+    });
     return wrapper;
   }
 
@@ -224,19 +229,18 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
     state.model = null;
     state.loaded = false;
     setHostsVisible(false);
-    syncButtons();
+    syncFaces();
   }
 
   function destroy() {
     close();
     doc.removeEventListener('click', onDocumentClick);
     doc.removeEventListener('keydown', onDocumentKeydown);
-    if (state.panel && state.panel.parentNode && typeof state.panel.parentNode.removeChild === 'function') {
-      state.panel.parentNode.removeChild(state.panel);
+    for (const host of state.hosts) {
+      if (host.parentNode && typeof host.parentNode.removeChild === 'function') host.parentNode.removeChild(host);
     }
-    state.panel = null;
     state.hosts = [];
-    state.buttonByHost.clear();
+    state.partsByHost.clear();
   }
 
   function onReviewComplete() {
@@ -259,7 +263,7 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
     toggle,
     reset,
     destroy,
-    isOpen: () => state.open,
+    isOpen: () => state.openHost !== null,
     getModel: () => state.model,
     isLoaded: () => state.loaded
   };

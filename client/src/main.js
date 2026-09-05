@@ -79,7 +79,7 @@ translateDocument();
 function updateThemeControls(theme) {
   const dark = theme === 'dark';
   document.documentElement.style.colorScheme = theme;
-  themeColorMeta?.setAttribute('content', dark ? '#202428' : '#eef1f7');
+  themeColorMeta?.setAttribute('content', dark ? '#202428' : '#EDD9C0');
   if (brandLogo) {
     brandLogo.src = dark ? darkBrandLogo : lightBrandLogo;
     brandLogo.classList.toggle('brand-logo-dark', dark);
@@ -247,12 +247,11 @@ accountButtons.forEach((button) => button?.addEventListener('click', () => {
   openAccountDialog().catch((error) => showToast(error.message || 'Unable to load your account.', 'error'));
 }));
 
-// Phase 9 refinement — single header level-estimate control. One instance
-// manages both the desktop and mobile header buttons (only one header is
-// ever visible); the expanded panel is a singleton reparented to whichever
-// host opened it. Freshness: initial load after sign-in plus review
-// evidence only — analyzer/import/session events cannot change the
-// estimate, so nothing subscribes to them.
+// Phase 9 refinement — single header level-estimate control. One controller
+// manages both the desktop and mobile header morphs (only one header is
+// ever visible); at most one morph is ever open. Freshness: initial load
+// after sign-in plus review evidence only — analyzer/import/session events
+// cannot change the estimate, so nothing subscribes to them.
 const levelEstimateControl = createLevelEstimateControl({
   fetchEstimate: () => apiRequest('/api/level/estimate'),
   createElement: element,

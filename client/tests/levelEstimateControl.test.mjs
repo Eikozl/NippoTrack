@@ -4,13 +4,14 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import {
+import * as controlModule from '../src/levelEstimateControl.js';
+
+const {
   createLevelEstimateControl,
-  LEVEL_ESTIMATE_PANEL_ID,
+  LEVEL_ESTIMATE_MORPH_CLASS,
   levelControlLabel,
-  PANEL_TRANSITION_MS,
-  renderLevelPanel
-} from '../src/levelEstimateControl.js';
+  renderLevelDetail
+} = controlModule;
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readSource = (path) => readFileSync(join(root, path), 'utf8');
@@ -211,131 +212,167 @@ function setup({ payload = estimatedPayload(), reducedMotion = false } = {}) {
   doc.body.appendChild(mobileHost);
   const desktopWrapper = control.mount(desktopHost);
   const mobileWrapper = control.mount(mobileHost);
-  const button = (wrapper) => wrapper.querySelector('.level-estimate-toggle');
+  const morph = (wrapper) => wrapper.querySelector(`.${LEVEL_ESTIMATE_MORPH_CLASS}`);
+  const face = (wrapper) => wrapper.querySelector('.level-estimate-face');
   const click = (node) => node.dispatchEvent({ type: 'click', target: node, stopPropagation() {} });
-  return { doc, win, h, control, desktopHost, mobileHost, desktopWrapper, mobileWrapper, button, click, fetchCalls: () => calls };
+  return { doc, win, h, control, desktopHost, mobileHost, desktopWrapper, mobileWrapper, morph, face, click, fetchCalls: () => calls };
 }
 
-test('Header control: collapsed estimate button mounts first in the header group', async () => {
-  const { control, desktopHost, desktopWrapper, button } = setup();
+test('Header morph: no detached popup module or toggle remains', () => {
+  assert.ok(!('LEVEL_ESTIMATE_PANEL_ID' in controlModule), 'old detached-panel contract is gone');
+  assert.ok(!('PANEL_TRANSITION_MS' in controlModule), 'no JS timers drive the morph');
+  const source = readSource('src/levelEstimateControl.js');
+  assert.doesNotMatch(source, /setTimeout|clearTimeout/);
+  assert.doesNotMatch(source, /level-estimate-panel|level-estimate-toggle|level-estimate-dot/);
+});
+
+test('Header morph: collapsed state shows the bare level, first in the header group', async () => {
+  const { control, desktopHost, desktopWrapper, morph, face } = setup();
   await control.load();
-  const toggle = button(desktopWrapper);
-  assert.ok(toggle, 'collapsed button exists in the header');
+  const node = morph(desktopWrapper);
+  const button = face(desktopWrapper);
+  assert.ok(node, 'same surface lives in the header host');
   assert.equal(desktopHost.firstElementChild, desktopWrapper, 'level control precedes theme/account controls');
-  assert.equal(toggle.querySelector('[data-level-text]').textContent, 'N5');
-  assert.equal(toggle.getAttribute('aria-label'), 'JLT estimated study level: N5');
-  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
-  assert.equal(toggle.getAttribute('aria-controls'), LEVEL_ESTIMATE_PANEL_ID);
+  assert.equal(button.tagName, 'BUTTON');
+  assert.equal(button.querySelector('[data-level-text]').textContent, 'N5');
+  assert.equal(button.getAttribute('aria-label'), 'JLT estimated study level: N5');
+  assert.equal(button.getAttribute('aria-expanded'), 'false');
+  assert.ok(button.getAttribute('aria-controls'), 'face controls the detail region');
   control.destroy();
 });
 
-test('Header control: insufficient evidence renders safely, never as a level', async () => {
-  const { control, desktopWrapper, button, click } = setup({ payload: insufficientPayload() });
+test('Header morph: no decorative icon or glyph beside the level', async () => {
+  const { control, desktopWrapper, face } = setup();
   await control.load();
-  const toggle = button(desktopWrapper);
-  assert.equal(toggle.querySelector('[data-level-text]').textContent, '—');
-  assert.equal(toggle.getAttribute('aria-label'), 'JLT estimated study level: not enough evidence yet');
+  const button = face(desktopWrapper);
+  const text = textOf(button);
+  assert.doesNotMatch(text, /◎|◉|◍|⬤|●|◆|★|🎯/);
+  assert.equal(button.querySelectorAll('svg').length, 0);
+  assert.equal(button.querySelectorAll('[data-jlt-icon]').length, 0);
+  // Only the title + value spans; the value is exactly the level.
+  assert.equal(button.querySelector('[data-level-text]').textContent, 'N5');
+  assert.match(text, /Estimated study level/);
+  const source = readSource('src/levelEstimateControl.js');
+  assert.doesNotMatch(source, /◎|icon\(/);
+  control.destroy();
+});
+
+test('Header morph: insufficient evidence renders safely, never as a level', async () => {
+  const { control, desktopWrapper, face, click, morph } = setup({ payload: insufficientPayload() });
+  await control.load();
+  const button = face(desktopWrapper);
+  assert.equal(button.querySelector('[data-level-text]').textContent, '—');
+  assert.equal(button.getAttribute('aria-label'), 'JLT estimated study level: not enough evidence yet');
   assert.equal(levelControlLabel(null), 'JLT estimated study level');
-  click(toggle);
-  await sleep(40);
+  click(button);
   assert.ok(control.isOpen());
+  assert.ok(morph(desktopWrapper).classList.contains('is-open'));
   control.destroy();
 });
 
-test('Header control: click expands the panel with full estimate content', async () => {
-  const { control, desktopWrapper, button, click, doc } = setup();
+test('Header morph: click expands THE SAME surface (no detached node)', async () => {
+  const { control, desktopHost, desktopWrapper, face, morph, click, doc } = setup();
   await control.load();
-  const toggle = button(desktopWrapper);
-  click(toggle);
-  await sleep(40);
+  const nodeBefore = morph(desktopWrapper);
+  assert.equal(nodeBefore.parentNode, desktopWrapper, 'morph is anchored in its header host');
+  click(face(desktopWrapper));
   assert.ok(control.isOpen());
-  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
-  const panel = desktopWrapper.querySelector(`#${LEVEL_ESTIMATE_PANEL_ID}`);
-  assert.ok(panel, 'single panel instance lives in the opening host');
-  assert.equal(panel.getAttribute('role'), 'region');
-  assert.ok(panel.classList.contains('is-open'));
-  const text = textOf(panel);
-  assert.match(panel.querySelector('h2').textContent, /N5/);
+  // Same node, still anchored in the opening host, now morphed open.
+  assert.equal(morph(desktopWrapper), nodeBefore);
+  assert.equal(nodeBefore.parentNode, desktopWrapper, 'expansion reparents nothing');
+  assert.ok(nodeBefore.classList.contains('is-open'));
+  assert.equal(face(desktopWrapper).getAttribute('aria-expanded'), 'true');
+  // No detached dropdown/popover/modal: the only morph surfaces are the two
+  // header-anchored ones, and the open one is still inside its host.
+  assert.equal(doc.body.querySelectorAll(`.${LEVEL_ESTIMATE_MORPH_CLASS}`).length, 2);
+  assert.equal(nodeBefore.parentNode, desktopWrapper);
+  const text = textOf(nodeBefore);
+  assert.match(face(desktopWrapper).querySelector('[data-level-text]').textContent, /N5/);
   assert.match(text, /Moderate estimate confidence/);
   assert.match(text, /N5 · 8 reviewed/);
   assert.match(text, /not an official JLPT assessment/);
   assert.match(text, /OpenJLPT/);
-  assert.equal(doc.querySelectorAll(`#${LEVEL_ESTIMATE_PANEL_ID}`).length, 1);
   control.destroy();
 });
 
-test('Header control: second click collapses the panel', async () => {
-  const { control, desktopWrapper, button, click } = setup();
+test('Header morph: collapsing morphs back into the same compact surface', async () => {
+  const { control, desktopWrapper, face, morph, click } = setup();
   await control.load();
-  const toggle = button(desktopWrapper);
-  click(toggle);
-  await sleep(40);
-  assert.ok(control.isOpen());
-  click(toggle);
+  const nodeBefore = morph(desktopWrapper);
+  click(face(desktopWrapper));
+  assert.ok(nodeBefore.classList.contains('is-open'));
+  click(face(desktopWrapper));
   assert.ok(!control.isOpen());
-  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
-  await sleep(PANEL_TRANSITION_MS + 50);
-  assert.ok(desktopWrapper.querySelector(`#${LEVEL_ESTIMATE_PANEL_ID}`).classList.contains('hidden'));
+  assert.equal(morph(desktopWrapper), nodeBefore, 'still the same node');
+  assert.ok(!nodeBefore.classList.contains('is-open'), 'morphed back synchronously (CSS handles motion)');
+  assert.equal(face(desktopWrapper).getAttribute('aria-expanded'), 'false');
+  assert.equal(face(desktopWrapper).querySelector('[data-level-text]').textContent, 'N5');
   control.destroy();
 });
 
-test('Header control: click outside collapses the panel', async () => {
-  const { control, desktopWrapper, button, click, doc } = setup();
+test('Header morph: click outside collapses', async () => {
+  const { control, desktopWrapper, face, click, doc } = setup();
   await control.load();
-  click(button(desktopWrapper));
-  await sleep(40);
+  click(face(desktopWrapper));
   assert.ok(control.isOpen());
   doc.dispatchEvent({ type: 'click', target: doc.body });
   assert.ok(!control.isOpen());
   control.destroy();
 });
 
-test('Header control: Escape collapses and returns focus to the control', async () => {
-  const { control, desktopWrapper, button, click, doc } = setup();
+test('Header morph: Escape collapses and returns focus to the face', async () => {
+  const { control, desktopWrapper, face, click, doc } = setup();
   await control.load();
-  const toggle = button(desktopWrapper);
-  click(toggle);
-  await sleep(40);
+  const button = face(desktopWrapper);
+  click(button);
   assert.ok(control.isOpen());
   doc.dispatchEvent({ type: 'keydown', key: 'Escape' });
   assert.ok(!control.isOpen());
-  assert.ok(toggle.focused, 'focus returns to the level control');
+  assert.ok(button.focused, 'focus returns to the level face');
   control.destroy();
 });
 
-test('Header control: reduced motion collapses without waiting', async () => {
-  const { control, desktopWrapper, button, click } = setup({ reducedMotion: true });
+test('Header morph: face is a native button (keyboard activation works)', async () => {
+  const { control, desktopWrapper, face } = setup();
   await control.load();
-  const toggle = button(desktopWrapper);
-  click(toggle);
-  await sleep(40);
-  click(toggle);
-  assert.ok(desktopWrapper.querySelector(`#${LEVEL_ESTIMATE_PANEL_ID}`).classList.contains('hidden'));
+  const button = face(desktopWrapper);
+  assert.equal(button.tagName, 'BUTTON');
+  assert.equal(button.getAttribute('type'), 'button');
+  control.destroy();
+});
+
+test('Header morph: reduced motion keeps instant state changes', async () => {
+  const { control, desktopWrapper, face, morph, click } = setup({ reducedMotion: true });
+  await control.load();
+  click(face(desktopWrapper));
+  assert.ok(morph(desktopWrapper).classList.contains('is-open'));
+  click(face(desktopWrapper));
+  assert.ok(!morph(desktopWrapper).classList.contains('is-open'));
   const css = readSource('src/styles.css');
   assert.match(css, /prefers-reduced-motion/);
-  assert.match(css, /\.level-estimate-panel/);
+  assert.match(css, /\.level-estimate-morph[\s\S]*?transition:\s*none/);
+  assert.match(css, /grid-template-rows/);
+  assert.match(css, /width:\s*min\(22rem,\s*calc\(100vw\s*-\s*2rem\)\)/);
   control.destroy();
 });
 
-test('Header control: approaching band renders when the estimate has one', async () => {
-  const { control, desktopWrapper, button, click } = setup({
+test('Header morph: approaching band renders when the estimate has one', async () => {
+  const { control, desktopWrapper, face, morph, click } = setup({
     payload: () => ({
       ...estimatedPayload(),
       estimate: { level: 'N4', status: 'estimated', confidence: 'low', approachingBand: 'N3' }
     })
   });
   await control.load();
-  const toggle = button(desktopWrapper);
-  assert.equal(toggle.querySelector('[data-level-text]').textContent, 'N4');
-  click(toggle);
-  await sleep(40);
-  assert.match(textOf(desktopWrapper.querySelector(`#${LEVEL_ESTIMATE_PANEL_ID}`)), /Approaching N3/);
+  assert.equal(face(desktopWrapper).querySelector('[data-level-text]').textContent, 'N4');
+  click(face(desktopWrapper));
+  assert.match(textOf(morph(desktopWrapper)), /Approaching N3/);
   control.destroy();
 });
 
-test('Header control: review completion refreshes, unrelated events do not', async () => {
+test('Header morph: review completion refreshes, unrelated events do not', async () => {
   let level = 'N5';
-  const { control, desktopWrapper, button, win, fetchCalls } = setup({ payload: () => ({ ...estimatedPayload(), estimate: { level, status: 'estimated', confidence: 'moderate', approachingBand: null } }) });
+  const { control, desktopWrapper, face, win, fetchCalls } = setup({ payload: () => ({ ...estimatedPayload(), estimate: { level, status: 'estimated', confidence: 'moderate', approachingBand: null } }) });
   await control.load();
   assert.equal(fetchCalls(), 1);
   // Analyzer analysis, unreviewed imports, and session writes must not refetch.
@@ -349,39 +386,39 @@ test('Header control: review completion refreshes, unrelated events do not', asy
   win.dispatchEvent({ type: 'jlt-review-complete' });
   await sleep(20);
   assert.equal(fetchCalls(), 2);
-  assert.equal(button(desktopWrapper).querySelector('[data-level-text]').textContent, 'N4');
+  assert.equal(face(desktopWrapper).querySelector('[data-level-text]').textContent, 'N4');
   control.destroy();
 });
 
-test('Header control: fetch failure hides the control instead of guessing', async () => {
-  const { control, desktopWrapper, button } = setup({ payload: async () => { throw new Error('offline'); } });
+test('Header morph: fetch failure hides the control instead of guessing', async () => {
+  const { control, desktopWrapper } = setup({ payload: async () => { throw new Error('offline'); } });
   await control.load();
   assert.ok(desktopWrapper.classList.contains('hidden'));
   assert.ok(!control.isLoaded());
   control.destroy();
 });
 
-test('Header control: desktop and mobile share one panel instance', async () => {
-  const { control, desktopWrapper, mobileWrapper, button, click, doc } = setup();
+test('Header morph: desktop and mobile never open together', async () => {
+  const { control, desktopWrapper, mobileWrapper, face, morph, click } = setup();
   await control.load();
-  assert.ok(button(desktopWrapper));
-  assert.ok(button(mobileWrapper));
-  click(button(desktopWrapper));
-  await sleep(40);
-  assert.equal(doc.querySelectorAll(`#${LEVEL_ESTIMATE_PANEL_ID}`).length, 1);
-  assert.ok(desktopWrapper.querySelector(`#${LEVEL_ESTIMATE_PANEL_ID}`));
-  click(button(desktopWrapper));
-  await sleep(PANEL_TRANSITION_MS + 50);
-  click(button(mobileWrapper));
-  await sleep(40);
-  assert.equal(doc.querySelectorAll(`#${LEVEL_ESTIMATE_PANEL_ID}`).length, 1);
-  assert.ok(mobileWrapper.querySelector(`#${LEVEL_ESTIMATE_PANEL_ID}`), 'panel reparents to the opening host');
+  assert.ok(face(desktopWrapper));
+  assert.ok(face(mobileWrapper));
+  assert.notEqual(
+    face(desktopWrapper).getAttribute('aria-controls'),
+    face(mobileWrapper).getAttribute('aria-controls'),
+    'detail regions need unique ids'
+  );
+  click(face(desktopWrapper));
+  assert.ok(morph(desktopWrapper).classList.contains('is-open'));
+  click(face(mobileWrapper));
+  assert.ok(!morph(desktopWrapper).classList.contains('is-open'), 'opening mobile collapses desktop');
+  assert.ok(morph(mobileWrapper).classList.contains('is-open'));
   control.destroy();
 });
 
-test('Header control: panel renderer covers copy without a browser', () => {
+test('Header morph: detail renderer covers copy without a browser', () => {
   const doc = new FakeDocument();
-  const nodes = renderLevelPanel(makeH(doc), {
+  const nodes = renderLevelDetail(makeH(doc), {
     status: 'estimated', headline: 'Estimated study level: N5', subline: 'sub', metricNote: 'note',
     bandRows: [{ band: 'N5', eligible: 1, retained: 0 }], evidenceLines: ['a'], notUsedLines: ['b'],
     limitationLines: ['c'], disclaimer: 'd'
@@ -392,7 +429,7 @@ test('Header control: panel renderer covers copy without a browser', () => {
 test('Dashboard: estimate metric, estimate section, and Quick Add are gone', () => {
   const source = readSource('src/pages/dashboard.js');
   assert.doesNotMatch(source, /Study level/);
-  assert.doesNotMatch(source, /estimateSection|levelEstimateModel|levelPayload/);
+  assert.doesNotMatch(source, /estimateSection|estimateMetric|levelEstimateModel|levelPayload/);
   assert.doesNotMatch(source, /quickAddPanel|Quick add session|quick-add-card/);
   assert.doesNotMatch(source, /\/api\/level\/estimate/);
   assert.doesNotMatch(source, /\/api\/sessions.*POST|POST.*\/api\/sessions/);
