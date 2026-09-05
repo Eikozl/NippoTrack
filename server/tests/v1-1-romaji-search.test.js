@@ -154,6 +154,7 @@ test('builds raw, romaji, kana and normalized Japanese candidates', () => {
     hiragana: 'たべる',
     katakana: 'タベル',
     kanaCandidates: [{ hiragana: 'たべる', katakana: 'タベル' }],
+    candidateOrigins: ['complete'],
     normalizedJapanese: 'たべる',
     romajiComplete: true
   });
@@ -163,6 +164,7 @@ test('builds raw, romaji, kana and normalized Japanese candidates', () => {
     hiragana: null,
     katakana: 'ショク',
     kanaCandidates: [{ hiragana: 'しょく', katakana: 'ショク' }],
+    candidateOrigins: ['direct'],
     normalizedJapanese: 'しょく',
     romajiComplete: false
   });

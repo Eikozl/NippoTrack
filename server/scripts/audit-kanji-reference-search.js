@@ -16,7 +16,7 @@ const PRODUCT_LIMIT = 20;
 const GLOBAL_SEARCH_LIMIT = 5;
 
 function parseArgs(argv) {
-  const options = { json: null, concurrency: 8, levels: null, maxRows: null, offset: 0 };
+  const options = { json: null, concurrency: 8, levels: null, maxRows: null, offset: 0, modes: new Set(['exact', 'meaning', 'reading', 'romaji', 'probes']) };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--json') options.json = argv[++index];
@@ -24,6 +24,7 @@ function parseArgs(argv) {
     else if (argument === '--levels') options.levels = new Set(argv[++index].split(',').map((level) => level.trim().toUpperCase()));
     else if (argument === '--max-rows') options.maxRows = Math.max(1, Number(argv[++index]) || 0);
     else if (argument === '--offset') options.offset = Math.max(0, Number(argv[++index]) || 0);
+    else if (argument === '--modes') options.modes = new Set(argv[++index].split(',').map((mode) => mode.trim().toLowerCase()));
     else throw new Error(`Unknown argument: ${argument}`);
   }
   return options;
@@ -38,62 +39,73 @@ function levelKey(row) {
   return row.jlpt_level || 'unknown/null';
 }
 
-async function auditRow(row, searchKanjiReferences, helpers) {
+async function auditRow(row, searchKanjiReferences, helpers, modes) {
   const { normalizeJapaneseReading, hiraganaToRomaji } = helpers;
   const result = { character: row.character, jlptLevel: row.jlpt_level, exact: null, meaning: null, readings: [], romaji: [] };
 
-  const exact = await searchKanjiReferences(row.character, AUDIT_LIMIT);
-  const exactRank = rankOf(exact.items, row.character);
-  result.exact = { status: exactRank === 1 ? 'PASS' : 'FAIL', rank: exactRank, category: exactRank === 1 ? null : 'EXACT_CHARACTER_QUERY_MISS' };
+  if (modes.has('exact')) {
+    const exact = await searchKanjiReferences(row.character, AUDIT_LIMIT);
+    const exactRank = rankOf(exact.items, row.character);
+    result.exact = { status: exactRank === 1 ? 'PASS' : 'FAIL', rank: exactRank, category: exactRank === 1 ? null : 'EXACT_CHARACTER_QUERY_MISS' };
+  }
 
-  const firstMeaning = (row.meanings || [])[0] || null;
-  if (!firstMeaning) {
-    result.meaning = { status: 'NOT_APPLICABLE', probe: null, rank: null, truncated: false, category: null };
+  if (!modes.has('meaning')) {
+    result.meaning = { status: 'SKIPPED', probe: null, rank: null, truncated: false, category: null };
   } else {
-    const found = await searchKanjiReferences(firstMeaning, AUDIT_LIMIT);
-    const rank = rankOf(found.items, row.character);
-    const truncated = found.items.length >= AUDIT_LIMIT;
-    if (rank !== null) {
-      result.meaning = {
-        status: 'PASS', probe: firstMeaning, rank, truncated,
-        paginationNote: rank > PRODUCT_LIMIT ? 'PAGINATION_RANKING_MISS beyond product limit 20' : (rank > GLOBAL_SEARCH_LIMIT ? 'hidden from global search limit 5' : null),
-        category: null
-      };
+    const firstMeaning = (row.meanings || [])[0] || null;
+    if (!firstMeaning) {
+      result.meaning = { status: 'NOT_APPLICABLE', probe: null, rank: null, truncated: false, category: null };
     } else {
-      result.meaning = { status: truncated ? 'AMBIGUOUS' : 'FAIL', probe: firstMeaning, rank, truncated, category: truncated ? 'PAGINATION_RANKING_MISS' : 'MEANING_QUERY_MISS' };
+      const found = await searchKanjiReferences(firstMeaning, AUDIT_LIMIT);
+      const rank = rankOf(found.items, row.character);
+      const truncated = found.items.length >= AUDIT_LIMIT;
+      if (rank !== null) {
+        result.meaning = {
+          status: 'PASS', probe: firstMeaning, rank, truncated,
+          paginationNote: rank > PRODUCT_LIMIT ? 'PAGINATION_RANKING_MISS beyond product limit 20' : (rank > GLOBAL_SEARCH_LIMIT ? 'hidden from global search limit 5' : null),
+          category: null
+        };
+      } else {
+        result.meaning = { status: truncated ? 'AMBIGUOUS' : 'FAIL', probe: firstMeaning, rank, truncated, category: truncated ? 'PAGINATION_RANKING_MISS' : 'MEANING_QUERY_MISS' };
+      }
     }
   }
 
-  const readings = [...new Set([...(row.onyomi || []), ...(row.kunyomi || [])])];
-  for (const reading of readings) {
-    const found = await searchKanjiReferences(reading, AUDIT_LIMIT);
-    const rank = rankOf(found.items, row.character);
-    let category = null;
-    if (rank === null) {
-      category = 'READING_QUERY_MISS';
-      try {
-        const normalized = normalizeJapaneseReading(reading);
-        if (normalized && normalized !== reading) {
-          const retry = await searchKanjiReferences(normalized, AUDIT_LIMIT);
-          if (rankOf(retry.items, row.character) !== null) category = 'NORMALIZATION_MISS';
-        }
-      } catch { category = 'NORMALIZATION_MISS'; }
+  if (modes.has('reading')) {
+    const readings = [...new Set([...(row.onyomi || []), ...(row.kunyomi || [])])];
+    for (const reading of readings) {
+      const found = await searchKanjiReferences(reading, AUDIT_LIMIT);
+      const rank = rankOf(found.items, row.character);
+      let category = null;
+      if (rank === null) {
+        category = 'READING_QUERY_MISS';
+        try {
+          const normalized = normalizeJapaneseReading(reading);
+          if (normalized && normalized !== reading) {
+            const retry = await searchKanjiReferences(normalized, AUDIT_LIMIT);
+            if (rankOf(retry.items, row.character) !== null) category = 'NORMALIZATION_MISS';
+          }
+        } catch { category = 'NORMALIZATION_MISS'; }
+      }
+      result.readings.push({ reading, status: rank !== null ? 'PASS' : 'FAIL', rank, category });
     }
-    result.readings.push({ reading, status: rank !== null ? 'PASS' : 'FAIL', rank, category });
   }
 
-  const normalizedReadings = [...new Set(readings.map((reading) => {
-    try { return normalizeJapaneseReading(reading); } catch { return null; }
-  }).filter(Boolean))];
-  for (const normalized of normalizedReadings) {
-    const romaji = hiraganaToRomaji(normalized);
-    if (!romaji) {
-      result.romaji.push({ reading: normalized, romaji: null, status: 'SKIP', rank: null, category: 'ROMAJI_NOT_SUPPORTED' });
-      continue;
+  if (modes.has('romaji')) {
+    const readings = [...new Set([...(row.onyomi || []), ...(row.kunyomi || [])])];
+    const normalizedReadings = [...new Set(readings.map((reading) => {
+      try { return normalizeJapaneseReading(reading); } catch { return null; }
+    }).filter(Boolean))];
+    for (const normalized of normalizedReadings) {
+      const romaji = hiraganaToRomaji(normalized);
+      if (!romaji) {
+        result.romaji.push({ reading: normalized, romaji: null, status: 'SKIP', rank: null, category: 'ROMAJI_NOT_SUPPORTED' });
+        continue;
+      }
+      const found = await searchKanjiReferences(romaji, AUDIT_LIMIT);
+      const rank = rankOf(found.items, row.character);
+      result.romaji.push({ reading: normalized, romaji, status: rank !== null ? 'PASS' : 'FAIL', rank, category: rank !== null ? null : 'READING_QUERY_MISS' });
     }
-    const found = await searchKanjiReferences(romaji, AUDIT_LIMIT);
-    const rank = rankOf(found.items, row.character);
-    result.romaji.push({ reading: normalized, romaji, status: rank !== null ? 'PASS' : 'FAIL', rank, category: rank !== null ? null : 'READING_QUERY_MISS' });
   }
   return result;
 }
@@ -125,7 +137,7 @@ async function main() {
   let completed = 0;
   async function worker(start) {
     for (let index = start; index < scope.length; index += options.concurrency) {
-      results[index] = await auditRow(scope[index], boundSearch, helpers);
+      results[index] = await auditRow(scope[index], boundSearch, helpers, options.modes);
       completed += 1;
       if (completed % 200 === 0) console.log(`  ...${completed}/${scope.length}`);
     }
@@ -134,21 +146,23 @@ async function main() {
 
   const falsePositiveProbes = ['I', 'ore', 'a', 'ka'];
   const probes = {};
-  for (const probe of falsePositiveProbes) {
-    const found = await boundSearch(probe, AUDIT_LIMIT);
-    const histogram = {};
-    found.items.forEach((item) => { histogram[item.jlptLevel || 'unknown/null'] = (histogram[item.jlptLevel || 'unknown/null'] || 0) + 1; });
-    probes[probe] = {
-      returned: found.items.length, truncated: found.items.length >= AUDIT_LIMIT,
-      top: found.items.slice(0, 5).map((item) => item.character),
-      jlptHistogram: histogram,
-      transliteration: found.transliteration
-    };
-  }
   const exactSpots = {};
-  for (const character of ['日', '本', '水']) {
-    const found = await boundSearch(character, PRODUCT_LIMIT);
-    exactSpots[character] = { rank: rankOf(found.items, character), first: found.items[0]?.character || null };
+  if (options.modes.has('probes')) {
+    for (const probe of falsePositiveProbes) {
+      const found = await boundSearch(probe, AUDIT_LIMIT);
+      const histogram = {};
+      found.items.forEach((item) => { histogram[item.jlptLevel || 'unknown/null'] = (histogram[item.jlptLevel || 'unknown/null'] || 0) + 1; });
+      probes[probe] = {
+        returned: found.items.length, truncated: found.items.length >= AUDIT_LIMIT,
+        top: found.items.slice(0, 5).map((item) => item.character),
+        jlptHistogram: histogram,
+        transliteration: found.transliteration
+      };
+    }
+    for (const character of ['日', '本', '水']) {
+      const found = await boundSearch(character, PRODUCT_LIMIT);
+      exactSpots[character] = { rank: rankOf(found.items, character), first: found.items[0]?.character || null };
+    }
   }
 
   const summary = summarize(results, probes, exactSpots, rows.length);
@@ -180,10 +194,10 @@ function summarize(results, probes, exactSpots, totalRows) {
   for (const result of results) {
     const level = ensureLevel(result.jlptLevel || 'unknown/null');
     level.rows += 1;
-    if (result.exact.status === 'PASS') exactPass += 1;
+    if (!result.exact || result.exact.status === 'PASS') { if (result.exact) exactPass += 1; }
     else { level.exactFail += 1; categories.EXACT_CHARACTER_QUERY_MISS = (categories.EXACT_CHARACTER_QUERY_MISS || 0) + 1; recordExample('EXACT_CHARACTER_QUERY_MISS', result.character); }
 
-    if (result.meaning.status === 'NOT_APPLICABLE') level.meaningNA += 1;
+    if (!result.meaning || result.meaning.status === 'NOT_APPLICABLE' || result.meaning.status === 'SKIPPED') { if (result.meaning && result.meaning.status === 'NOT_APPLICABLE') level.meaningNA += 1; }
     else {
       meaningApplicable += 1;
       if (result.meaning.status === 'PASS') meaningPass += 1;

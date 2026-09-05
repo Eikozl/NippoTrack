@@ -1,7 +1,6 @@
 const { JLPT_LEVELS } = require('../constants');
 const { ValidationError } = require('../errors/http');
-const { buildSearchCandidates } = require('../search/japaneseSearch');
-const { kanaSearchValues } = require('../search/sqlSearch');
+const { buildSearchCandidates, classifyReferenceQuery, expandReferenceReadings } = require('../search/japaneseSearch');
 
 const singleHanCodePoint = /^\p{Script=Han}$/u;
 const IMPORT_BATCH_SIZE = 200;
@@ -45,20 +44,60 @@ async function lookupKanjiReference(character, database = runtimeDatabase()) {
 
 async function searchKanjiReferences(search, limit, database = runtimeDatabase()) {
   const candidates = buildSearchCandidates(search);
-  const readingValues = kanaSearchValues(candidates).map((value) => `%${value}%`);
-  const normalizedReadings = "REPLACE(REPLACE(REPLACE(REPLACE(array_to_string(r.onyomi || r.kunyomi, ' '), '.', ''), '．', ''), '・', ''), ' ', '')";
+  // Intent is a routing hint only: Latin input keeps both the reading and
+  // the English-meaning channels, and the relevance tiers below decide the
+  // weights. JLPT level is a tie-breaker, never the primary signal.
+  const intent = classifyReferenceQuery(candidates.raw, candidates);
+  const { strong, weak } = expandReferenceReadings(candidates);
+  // Prefix guesses only exist for Latin input (they need a romaji parse);
+  // Japanese input therefore searches the weak channel never. Latin input
+  // keeps both channels: strong readings rank high, weak guesses and
+  // English substrings stay at substring fallback.
+  const weakActive = intent.primary !== 'han' && intent.primary !== 'kana' ? weak : [];
+  // Stored readings carry dictionary morphology markers ('.', '・', spaces)
+  // plus hyphen affixes; strip them on the stored side to match the
+  // hyphen-stripped candidate keys. Canonical rows are never rewritten.
+  // Element-wise normalizer for single reading/meaning array entries.
+  // (The whole-array normalizedReadings above is recall-only; prefix and
+  // equality tiers must compare per element, not against the concatenation.)
+  const normElement = (expression) => `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(${expression}, '.', ''), '．', ''), '・', ''), ' ', ''), '-', '')`;
+  const normalizedReadings = `(${normElement("array_to_string(r.onyomi || r.kunyomi, ' ')")})`;
+  const strongValues = [...new Set(strong.flatMap(({ hiragana, katakana }) => [hiragana, katakana]))];
+  const weakValues = [...new Set(weakActive.flatMap(({ hiragana, katakana }) => [hiragana, katakana]))];
+  const readingValues = [...new Set([...strongValues, ...weakValues])].map((value) => `%${value}%`);
   const readingWhere = readingValues.length
     ? ` OR (${readingValues.map(() => `${normalizedReadings} ILIKE ?`).join(' OR ')})`
     : '';
+  const params = [`%${candidates.raw}%`, `%${candidates.raw}%`, ...readingValues];
+
+  // Relevance tiers (lower wins): exact character, exact meaning, exact
+  // stored reading, exact normalized reading, whole-word meaning, strong
+  // reading prefix, meaning prefix, substring fallback. Groups that have no
+  // values are omitted so the tier order never shifts.
+  const tiers = [];
+  tiers.push({ sql: 'WHEN r.character = ?', params: [candidates.raw] });
+  tiers.push({ sql: 'WHEN EXISTS (SELECT 1 FROM UNNEST(r.meanings) AS meaning WHERE LOWER(meaning) = LOWER(?))', params: [candidates.raw] });
+  if (strongValues.length) {
+    tiers.push({ sql: 'WHEN EXISTS (SELECT 1 FROM UNNEST(r.onyomi || r.kunyomi) AS reading WHERE reading = ANY (?))', params: [strongValues] });
+    tiers.push({ sql: `WHEN EXISTS (SELECT 1 FROM UNNEST(r.onyomi || r.kunyomi) AS reading WHERE ${normElement('reading')} = ANY (?))`, params: [strongValues] });
+  }
+  tiers.push({ sql: "WHEN (' ' || array_to_string(r.meanings, ' ') || ' ') ILIKE ?", params: [`% ${candidates.raw} %`] });
+  if (strongValues.length) {
+    tiers.push({ sql: `WHEN EXISTS (SELECT 1 FROM UNNEST(r.onyomi || r.kunyomi) AS reading WHERE ${normElement('reading')} LIKE ANY (?))`, params: [strongValues.map((value) => `${value}%`)] });
+  }
+  tiers.push({ sql: 'WHEN EXISTS (SELECT 1 FROM UNNEST(r.meanings) AS meaning WHERE meaning ILIKE ?)', params: [`${candidates.raw}%`] });
+  const orderBy = tiers.map(({ sql }, index) => `${sql} THEN ${index}`).join(' ');
+  tiers.forEach(({ params: tierParams }) => params.push(...tierParams));
+
   const [rows] = await database.execute(
     `SELECT r.id_kanji_reference AS reference_id, r.character, r.jlpt_level, r.onyomi, r.kunyomi, r.meanings, r.stroke_count
      FROM kanji_reference AS r
      WHERE r.character ILIKE ? OR array_to_string(r.meanings, ' ') ILIKE ?${readingWhere}
-     ORDER BY CASE WHEN r.character = ? THEN 0 ELSE 1 END,
+     ORDER BY CASE ${orderBy} ELSE ${tiers.length} END,
               CASE r.jlpt_level WHEN 'N5' THEN 1 WHEN 'N4' THEN 2 WHEN 'N3' THEN 3 WHEN 'N2' THEN 4 WHEN 'N1' THEN 5 ELSE 6 END,
               r.character ASC
      LIMIT ?`,
-    [`%${candidates.raw}%`, `%${candidates.raw}%`, ...readingValues, candidates.raw, limit]
+    [...params, limit]
   );
   return {
     items: rows.map(publicReference),
