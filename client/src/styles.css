@@ -36,6 +36,7 @@
     /* Dark surfaces/mood unchanged; only the brand accent shifts from blue
        to a light Mocha so both themes share one visual identity. */
     --jlt-bg: #202428; --jlt-surface: #202428; --jlt-border: #30363c;
+    --jlt-surface-soft: #292E33;
     --jlt-ink: #f4f7fb; --jlt-muted: #c3cedd; --jlt-primary: #C9AEA6;
     --jlt-primary-strong: #D8C2B9; --jlt-primary-soft: #3B2F29;
     --jlt-chart-text: #ffffff;
@@ -197,6 +198,13 @@
 }
 
 @keyframes kanji-reference-pulse { from { box-shadow: var(--shadow-inset-md); } to { box-shadow: var(--shadow-inset-sm); background: color-mix(in srgb, var(--jlt-primary-soft) 22%, transparent); } }
+
+/* Phase 10 — Reference Kanji Progress bars. Token-driven so both themes
+   stay readable; the numerator/denominator text (not color) carries meaning. */
+.jlpt-progress-track { height: 0.625rem; overflow: hidden; border: 1px solid var(--jlt-border); border-radius: 999px; background: var(--jlt-surface-soft); }
+.jlpt-progress-fill { height: 100%; min-width: 0; border-radius: inherit; background: var(--jlt-primary); transition: width 300ms ease; }
+:root[data-theme="dark"] .jlpt-progress-fill { background: var(--jlt-primary-strong); }
+@media (prefers-reduced-motion: reduce) { .jlpt-progress-fill { transition: none; } }
 
 /* V3 overlays legacy utility surfaces so every existing V1/V2 module follows the same theme. */
 :root[data-theme="dark"] .bg-white,

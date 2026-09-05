@@ -4,5 +4,6 @@ const controller = require('../controllers/levelController');
 const router = express.Router();
 
 router.route('/estimate').get(controller.getLevelEstimate);
+router.route('/progress').get(controller.getJlptProgress);
 
 module.exports = router;

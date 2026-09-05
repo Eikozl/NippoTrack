@@ -138,6 +138,7 @@ test('Light theme: text contrast meets WCAG AA on warm surfaces', () => {
 test('Dark theme: surfaces unchanged, accent shifts blue → light Mocha', () => {
   const block = darkBlock();
   assert.ok(block.includes('--jlt-bg: #202428; --jlt-surface: #202428; --jlt-border: #30363c;'));
+  assert.ok(block.includes('--jlt-surface-soft: #292E33;'), 'dark soft surfaces stay charcoal, never beige');
   assert.ok(block.includes('--jlt-ink: #f4f7fb; --jlt-muted: #c3cedd;'));
   assert.equal(token(block, '--jlt-primary'), '#C9AEA6');
   assert.equal(token(block, '--jlt-primary-strong'), '#D8C2B9');
@@ -149,6 +150,9 @@ test('Dark theme: surfaces unchanged, accent shifts blue → light Mocha', () =>
 test('Dark theme: light Mocha accents stay readable on charcoal', () => {
   const block = darkBlock();
   const bg = token(block, '--jlt-bg');
+  const soft = token(block, '--jlt-surface-soft');
+  const muted = token(block, '--jlt-muted');
+  assert.ok(contrastRatio(muted, soft) >= 4.5, `dark secondary text on soft surfaces: ${contrastRatio(muted, soft).toFixed(2)}`);
   const primary = token(block, '--jlt-primary');
   assert.ok(contrastRatio(primary, bg) >= 4.5, `dark accent on charcoal: ${contrastRatio(primary, bg).toFixed(2)}`);
   assert.ok(contrastRatio('#241F1C', primary) >= 4.5, `dark button/calendar text on accent: ${contrastRatio('#241F1C', primary).toFixed(2)}`);
@@ -183,6 +187,9 @@ test('Theme: global loading overlay stays readable (dark scrim, white card)', ()
 });
 
 test('Theme: level-estimate morph follows the token system', () => {
+  assert.match(css, /\.jlpt-progress-track \{[^}]*background:\s*var\(--jlt-surface-soft\)/);
+  assert.match(css, /\.jlpt-progress-fill \{[^}]*background:\s*var\(--jlt-primary\)/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{ \.jlpt-progress-fill \{ transition: none; \} \}/);
   assert.match(css, /\.level-estimate-morph \{[^}]*background:\s*var\(--jlt-surface\)/);
   assert.match(css, /\.level-estimate-face \{[^}]*color:\s*var\(--jlt-ink\)/);
 });

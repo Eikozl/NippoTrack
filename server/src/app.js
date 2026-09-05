@@ -54,7 +54,8 @@ app.get('/api', (req, res) => {
       'GET /api/tags'
       ,      'GET /api/review',
       'POST /api/analyze/text',
-      'GET /api/level/estimate'
+      'GET /api/level/estimate',
+      'GET /api/level/progress'
     ]
   });
 });
