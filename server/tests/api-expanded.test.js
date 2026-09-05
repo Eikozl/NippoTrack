@@ -398,7 +398,7 @@ test('PUT /api/sessions replaces supplied relationship sets in one transaction',
         statements
           .filter(({ sql }) => sql.startsWith('INSERT INTO session_vocabulary'))
           .map(({ params }) => params),
-        [[8, 2], [8, 3]]
+        [[8, 2, 8, 3]]
       );
       assert.deepEqual(
         statements

@@ -44,33 +44,39 @@ async function recordKanjiEncounters(executor, userId, text, source) {
 }
 
 async function getKanjiEncounterSummary(executor, userId, kanjiId) {
-  const [summaryRows] = await executor.execute(
-    `SELECT COUNT(*) AS count, MIN(encountered_at) AS first_encountered_at, MAX(encountered_at) AS last_encountered_at
-     FROM kanji_encounters WHERE user_id = ? AND id_kanji = ?`,
-    [userId, kanjiId]
+  const [rows] = await executor.execute(
+    `WITH scoped AS (
+      SELECT id_kanji_encounter, source_type, source_id, encountered_at
+      FROM kanji_encounters WHERE user_id = ? AND id_kanji = ?
+    ),
+    summary AS (
+      SELECT COUNT(*) AS count, MIN(encountered_at) AS first_encountered_at, MAX(encountered_at) AS last_encountered_at FROM scoped
+    ),
+    by_source AS (
+      SELECT source_type, COUNT(*) AS count FROM scoped GROUP BY source_type ORDER BY source_type
+    ),
+    recent AS (
+      SELECT s.id_kanji_encounter, s.source_type, s.source_id, s.encountered_at,
+             CASE
+               WHEN s.source_type = 'vocabulary' THEN v.word
+               WHEN s.source_type = 'session_writing' THEN COALESCE(sw.title, 'Session writing')
+               ELSE NULL
+             END AS source_title
+      FROM scoped s
+      LEFT JOIN vocabulary v ON s.source_type = 'vocabulary' AND v.id_vocabulary = s.source_id AND v.user_id = ?
+      LEFT JOIN study_sessions ss ON s.source_type = 'session_writing' AND ss.id_session = s.source_id AND ss.user_id = ?
+      LEFT JOIN session_writings sw ON s.source_type = 'session_writing' AND sw.id_session = ss.id_session
+      ORDER BY s.encountered_at DESC, s.id_kanji_encounter DESC
+      LIMIT 5
+    )
+    SELECT (SELECT row_to_json(summary) FROM summary) AS summary,
+           (SELECT COALESCE(json_agg(row_to_json(by_source)), '[]') FROM by_source) AS by_source,
+           (SELECT COALESCE(json_agg(row_to_json(recent)), '[]') FROM recent) AS recent`,
+    [userId, kanjiId, userId, userId]
   );
-  const [bySourceRows] = await executor.execute(
-    `SELECT source_type, COUNT(*) AS count FROM kanji_encounters
-     WHERE user_id = ? AND id_kanji = ? GROUP BY source_type ORDER BY source_type`,
-    [userId, kanjiId]
-  );
-  const [recentRows] = await executor.execute(
-    `SELECT ke.id_kanji_encounter, ke.source_type, ke.source_id, ke.encountered_at,
-            CASE
-              WHEN ke.source_type = 'vocabulary' THEN v.word
-              WHEN ke.source_type = 'session_writing' THEN COALESCE(sw.title, 'Session writing')
-              ELSE NULL
-            END AS source_title
-     FROM kanji_encounters ke
-      LEFT JOIN vocabulary v ON ke.source_type = 'vocabulary' AND v.id_vocabulary = ke.source_id AND v.user_id = ke.user_id
-      LEFT JOIN study_sessions ss ON ke.source_type = 'session_writing' AND ss.id_session = ke.source_id AND ss.user_id = ke.user_id
-      LEFT JOIN session_writings sw ON ke.source_type = 'session_writing' AND sw.id_session = ss.id_session
-     WHERE ke.user_id = ? AND ke.id_kanji = ?
-     ORDER BY ke.encountered_at DESC, ke.id_kanji_encounter DESC
-     LIMIT 5`,
-    [userId, kanjiId]
-  );
-  const summary = summaryRows[0] || {};
+  const summary = rows[0]?.summary || {};
+  const bySourceRows = rows[0]?.by_source || [];
+  const recentRows = rows[0]?.recent || [];
   return {
     count: Number(summary.count || 0),
     firstEncounteredAt: summary.first_encountered_at || null,

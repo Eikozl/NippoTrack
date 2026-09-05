@@ -270,18 +270,24 @@ window.addEventListener('jlt-sidebar-activity', (event) => {
   loadSidebarStreak();
 });
 
-function closeSearch() { searchResults.classList.add('hidden'); searchResults.replaceChildren(); }
-async function globalSearch(query) {
+function closeSearch() { searchResults.classList.add('hidden'); searchResults.replaceChildren(); searchSequence += 1; searchAbort?.abort(); }
+let searchSequence = 0;
+let searchAbort = null;
+async function globalSearch(query, sequence) {
   if (!query.trim()) return closeSearch();
   searchResults.classList.remove('hidden'); searchResults.className = 'absolute inset-x-0 top-[calc(100%+.6rem)] z-30 max-h-96 overflow-y-auto rounded-[18px] p-2 surface';
   searchResults.textContent = 'Searching…';
+  searchAbort?.abort();
+  const controller = new AbortController();
+  searchAbort = controller;
   try {
-    const referenceRequest = apiRequest(`/api/kanji/reference?search=${encodeURIComponent(query)}&limit=5`)
+    const referenceRequest = apiRequest(`/api/kanji/reference?search=${encodeURIComponent(query)}&limit=5`, { signal: controller.signal })
       .then((data) => data.items)
-      .catch(() => []);
+      .catch((error) => { if (error?.name === 'AbortError') throw error; return []; });
     const [vocabulary, kanji, grammar, sessions, notes, references] = await Promise.all([
-      apiRequest(`/api/vocabulary?search=${encodeURIComponent(query)}&limit=5`), apiRequest(`/api/kanji?search=${encodeURIComponent(query)}&limit=5`), apiRequest(`/api/grammar?search=${encodeURIComponent(query)}&limit=5`), apiRequest(`/api/sessions?search=${encodeURIComponent(query)}&limit=5`).catch(() => ({ items: [] })), apiRequest(`/api/notes?search=${encodeURIComponent(query)}&limit=5`).catch(() => ({ items: [] })), referenceRequest
+      apiRequest(`/api/vocabulary?search=${encodeURIComponent(query)}&limit=5`, { signal: controller.signal }), apiRequest(`/api/kanji?search=${encodeURIComponent(query)}&limit=5`, { signal: controller.signal }), apiRequest(`/api/grammar?search=${encodeURIComponent(query)}&limit=5`, { signal: controller.signal }), apiRequest(`/api/sessions?search=${encodeURIComponent(query)}&limit=5`, { signal: controller.signal }).catch((error) => { if (error?.name === 'AbortError') throw error; return { items: [] }; }), apiRequest(`/api/notes?search=${encodeURIComponent(query)}&limit=5`, { signal: controller.signal }).catch((error) => { if (error?.name === 'AbortError') throw error; return { items: [] }; }), referenceRequest
     ]);
+    if (sequence !== searchSequence || controller.signal.aborted) return;
     const groups = [
       ['Kanji reference', references, null, (x) => `${x.character} · ${x.meanings.join(', ')}`],
       ['Vocabulary', vocabulary.items, 'vocabulary', (x) => `${x.word} · ${x.meaning}`],
@@ -292,10 +298,10 @@ async function globalSearch(query) {
     ];
     searchResults.replaceChildren(...groups.filter(([, items]) => items?.length).map(([label, items, page, text]) => element('section', { className: 'p-2' }, [element('p', { className: 'eyebrow', text: label }), ...items.map((item) => { const button = element('button', { className: 'block w-full rounded-xl px-3 py-2 text-left text-sm text-ink hover:bg-paper', text: text(item), attrs: { type: 'button' } }); button.addEventListener('click', () => { closeSearch(); searchInput.value = ''; navigate(page || kanjiReferenceRoute(item.character)); }); return button; })])));
     if (!searchResults.childNodes.length) searchResults.textContent = 'No matching study records.';
-  } catch { searchResults.textContent = 'Unable to search right now.'; }
+  } catch (error) { if (error?.name === 'AbortError' || sequence !== searchSequence) return; searchResults.textContent = 'Unable to search right now.'; }
 }
 let searchTimer;
-searchInput?.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => globalSearch(searchInput.value), 220); });
+searchInput?.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => globalSearch(searchInput.value, ++searchSequence), 220); });
 
 function closeNavigation() {
   sidebar.classList.add('-translate-x-full');

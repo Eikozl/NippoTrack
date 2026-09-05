@@ -11,10 +11,10 @@ const {
   validateStandardRecordPayload,
   validateWriteFields
 } = require('../validation');
-const { fetchEntityById } = require('./helpers');
+const { fetchEntityById, rollbackAndRelease } = require('./helpers');
 const { executePaginatedList } = require('./listHelpers');
 const { createReviewItem } = require('./reviewController');
-const { findKanjiReferenceId, lookupKanjiReference: lookupReference, searchKanjiReferences } = require('../services/kanjiReference');
+const { findKanjiReferenceId, getKanjiReferenceById, lookupKanjiReference: lookupReference, searchKanjiReferences } = require('../services/kanjiReference');
 const { findUserKanjiByCharacter } = require('../services/kanjiLearning');
 const { getKanjiEncounterSummary } = require('../services/kanjiEncounters');
 
@@ -143,39 +143,38 @@ async function getKanji(req, res) {
     const entry = await fetchEntityById('kanji', id, req.user.id);
     if (!entry) return res.status(404).json({ error: 'kanji entry not found' });
 
-    let reference = null;
-    try {
-      reference = await lookupReference(entry.character_kanji);
-    } catch {
-      reference = null;
-    }
+    const referencePromise = (async () => {
+      try {
+        if (entry.reference_id) {
+          const byId = await getKanjiReferenceById(entry.reference_id);
+          if (byId) return byId;
+        } else {
+          return null;
+        }
+        return await lookupReference(entry.character_kanji);
+      } catch {
+        return null;
+      }
+    })();
 
-    const [vocabulary] = await pool.execute(
-      'SELECT v.id_vocabulary, v.word, v.reading, v.meaning, v.jlpt_level, v.status FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary WHERE kv.id_kanji = ? AND v.user_id = ? ORDER BY v.word',
+    const vocabularyPromise = pool.execute(
+      `SELECT v.id_vocabulary, v.word, v.reading, v.meaning, v.jlpt_level, v.status,
+              ue.id_usage_example, ue.sentence, ue.translation
+       FROM kanji_vocabulary kv
+       JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary
+       LEFT JOIN usage_examples ue ON ue.id_vocabulary = v.id_vocabulary
+       WHERE kv.id_kanji = ? AND v.user_id = ? ORDER BY v.word, ue.id_usage_example DESC`,
       [id, req.user.id]
     );
-    const [usageExamples] = await pool.execute(
-      'SELECT v.id_vocabulary, v.word, v.reading, ue.id_usage_example, ue.sentence, ue.translation FROM kanji_vocabulary kv JOIN vocabulary v ON kv.id_vocabulary = v.id_vocabulary JOIN usage_examples ue ON ue.id_vocabulary = v.id_vocabulary WHERE kv.id_kanji = ? AND v.user_id = ? ORDER BY v.word, ue.id_usage_example DESC',
-      [id, req.user.id]
-    );
-const [reviewRows] = await pool.execute(
+    const reviewPromise = pool.execute(
       `SELECT ri.id_review_item, ri.due_on, ri.interval_days, ri.last_reviewed_at, ri.last_result
        FROM review_items ri
        JOIN kanji k ON k.id_kanji = ri.id_kanji
        WHERE ri.id_kanji = ? AND k.user_id = ?`,
       [id, req.user.id]
     );
-    const review = reviewRows[0] ? {
-      idReviewItem: reviewRows[0].id_review_item,
-      dueOn: reviewRows[0].due_on,
-      intervalDays: Number(reviewRows[0].interval_days || 0),
-      lastReviewedAt: reviewRows[0].last_reviewed_at || null,
-      lastResult: reviewRows[0].last_result || null
-    } : null;
-
-const encounters = await getKanjiEncounterSummary(pool, req.user.id, id);
-
-    const [linkedNotes] = await pool.execute(
+    const encountersPromise = getKanjiEncounterSummary(pool, req.user.id, id);
+    const linkedNotesPromise = pool.execute(
       `SELECT n.id_note, n.title, n.body, n.category, n.created_at, n.updated_at
        FROM note_kanji nk
        JOIN notes n ON n.id_note = nk.id_note
@@ -183,6 +182,30 @@ const encounters = await getKanjiEncounterSummary(pool, req.user.id, id);
        ORDER BY n.updated_at DESC`,
       [id, req.user.id]
     );
+
+    const [reference, [vocabularyRows], [reviewRows], encounters, [linkedNotes]] = await Promise.all([
+      referencePromise, vocabularyPromise, reviewPromise, encountersPromise, linkedNotesPromise
+    ]);
+
+    const vocabulary = [];
+    const usageExamples = [];
+    const seenVocabulary = new Set();
+    for (const row of vocabularyRows) {
+      if (!seenVocabulary.has(row.id_vocabulary)) {
+        seenVocabulary.add(row.id_vocabulary);
+        vocabulary.push({ id_vocabulary: row.id_vocabulary, word: row.word, reading: row.reading, meaning: row.meaning, jlpt_level: row.jlpt_level, status: row.status });
+      }
+      if (row.id_usage_example !== null && row.id_usage_example !== undefined) {
+        usageExamples.push({ id_vocabulary: row.id_vocabulary, word: row.word, reading: row.reading, id_usage_example: row.id_usage_example, sentence: row.sentence, translation: row.translation });
+      }
+    }
+    const review = reviewRows[0] ? {
+      idReviewItem: reviewRows[0].id_review_item,
+      dueOn: reviewRows[0].due_on,
+      intervalDays: Number(reviewRows[0].interval_days || 0),
+      lastReviewedAt: reviewRows[0].last_reviewed_at || null,
+      lastResult: reviewRows[0].last_result || null
+    } : null;
 
     return res.json({ ...entry, reference, review, vocabulary, usageExamples, encounters, linkedNotes });
   } catch (error) {
@@ -231,6 +254,7 @@ function normalizeKanji(body, current = {}) {
 
 async function createKanji(req, res) {
   let requestedCharacter;
+  let connection;
   try {
     const body = req.body || {};
     validateWriteFields(body, ALLOWED_FIELDS.kanji);
@@ -246,13 +270,19 @@ async function createKanji(req, res) {
     const existingKanji = await findUserKanjiByCharacter(req.user.id, values.character);
     if (existingKanji) return duplicateKanjiResponse(res, existingKanji);
     const referenceId = await findKanjiReferenceId(values.character);
-    const [result] = await pool.execute(
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [result] = await connection.execute(
       'INSERT INTO kanji (character_kanji, meaning, onyomi, kunyomi, jlpt_level, status, notes, user_id, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [values.character, values.meaning, values.onyomi, values.kunyomi, values.jlptLevel, values.status, values.notes, req.user.id, referenceId]
     );
-    await createReviewItem(pool, 'id_kanji', result.insertId);
+    await createReviewItem(connection, 'id_kanji', result.insertId);
+    await connection.commit();
+    connection.release();
+    connection = null;
     return res.status(201).json(await fetchEntityById('kanji', result.insertId, req.user.id));
   } catch (error) {
+    if (connection) await rollbackAndRelease(connection);
     if (isUniqueViolation(error)) {
       try {
         const existingKanji = await findUserKanjiByCharacter(req.user.id, requestedCharacter);

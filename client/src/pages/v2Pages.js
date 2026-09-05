@@ -1,6 +1,6 @@
 import { apiRequest, queryString } from '../api';
 import { iconForTitle, iconTile } from '../icons';
-import { confirmDialog, element, emptyState, errorState, field, formatDate, loadingState, openDialog, pageHeader, paginationControls, searchableMultiSelect, showToast } from '../ui';
+import { confirmDialog, debounce, element, emptyState, errorState, field, formatDate, loadingState, openDialog, pageHeader, paginationControls, searchableMultiSelect, showToast } from '../ui';
 
 const options = (values, blank = 'Not set') => [{ value: '', label: blank }, ...values.map((value) => ({ value, label: value }))];
 const jlpt = options(['N5', 'N4', 'N3', 'N2', 'N1']);
@@ -194,6 +194,7 @@ export function renderV2Page(container, kind) {
     } catch (error) { records.replaceChildren(errorState(error, load)); }
   }
   addButton.addEventListener('click', () => openRecord());
-  search.addEventListener('input', () => { page = 1; load(); });
+  const debouncedSearch = debounce(() => { page = 1; load(); }, 250);
+  search.addEventListener('input', debouncedSearch);
   return load();
 }

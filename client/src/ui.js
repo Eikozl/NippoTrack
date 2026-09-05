@@ -251,13 +251,17 @@ export function searchableMultiSelect({
     }
   }, 250);
 
+  const debouncedLocalFilter = debounce((query) => {
+    const normalizedQuery = query.toLocaleLowerCase();
+    const filtered = options.filter((option) => optionSearchText(option).includes(normalizedQuery));
+    renderOptions(filtered, 'No matches found.');
+  }, 150);
+
   search.addEventListener('input', () => {
     const query = search.value.trim();
     const sequence = ++requestSequence;
     if (!loadOptions) {
-      const normalizedQuery = query.toLocaleLowerCase();
-      const filtered = options.filter((option) => optionSearchText(option).includes(normalizedQuery));
-      renderOptions(filtered, 'No matches found.');
+      debouncedLocalFilter(query);
       return;
     }
 

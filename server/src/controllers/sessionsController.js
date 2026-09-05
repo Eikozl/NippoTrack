@@ -130,28 +130,20 @@ async function ensureOwnedRelationships(connection, table, idColumn, ids, userId
   if (rows.length !== ids.length) throw new ValidationError('Related entries must belong to the authenticated user.');
 }
 
+async function insertRelationshipRows(connection, table, idColumn, sessionId, targetIds) {
+  if (!targetIds?.length) return;
+  const placeholders = targetIds.map(() => '(?, ?)').join(', ');
+  const params = targetIds.flatMap((targetId) => [sessionId, targetId]);
+  await connection.execute(`INSERT INTO ${table} (id_session, ${idColumn}) VALUES ${placeholders}`, params);
+}
+
 async function insertRelationships(connection, sessionId, relationships, userId) {
   await ensureOwnedRelationships(connection, 'vocabulary', 'id_vocabulary', relationships.vocabularyIds, userId);
   await ensureOwnedRelationships(connection, 'kanji', 'id_kanji', relationships.kanjiIds, userId);
   await ensureOwnedRelationships(connection, 'grammar_points', 'id_grammar', relationships.grammarIds, userId);
-  for (const vocabularyId of relationships.vocabularyIds || []) {
-    await connection.execute(
-      'INSERT INTO session_vocabulary (id_session, id_vocabulary) VALUES (?, ?)',
-      [sessionId, vocabularyId]
-    );
-  }
-  for (const kanjiId of relationships.kanjiIds || []) {
-    await connection.execute(
-      'INSERT INTO session_kanji (id_session, id_kanji) VALUES (?, ?)',
-      [sessionId, kanjiId]
-    );
-  }
-  for (const grammarId of relationships.grammarIds || []) {
-    await connection.execute(
-      'INSERT INTO session_grammar (id_session, id_grammar) VALUES (?, ?)',
-      [sessionId, grammarId]
-    );
-  }
+  await insertRelationshipRows(connection, 'session_vocabulary', 'id_vocabulary', sessionId, relationships.vocabularyIds);
+  await insertRelationshipRows(connection, 'session_kanji', 'id_kanji', sessionId, relationships.kanjiIds);
+  await insertRelationshipRows(connection, 'session_grammar', 'id_grammar', sessionId, relationships.grammarIds);
 }
 
 async function createSession(req, res) {

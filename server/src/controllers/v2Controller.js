@@ -5,6 +5,7 @@ const { sendRouteError } = require('../errors/http');
 const { executePaginatedList } = require('./listHelpers');
 const { isValidDateString, normalizeText, parseIdParam, validateAllowedValues, validateWriteFields } = require('../validation');
 const { parsePagination } = require('../pagination');
+const { paginationPayload } = require('../pagination');
 
 function requiredText(value, maxLength, fieldName) {
   const text = normalizeText(value, maxLength, fieldName);
@@ -77,11 +78,35 @@ async function getGoalProgress(goal, userId) {
 async function listGoals(req, res) {
   try {
     const { page, limit, offset } = parsePagination(req.query);
-    let whereSql = ' WHERE 1=1'; const params = [];
-    if (req.query.active !== undefined) { if (!['0', '1'].includes(req.query.active)) throw new ValidationError('active must be 0 or 1.'); whereSql += ' AND is_active = ?'; params.push(req.query.active === '1'); }
-    const result = await executePaginatedList(pool, { table: 'goals', columns: 'id_goal, title, goal_type, target_value, period_type, target_jlpt_level, target_status, start_date, due_date, is_active', whereSql, params, orderBy: 'is_active DESC, due_date IS NULL, due_date ASC, id_goal DESC', page, limit, offset, userId: req.user.id });
-    result.items = await Promise.all(result.items.map((goal) => getGoalProgress(goal, req.user.id)));
-    return res.json(result);
+    let countWhere = ' WHERE 1=1';
+    let itemsWhere = ' WHERE 1=1';
+    const params = [];
+    if (req.query.active !== undefined) { if (!['0', '1'].includes(req.query.active)) throw new ValidationError('active must be 0 or 1.'); countWhere += ' AND is_active = ?'; itemsWhere += ' AND g.is_active = ?'; params.push(req.query.active === '1'); }
+    const [countResult, itemsResult] = await Promise.all([
+      pool.execute(`SELECT COUNT(*) AS total FROM goals${countWhere} AND user_id = ?`, [...params, req.user.id]),
+      pool.execute(
+        `SELECT g.id_goal, g.title, g.goal_type, g.target_value, g.period_type, g.target_jlpt_level, g.target_status, g.start_date, g.due_date, g.is_active,
+          (CASE
+            WHEN g.goal_type = 'study_minutes' AND g.period_type = 'weekly'
+              THEN (SELECT COALESCE(SUM(ss.duration_minutes), 0) FROM study_sessions ss WHERE ss.user_id = g.user_id AND ss.session_date >= GREATEST(g.start_date, date_trunc('week', CURRENT_DATE)::date) AND ss.session_date <= CURRENT_DATE)
+            WHEN g.goal_type = 'study_minutes'
+              THEN (SELECT COALESCE(SUM(ss.duration_minutes), 0) FROM study_sessions ss WHERE ss.user_id = g.user_id AND ss.session_date >= g.start_date AND ss.session_date <= COALESCE(g.due_date, '9999-12-31'))
+            WHEN g.goal_type = 'vocabulary_count'
+              THEN (SELECT COUNT(*) FROM vocabulary v WHERE v.user_id = g.user_id AND v.created_at::date >= g.start_date AND v.created_at::date <= COALESCE(g.due_date, '9999-12-31') AND (g.target_jlpt_level IS NULL OR v.jlpt_level = g.target_jlpt_level) AND (g.target_status IS NULL OR v.status = g.target_status))
+            WHEN g.goal_type = 'kanji_count'
+              THEN (SELECT COUNT(*) FROM kanji k WHERE k.user_id = g.user_id AND k.created_at::date >= g.start_date AND k.created_at::date <= COALESCE(g.due_date, '9999-12-31') AND (g.target_jlpt_level IS NULL OR k.jlpt_level = g.target_jlpt_level) AND (g.target_status IS NULL OR k.status = g.target_status))
+            ELSE (SELECT COUNT(*) FROM grammar_points gp WHERE gp.user_id = g.user_id AND gp.created_at::date >= g.start_date AND gp.created_at::date <= COALESCE(g.due_date, '9999-12-31') AND (g.target_jlpt_level IS NULL OR gp.jlpt_level = g.target_jlpt_level) AND (g.target_status IS NULL OR gp.status = g.target_status))
+          END) AS progress
+        FROM goals g${itemsWhere} AND g.user_id = ? ORDER BY g.is_active DESC, g.due_date IS NULL, g.due_date ASC, g.id_goal DESC LIMIT ? OFFSET ?`,
+        [...params, req.user.id, limit, offset]
+      )
+    ]);
+    const total = Number(countResult[0][0]?.total || 0);
+    const items = itemsResult[0].map((goal) => {
+      const progress = Number(goal.progress || 0);
+      return { ...goal, progress, isComplete: progress >= Number(goal.target_value) };
+    });
+    return res.json(paginationPayload(items, total, page, limit));
   } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load goals.' }); }
 }
 
@@ -186,7 +211,11 @@ function linkHandlers(kind) {
           if (owned.length !== ids.length) throw new ValidationError('Linked entries must belong to the authenticated user.');
         }
         await connection.execute(`DELETE FROM ${group.table} WHERE ${group.entityColumn} = ?`, [id]);
-        for (const targetId of ids) await connection.execute(`INSERT INTO ${group.table} (${group.entityColumn}, ${group.targetColumn}) VALUES (?, ?)`, [id, targetId]);
+        if (ids.length) {
+          const placeholders = ids.map(() => '(?, ?)').join(', ');
+          const params = ids.flatMap((targetId) => [id, targetId]);
+          await connection.execute(`INSERT INTO ${group.table} (${group.entityColumn}, ${group.targetColumn}) VALUES ${placeholders}`, params);
+        }
       }
       await connection.commit(); connection.release(); connection = null;
       return res.json({ success: true });

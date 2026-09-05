@@ -30,12 +30,15 @@ async function stopServer(server) {
 }
 
 async function withPoolStub(stub, callback) {
-  const original = pool.execute;
+  const originalExecute = pool.execute;
+  const originalGetConnection = pool.getConnection;
   pool.execute = stub;
+  pool.getConnection = async () => ({ beginTransaction: async () => {}, execute: stub, commit: async () => {}, rollback: async () => {}, release: () => {} });
   try {
     await callback();
   } finally {
-    pool.execute = original;
+    pool.execute = originalExecute;
+    pool.getConnection = originalGetConnection;
   }
 }
 

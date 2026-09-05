@@ -232,7 +232,7 @@ test('POST /api/study-sessions writes all N:M relationships atomically and de-du
       const kanjiWrites = statements.filter(({ sql }) => sql.startsWith('INSERT INTO session_kanji'));
       const grammarWrites = statements.filter(({ sql }) => sql.startsWith('INSERT INTO session_grammar'));
 
-      assert.deepEqual(vocabularyWrites.map(({ params }) => params), [[41, 3], [41, 4]]);
+      assert.deepEqual(vocabularyWrites.map(({ params }) => params), [[41, 3, 41, 4]]);
       assert.deepEqual(kanjiWrites.map(({ params }) => params), [[41, 5]]);
       assert.deepEqual(grammarWrites.map(({ params }) => params), [[41, 6]]);
     } finally {

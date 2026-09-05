@@ -66,6 +66,14 @@ async function searchKanjiReferences(search, limit, database = runtimeDatabase()
   };
 }
 
+async function getKanjiReferenceById(referenceId, database = runtimeDatabase()) {
+  const [rows] = await database.execute(
+    'SELECT id_kanji_reference AS reference_id, character, jlpt_level, onyomi, kunyomi, meanings, stroke_count FROM kanji_reference WHERE id_kanji_reference = ?',
+    [referenceId]
+  );
+  return publicReference(rows[0]);
+}
+
 async function findKanjiReferenceId(character, database = runtimeDatabase()) {
   const [rows] = await database.execute(
     'SELECT id_kanji_reference AS reference_id FROM kanji_reference WHERE character = ?',
@@ -168,6 +176,7 @@ async function importKanjiReferences(client, references) {
 
 module.exports = {
   findKanjiReferenceId,
+  getKanjiReferenceById,
   importKanjiReferences,
   isSingleHanCodePoint,
   lookupKanjiReference,

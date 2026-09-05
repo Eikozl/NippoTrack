@@ -31,10 +31,22 @@ export async function renderReview(container) {
     try {
       const data = await apiRequest('/api/review');
       if (!data.items.length) { content.replaceChildren(emptyState({ title: 'Nothing due today', description: 'New vocabulary, kanji and grammar entries will appear here automatically when they are ready to review.' })); return; }
-      content.replaceChildren(element('div', { className: 'grid gap-4' }, data.items.map((item) => reviewCard(item, async (record, result, button) => {
+      const grid = element('div', { className: 'grid gap-4' });
+      const completeCard = (card) => {
+        card?.remove();
+        if (!grid.childNodes.length) content.replaceChildren(emptyState({ title: 'Nothing due today', description: 'New vocabulary, kanji and grammar entries will appear here automatically when they are ready to review.' }));
+      };
+      grid.replaceChildren(...data.items.map((item) => reviewCard(item, async (record, result, button) => {
         button.disabled = true;
-        try { await apiRequest(`/api/review/${record.id_review_item}`, { method: 'POST', body: { result } }); showToast(`Review recorded: ${result}.`); await load(); } catch (error) { button.disabled = false; showToast(error.message, 'error'); }
-      }))));
+        try {
+          await apiRequest(`/api/review/${record.id_review_item}`, { method: 'POST', body: { result } });
+          showToast(`Review recorded: ${result}.`);
+          const card = button.closest('article');
+          if (card) completeCard(card);
+          else await load();
+        } catch (error) { button.disabled = false; showToast(error.message, 'error'); }
+      })));
+      content.replaceChildren(grid);
     } catch (error) { content.replaceChildren(errorState(error, load)); }
   }
   await load();
