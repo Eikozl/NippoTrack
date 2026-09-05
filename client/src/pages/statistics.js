@@ -3,6 +3,7 @@ import { destroyCharts } from '../chartRegistry';
 import { distributionChart, weeklyChart } from '../charts';
 import { iconTile } from '../icons';
 import { jlptProgressModel } from '../jlptProgress';
+import { estimateTargetLine, targetContextLine, targetLevelOptions } from '../jlptTarget';
 import { element, errorState, loadingState, pageHeader } from '../ui';
 
 export async function renderStatistics(container) {
@@ -49,14 +50,34 @@ export async function renderStatistics(container) {
 
   async function loadProgress() {
     try {
-      const payload = await apiRequest('/api/level/progress');
-      const model = jlptProgressModel(payload);
+      const [progressPayload, targetPayload, estimatePayload] = await Promise.all([
+        apiRequest('/api/level/progress'),
+        apiRequest('/api/level/target'),
+        apiRequest('/api/level/estimate')
+      ]);
+      const model = jlptProgressModel(progressPayload);
       // Hide gracefully on failure, mirroring the Phase 9 estimate section.
       if (!model) {
         progressSlot.replaceChildren();
         return;
       }
-      progressSlot.replaceChildren(referenceKanjiProgressPanel(model));
+      const target = targetPayload && typeof targetPayload.targetLevel === 'string'
+        ? targetPayload.targetLevel
+        : null;
+      const estimateLevel = estimatePayload && estimatePayload.estimate
+        ? estimatePayload.estimate.level
+        : null;
+      progressSlot.replaceChildren(referenceKanjiProgressPanel(model, {
+        target,
+        estimateLevel,
+        onSelect: async (next) => {
+          const saved = await apiRequest('/api/level/target', {
+            method: 'PUT',
+            body: { target_level: next }
+          });
+          return saved && typeof saved.targetLevel === 'string' ? saved.targetLevel : null;
+        }
+      }));
     } catch {
       progressSlot.replaceChildren();
     }
@@ -85,7 +106,53 @@ function chartPanel(iconName, title, description, canvas) {
 // Phase 10 — Reference Kanji Progress panel. One compact row per band with
 // an explicit "reviewed / reference" numerator and denominator; cumulative
 // coverage and the disclaimer travel in the same panel.
-function referenceKanjiProgressPanel(model) {
+// Phase 11 — the panel also hosts the "Target JLPT level" selector, which
+// only highlights the matching cumulative progress (already-loaded data,
+// no refetch) and never mutates study state.
+function referenceKanjiProgressPanel(model, targetState = {}) {
+  let currentTarget = typeof targetState.target === 'string' ? targetState.target : null;
+  const estimateLevel = typeof targetState.estimateLevel === 'string' ? targetState.estimateLevel : null;
+  const cumulativeByBand = Object.fromEntries(model.cumulative.map((entry) => [entry.band, entry]));
+  const contextLine = element('p', {
+    className: 'mt-2 text-sm text-muted',
+    text: targetContextLine(currentTarget, cumulativeByBand[currentTarget]) || 'Choose a reference level when you have a JLPT study goal.'
+  });
+  const comparisonLine = element('p', {
+    className: 'mt-2 text-sm text-muted',
+    text: estimateTargetLine(estimateLevel, currentTarget) || ''
+  });
+  const saveError = element('p', { className: 'mt-1 hidden text-xs text-red-700', text: '' });
+  const select = element('select', {
+    className: 'field-control mt-2 max-w-56',
+    attrs: { id: 'target-jlpt-level', 'aria-label': 'Target JLPT level' }
+  }, targetLevelOptions().map((option) => element('option', {
+    attrs: { value: option.value, ...(option.value === (currentTarget || '') ? { selected: 'selected' } : {}) },
+    text: option.label
+  })));
+  select.addEventListener('change', async () => {
+    const previous = currentTarget;
+    const next = select.value === '' ? null : select.value;
+    saveError.classList.add('hidden');
+    try {
+      const saved = targetState.onSelect ? await targetState.onSelect(next) : next;
+      currentTarget = saved === null ? null : saved;
+      contextLine.textContent = targetContextLine(currentTarget, cumulativeByBand[currentTarget])
+        || 'Choose a reference level when you have a JLPT study goal.';
+      comparisonLine.textContent = estimateTargetLine(estimateLevel, currentTarget) || '';
+    } catch {
+      select.value = previous || '';
+      saveError.textContent = 'Could not save the target level. Please try again.';
+      saveError.classList.remove('hidden');
+    }
+  });
+  const targetBlock = element('div', { className: 'mt-4 border-t border-stone pt-4' }, [
+    element('label', { className: 'text-sm font-semibold text-ink', attrs: { for: 'target-jlpt-level' }, text: 'Target JLPT level' }),
+    element('p', { className: 'mt-1 text-xs text-muted', text: 'Your study goal — not your current level. Changing it only highlights different progress; it never changes your data.' }),
+    select,
+    saveError,
+    contextLine,
+    comparisonLine
+  ]);
   const rows = model.rows.map((row) => {
     const notes = [];
     if (row.repeated > 0) notes.push(`${row.repeated} reviewed more than once`);
@@ -122,6 +189,7 @@ function referenceKanjiProgressPanel(model) {
       ? [element('p', { className: 'mt-2 text-xs text-muted', text: `${model.unclassifiedReviewed} reviewed kanji have no reference JLPT classification and are excluded from band counts.` })]
       : []),
     element('p', { className: 'mt-3 text-xs text-muted', text: model.limitationLines.join(' ') }),
-    element('p', { className: 'mt-1 text-xs text-muted', text: model.disclaimer })
+    element('p', { className: 'mt-1 text-xs text-muted', text: model.disclaimer }),
+    targetBlock
   ]);
 }

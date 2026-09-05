@@ -55,7 +55,9 @@ app.get('/api', (req, res) => {
       ,      'GET /api/review',
       'POST /api/analyze/text',
       'GET /api/level/estimate',
-      'GET /api/level/progress'
+      'GET /api/level/progress',
+      'GET /api/level/target',
+      'PUT /api/level/target'
     ]
   });
 });
