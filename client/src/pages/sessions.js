@@ -2,6 +2,11 @@ import { apiRequest, queryString } from '../api';
 import { destroyCharts } from '../chartRegistry';
 import { iconTile } from '../icons';
 import {
+  formatKanjiContextEntry,
+  getDiscoveryKanji,
+  getDiscoveryState
+} from '../vocabularyReading';
+import {
   confirmDialog,
   element,
   emptyState,
@@ -359,6 +364,29 @@ export function renderSessions(container) {
   async function viewSession(session) {
     try {
       const record = await apiRequest(`/api/sessions/${session.id_session}`);
+      // Phase 6 — Kanji discovery: deterministic per-character states over
+      // the session writing content. Discovery only — nothing is added here.
+      const discovered = getDiscoveryKanji(record).map(formatKanjiContextEntry).filter(Boolean);
+      const discoveryPill = (kanji) => {
+        const state = getDiscoveryState(kanji);
+        if (state === 'alreadyInCollection') return 'In your collection';
+        if (state === 'availableToAdd') return 'Available from reference';
+        return 'No reference data';
+      };
+      const discoverySection = element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [
+        element('h3', { className: 'font-semibold text-ink', text: `Kanji discovered${discovered.length ? ` (${discovered.length})` : ''}` }),
+        discovered.length
+          ? element('ul', { className: 'mt-3 grid gap-2 sm:grid-cols-2' }, discovered.map((kanji) => {
+            const detail = kanji.inUserCollection ? kanji.meaning : kanji.referenceMeanings;
+            return element('li', { className: 'text-sm' }, [
+              element('span', { className: 'text-lg font-medium text-ink', text: kanji.character }),
+              element('span', { className: 'status-pill ml-2 shrink-0 text-xs', text: discoveryPill(kanji) }),
+              ...(detail ? [element('p', { className: 'mt-1 text-muted', text: detail })] : [])
+            ]);
+          }))
+          : element('p', { className: 'mt-2 text-sm text-muted', text: 'No kanji characters found in this writing.' }),
+        ...(discovered.length ? [element('p', { className: 'mt-3 text-xs text-muted', text: 'Detected as individual characters present in the writing content. Reference data is context only — nothing has been added.' })] : [])
+      ]);
       const relatedList = (title, items, primary, secondary) => element('section', { className: 'rounded-lg border border-stone p-4' }, [
         element('h3', { className: 'font-semibold text-ink', text: title }),
         items.length
@@ -377,6 +405,7 @@ export function renderSessions(container) {
         ]),
         ...(record.notes ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Notes' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: record.notes })])] : []),
         ...(record.writing ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: record.writing.title || 'Writing content' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: record.writing.content }), ...(record.writing.notes ? [element('p', { className: 'mt-3 whitespace-pre-wrap text-sm text-muted', text: record.writing.notes })] : [])])] : []),
+        ...((record.writing && record.kanjiDiscovery) ? [discoverySection] : []),
         element('div', { className: 'mt-5 grid gap-3 sm:grid-cols-3' }, [
           relatedList('Vocabulary', record.vocabulary, (item) => item.word, (item) => item.meaning),
           relatedList('Kanji', record.kanji, (item) => item.character_kanji, (item) => item.meaning),

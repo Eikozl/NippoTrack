@@ -24,6 +24,31 @@ export function getContextKanji(item) {
   return context.kanji;
 }
 
+// Phase 6 — Kanji Discovery from Sessions. Defensive accessor: older API
+// payloads may lack kanjiDiscovery.
+export function getDiscoveryContext(item) {
+  if (!item || typeof item !== 'object') return null;
+  const discovery = item.kanjiDiscovery;
+  if (!discovery || typeof discovery !== 'object') return null;
+  return discovery;
+}
+
+export function getDiscoveryKanji(item) {
+  const discovery = getDiscoveryContext(item);
+  if (!discovery || !Array.isArray(discovery.kanji)) return [];
+  return discovery.kanji;
+}
+
+// Maps a formatted kanji-context entry to its Phase 6 discovery state:
+// already in the user's collection, available from reference, or without
+// reference data. Discovery never claims per-kanji readings.
+export function getDiscoveryState(formattedEntry) {
+  if (!formattedEntry || typeof formattedEntry !== 'object') return 'noReferenceData';
+  if (formattedEntry.inUserCollection) return 'alreadyInCollection';
+  if (formattedEntry.importable) return 'availableToAdd';
+  return 'noReferenceData';
+}
+
 // Level A invariant: no per-kanji segment may ever be claimed.
 // Empty/whitespace-only strings count as unclaimed, same as null.
 export function hasClaimedSegment(entry) {

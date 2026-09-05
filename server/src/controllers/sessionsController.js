@@ -12,6 +12,7 @@ const {
 const { fetchEntityById, rollbackAndRelease } = require('./helpers');
 const { executePaginatedList } = require('./listHelpers');
 const { ENCOUNTER_SOURCE_TYPES, recordKanjiEncounters } = require('../services/kanjiEncounters');
+const { buildSessionKanjiDiscovery, extractDiscoveryCharacters } = require('../services/sessionKanjiDiscovery');
 
 async function listSessions(req, res) {
   try {
@@ -88,7 +89,25 @@ async function getSession(req, res) {
       [id]
     );
 
-    return res.json({ ...session, vocabulary, kanji, grammar, writing: writingRows[0] || null });
+    // Phase 6 (kanji discovery): deterministic Han detection over the
+    // authoritative session-writing content (the same source Phase 3
+    // encounter extraction scans). Two bounded batched queries — the
+    // requester's kanji (owned) and the shared reference rows — run
+    // concurrently. No N+1, no reading inference, no auto-creation.
+    const discoveryChars = extractDiscoveryCharacters(writingRows.map((row) => row.content));
+    const charPlaceholders = discoveryChars.map(() => '?').join(', ');
+    const userKanjiPromise = discoveryChars.length ? pool.execute(
+      'SELECT k.id_kanji, k.character_kanji, k.meaning, k.jlpt_level, k.status, k.onyomi AS user_onyomi, k.kunyomi AS user_kunyomi FROM kanji k WHERE k.user_id = ? AND k.character_kanji IN (' + charPlaceholders + ')',
+      [req.user.id, ...discoveryChars]
+    ) : Promise.resolve([[]]);
+    const referencePromise = discoveryChars.length ? pool.execute(
+      'SELECT character, jlpt_level, onyomi, kunyomi, meanings, stroke_count FROM kanji_reference WHERE character IN (' + charPlaceholders + ')',
+      discoveryChars
+    ) : Promise.resolve([[]]);
+    const [[userKanjiRows], [referenceRows]] = await Promise.all([userKanjiPromise, referencePromise]);
+    const kanjiDiscovery = buildSessionKanjiDiscovery(discoveryChars, userKanjiRows, referenceRows);
+
+    return res.json({ ...session, vocabulary, kanji, grammar, writing: writingRows[0] || null, kanjiDiscovery });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load study session.' });
   }
