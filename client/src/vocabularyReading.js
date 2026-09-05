@@ -49,6 +49,28 @@ export function getDiscoveryState(formattedEntry) {
   return 'noReferenceData';
 }
 
+// Phase 7 — Batch Kanji Import. Returns the formatted discovery entries
+// that can be imported (available from reference, not already collected),
+// in stable order. Never includes already-collected or no-reference entries.
+export function getImportableKanji(formattedEntries) {
+  if (!Array.isArray(formattedEntries)) return [];
+  return formattedEntries.filter((entry) => getDiscoveryState(entry) === 'availableToAdd');
+}
+
+// Summarizes sequential per-item import outcomes ({ character, ok, status }
+// where status is 'added', 'already', or 'failed') for user feedback.
+export function summarizeImportResults(results) {
+  const list = Array.isArray(results) ? results : [];
+  const summary = { added: 0, already: 0, failed: [] };
+  for (const result of list) {
+    if (!result || typeof result !== 'object') continue;
+    if (result.ok && result.status === 'already') summary.already += 1;
+    else if (result.ok) summary.added += 1;
+    else if (result.character) summary.failed.push(result.character);
+  }
+  return summary;
+}
+
 // Level A invariant: no per-kanji segment may ever be claimed.
 // Empty/whitespace-only strings count as unclaimed, same as null.
 export function hasClaimedSegment(entry) {

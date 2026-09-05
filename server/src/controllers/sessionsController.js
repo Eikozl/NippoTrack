@@ -1,7 +1,7 @@
 const pool = require('../config/db');
 const { ALLOWED_FIELDS, STUDY_CATEGORIES } = require('../constants');
 const { ValidationError, sendRouteError } = require('../errors/http');
-const { parsePagination } = require('../pagination');
+const { parsePagination, paginationPayload } = require('../pagination');
 const {
   isValidDateString,
   normalizeText,
@@ -10,20 +10,21 @@ const {
   validateWriteFields
 } = require('../validation');
 const { fetchEntityById, rollbackAndRelease } = require('./helpers');
-const { executePaginatedList } = require('./listHelpers');
 const { ENCOUNTER_SOURCE_TYPES, recordKanjiEncounters } = require('../services/kanjiEncounters');
 const { buildSessionKanjiDiscovery, extractDiscoveryCharacters } = require('../services/sessionKanjiDiscovery');
 
 async function listSessions(req, res) {
   try {
     const { page, limit, offset } = parsePagination(req.query);
+    // Qualified (s.*) because the items query joins writing/relationship
+    // tables; filter semantics and parameter order are unchanged.
     let whereSql = ' WHERE 1=1';
     const params = [];
 
     if (req.query.category) {
       const category = normalizeText(req.query.category, 20, 'category');
       if (!STUDY_CATEGORIES.includes(category)) return res.status(400).json({ error: 'Invalid category' });
-      whereSql += ' AND category = ?';
+      whereSql += ' AND s.category = ?';
       params.push(category);
     }
 
@@ -31,36 +32,53 @@ async function listSessions(req, res) {
       if (!isValidDateString(req.query.date)) {
         return res.status(400).json({ error: 'Invalid date format (YYYY-MM-DD)' });
       }
-      whereSql += ' AND session_date = ?';
+      whereSql += ' AND s.session_date = ?';
       params.push(req.query.date);
     } else {
       if (req.query.from) {
         if (!isValidDateString(req.query.from)) {
           return res.status(400).json({ error: 'Invalid from date (YYYY-MM-DD)' });
         }
-        whereSql += ' AND session_date >= ?';
+        whereSql += ' AND s.session_date >= ?';
         params.push(req.query.from);
       }
       if (req.query.to) {
         if (!isValidDateString(req.query.to)) {
           return res.status(400).json({ error: 'Invalid to date (YYYY-MM-DD)' });
         }
-        whereSql += ' AND session_date <= ?';
+        whereSql += ' AND s.session_date <= ?';
         params.push(req.query.to);
       }
     }
 
-    return res.json(await executePaginatedList(pool, {
-      table: 'study_sessions',
-      columns: 'id_session, session_date, duration_minutes, category, resource, notes',
-      whereSql,
-      params,
-      orderBy: 'session_date DESC, id_session DESC',
-      page,
-      limit,
-      offset,
-      userId: req.user.id
-    }));
+    // Session-history list enrichment (single grouped query, list-only):
+    // writing title + bounded excerpt for card previews and per-session
+    // related-link counts. session_writings is 1:1 (UNIQUE id_session) so it
+    // never fans out; junctions use COUNT(DISTINCT) to avoid cross-products.
+    // The COUNT(*) query stays join-free so pagination totals are exact.
+    // No per-card detail fetches (no N+1); kanji-discovery counts are
+    // intentionally omitted (they require Han extraction, detail-only).
+    const [countRows] = await pool.execute(
+      `SELECT COUNT(*) AS total FROM study_sessions s${whereSql} AND s.user_id = ?`,
+      [...params, req.user.id]
+    );
+    const [items] = await pool.execute(
+      `SELECT s.id_session, s.session_date, s.duration_minutes, s.category, s.resource, s.notes,
+              w.title AS writing_title, LEFT(w.content, 400) AS writing_excerpt,
+              COUNT(DISTINCT sv.id_vocabulary)::int AS vocabulary_count,
+              COUNT(DISTINCT sk.id_kanji)::int AS kanji_count,
+              COUNT(DISTINCT sg.id_grammar)::int AS grammar_count
+         FROM study_sessions s
+         LEFT JOIN session_writings w ON w.id_session = s.id_session
+         LEFT JOIN session_vocabulary sv ON sv.id_session = s.id_session
+         LEFT JOIN session_kanji sk ON sk.id_session = s.id_session
+         LEFT JOIN session_grammar sg ON sg.id_session = s.id_session
+        ${whereSql} AND s.user_id = ?
+        GROUP BY s.id_session, s.session_date, s.duration_minutes, s.category, s.resource, s.notes, w.title, LEFT(w.content, 400)
+        ORDER BY s.session_date DESC, s.id_session DESC LIMIT ? OFFSET ?`,
+      [...params, req.user.id, limit, offset]
+    );
+    return res.json(paginationPayload(items, Number(countRows[0]?.total || 0), page, limit));
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Database unavailable' });
   }

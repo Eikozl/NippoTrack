@@ -1,10 +1,17 @@
 import { apiRequest, queryString } from '../api';
 import { destroyCharts } from '../chartRegistry';
-import { iconTile } from '../icons';
+import { icon, iconTile } from '../icons';
 import {
+  buildSessionSubmitPayload,
+  sessionCardModel
+} from '../sessionHistory';
+import {
+  buildKanjiImportPayload,
   formatKanjiContextEntry,
   getDiscoveryKanji,
-  getDiscoveryState
+  getDiscoveryState,
+  getImportableKanji,
+  summarizeImportResults
 } from '../vocabularyReading';
 import {
   confirmDialog,
@@ -17,7 +24,6 @@ import {
   openDialog,
   pageHeader,
   paginationControls,
-  searchableMultiSelect,
   showToast
 } from '../ui';
 
@@ -55,35 +61,109 @@ function periodQuery(period, customFrom, customTo) {
 }
 
 function sessionCard(session, onView, onEdit, onDelete) {
+  const model = sessionCardModel(session);
   const viewButton = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5', text: 'View', attrs: { type: 'button' } });
   const editButton = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5', text: 'Edit', attrs: { type: 'button' } });
-  const deleteButton = element('button', { className: 'button-danger', text: 'Delete', attrs: { type: 'button' } });
   viewButton.addEventListener('click', () => onView(session));
   editButton.addEventListener('click', () => onEdit(session));
-  deleteButton.addEventListener('click', () => onDelete(session));
 
   return element('article', { className: 'surface p-5' }, [
     element('div', { className: 'flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between' }, [
-      element('div', { className: 'flex items-start gap-3' }, [
+      element('div', { className: 'flex min-w-0 items-start gap-3' }, [
         iconTile('sessions', { className: 'preview-icon shrink-0' }),
-        element('div', {}, [
-        element('div', { className: 'flex flex-wrap items-center gap-2' }, [
-          element('h2', { className: 'font-semibold text-ink', text: session.category }),
-          element('span', { className: 'status-pill', text: `${session.duration_minutes} min` })
-        ]),
-        element('p', { className: 'mt-2 text-sm text-muted', text: formatDate(session.session_date) }),
-        element('p', { className: 'mt-3 text-sm text-ink/80', text: session.resource || 'No resource recorded' }),
-        ...(session.notes ? [element('p', { className: 'mt-2 line-clamp-2 text-sm leading-6 text-muted', text: session.notes })] : [])
+        element('div', { className: 'min-w-0' }, [
+          element('div', { className: 'flex flex-wrap items-center gap-2' }, [
+            element('span', { className: 'status-pill', text: model.badge }),
+            ...(model.durationLabel ? [element('span', { className: 'text-sm text-muted', text: model.durationLabel })] : []),
+            ...(model.dateValue ? [element('span', { className: 'text-sm text-muted', text: `· ${formatDate(model.dateValue)}` })] : [])
+          ]),
+          element('h2', { className: 'mt-2 break-words font-semibold text-ink', text: model.title }),
+          ...(model.preview ? [element('p', { className: 'mt-1 line-clamp-2 text-sm leading-6 text-muted', text: model.preview })] : []),
+          ...(model.meta.length ? [element('ul', { className: 'mt-2 flex flex-wrap items-center gap-x-4 gap-y-1' }, model.meta.map((row, index) => (
+            // Separator lives inside its item (not as a loose flex child) so
+            // it wraps together with the item and can never dangle alone or
+            // collapse against the previous item's text.
+            element('li', { className: 'flex shrink-0 items-baseline gap-x-1 text-xs text-muted' }, [
+              ...(index > 0 ? [element('span', { className: 'shrink-0', text: '·', attrs: { 'aria-hidden': 'true' } })] : []),
+              element('span', { className: 'font-medium text-ink/70', text: `${row.label}: ` }),
+              element('span', { text: row.text })
+            ])
+          )))] : [])
         ])
       ]),
-      element('div', { className: 'flex shrink-0 gap-2' }, [viewButton, editButton, deleteButton])
+      element('div', { className: 'flex shrink-0 items-center gap-2' }, [viewButton, editButton, sessionOverflowMenu(() => onDelete(session))])
     ])
   ]);
 }
 
+// Secondary overflow menu for destructive/secondary card actions. Delete
+// keeps its confirmation flow via the onDelete callback (confirmDialog).
+let openSessionMenuCloser = null;
+
+function sessionOverflowMenu(onDelete) {
+  const deleteItem = element('button', {
+    className: 'flex w-full items-center rounded-md px-3 py-2 text-left text-sm font-medium text-red-700 transition hover:bg-red-50',
+    text: 'Delete',
+    attrs: { type: 'button', role: 'menuitem' }
+  });
+  const menu = element('div', {
+    className: 'absolute right-0 top-[calc(100%+.25rem)] z-20 min-w-36 rounded-lg border border-stone bg-white p-1 shadow-lg',
+    attrs: { role: 'menu', hidden: '' }
+  }, [deleteItem]);
+  const toggle = element('button', {
+    className: 'button-secondary min-h-9 px-2.5 py-1.5',
+    attrs: { type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': 'More actions', title: 'More actions' }
+  }, [icon('menu', { size: 18 })]);
+  const close = () => {
+    menu.setAttribute('hidden', '');
+    toggle.setAttribute('aria-expanded', 'false');
+    if (openSessionMenuCloser === close) openSessionMenuCloser = null;
+  };
+  toggle.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const willOpen = menu.hasAttribute('hidden');
+    openSessionMenuCloser?.();
+    if (willOpen) {
+      menu.removeAttribute('hidden');
+      toggle.setAttribute('aria-expanded', 'true');
+      openSessionMenuCloser = close;
+      deleteItem.focus();
+    }
+  });
+  menu.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      close();
+      toggle.focus();
+    }
+  });
+  deleteItem.addEventListener('click', () => {
+    close();
+    onDelete();
+  });
+  if (!sessionOverflowMenu.listenerInstalled) {
+    sessionOverflowMenu.listenerInstalled = true;
+    document.addEventListener('pointerdown', (event) => {
+      if (openSessionMenuCloser && !event.target.closest('[data-session-menu]')) openSessionMenuCloser();
+    });
+  }
+  return element('div', { className: 'relative', attrs: { 'data-session-menu': '' } }, [toggle, menu]);
+}
+
+// Visible Session form field order is defined in ../sessionHistory.js
+// (SESSION_FORM_FIELD_ORDER: Basic → Resource → Writing → Notes).
+// Manual linking controls (vocabulary/kanji/grammar) and Writing notes are
+// intentionally hidden from the form and never submitted, so the backend
+// preserves existing relationships and writing notes on edit.
+
 function selectedNumbers(select) {
   return Array.from(select.selectedOptions, (option) => Number(option.value));
 }
+
+// Preserved for compatibility: manual session-linking helpers. The linking
+// UI is intentionally hidden from the Session form, but these loaders stay
+// available (backend contracts, junction tables, and stored relationships
+// are untouched).
 
 function mergeOptions(loadedOptions, selectedRecords, mapRecord) {
   const merged = new Map(loadedOptions.map((option) => [String(option.value), option]));
@@ -258,83 +338,43 @@ export function renderSessions(container) {
     const previousLabel = addButton.textContent;
     addButton.textContent = 'Loading…';
     try {
-      const options = await loadRelationshipOptions(record);
-      let closeDialog;
-      const goToLibrary = (page) => {
-        closeDialog?.();
-        window.location.hash = `#${page}`;
-      };
+      // Visible order: Basic → Resource → Writing → Notes.
+      // Manual linking controls and Writing notes are intentionally hidden
+      // from this form (see buildSessionSubmitPayload), but the underlying
+      // linking system, API contracts, and stored data are fully preserved.
+      const notesField = field({ name: 'notes', label: 'Notes', type: 'textarea', maxLength: 1500, value: record.notes || '', description: 'Reflections, observations, reminders.' });
+      notesField.classList.add('sm:col-span-2');
       const formFields = [
+        field({ name: 'category', label: 'Session type', required: true, value: record.category || 'Vocabulary', options: CATEGORIES.map((value) => ({ value, label: value })) }),
         field({ name: 'session_date', label: 'Date', type: 'date', required: true, value: String(record.session_date || '').slice(0, 10) }),
         field({ name: 'duration_minutes', label: 'Duration (minutes)', type: 'number', required: true, value: record.duration_minutes || 30 }),
-        field({ name: 'category', label: 'Category', required: true, value: record.category || 'Vocabulary', options: CATEGORIES.map((value) => ({ value, label: value })) }),
         field({ name: 'resource', label: 'Resource', maxLength: 255, value: record.resource || '', placeholder: 'Genki, NHK, conversation…' }),
-        field({ name: 'notes', label: 'Notes', type: 'textarea', maxLength: 1500, value: record.notes || '' }),
         element('section', { className: 'rounded-lg border border-stone bg-paper/40 p-4 sm:col-span-2' }, [
-          element('h3', { className: 'font-semibold text-ink', text: 'Writing (optional)' }),
-          element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: 'Save a structured writing sample with this study session.' }),
+          element('h3', { className: 'font-semibold text-ink', text: 'Writing' }),
+          element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: 'Your study output — the content you created.' }),
           element('div', { className: 'mt-4 grid gap-4 sm:grid-cols-2' }, [
-            field({ name: 'writing_title', label: 'Title', maxLength: 150, value: record.writing?.title || '' }),
-            field({ name: 'writing_notes', label: 'Writing notes', type: 'textarea', maxLength: 1500, value: record.writing?.notes || '' }),
+            field({ name: 'writing_title', label: 'Writing title', maxLength: 150, value: record.writing?.title || '' }),
             element('div', { className: 'sm:col-span-2' }, [field({ name: 'writing_content', label: 'Writing content', type: 'textarea', maxLength: 10000, value: record.writing?.content || '' })])
           ])
         ]),
-        searchableMultiSelect({
-          name: 'vocabulary_ids',
-          label: 'Related vocabulary',
-          options: options.vocabulary,
-          value: (record.vocabulary || []).map((item) => item.id_vocabulary),
-          placeholder: 'Search vocabulary…',
-          emptyMessage: 'No vocabulary records yet. Add vocabulary before linking it to this session.',
-          createLabel: 'Add vocabulary',
-          onCreate: () => goToLibrary('vocabulary'),
-          loadOptions: loadVocabularyOptions
-        }),
-        searchableMultiSelect({
-          name: 'kanji_ids',
-          label: 'Related kanji',
-          options: options.kanji,
-          value: (record.kanji || []).map((item) => item.id_kanji),
-          placeholder: 'Search kanji…',
-          emptyMessage: 'No kanji records yet. Add kanji before linking it to this session.',
-          createLabel: 'Add kanji',
-          onCreate: () => goToLibrary('kanji'),
-          loadOptions: loadKanjiOptions
-        }),
-        searchableMultiSelect({
-          name: 'grammar_ids',
-          label: 'Related grammar',
-          options: options.grammar,
-          value: (record.grammar || []).map((item) => item.id_grammar),
-          placeholder: 'Search grammar…',
-          emptyMessage: 'No grammar records yet. Add grammar before linking it to this session.',
-          createLabel: 'Add grammar',
-          onCreate: () => goToLibrary('grammar'),
-          loadOptions: loadGrammarOptions
-        })
+        notesField
       ];
-      formFields[4].classList.add('sm:col-span-2');
 
-      closeDialog = openDialog({
+      openDialog({
         title: record.id_session ? 'Edit study session' : 'Add study session',
         content: formFields,
         submitLabel: record.id_session ? 'Save changes' : 'Create session',
         onSubmit: async (form, close) => {
           const formData = new FormData(form);
-          const payload = {
-            session_date: formData.get('session_date'),
-            duration_minutes: Number(formData.get('duration_minutes')),
+          const payload = buildSessionSubmitPayload({
             category: formData.get('category'),
+            session_date: formData.get('session_date'),
+            duration_minutes: formData.get('duration_minutes'),
             resource: formData.get('resource'),
-            notes: formData.get('notes'),
-            vocabulary_ids: selectedNumbers(form.elements.vocabulary_ids),
-            kanji_ids: selectedNumbers(form.elements.kanji_ids),
-            grammar_ids: selectedNumbers(form.elements.grammar_ids)
-          };
-          const writing = ['writing_title', 'writing_content', 'writing_notes'].map((name) => formData.get(name));
-          if (writing.some((value) => String(value || '').trim())) {
-            [payload.writing_title, payload.writing_content, payload.writing_notes] = writing;
-          }
+            writing_title: formData.get('writing_title'),
+            writing_content: formData.get('writing_content'),
+            notes: formData.get('notes')
+          });
           await apiRequest(record.id_session ? `/api/sessions/${record.id_session}` : '/api/sessions', {
             method: record.id_session ? 'PUT' : 'POST',
             body: payload
@@ -373,6 +413,67 @@ export function renderSessions(container) {
         if (state === 'availableToAdd') return 'Available from reference';
         return 'No reference data';
       };
+      // Phase 7 — Batch import: explicit checkbox selection over reference-
+      // backed discoveries only. Imports reuse POST /api/kanji sequentially
+      // (per-item 201/409/422); already-collected and no-reference entries
+      // can never be selected.
+      const rawDiscoveryByChar = new Map(getDiscoveryKanji(record).map((entry) => [entry.character, entry]));
+      const importable = getImportableKanji(discovered);
+      const selectedChars = new Set(importable.map((kanji) => kanji.character));
+      const addSelectedButton = element('button', { className: 'button-secondary mt-3 min-h-9 px-3 py-1.5', text: `Add selected Kanji (${selectedChars.size})`, attrs: { type: 'button' } });
+      const syncAddButton = () => {
+        addSelectedButton.textContent = `Add selected Kanji (${selectedChars.size})`;
+        addSelectedButton.disabled = selectedChars.size === 0;
+      };
+      const selectionRows = importable.map((kanji) => {
+        const checkbox = element('input', { className: 'mt-0.5 size-4 accent-vermilion', attrs: { type: 'checkbox', value: kanji.character } });
+        checkbox.checked = true;
+        checkbox.addEventListener('change', () => {
+          if (checkbox.checked) selectedChars.add(kanji.character);
+          else selectedChars.delete(kanji.character);
+          syncAddButton();
+        });
+        return element('label', { className: 'flex cursor-pointer items-start gap-3 rounded-md px-3 py-2 text-sm font-normal transition hover:bg-paper' }, [
+          checkbox,
+          element('span', { className: 'min-w-0 leading-5' }, [
+            element('span', { className: 'block text-lg font-medium text-ink', text: kanji.character }),
+            ...(kanji.referenceMeanings ? [element('span', { className: 'block text-xs text-muted', text: kanji.referenceMeanings })] : [])
+          ])
+        ]);
+      });
+      syncAddButton();
+      addSelectedButton.addEventListener('click', async () => {
+        addSelectedButton.disabled = true;
+        try {
+          // Sequential (never parallel): protects the small runtime pool and
+          // keeps per-item feedback deterministic.
+          const outcomes = [];
+          for (const character of [...selectedChars]) {
+            const payload = buildKanjiImportPayload(rawDiscoveryByChar.get(character));
+            if (!payload) continue;
+            try {
+              await apiRequest('/api/kanji', { method: 'POST', body: payload });
+              outcomes.push({ character, ok: true, status: 'added' });
+            } catch (error) {
+              // 409 = already learning (e.g. added in another tab): benign
+              // skip, refresh flips the card to "In your Kanji collection".
+              if (error?.status === 409) outcomes.push({ character, ok: true, status: 'already' });
+              else outcomes.push({ character, ok: false, status: 'failed' });
+            }
+          }
+          const summary = summarizeImportResults(outcomes);
+          const parts = [];
+          if (summary.added) parts.push(`${summary.added} added`);
+          if (summary.already) parts.push(`${summary.already} already in collection`);
+          showToast(parts.length ? `${parts.join(' · ')}.` : 'Nothing was added.');
+          if (summary.failed.length) showToast(`Could not add: ${summary.failed.join(', ')}.`, 'error');
+          // Refresh from a fresh fetch: imported kanji flip to "In your
+          // collection" and selection clears. Session content untouched.
+          await viewSession(session);
+        } finally {
+          addSelectedButton.disabled = false;
+        }
+      });
       const discoverySection = element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [
         element('h3', { className: 'font-semibold text-ink', text: `Kanji discovered${discovered.length ? ` (${discovered.length})` : ''}` }),
         discovered.length
@@ -385,7 +486,13 @@ export function renderSessions(container) {
             ]);
           }))
           : element('p', { className: 'mt-2 text-sm text-muted', text: 'No kanji characters found in this writing.' }),
-        ...(discovered.length ? [element('p', { className: 'mt-3 text-xs text-muted', text: 'Detected as individual characters present in the writing content. Reference data is context only — nothing has been added.' })] : [])
+        ...(discovered.length ? [element('p', { className: 'mt-3 text-xs text-muted', text: 'Detected as individual characters present in the writing content. Reference data is context only — nothing has been added.' })] : []),
+        ...(importable.length ? [element('div', { className: 'mt-4 border-t border-stone pt-4' }, [
+          element('h4', { className: 'font-semibold text-ink', text: 'Add to your Kanji collection' }),
+          element('p', { className: 'mt-1 text-xs text-muted', text: 'Select reference-backed kanji to import. Already-collected kanji and kanji without reference data cannot be added here.' }),
+          element('div', { className: 'mt-2 grid gap-1 sm:grid-cols-2' }, selectionRows),
+          addSelectedButton
+        ])] : [])
       ]);
       const relatedList = (title, items, primary, secondary) => element('section', { className: 'rounded-lg border border-stone p-4' }, [
         element('h3', { className: 'font-semibold text-ink', text: title }),
