@@ -26,10 +26,18 @@ require the integration workflow below.
 - `npm.cmd run dev` = safe local workflow (local PostgreSQL).
 - `npm.cmd run dev:integration` = disposable Supabase-compatible workflow.
 - Production must never be used for normal smoke testing.
+- Auth invariant: for any non-Production workflow the frontend and backend
+  must use the SAME Supabase project (cross-project JWTs never verify).
+  Plain dev uses `server/.env.development` (backend) plus
+  `client/.env.development.local` (frontend, overrides `client/.env.local`
+  in development mode); both point at the disposable project.
 - `server/.env.runtime` is no longer loaded by `npm run dev`. If a legacy
   `.env.runtime` file points at Production, development startup aborts with
   "Refusing to start development server against Production" instead of
-  connecting. Intentional production startup is `NODE_ENV=production`
+  connecting. The Vite config (`client/vite.config.js`) and the root
+  launcher (`dev.js`) enforce the same fail-closed rule for the frontend
+  Supabase URL and for frontend/backend project mismatch. Intentional
+  production startup is `NODE_ENV=production`
   with explicit production configuration (Vercel deployments use
   `api/index.js` with platform environment variables and are unaffected
   by the development guard).

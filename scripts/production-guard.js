@@ -22,6 +22,10 @@ const PRODUCTION_PROJECT_REF = 'milayuvlajmgrcxmrxdg';
 
 const REFUSAL_MESSAGE = 'Refusing to start development server against Production. Use a safe local or integration environment instead.';
 
+const CLIENT_REFUSAL_MESSAGE = 'Refusing to start development client against Production Supabase Auth. Use a safe local or integration environment instead.';
+
+const MISMATCH_MESSAGE = 'Refusing to start development stack with mismatched Supabase Auth projects. Frontend and backend must use the same non-Production project.';
+
 // Extracts a Supabase project ref from non-secret identity values:
 // - 'https://<ref>.supabase.co' (SUPABASE_URL)
 // - '<ref>.supabase.co'
@@ -114,12 +118,73 @@ function assertSafeDevelopmentEnvironment({ env = process.env, serverDir, mode =
   return identity;
 }
 
+// Resolves the Supabase URL a Vite client WOULD use, mirroring Vite env
+// precedence for the given mode: real process environment wins, then
+// `.env.{mode}.local`, `.env.{mode}`, `.env.local`, `.env` (later wins).
+// Only the non-secret URL and its source file are returned.
+function resolveClientSupabaseUrl({ mode = 'development', clientDir, env = process.env } = {}) {
+  const directory = clientDir || path.join(__dirname, '..', 'client');
+  const names = ['.env', '.env.local', `.env.${mode}`, `.env.${mode}.local`];
+  let url;
+  let source = 'process environment';
+  for (const name of names) {
+    const parsed = parseEnvFile(path.join(directory, name));
+    if (parsed.VITE_SUPABASE_URL !== undefined) {
+      url = parsed.VITE_SUPABASE_URL;
+      source = name;
+    }
+  }
+  if (env.VITE_SUPABASE_URL !== undefined) {
+    url = env.VITE_SUPABASE_URL;
+    source = 'process environment';
+  }
+  return { url, source };
+}
+
+// Fail-closed client guard: in any non-production Vite mode the resolved
+// Supabase URL must carry an explicit non-Production project ref, because
+// the client's compiled fallback (authClient.js) is the Production
+// project. Mode 'production' (explicit builds/deploys) is never blocked.
+function assertSafeClientEnvironment({ mode = 'development', clientDir, env = process.env } = {}) {
+  if (mode === 'production') return resolveClientSupabaseUrl({ mode, clientDir, env });
+  const resolved = resolveClientSupabaseUrl({ mode, clientDir, env });
+  const ref = extractSupabaseRef(resolved.url);
+  if (ref === PRODUCTION_PROJECT_REF) {
+    throw new Error(`${CLIENT_REFUSAL_MESSAGE} (Production project ref '${PRODUCTION_PROJECT_REF}' detected via ${resolved.source}.)`);
+  }
+  if (!ref) {
+    throw new Error(`${CLIENT_REFUSAL_MESSAGE} (No Supabase project configured via VITE_SUPABASE_URL for mode '${mode}'; the client would fall back to Production defaults.)`);
+  }
+  return resolved;
+}
+
+// Verifies frontend and backend authenticate against the SAME Supabase
+// project (cross-project JWTs can never verify). Compares only the
+// non-secret project refs. Explicit production mode is never blocked.
+function assertAlignedEnvironments({ backendSupabaseUrl, clientSupabaseUrl, mode = 'development' } = {}) {
+  if (mode === 'production') return { backendRef: extractSupabaseRef(backendSupabaseUrl), clientRef: extractSupabaseRef(clientSupabaseUrl) };
+  const backendRef = extractSupabaseRef(backendSupabaseUrl);
+  const clientRef = extractSupabaseRef(clientSupabaseUrl);
+  if (!backendRef || !clientRef) {
+    throw new Error(`${MISMATCH_MESSAGE} (Unresolvable Auth identity: backend '${backendRef || 'missing'}', client '${clientRef || 'missing'}'.)`);
+  }
+  if (backendRef !== clientRef) {
+    throw new Error(`${MISMATCH_MESSAGE} (backend '${backendRef}' vs client '${clientRef}'.)`);
+  }
+  return { backendRef, clientRef };
+}
+
 module.exports = {
   PRODUCTION_PROJECT_REF,
   REFUSAL_MESSAGE,
+  CLIENT_REFUSAL_MESSAGE,
+  MISMATCH_MESSAGE,
   extractSupabaseRef,
   isProductionValue,
   parseEnvFile,
   resolveDevelopmentIdentity,
-  assertSafeDevelopmentEnvironment
+  assertSafeDevelopmentEnvironment,
+  resolveClientSupabaseUrl,
+  assertSafeClientEnvironment,
+  assertAlignedEnvironments
 };

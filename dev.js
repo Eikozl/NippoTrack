@@ -1,20 +1,34 @@
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const { selectDevelopmentServices, selectNpmExecutable } = require('./scripts/development-environment');
-const { assertSafeDevelopmentEnvironment } = require('./scripts/production-guard');
+const { assertSafeDevelopmentEnvironment, assertSafeClientEnvironment, assertAlignedEnvironments } = require('./scripts/production-guard');
 
 const npmExecutable = selectNpmExecutable();
 const services = selectDevelopmentServices(process.argv.slice(2));
 const mode = process.argv.slice(2).includes('--integration') ? 'integration' : 'development';
 
-// Fail closed: never spawn a development stack against Production. The
-// guard inspects only non-secret environment identity and throws before
-// any child process starts.
+// Fail closed: never spawn a development stack against Production, and
+// never spawn a stack whose frontend/backend Supabase Auth projects differ
+// (cross-project JWTs can never verify). The guard inspects only
+// non-secret environment identity and throws before any child starts.
 try {
   const api = services.find((service) => service.directory === 'server');
-  assertSafeDevelopmentEnvironment({
-    env: { ...process.env, ...(api ? api.environment : {}) },
+  const apiEnv = { ...process.env, ...(api ? api.environment : {}) };
+  const backend = assertSafeDevelopmentEnvironment({
+    env: apiEnv,
     serverDir: path.join(__dirname, 'server'),
+    mode
+  });
+  const frontend = services.find((service) => service.directory === 'client');
+  const clientMode = frontend && frontend.npmArguments.includes('integration') ? 'integration' : 'development';
+  const client = assertSafeClientEnvironment({
+    mode: clientMode,
+    clientDir: path.join(__dirname, 'client'),
+    env: process.env
+  });
+  assertAlignedEnvironments({
+    backendSupabaseUrl: backend.candidates.SUPABASE_URL,
+    clientSupabaseUrl: client.url,
     mode
   });
 } catch (error) {

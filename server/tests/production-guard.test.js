@@ -139,3 +139,94 @@ test('plain dev launcher selects the safe local runtime file', () => {
   const services = selectDevelopmentServices([]);
   assert.equal(services[0].environment.POSTGRES_RUNTIME_ENV_FILE, '.env.development');
 });
+
+const prodClientFiles = { '.env.local': 'VITE_SUPABASE_URL=https://milayuvlajmgrcxmrxdg.supabase.co' };
+
+test('development client + Production ref is rejected', () => {
+  const dir = fakeServerDir(prodClientFiles);
+  assert.throws(
+    () => guard.assertSafeClientEnvironment({ mode: 'development', clientDir: dir, env: {} }),
+    /Refusing to start development client against Production Supabase Auth/
+  );
+});
+
+test('development client prefers .env.development.local over Production .env.local', () => {
+  const dir = fakeServerDir({
+    '.env.local': 'VITE_SUPABASE_URL=https://milayuvlajmgrcxmrxdg.supabase.co',
+    '.env.development.local': 'VITE_SUPABASE_URL=https://mufxygohcjikhlktvrcy.supabase.co'
+  });
+  const resolved = guard.assertSafeClientEnvironment({ mode: 'development', clientDir: dir, env: {} });
+  assert.equal(resolved.source, '.env.development.local');
+});
+
+test('integration client resolves the disposable ref', () => {
+  const dir = fakeServerDir({
+    '.env.local': 'VITE_SUPABASE_URL=https://milayuvlajmgrcxmrxdg.supabase.co',
+    '.env.integration.local': 'VITE_SUPABASE_URL=https://mufxygohcjikhlktvrcy.supabase.co'
+  });
+  const resolved = guard.assertSafeClientEnvironment({ mode: 'integration', clientDir: dir, env: {} });
+  assert.equal(guard.extractSupabaseRef(resolved.url), 'mufxygohcjikhlktvrcy');
+});
+
+test('explicit process env wins over client files', () => {
+  const dir = fakeServerDir(prodClientFiles);
+  const resolved = guard.assertSafeClientEnvironment({
+    mode: 'development',
+    clientDir: dir,
+    env: { VITE_SUPABASE_URL: 'https://mufxygohcjikhlktvrcy.supabase.co' }
+  });
+  assert.equal(resolved.source, 'process environment');
+});
+
+test('missing client URL fails closed (compiled fallback is Production)', () => {
+  const dir = fakeServerDir({});
+  assert.throws(
+    () => guard.assertSafeClientEnvironment({ mode: 'development', clientDir: dir, env: {} }),
+    /Refusing to start development client against Production Supabase Auth/
+  );
+});
+
+test('production-mode client is never blocked', () => {
+  const dir = fakeServerDir(prodClientFiles);
+  const resolved = guard.assertSafeClientEnvironment({ mode: 'production', clientDir: dir, env: {} });
+  assert.equal(guard.extractSupabaseRef(resolved.url), 'milayuvlajmgrcxmrxdg');
+});
+
+test('frontend/backend mismatch is rejected', () => {
+  assert.throws(
+    () => guard.assertAlignedEnvironments({
+      backendSupabaseUrl: 'https://mufxygohcjikhlktvrcy.supabase.co',
+      clientSupabaseUrl: 'https://milayuvlajmgrcxmrxdg.supabase.co',
+      mode: 'development'
+    }),
+    /mismatched Supabase Auth projects/
+  );
+  assert.throws(
+    () => guard.assertAlignedEnvironments({ backendSupabaseUrl: '', clientSupabaseUrl: 'https://mufxygohcjikhlktvrcy.supabase.co', mode: 'development' }),
+    /mismatched Supabase Auth projects/
+  );
+});
+
+test('aligned non-Production refs pass and report refs', () => {
+  const result = guard.assertAlignedEnvironments({
+    backendSupabaseUrl: 'https://mufxygohcjikhlktvrcy.supabase.co',
+    clientSupabaseUrl: 'https://mufxygohcjikhlktvrcy.supabase.co',
+    mode: 'integration'
+  });
+  assert.deepEqual(result, { backendRef: 'mufxygohcjikhlktvrcy', clientRef: 'mufxygohcjikhlktvrcy' });
+});
+
+test('mismatch errors never contain secret values', () => {
+  let message = '';
+  try {
+    guard.assertAlignedEnvironments({
+      backendSupabaseUrl: 'https://mufxygohcjikhlktvrcy.supabase.co',
+      clientSupabaseUrl: 'https://milayuvlajmgrcxmrxdg.supabase.co',
+      mode: 'development'
+    });
+  } catch (error) {
+    message = error.message;
+  }
+  assert.match(message, /mismatched Supabase Auth projects/);
+  assert.ok(!message.includes(FAKE_SECRET));
+});
