@@ -3,6 +3,7 @@ import { destroyCharts } from '../chartRegistry';
 import { distributionChart, weeklyChart } from '../charts';
 import { iconTile } from '../icons';
 import { element, errorState, field, formatDate, loadingState, pageHeader, searchableMultiSelect, showToast, withPendingAction } from '../ui';
+import { levelEstimateModel } from '../levelEstimate';
 
 const CATEGORIES = ['Grammar', 'Vocabulary', 'Kanji', 'Reading', 'Listening', 'Speaking', 'Writing', 'Mixed'];
 const todayInputValue = () => new Date().toLocaleDateString('en-CA');
@@ -13,6 +14,31 @@ function metric(iconName, label, value, note) {
     element('div', { className: 'flex items-center gap-3' }, [iconTile(iconName, { className: 'metric-icon' }), element('p', { className: 'text-xs font-semibold uppercase tracking-[0.13em] text-muted', text: label })]),
     element('p', { className: 'mt-3 text-3xl font-semibold tracking-tight text-ink', text: value }),
     element('p', { className: 'mt-2 text-xs text-muted', text: note })
+  ]);
+}
+
+function estimateSection(model) {
+  // Phase 9 — Estimated study level breakdown. Compact by default; the
+  // reasoning, exclusions, and disclaimer live inside a native <details>
+  // disclosure. Returns null when the estimate fetch failed so the dashboard
+  // degrades to its pre-Phase-9 layout.
+  if (!model) return null;
+  const bulletList = (items) => element('ul', { className: 'mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-muted' }, items.map((text) => element('li', { text })));
+  const subheading = (text) => element('h3', { className: 'mt-4 text-sm font-semibold text-ink', text });
+  return element('article', { className: 'surface mt-5 p-5 sm:p-6' }, [
+    element('div', { className: 'flex items-center gap-3' }, [iconTile('goals', { className: 'panel-icon' }), element('h2', { className: 'font-semibold text-ink', text: 'Estimated study level' })]),
+    element('p', { className: 'mt-3 text-3xl font-semibold tracking-tight text-ink', text: model.status === 'estimated' ? model.level : 'Not enough evidence yet' }),
+    element('p', { className: 'mt-2 text-sm leading-6 text-muted', text: model.subline }),
+    element('div', { className: 'mt-4 flex flex-wrap gap-2' }, model.bandRows.map((row) => element('span', { className: 'status-pill', text: `${row.band} · ${row.eligible} reviewed` }))),
+    element('details', { className: 'mt-4' }, [
+      element('summary', { className: 'cursor-pointer text-sm font-semibold text-ink', text: 'How this is estimated' }),
+      subheading('Evidence used'),
+      bulletList(model.evidenceLines),
+      subheading('Explicitly not used'),
+      bulletList(model.notUsedLines),
+      ...(model.limitationLines.length ? [subheading('Limitations'), bulletList(model.limitationLines)] : []),
+      element('p', { className: 'mt-4 text-sm font-medium text-ink', text: model.disclaimer })
+    ])
   ]);
 }
 
@@ -107,14 +133,21 @@ export async function renderDashboard(container) {
   content.replaceChildren(loadingState('Loading your study overview…'));
   async function load() {
     try {
-      const [data, activity, review] = await Promise.all([apiRequest('/api/dashboard'), apiRequest('/api/dashboard/activity'), apiRequest('/api/review')]);
+      const [data, activity, review, levelPayload] = await Promise.all([apiRequest('/api/dashboard'), apiRequest('/api/dashboard/activity'), apiRequest('/api/review'), apiRequest('/api/level/estimate').catch(() => null)]);
       destroyCharts();
       window.dispatchEvent(new CustomEvent('jlt-sidebar-activity', { detail: activity }));
+      // Estimate fetch failure degrades gracefully: the metric shows an
+      // unavailable note and the breakdown section is omitted entirely.
+      const levelModel = levelEstimateModel(levelPayload);
+      const estimateMetric = levelModel
+        ? metric('goals', 'Study level (JLT estimate)', levelModel.metricValue, levelModel.metricNote)
+        : metric('goals', 'Study level (JLT estimate)', '—', 'Estimate unavailable');
       const weeklyCanvas = element('canvas', { attrs: { 'aria-label': 'Weekly study activity chart', role: 'img' } });
       const distributionCanvas = element('canvas', { attrs: { 'aria-label': 'Study category distribution chart', role: 'img' } });
       content.replaceChildren(
         quickAddPanel(load),
-        element('div', { className: 'grid gap-4 sm:grid-cols-2 xl:grid-cols-4' }, [metric('today', 'Today', data.minutesToday, 'minutes studied'), metric('week', 'This week', data.minutesThisWeek, 'minutes studied'), metric('streak', 'Current streak', activity.currentStreak, 'consecutive active days'), metric('streak', 'Longest streak', activity.longestStreak, 'best run of active days'), metric('review', 'Due reviews', review.items.length, 'items ready to recall'), metric('vocabulary', 'Vocabulary', data.vocabularyCount, 'saved words'), metric('kanji', 'Kanji', data.kanjiCount, 'tracked characters'), metric('grammar', 'Grammar', data.grammarCount, 'saved patterns')]),
+        element('div', { className: 'grid gap-4 sm:grid-cols-2 xl:grid-cols-4' }, [metric('today', 'Today', data.minutesToday, 'minutes studied'), metric('week', 'This week', data.minutesThisWeek, 'minutes studied'), metric('streak', 'Current streak', activity.currentStreak, 'consecutive active days'), metric('streak', 'Longest streak', activity.longestStreak, 'best run of active days'), metric('review', 'Due reviews', review.items.length, 'items ready to recall'), metric('vocabulary', 'Vocabulary', data.vocabularyCount, 'saved words'), metric('kanji', 'Kanji', data.kanjiCount, 'tracked characters'), metric('grammar', 'Grammar', data.grammarCount, 'saved patterns'), estimateMetric]),
+        ...[estimateSection(levelModel)].filter(Boolean),
         element('div', { className: 'mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]' }, [chartCard('activity', 'Weekly activity', 'Minutes recorded over the last seven days.', weeklyCanvas), recentSessions(data.recentSessions)]),
         element('div', { className: 'mt-5 grid gap-5 xl:grid-cols-2' }, [chartCard('distribution', 'Study distribution', 'How recorded minutes are distributed by category.', distributionCanvas), activityCalendar(activity.calendar)])
       );
