@@ -14,7 +14,8 @@ const {
 const { fetchEntityById, rollbackAndRelease } = require('./helpers');
 const { executePaginatedList } = require('./listHelpers');
 const { createReviewItem } = require('./reviewController');
-const { syncVocabularyKanjiLinks } = require('../services/kanjiVocabularyLinks');
+const { extractUniqueKanji, syncVocabularyKanjiLinks } = require('../services/kanjiVocabularyLinks');
+const { buildFullVocabularyReadingContext } = require('../services/vocabularyReading');
 const { ENCOUNTER_SOURCE_TYPES, recordKanjiEncounters } = require('../services/kanjiEncounters');
 
 async function listVocabulary(req, res) {
@@ -144,15 +145,43 @@ async function getVocabulary(req, res) {
       return res.status(404).json({ error: 'vocabulary entry not found' });
     }
 
-    const [kanji] = await pool.execute(
+    // Phase 5 enhancement (reading-aware, full-word coverage): reading
+    // context covers EVERY unique Han character in the word, not just linked
+    // user kanji. Two bounded batched queries — the requester's kanji (owned)
+    // and the shared reference rows — plus the legacy links query and the
+    // examples query, all independent so they run concurrently. No N+1, no
+    // per-kanji reading inference, no auto-creation of missing kanji.
+    const wordChars = extractUniqueKanji(entry.word);
+    const charPlaceholders = wordChars.map(() => '?').join(', ');
+    const legacyKanjiPromise = pool.execute(
       'SELECT k.id_kanji, k.character_kanji, k.meaning, k.jlpt_level, k.status FROM kanji_vocabulary kv JOIN kanji k ON kv.id_kanji = k.id_kanji WHERE kv.id_vocabulary = ? AND k.user_id = ? ORDER BY k.character_kanji',
       [id, req.user.id]
     );
-    const [examples] = await pool.execute(
+    const userKanjiPromise = wordChars.length ? pool.execute(
+      'SELECT k.id_kanji, k.character_kanji, k.meaning, k.jlpt_level, k.status, k.onyomi AS user_onyomi, k.kunyomi AS user_kunyomi FROM kanji k WHERE k.user_id = ? AND k.character_kanji IN (' + charPlaceholders + ')',
+      [req.user.id, ...wordChars]
+    ) : Promise.resolve([[]]);
+    const referencePromise = wordChars.length ? pool.execute(
+      'SELECT character, jlpt_level, onyomi, kunyomi, meanings FROM kanji_reference WHERE character IN (' + charPlaceholders + ')',
+      wordChars
+    ) : Promise.resolve([[]]);
+    const examplesPromise = pool.execute(
       'SELECT id_usage_example, sentence, translation, notes FROM usage_examples WHERE id_vocabulary = ? ORDER BY id_usage_example DESC',
       [id]
     );
-    return res.json({ ...entry, kanji, examples });
+    const [[legacyKanji], [userKanjiRows], [referenceRows], [examples]] = await Promise.all([
+      legacyKanjiPromise, userKanjiPromise, referencePromise, examplesPromise
+    ]);
+    // Legacy `kanji` projection kept byte-identical for API compatibility.
+    const kanji = legacyKanji.map((row) => ({
+      id_kanji: row.id_kanji,
+      character_kanji: row.character_kanji,
+      meaning: row.meaning,
+      jlpt_level: row.jlpt_level,
+      status: row.status
+    }));
+    const readingContext = buildFullVocabularyReadingContext(entry, wordChars, userKanjiRows, referenceRows);
+    return res.json({ ...entry, kanji, readingContext, examples });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load vocabulary entry.' });
   }

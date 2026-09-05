@@ -1,4 +1,5 @@
 import { apiRequest, queryString } from '../api';
+import { buildKanjiImportPayload, getContextKanji, getReadingContext, formatKanjiContextEntry, VOCAB_READING_NOTICE } from '../vocabularyReading.js';
 import { applyPristineKanjiAutofill, changedKanjiReferenceFields, existingKanjiFromDuplicateError, isSingleHanCodePoint, transliteratedValue } from '../kanjiReference';
 import {
   debounce,
@@ -35,17 +36,58 @@ export const ENTITY_CONFIGS = {
     secondary: (item) => item.reading || 'Reading not recorded',
     detail: (item) => item.meaning,
     japaneseTextFields: { word: 'hiragana', reading: 'hiragana', example_sentence: 'hiragana' },
-    renderDetail: (item, actions) => element('div', { className: 'sm:col-span-2' }, [
+    renderDetail: (item, actions) => {
+      // Phase 5 (Level A): authoritative word reading + contextual kanji
+      // readings. Never split the word reading per kanji.
+      const readingContext = getReadingContext(item);
+      const contextKanji = getContextKanji(item).map(formatKanjiContextEntry).filter(Boolean);
+      const wordReading = readingContext?.wordReading?.value ?? item.reading;
+      const kanjiNotice = readingContext?.notice || VOCAB_READING_NOTICE;
+      // Phase 5 enhancement: import targets are entries with reference
+      // meanings (kanji creation requires a meaning). "Add all" appears only
+      // when at least two such missing kanji exist.
+      const importableKanji = contextKanji.filter((kanji) => kanji.importable);
+      return element('div', { className: 'sm:col-span-2' }, [
       element('dl', { className: 'grid gap-3 text-sm sm:grid-cols-2' }, [
-        element('div', {}, [element('dt', { className: 'text-muted', text: 'Reading' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.reading || 'Not recorded' })]),
+        element('div', {}, [element('dt', { className: 'text-muted', text: 'Word reading (authoritative for this entry)' }), element('dd', { className: 'mt-1 font-medium text-ink', text: wordReading || 'Not recorded', attrs: { lang: 'ja' } })]),
         element('div', {}, [element('dt', { className: 'text-muted', text: 'Meaning' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.meaning })]),
         element('div', {}, [element('dt', { className: 'text-muted', text: 'JLPT level' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.jlpt_level || 'Not set' })]),
         element('div', {}, [element('dt', { className: 'text-muted', text: 'Status' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.status || 'New' })])
       ]),
       ...(item.notes ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Notes' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: item.notes })])] : []),
-      element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [
-        element('h3', { className: 'font-semibold text-ink', text: 'Related kanji' }),
-        item.kanji?.length ? element('ul', { className: 'mt-2 flex flex-wrap gap-2' }, item.kanji.map((kanji) => element('li', { className: 'status-pill', text: `${kanji.character_kanji} · ${kanji.meaning}` }))) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No kanji linked.' })
+      element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'aria-label': 'Kanji reading context' } }, [
+        element('div', { className: 'flex items-start justify-between gap-3' }, [
+          element('div', {}, [
+            element('h3', { className: 'font-semibold text-ink', text: 'Kanji reading context' }),
+            element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: 'Kanji context — not split from this word. Per-kanji alignment: unavailable (unverified).' })
+          ]),
+          ...(importableKanji.length > 1 ? [element('button', { className: 'button-secondary min-h-9 shrink-0 px-3 py-1.5', text: `Add all missing Kanji (${importableKanji.length})`, attrs: { type: 'button', 'data-kanji-add-all': 'true' } })] : [])
+        ]),
+        contextKanji.length ? element('div', { className: 'mt-3 grid gap-3' }, contextKanji.map((kanji) => {
+          const title = kanji.meaning ? `${kanji.character} · ${kanji.meaning}` : (kanji.referenceMeanings ? `${kanji.character} · ${kanji.referenceMeanings} (reference)` : kanji.character);
+          return element('article', { className: 'rounded-md bg-paper p-3' }, [
+          element('div', { className: 'flex items-start justify-between gap-3' }, [
+            element('div', {}, [
+              element('p', { className: 'font-medium text-ink', text: title, attrs: { lang: 'ja' } }),
+              element('p', { className: 'mt-1 text-xs text-muted', text: 'No per-kanji reading claimed for this word.' })
+            ]),
+            kanji.inUserCollection
+              ? element('span', { className: 'status-pill shrink-0 text-xs', text: 'In your Kanji collection' })
+              : (kanji.hasReference
+                ? element('span', { className: 'status-pill shrink-0 text-xs', text: 'Not in your Kanji collection' })
+                : element('span', { className: 'status-pill shrink-0 text-xs', text: 'No reference data' }))
+          ]),
+          element('dl', { className: 'mt-2 grid gap-2 text-sm sm:grid-cols-2' }, [
+            element('div', {}, [element('dt', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Your on\u2019yomi (note \u2014 not from this word)' }), element('dd', { className: 'mt-1 text-ink/80', text: kanji.userOnyomi || 'Not recorded' })]),
+            element('div', {}, [element('dt', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Your kun\u2019yomi (note \u2014 not from this word)' }), element('dd', { className: 'mt-1 text-ink/80', text: kanji.userKunyomi || 'Not recorded' })]),
+            element('div', {}, [element('dt', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Reference on\u2019yomi (context only)' }), element('dd', { className: 'mt-1 text-ink/80', text: kanji.referenceOnyomi || '—' })]),
+            element('div', {}, [element('dt', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Reference kun\u2019yomi (context only)' }), element('dd', { className: 'mt-1 text-ink/80', text: kanji.referenceKunyomi || '—' })])
+          ]),
+          ...(kanji.referenceMeanings ? [element('p', { className: 'mt-2 text-xs text-muted', text: `Reference meanings: ${kanji.referenceMeanings}${kanji.referenceJlptLevel ? ` · JLPT ${kanji.referenceJlptLevel} (Reference)` : ''}` })] : []),
+          ...(!kanji.inUserCollection && kanji.importable ? [element('button', { className: 'button-secondary mt-3 min-h-9 px-3 py-1.5', text: 'Add to My Kanji', attrs: { type: 'button', 'data-kanji-add': kanji.character } })] : []),
+          ...(!kanji.inUserCollection && !kanji.hasReference ? [element('p', { className: 'mt-2 text-xs text-muted', text: 'Add it manually from the Kanji tab.' })] : [])
+        ])})) : element('p', { className: 'mt-2 text-sm text-muted', text: item.kanji?.length ? 'Kanji linked, but no reading context is available.' : 'No kanji linked.' }),
+        element('p', { className: 'mt-3 text-xs leading-5 text-muted', text: kanjiNotice })
       ]),
       element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [
         element('div', { className: 'flex items-center justify-between gap-3' }, [element('h3', { className: 'font-semibold text-ink', text: 'Example usage' }), element('button', { className: 'button-secondary min-h-9 px-3 py-1.5', text: 'Add example', attrs: { type: 'button', 'data-example-action': 'add' } })]),
@@ -55,7 +97,7 @@ export const ENTITY_CONFIGS = {
           element('button', { className: 'button-secondary mt-3 min-h-9 px-3 py-1.5', text: 'Edit example', attrs: { type: 'button', 'data-example-action': 'edit', 'data-example-id': example.id_usage_example } })
         ]))) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No examples recorded yet.' })
       ])
-    ]),
+    ])},
     fields: [
       { name: 'word', label: 'Word', required: true, maxLength: 100 },
       { name: 'reading', label: 'Reading', maxLength: 150 },
@@ -679,6 +721,57 @@ enableRomajiConversion(content, config);
       const content = config.renderDetail ? config.renderDetail(record, { openExampleForm }) : element('div', { className: 'sm:col-span-2 text-sm text-muted', text: 'A detailed preview is not available for this record yet.' });
       content.querySelector('[data-example-action="add"]')?.addEventListener('click', () => openExampleForm());
       content.querySelectorAll('[data-example-action="edit"]').forEach((button) => button.addEventListener('click', () => openExampleForm(record.examples.find((example) => example.id_usage_example === Number(button.dataset.exampleId)))));
+      // Phase 5 enhancement (vocabulary only): explicit per-kanji import.
+      // Uses the existing kanji creation endpoint (which resolves
+      // reference_id, enforces ownership and duplicate rules), then
+      // re-opens the detail from a fresh fetch — no full-page reload.
+      if (config === ENTITY_CONFIGS.vocabulary) {
+        const contextByChar = new Map((record.readingContext?.kanji || []).map((entry) => [entry.character, entry]));
+        const importKanji = async (character) => {
+          const payload = buildKanjiImportPayload(contextByChar.get(character));
+          if (!payload) {
+            showToast('Cannot import this kanji automatically. Add it from the Kanji tab.', 'error');
+            return false;
+          }
+          try {
+            await apiRequest('/api/kanji', { method: 'POST', body: payload });
+            showToast(`${character} added to your Kanji collection.`);
+            return true;
+          } catch (error) {
+            // 409 = already learning (e.g. added in another tab): refresh
+            // so the card flips to "In your Kanji collection".
+            if (error?.status === 409) {
+              showToast(`${character} is already in your Kanji collection.`);
+              return true;
+            }
+            showToast(error.message, 'error');
+            return false;
+          }
+        };
+        content.querySelectorAll('[data-kanji-add]').forEach((button) => button.addEventListener('click', async () => {
+          button.disabled = true;
+          try {
+            if (await importKanji(button.dataset.kanjiAdd)) await viewRecord(record);
+          } finally {
+            button.disabled = false;
+          }
+        }));
+        content.querySelector('[data-kanji-add-all]')?.addEventListener('click', async (event) => {
+          const addAllButton = event.currentTarget;
+          addAllButton.disabled = true;
+          try {
+            const targets = [...content.querySelectorAll('[data-kanji-add]')].map((button) => button.dataset.kanjiAdd);
+            let added = 0;
+            for (const character of targets) {
+              if (await importKanji(character)) added += 1;
+            }
+            showToast(added ? `${added} kanji added to your Kanji collection.` : 'Nothing was added.');
+            await viewRecord(record);
+          } finally {
+            addAllButton.disabled = false;
+          }
+        });
+      }
       openDialog({ title: `${config.title} detail`, content: [content], submitLabel: 'Close', onSubmit: async (form, close) => close() });
     } catch (error) {
       showToast(error.message, 'error');
