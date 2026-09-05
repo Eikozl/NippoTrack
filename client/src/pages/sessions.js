@@ -1,5 +1,5 @@
 import { apiRequest, queryString } from '../api';
-import { destroyCharts } from '../charts';
+import { destroyCharts } from '../chartRegistry';
 import { iconTile } from '../icons';
 import {
   confirmDialog,

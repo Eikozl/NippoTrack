@@ -1,16 +1,8 @@
 import './styles.css';
 import lightBrandLogo from './assets/JLT_logo-png.png';
 import darkBrandLogo from './assets/JLT_logo-png-dark-mode.png';
-import { destroyCharts, refreshChartTheme } from './charts';
+import { destroyCharts, refreshChartTheme } from './chartRegistry';
 import { apiRequest } from './api';
-import { renderDashboard } from './pages/dashboard';
-import { ENTITY_CONFIGS, renderEntityPage } from './pages/entityPage';
-import { renderSessions } from './pages/sessions';
-import { renderStatistics } from './pages/statistics';
-import { renderV2Page } from './pages/v2Pages';
-import { renderReview } from './pages/review';
-import { renderSettings } from './pages/settings';
-import { renderKanjiReference } from './pages/kanjiReference';
 import { kanjiReferenceRoute, parseKanjiReferenceRoute } from './kanjiReference';
 import { icon, moduleIconMap } from './icons';
 import { confirmDialog, element, openDialog, showToast } from './ui';
@@ -23,20 +15,48 @@ const appShell = document.getElementById('app-shell');
 const sidebar = document.getElementById('sidebar');
 const backdrop = document.getElementById('mobile-backdrop');
 const navigationButtons = Array.from(document.querySelectorAll('[data-page]'));
-const pages = {
-  dashboard: () => renderDashboard(content),
-  sessions: () => renderSessions(content),
-  vocabulary: () => renderEntityPage(content, ENTITY_CONFIGS.vocabulary),
-  kanji: () => renderEntityPage(content, ENTITY_CONFIGS.kanji),
-  grammar: () => renderEntityPage(content, ENTITY_CONFIGS.grammar),
-  goals: () => renderV2Page(content, 'goals'),
-  content: () => renderV2Page(content, 'content'),
-  notes: () => renderV2Page(content, 'notes'),
-  tags: () => renderV2Page(content, 'tags'),
-  review: () => renderReview(content),
-  statistics: () => renderStatistics(content),
-  settings: () => renderSettings(content)
+// Page modules load on first navigation so the initial chunk stays small.
+// Entries resolve to their render functions; failed loads are evicted from the
+// cache so a retry re-imports instead of reusing a rejected promise.
+const pageModuleCache = new Map();
+const pageLoaders = {
+  dashboard: () => import('./pages/dashboard.js').then((module) => (container) => module.renderDashboard(container)),
+  sessions: () => import('./pages/sessions.js').then((module) => (container) => module.renderSessions(container)),
+  vocabulary: () => import('./pages/entityPage.js').then((module) => (container) => module.renderEntityPage(container, module.ENTITY_CONFIGS.vocabulary)),
+  kanji: () => import('./pages/entityPage.js').then((module) => (container) => module.renderEntityPage(container, module.ENTITY_CONFIGS.kanji)),
+  grammar: () => import('./pages/entityPage.js').then((module) => (container) => module.renderEntityPage(container, module.ENTITY_CONFIGS.grammar)),
+  goals: () => import('./pages/v2Pages.js').then((module) => (container) => module.renderV2Page(container, 'goals')),
+  content: () => import('./pages/v2Pages.js').then((module) => (container) => module.renderV2Page(container, 'content')),
+  notes: () => import('./pages/v2Pages.js').then((module) => (container) => module.renderV2Page(container, 'notes')),
+  tags: () => import('./pages/v2Pages.js').then((module) => (container) => module.renderV2Page(container, 'tags')),
+  review: () => import('./pages/review.js').then((module) => (container) => module.renderReview(container)),
+  statistics: () => import('./pages/statistics.js').then((module) => (container) => module.renderStatistics(container)),
+  settings: () => import('./pages/settings.js').then((module) => (container) => module.renderSettings(container))
 };
+function loadPage(page) {
+  if (!pageModuleCache.has(page)) {
+    pageModuleCache.set(page, pageLoaders[page]().catch((error) => { pageModuleCache.delete(page); throw error; }));
+  }
+  return pageModuleCache.get(page);
+}
+const pages = {
+  dashboard: (container) => loadPage('dashboard').then((render) => render(container)),
+  sessions: (container) => loadPage('sessions').then((render) => render(container)),
+  vocabulary: (container) => loadPage('vocabulary').then((render) => render(container)),
+  kanji: (container) => loadPage('kanji').then((render) => render(container)),
+  grammar: (container) => loadPage('grammar').then((render) => render(container)),
+  goals: (container) => loadPage('goals').then((render) => render(container)),
+  content: (container) => loadPage('content').then((render) => render(container)),
+  notes: (container) => loadPage('notes').then((render) => render(container)),
+  tags: (container) => loadPage('tags').then((render) => render(container)),
+  review: (container) => loadPage('review').then((render) => render(container)),
+  statistics: (container) => loadPage('statistics').then((render) => render(container)),
+  settings: (container) => loadPage('settings').then((render) => render(container))
+};
+async function renderKanjiReferencePage(container, character) {
+  const module = await import('./pages/kanjiReference.js');
+  return module.renderKanjiReference(container, character);
+}
 
 const searchInput = document.getElementById('global-search');
 const searchResults = document.getElementById('global-search-results');
@@ -325,8 +345,8 @@ async function navigate(pageName, { updateHash = true } = {}) {
   });
   closeNavigation();
   if (updateHash && window.location.hash !== `#${page}`) history.pushState(null, '', `#${page}`);
-  if (referenceCharacter) await renderKanjiReference(content, referenceCharacter);
-  else await pages[page]();
+  if (referenceCharacter) await renderKanjiReferencePage(content, referenceCharacter);
+  else await pages[page](content);
   loadSidebarStreak();
   content.focus({ preventScroll: true });
   window.scrollTo({ top: 0, behavior: 'smooth' });

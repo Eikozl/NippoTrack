@@ -1,5 +1,6 @@
 import { apiRequest, queryString } from '../api';
-import { destroyCharts, distributionChart, weeklyChart } from '../charts';
+import { destroyCharts } from '../chartRegistry';
+import { distributionChart, weeklyChart } from '../charts';
 import { iconTile } from '../icons';
 import { element, errorState, field, formatDate, loadingState, pageHeader, searchableMultiSelect, showToast } from '../ui';
 

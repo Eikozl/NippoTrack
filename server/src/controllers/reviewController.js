@@ -13,17 +13,28 @@ async function createReviewItem(executor, targetColumn, targetId) {
 
 async function listDueReviews(req, res) {
   try {
+    // Exactly one FK per row is enforced by chk_review_items_one_target, so three
+    // owned INNER JOIN branches UNION ALLed are equivalent to the old
+    // LEFT JOIN + OR ownership filter, while letting each branch use its
+    // (user_id, id) index instead of scanning every due row three times.
     const [items] = await pool.execute(`SELECT ri.id_review_item, ri.due_on, ri.interval_days, ri.last_reviewed_at, ri.last_result,
-      CASE WHEN ri.id_vocabulary IS NOT NULL THEN 'Vocabulary' WHEN ri.id_kanji IS NOT NULL THEN 'Kanji' ELSE 'Grammar' END AS item_type,
-      COALESCE(v.word, k.character_kanji, g.grammar_point) AS title,
-      COALESCE(v.meaning, k.meaning, g.meaning) AS meaning,
-      v.reading
+      'Vocabulary' AS item_type, v.word AS title, v.meaning AS meaning, v.reading
       FROM review_items ri
-      LEFT JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary
-      LEFT JOIN kanji k ON k.id_kanji = ri.id_kanji
-      LEFT JOIN grammar_points g ON g.id_grammar = ri.id_grammar
-      WHERE ri.due_on <= CURRENT_DATE AND (v.user_id = ? OR k.user_id = ? OR g.user_id = ?)
-      ORDER BY ri.due_on ASC, ri.id_review_item ASC`, [req.user.id, req.user.id, req.user.id]);
+      JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary
+      WHERE ri.due_on <= CURRENT_DATE AND ri.id_vocabulary IS NOT NULL AND ri.id_kanji IS NULL AND ri.id_grammar IS NULL AND v.user_id = ?
+      UNION ALL
+      SELECT ri.id_review_item, ri.due_on, ri.interval_days, ri.last_reviewed_at, ri.last_result,
+      'Kanji' AS item_type, k.character_kanji AS title, k.meaning AS meaning, NULL AS reading
+      FROM review_items ri
+      JOIN kanji k ON k.id_kanji = ri.id_kanji
+      WHERE ri.due_on <= CURRENT_DATE AND ri.id_kanji IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_grammar IS NULL AND k.user_id = ?
+      UNION ALL
+      SELECT ri.id_review_item, ri.due_on, ri.interval_days, ri.last_reviewed_at, ri.last_result,
+      'Grammar' AS item_type, g.grammar_point AS title, g.meaning AS meaning, NULL AS reading
+      FROM review_items ri
+      JOIN grammar_points g ON g.id_grammar = ri.id_grammar
+      WHERE ri.due_on <= CURRENT_DATE AND ri.id_grammar IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_kanji IS NULL AND g.user_id = ?
+      ORDER BY due_on ASC, id_review_item ASC`, [req.user.id, req.user.id, req.user.id]);
     return res.json({ items });
   } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load reviews.' }); }
 }

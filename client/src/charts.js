@@ -1,7 +1,10 @@
-import Chart from 'chart.js/auto';
+import { ArcElement, BarController, BarElement, CategoryScale, Chart, DoughnutController, Legend, LinearScale, Tooltip } from 'chart.js';
 import { t } from './i18n';
+import { registerChart } from './chartRegistry';
 
-const activeCharts = new Set();
+// JLT renders only bar + doughnut charts, so register exactly the
+// controllers/elements/scales/plugins those need instead of 'chart.js/auto'.
+Chart.register(BarController, DoughnutController, BarElement, ArcElement, CategoryScale, LinearScale, Legend, Tooltip);
 
 function themeColors() {
   const styles = getComputedStyle(document.documentElement);
@@ -24,24 +27,7 @@ function commonOptions() {
   };
 }
 
-export function destroyCharts() {
-  activeCharts.forEach((chart) => chart.destroy());
-  activeCharts.clear();
-}
-
-export function refreshChartTheme() {
-  const { chartText, border } = themeColors();
-  activeCharts.forEach((chart) => {
-    chart.options.plugins.legend.labels.color = chartText;
-    if (chart.options.scales) {
-      Object.values(chart.options.scales).forEach((scale) => {
-        if (scale.ticks) scale.ticks.color = chartText;
-        if (scale.grid && scale.grid.display !== false) scale.grid.color = border;
-      });
-    }
-    chart.update('none');
-  });
-}
+export { destroyCharts, refreshChartTheme } from './chartRegistry';
 
 export function weeklyChart(canvas, activity) {
   const { chartText, border } = themeColors();
@@ -65,7 +51,7 @@ export function weeklyChart(canvas, activity) {
       }
     }
   });
-  activeCharts.add(chart);
+  registerChart(chart);
   return chart;
 }
 
@@ -91,6 +77,6 @@ export function distributionChart(canvas, distribution) {
       }
     }
   });
-  activeCharts.add(chart);
+  registerChart(chart);
   return chart;
 }

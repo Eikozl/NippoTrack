@@ -4,10 +4,10 @@ const { sendRouteError } = require('../errors/http');
 async function getDashboard(req, res) {
   try {
     const [rows] = await pool.query(`
-      WITH user_sessions AS (SELECT * FROM study_sessions WHERE user_id = ?),
-      user_vocabulary AS (SELECT * FROM vocabulary WHERE user_id = ?),
-      user_kanji AS (SELECT * FROM kanji WHERE user_id = ?),
-      user_grammar AS (SELECT * FROM grammar_points WHERE user_id = ?)
+      WITH user_sessions AS (SELECT id_session, session_date, category, duration_minutes FROM study_sessions WHERE user_id = ?),
+      user_vocabulary AS (SELECT 1 FROM vocabulary WHERE user_id = ?),
+      user_kanji AS (SELECT 1 FROM kanji WHERE user_id = ?),
+      user_grammar AS (SELECT 1 FROM grammar_points WHERE user_id = ?)
       SELECT
         COALESCE((SELECT SUM(duration_minutes) FROM user_sessions WHERE session_date = CURRENT_DATE), 0) AS minutes_today,
         COALESCE((SELECT SUM(duration_minutes) FROM user_sessions WHERE session_date >= date_trunc('week', CURRENT_DATE)::date AND session_date <= CURRENT_DATE), 0) AS minutes_week,
