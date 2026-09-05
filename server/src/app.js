@@ -12,6 +12,7 @@ const grammarRoutes = require('./routes/grammar');
 const exportRoutes = require('./routes/export');
 const v2Routes = require('./routes/v2');
 const reviewRoutes = require('./routes/review');
+const analyzeRoutes = require('./routes/analyze');
 const authRoutes = require('./routes/auth');
 const { requireAuthentication } = require('./middleware/authentication');
 const { createRateLimiter } = require('./middleware/rateLimit');
@@ -50,7 +51,8 @@ app.get('/api', (req, res) => {
       'GET /api/content',
       'GET /api/notes',
       'GET /api/tags'
-      ,'GET /api/review'
+      ,      'GET /api/review',
+      'POST /api/analyze/text'
     ]
   });
 });
@@ -64,6 +66,7 @@ app.use('/api/grammar', grammarRoutes);
 app.use('/api/export', exportRoutes);
 app.use('/api', v2Routes);
 app.use('/api/review', reviewRoutes);
+app.use('/api/analyze', analyzeRoutes);
 
 app.use(express.static(path.join(__dirname, '../../client/dist')));
 app.use(errorHandler);

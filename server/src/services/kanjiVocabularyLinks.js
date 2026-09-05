@@ -5,6 +5,19 @@ function extractUniqueKanji(text) {
   return [...new Set(text.match(HAN_CHARACTER_PATTERN) || [])];
 }
 
+// Phase 8 — deterministic Han occurrence scan over arbitrary pasted text.
+// Single O(n) pass; returns first-occurrence-ordered entries so analysis
+// preserves stable order and occurrence counts without re-scanning.
+// Non-string input yields []. kana/Latin/punctuation never match.
+function extractHanOccurrences(text) {
+  if (typeof text !== 'string') return [];
+  const counts = new Map();
+  for (const character of text.match(HAN_CHARACTER_PATTERN) || []) {
+    counts.set(character, (counts.get(character) || 0) + 1);
+  }
+  return [...counts].map(([character, occurrences]) => ({ character, occurrences }));
+}
+
 async function syncVocabularyKanjiLinks(executor, { userId, vocabularyId, word }) {
   const characters = extractUniqueKanji(word);
   const ownershipParams = [vocabularyId, userId, userId];
@@ -39,4 +52,4 @@ async function syncVocabularyKanjiLinks(executor, { userId, vocabularyId, word }
   return characters;
 }
 
-module.exports = { extractUniqueKanji, syncVocabularyKanjiLinks };
+module.exports = { extractHanOccurrences, extractUniqueKanji, syncVocabularyKanjiLinks };

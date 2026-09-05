@@ -12,7 +12,9 @@ import {
   openDialog,
   pageHeader,
   paginationControls,
-  showToast
+  showToast,
+  withGlobalLoading,
+  withPendingAction
 } from '../ui';
 import { iconForTitle, iconTile } from '../icons';
 
@@ -506,11 +508,11 @@ function enableKanjiReferenceRestore(content, record) {
   });
   content.unshift(restoreButton);
 
-  restoreButton.addEventListener('click', async () => {
+  restoreButton.addEventListener('click', () => {
     const character = characterField.value.trim();
     if (!character) return;
 
-    try {
+    withPendingAction(restoreButton, async () => {
       const reference = await apiRequest(`/api/kanji/lookup/${encodeURIComponent(character)}`);
       if (!reference) {
         showToast('No OpenJLPT reference found for this character.', 'error');
@@ -546,9 +548,9 @@ function enableKanjiReferenceRestore(content, record) {
       if (referenceJlpt) fields.jlpt_level.value = referenceJlpt;
 
       showToast('Reference values restored. Review and save to persist.');
-    } catch (error) {
+    }, { pendingLabel: 'Loading…' }).catch((error) => {
       showToast(error.message || 'Failed to restore reference data.', 'error');
-    }
+    });
   });
 }
 
@@ -692,7 +694,11 @@ enableRomajiConversion(content, config);
 
   async function editRecord(item) {
     try {
-      openRecordDialog(await apiRequest(`${config.endpoint}/${item[config.idKey]}`));
+      // Edit forms wait on a fetch; the overlay covers slow loads only.
+      openRecordDialog(await withGlobalLoading(
+        () => apiRequest(`${config.endpoint}/${item[config.idKey]}`),
+        { label: `Loading ${config.singular}…` }
+      ));
     } catch (error) {
       showToast(error.message, 'error');
     }
@@ -700,7 +706,10 @@ enableRomajiConversion(content, config);
 
   async function viewRecord(item) {
     try {
-      const record = await apiRequest(`${config.endpoint}/${item[config.idKey]}`);
+      const record = await withGlobalLoading(
+        () => apiRequest(`${config.endpoint}/${item[config.idKey]}`),
+        { label: `Loading ${config.singular}…` }
+      );
       const openExampleForm = (example = null) => openDialog({
         title: example ? 'Edit usage example' : 'Add usage example',
         content: [
@@ -748,28 +757,25 @@ enableRomajiConversion(content, config);
             return false;
           }
         };
-        content.querySelectorAll('[data-kanji-add]').forEach((button) => button.addEventListener('click', async () => {
-          button.disabled = true;
-          try {
+        content.querySelectorAll('[data-kanji-add]').forEach((button) => button.addEventListener('click', () => {
+          withPendingAction(button, async () => {
             if (await importKanji(button.dataset.kanjiAdd)) await viewRecord(record);
-          } finally {
-            button.disabled = false;
-          }
+          }, { pendingLabel: 'Adding…' });
         }));
-        content.querySelector('[data-kanji-add-all]')?.addEventListener('click', async (event) => {
+        content.querySelector('[data-kanji-add-all]')?.addEventListener('click', (event) => {
           const addAllButton = event.currentTarget;
-          addAllButton.disabled = true;
-          try {
+          withPendingAction(addAllButton, async ({ setProgress }) => {
             const targets = [...content.querySelectorAll('[data-kanji-add]')].map((button) => button.dataset.kanjiAdd);
             let added = 0;
+            let index = 0;
             for (const character of targets) {
+              index += 1;
+              setProgress(index, targets.length);
               if (await importKanji(character)) added += 1;
             }
             showToast(added ? `${added} kanji added to your Kanji collection.` : 'Nothing was added.');
             await viewRecord(record);
-          } finally {
-            addAllButton.disabled = false;
-          }
+          }, { pendingLabel: 'Adding…', progressLabel: (done, total) => `Adding ${done}/${total}…` });
         });
       }
       openDialog({ title: `${config.title} detail`, content: [content], submitLabel: 'Close', onSubmit: async (form, close) => close() });

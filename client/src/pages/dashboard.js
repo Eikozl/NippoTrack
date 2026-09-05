@@ -2,7 +2,7 @@ import { apiRequest, queryString } from '../api';
 import { destroyCharts } from '../chartRegistry';
 import { distributionChart, weeklyChart } from '../charts';
 import { iconTile } from '../icons';
-import { element, errorState, field, formatDate, loadingState, pageHeader, searchableMultiSelect, showToast } from '../ui';
+import { element, errorState, field, formatDate, loadingState, pageHeader, searchableMultiSelect, showToast, withPendingAction } from '../ui';
 
 const CATEGORIES = ['Grammar', 'Vocabulary', 'Kanji', 'Reading', 'Listening', 'Speaking', 'Writing', 'Mixed'];
 const todayInputValue = () => new Date().toLocaleDateString('en-CA');
@@ -56,16 +56,20 @@ function quickAddPanel(reload) {
   };
   const buttons = Object.entries(configs).map(([key, [label, endpoint, name, map]]) => {
     const button = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5', text: `+ ${label}`, attrs: { type: 'button', 'aria-expanded': 'false' } });
-    button.addEventListener('click', async () => {
+    button.addEventListener('click', () => {
       if (visible.has(key)) return;
-      visible.add(key); button.disabled = true; button.textContent = 'Loading…';
-      try {
+      visible.add(key);
+      withPendingAction(button, async () => {
         const loadOptions = async (search = '') => (await apiRequest(`${endpoint}${queryString({ search, limit: 20 })}`)).items.map(map);
         relationFields.appendChild(searchableMultiSelect({ name, label: `Related ${label.toLowerCase()}`, options: await loadOptions(), placeholder: `Search ${label.toLowerCase()}…`, emptyMessage: `No ${label.toLowerCase()} records yet.`, loadOptions }));
-        button.textContent = `${label} added`; button.setAttribute('aria-expanded', 'true');
-      } catch (error) {
-        visible.delete(key); button.disabled = false; button.textContent = `+ ${label}`; showToast(error.message || `Unable to load ${label.toLowerCase()}.`, 'error');
-      }
+      }, { pendingLabel: 'Loading…' }).then(() => {
+        button.disabled = true;
+        button.textContent = `${label} added`;
+        button.setAttribute('aria-expanded', 'true');
+      }).catch((error) => {
+        visible.delete(key);
+        showToast(error.message || `Unable to load ${label.toLowerCase()}.`, 'error');
+      });
     });
     return button;
   });
@@ -83,13 +87,15 @@ function quickAddPanel(reload) {
   const quickAddHeading = form.firstElementChild?.firstElementChild;
   quickAddHeading?.classList.add('flex', 'items-start', 'gap-3');
   quickAddHeading?.prepend(iconTile('quickAdd', { className: 'panel-icon shrink-0' }));
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault(); submit.disabled = true; submit.textContent = 'Adding…';
-    try {
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    withPendingAction(submit, async () => {
       const data = new FormData(form);
       await apiRequest('/api/sessions', { method: 'POST', body: { session_date: todayInputValue(), category: data.get('category'), duration_minutes: Number(data.get('duration_minutes')), resource: data.get('resource'), notes: data.get('notes'), vocabulary_ids: selectedNumbers(form.elements.vocabulary_ids), kanji_ids: selectedNumbers(form.elements.kanji_ids), grammar_ids: selectedNumbers(form.elements.grammar_ids) } });
       showToast('Study session recorded.'); window.dispatchEvent(new Event('jlt-data-change')); await reload();
-    } catch (error) { showToast(error.message || 'Unable to record the session.', 'error'); submit.disabled = false; submit.textContent = 'Add session'; }
+    }, { pendingLabel: 'Adding…' }).catch((error) => {
+      showToast(error.message || 'Unable to record the session.', 'error');
+    });
   });
   return form;
 }

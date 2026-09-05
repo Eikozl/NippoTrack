@@ -1,5 +1,9 @@
 import { icon, iconForTitle, iconTile } from './icons';
 import { t } from './i18n';
+import { setActionPending } from './pendingAction';
+
+export { isActionPending, setActionPending, setPendingLabel, withPendingAction } from './pendingAction';
+export { isGlobalLoading, showGlobalLoading, withGlobalLoading } from './globalLoading';
 
 export function element(tagName, { className, text, attrs, dataset } = {}, children = []) {
   const node = document.createElement(tagName);
@@ -298,7 +302,7 @@ export function paginationControls(pagination, onPageChange) {
   ]);
 }
 
-export function openDialog({ title, content, submitLabel = 'Save', submitClassName = 'button-primary', cancelLabel = 'Cancel', showFooter = true, showCloseButton = true, onSubmit }) {
+export function openDialog({ title, content, submitLabel = 'Save', submitClassName = 'button-primary', cancelLabel = 'Cancel', pendingLabel = 'Saving…', showFooter = true, showCloseButton = true, onSubmit }) {
   const root = document.getElementById('modal-root');
   const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const overlay = element('div', {
@@ -339,14 +343,15 @@ export function openDialog({ title, content, submitLabel = 'Save', submitClassNa
   });
   if (submitButton && typeof onSubmit === 'function') form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    submitButton.disabled = true;
-    submitButton.textContent = 'Saving…';
+    // Local pending feedback on the submit action itself (never a blocking
+    // overlay). Guarded so double-submit cannot re-enter; cleanup restores
+    // the original label, enabled state, and removes the spinner.
+    if (!setActionPending(submitButton, true, { pendingLabel })) return;
     try {
       await onSubmit(form, close);
     } catch (error) {
       showToast(error.message || 'Unable to save.', 'error');
-      submitButton.disabled = false;
-      submitButton.textContent = submitLabel;
+      setActionPending(submitButton, false);
     }
   });
 
@@ -371,6 +376,7 @@ export function confirmDialog({ title = 'Confirm deletion', description, confirm
     content: [element('div', { className: 'sm:col-span-2' }, [element('p', { className: 'text-sm leading-6 text-muted', text: description })])],
     submitLabel: confirmLabel,
     submitClassName: 'button-danger',
+    pendingLabel: 'Deleting…',
     onSubmit: async (form, close) => {
       await onConfirm();
       close();

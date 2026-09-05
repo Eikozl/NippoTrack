@@ -20,11 +20,15 @@ import {
   errorState,
   field,
   formatDate,
+  isActionPending,
   loadingState,
   openDialog,
   pageHeader,
   paginationControls,
-  showToast
+  setActionPending,
+  showToast,
+  withGlobalLoading,
+  withPendingAction
 } from '../ui';
 
 const CATEGORIES = ['Grammar', 'Vocabulary', 'Kanji', 'Reading', 'Listening', 'Speaking', 'Writing', 'Mixed'];
@@ -334,9 +338,7 @@ export function renderSessions(container) {
   }
 
   async function openSessionDialog(record = {}) {
-    addButton.disabled = true;
-    const previousLabel = addButton.textContent;
-    addButton.textContent = 'Loading…';
+    if (!setActionPending(addButton, true, { pendingLabel: 'Loading…' })) return;
     try {
       // Visible order: Basic → Resource → Writing → Notes.
       // Manual linking controls and Writing notes are intentionally hidden
@@ -388,14 +390,17 @@ export function renderSessions(container) {
     } catch (error) {
       showToast(error.message || 'Unable to prepare the session form.', 'error');
     } finally {
-      addButton.disabled = false;
-      addButton.textContent = previousLabel;
+      setActionPending(addButton, false);
     }
   }
 
   async function editSession(session) {
     try {
-      await openSessionDialog(await apiRequest(`/api/sessions/${session.id_session}`));
+      // Edit forms wait on a fetch; the overlay covers slow loads only.
+      await openSessionDialog(await withGlobalLoading(
+        () => apiRequest(`/api/sessions/${session.id_session}`),
+        { label: 'Loading study session…' }
+      ));
     } catch (error) {
       showToast(error.message, 'error');
     }
@@ -403,7 +408,11 @@ export function renderSessions(container) {
 
   async function viewSession(session) {
     try {
-      const record = await apiRequest(`/api/sessions/${session.id_session}`);
+      // Detail dialogs wait on a fetch; the overlay covers slow loads only.
+      const record = await withGlobalLoading(
+        () => apiRequest(`/api/sessions/${session.id_session}`),
+        { label: 'Loading study session…' }
+      );
       // Phase 6 — Kanji discovery: deterministic per-character states over
       // the session writing content. Discovery only — nothing is added here.
       const discovered = getDiscoveryKanji(record).map(formatKanjiContextEntry).filter(Boolean);
@@ -422,6 +431,9 @@ export function renderSessions(container) {
       const selectedChars = new Set(importable.map((kanji) => kanji.character));
       const addSelectedButton = element('button', { className: 'button-secondary mt-3 min-h-9 px-3 py-1.5', text: `Add selected Kanji (${selectedChars.size})`, attrs: { type: 'button' } });
       const syncAddButton = () => {
+        // While the batch runs the helper owns the button label (progress);
+        // selection toggles still update the set for the post-import refresh.
+        if (isActionPending(addSelectedButton)) return;
         addSelectedButton.textContent = `Add selected Kanji (${selectedChars.size})`;
         addSelectedButton.disabled = selectedChars.size === 0;
       };
@@ -442,13 +454,18 @@ export function renderSessions(container) {
         ]);
       });
       syncAddButton();
-      addSelectedButton.addEventListener('click', async () => {
-        addSelectedButton.disabled = true;
-        try {
+      addSelectedButton.addEventListener('click', () => {
+        const targets = [...selectedChars];
+        if (!targets.length) return;
+        withPendingAction(addSelectedButton, async ({ setProgress }) => {
           // Sequential (never parallel): protects the small runtime pool and
-          // keeps per-item feedback deterministic.
+          // keeps per-item feedback deterministic. Snapshot targets up front
+          // so mid-import selection toggles cannot resubmit or skip items.
           const outcomes = [];
-          for (const character of [...selectedChars]) {
+          let index = 0;
+          for (const character of targets) {
+            index += 1;
+            setProgress(index, targets.length);
             const payload = buildKanjiImportPayload(rawDiscoveryByChar.get(character));
             if (!payload) continue;
             try {
@@ -470,9 +487,7 @@ export function renderSessions(container) {
           // Refresh from a fresh fetch: imported kanji flip to "In your
           // collection" and selection clears. Session content untouched.
           await viewSession(session);
-        } finally {
-          addSelectedButton.disabled = false;
-        }
+        }, { pendingLabel: 'Adding…', progressLabel: (done, total) => `Adding ${done}/${total}…` });
       });
       const discoverySection = element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [
         element('h3', { className: 'font-semibold text-ink', text: `Kanji discovered${discovered.length ? ` (${discovered.length})` : ''}` }),

@@ -1,6 +1,6 @@
 import { apiRequest } from '../api';
 import { iconTile } from '../icons';
-import { element, emptyState, errorState, loadingState, pageHeader, showToast } from '../ui';
+import { element, emptyState, errorState, loadingState, pageHeader, showToast, withPendingAction } from '../ui';
 
 const RESULTS = [
   ['Again', 'button-danger'],
@@ -36,15 +36,18 @@ export async function renderReview(container) {
         card?.remove();
         if (!grid.childNodes.length) content.replaceChildren(emptyState({ title: 'Nothing due today', description: 'New vocabulary, kanji and grammar entries will appear here automatically when they are ready to review.' }));
       };
-      grid.replaceChildren(...data.items.map((item) => reviewCard(item, async (record, result, button) => {
-        button.disabled = true;
-        try {
+      grid.replaceChildren(...data.items.map((item) => reviewCard(item, (record, result, button) => {
+        // Keep the result label (Again/Hard/Good) so the control stays
+        // understandable; the spinner + aria-busy signal progress.
+        withPendingAction(button, async () => {
           await apiRequest(`/api/review/${record.id_review_item}`, { method: 'POST', body: { result } });
           showToast(`Review recorded: ${result}.`);
           const card = button.closest('article');
           if (card) completeCard(card);
           else await load();
-        } catch (error) { button.disabled = false; showToast(error.message, 'error'); }
+        }, { pendingLabel: null }).catch((error) => {
+          showToast(error.message, 'error');
+        });
       })));
       content.replaceChildren(grid);
     } catch (error) { content.replaceChildren(errorState(error, load)); }

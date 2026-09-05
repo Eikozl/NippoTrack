@@ -1,6 +1,7 @@
 import { apiRequest, queryString } from '../api';
 import { iconForTitle, iconTile } from '../icons';
-import { confirmDialog, debounce, element, emptyState, errorState, field, formatDate, loadingState, openDialog, pageHeader, paginationControls, searchableMultiSelect, showToast } from '../ui';
+import { confirmDialog, debounce, element, emptyState, errorState, field, formatDate,
+loadingState, openDialog, pageHeader, paginationControls, searchableMultiSelect, showToast, withGlobalLoading } from '../ui';
 
 const options = (values, blank = 'Not set') => [{ value: '', label: blank }, ...values.map((value) => ({ value, label: value }))];
 const jlpt = options(['N5', 'N4', 'N3', 'N2', 'N1']);
@@ -141,9 +142,15 @@ export function renderV2Page(container, kind) {
 
   async function openLinks(record) {
     try {
-      const linked = await apiRequest(`${config.endpoint}/${record[config.id]}/links`);
+      // Links need several reads before the dialog can render; the overlay
+      // covers the wait and never flashes on fast loads (reveal delay).
+      const { linked, optionsByGroup } = await withGlobalLoading(async () => {
+        const loaded = await apiRequest(`${config.endpoint}/${record[config.id]}/links`);
+        const groups = config.linkGroups || [];
+        const options = Object.fromEntries(await Promise.all(groups.map(async (group) => [group, mergeLinkOptions(await loadLinkOptions(group), loaded[group] || [], group)])));
+        return { linked: loaded, optionsByGroup: options };
+      }, { label: `Loading ${config.singular} links…` });
       const groups = config.linkGroups || [];
-      const optionsByGroup = Object.fromEntries(await Promise.all(groups.map(async (group) => [group, mergeLinkOptions(await loadLinkOptions(group), linked[group] || [], group)])));
       const labels = { sessions: 'Related study sessions', vocabulary: 'Related vocabulary', kanji: 'Related kanji', grammar: 'Related grammar' };
       const linkFields = groups.map((group) => {
         const selector = searchableMultiSelect({ name: group, label: labels[group], options: optionsByGroup[group], value: (linked[group] || []).map((item) => linkOption(group, item).value), placeholder: `Search ${labels[group].toLowerCase()}…`, emptyMessage: `No ${labels[group].toLowerCase()} found.` });

@@ -92,6 +92,62 @@
   animation: spin 0.65s linear infinite;
 }
 
+/* Compact inline spinner for pending buttons: 1em sizing keeps button
+   dimensions stable when entering the loading state. Respects themes via
+   currentColor; reduced-motion handled below alongside .spinner. */
+.spinner-inline {
+  display: inline-block;
+  flex: none;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.15em;
+}
+
+.spinner-inline + .pending-label {
+  margin-left: 0.5em;
+}
+
+/* Global loading overlay: full-viewport dim layer above app and dialogs
+   (dialogs sit at z-50). Plain translucent black works in both themes;
+   subtle blur is cheap (single fixed layer) and matches the existing
+   backdrop style. The overlay itself blocks pointer interaction behind it;
+   it never traps focus and is removed on every outcome. */
+.global-loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background: rgb(0 0 0 / 0.45);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.global-loading-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border-radius: 999px;
+  padding: 0.85rem 1.4rem;
+  color: #fff;
+  background: rgb(20 20 22 / 0.82);
+  box-shadow: 0 18px 50px rgb(0 0 0 / 0.35);
+}
+
+.global-loading-spinner {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-width: 3px;
+}
+
+.global-loading-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
 @keyframes spin { to { transform: rotate(360deg); } }
 
 @media (prefers-reduced-motion: reduce) {

@@ -6,6 +6,7 @@ const translations = {
     'Study Sessions': 'Sesiones de estudio',
     'Vocabulary': 'Vocabulario',
     'Kanji': 'Kanji',
+    'Text Analyzer': 'Analizador de texto',
     'Grammar': 'Gramática',
     'Goals': 'Objetivos',
     'Content': 'Contenido',

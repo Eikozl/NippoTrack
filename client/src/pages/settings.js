@@ -1,5 +1,5 @@
 import { apiRequest } from '../api';
-import { element, pageHeader, showToast } from '../ui';
+import { element, pageHeader, showToast, withPendingAction } from '../ui';
 import { getLocale, setLocale } from '../i18n';
 
 export async function renderSettings(container) {
@@ -15,10 +15,8 @@ export async function renderSettings(container) {
   english.addEventListener('click', () => setLocale('en'));
   spanish.addEventListener('click', () => setLocale('es'));
   const exportButton = element('button', { className: 'button-secondary mt-5', text: 'Export backup', attrs: { type: 'button' } });
-  exportButton.addEventListener('click', async () => {
-    exportButton.disabled = true;
-    exportButton.textContent = 'Preparing…';
-    try {
+  exportButton.addEventListener('click', () => {
+    withPendingAction(exportButton, async () => {
       const backup = await apiRequest('/api/export');
       const blobUrl = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }));
       const link = document.createElement('a');
@@ -29,12 +27,9 @@ export async function renderSettings(container) {
       link.remove();
       URL.revokeObjectURL(blobUrl);
       showToast('Backup exported.');
-    } catch (error) {
+    }, { pendingLabel: 'Preparing…' }).catch((error) => {
       showToast(error.message || 'Unable to export backup.', 'error');
-    } finally {
-      exportButton.disabled = false;
-      exportButton.textContent = 'Export backup';
-    }
+    });
   });
   container.replaceChildren(element('section', {}, [
     pageHeader({ eyebrow: 'Preferences', title: 'Settings', description: 'Personal interface preferences stored only in this browser.' }),
