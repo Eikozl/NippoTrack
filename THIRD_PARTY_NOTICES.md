@@ -1,6 +1,10 @@
 # Third-Party Notices
 
-## OpenJLPT-derived kanji reference data
+## Kanji reference data (KANJIDIC2 + OpenJLPT)
+
+JLT's shared kanji reference dictionary is built from [KANJIDIC2](https://www.edrdg.org/wiki/index.php/KANJIDIC_Project) (EDRDG, CC BY-SA 4.0), which supplies character readings, meanings, stroke counts, and grade metadata for the full dictionary universe. JLPT level classifications are overlaid from [OpenJLPT](https://github.com/evanclan/OpenJLPT) (CC BY-SA 4.0) where available; characters without OpenJLPT coverage keep a null/unclassified JLPT level and are never presented as holding an official JLPT level. KANJIDIC2's legacy pre-2010 `<jlpt>` codes are ignored. See `server/scripts/build-kanji-reference.js` for the deterministic merge, including per-record provenance in `source_metadata`.
+
+OpenJLPT documents field-level provenance in its [NOTICE.md](https://github.com/evanclan/OpenJLPT/blob/main/NOTICE.md); that original notice remains the source for the complete upstream attribution.
 
 JLT can import kanji reference data derived from [OpenJLPT](https://github.com/evanclan/OpenJLPT), available under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). OpenJLPT documents field-level provenance in its [NOTICE.md](https://github.com/evanclan/OpenJLPT/blob/main/NOTICE.md); that original notice remains the source for the complete upstream attribution.
 
