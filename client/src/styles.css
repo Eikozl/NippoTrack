@@ -165,17 +165,28 @@
    is absolutely anchored in its fixed-size host, so expansion originates
    from the exact pill location, grows leftward/downward within the
    viewport, and never pushes the theme/account buttons.
+   Viewport safety: the OUTER shell keeps overflow:hidden for the morph
+   shape; the INNER .level-estimate-detail region (below the always-visible
+   face) is the scroll container, bounded by a dvh-based max-height with a
+   vh fallback, so long content (open "How this is estimated" details,
+   disclaimer) stays reachable via inner scroll on any viewport.
    prefers-reduced-motion: state still toggles, motion becomes instant. */
 .level-estimate-host { position: relative; flex: none; width: 4.25rem; height: 2.5rem; }
 .level-estimate-morph { position: absolute; top: 0; right: 0; z-index: 40; display: grid; grid-template-rows: auto 0fr; width: 4.25rem; padding: 0 0.5rem; overflow: hidden; border-radius: 999px; background: var(--jlt-surface); box-shadow: var(--shadow-raised-sm); transition: width 340ms cubic-bezier(0.22, 0.9, 0.26, 1), grid-template-rows 340ms cubic-bezier(0.22, 0.9, 0.26, 1), border-radius 340ms cubic-bezier(0.22, 0.9, 0.26, 1), padding 340ms cubic-bezier(0.22, 0.9, 0.26, 1), box-shadow 200ms ease; }
-.level-estimate-morph.is-open { width: min(22rem, calc(100vw - 2rem)); max-height: min(32rem, calc(100vh - 6rem)); overflow-y: auto; grid-template-rows: auto 1fr; padding: 0.8rem 1.1rem 1.1rem; border-radius: 20px; box-shadow: var(--shadow-raised-md); }
+.level-estimate-morph.is-open { width: min(22rem, calc(100vw - 2rem)); max-height: min(32rem, calc(100vh - 6rem)); grid-template-rows: auto 1fr; padding: 0.8rem 1.1rem 1.1rem; border-radius: 20px; box-shadow: var(--shadow-raised-md); }
+@supports (max-height: 100dvh) {
+  .level-estimate-morph.is-open { max-height: min(32rem, calc(100dvh - 6rem)); }
+}
 .level-estimate-face { display: flex; width: 100%; min-height: 2.5rem; align-items: center; justify-content: center; gap: 0.55rem; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--jlt-ink); cursor: pointer; }
 .level-estimate-morph.is-open .level-estimate-face { justify-content: space-between; min-height: 0; border-radius: 12px; }
 .level-estimate-title { max-width: 0; overflow: hidden; white-space: nowrap; opacity: 0; font-size: 0.8125rem; font-weight: 600; transition: max-width 300ms ease-out, opacity 200ms ease-out; }
 .level-estimate-morph.is-open .level-estimate-title { max-width: 14rem; opacity: 1; }
 .level-estimate-value { font-size: 0.9375rem; font-weight: 700; letter-spacing: 0.02em; }
 .level-estimate-detail { min-height: 0; overflow: hidden; visibility: hidden; opacity: 0; transition: opacity 220ms ease-out, visibility 0s linear 340ms; }
-.level-estimate-morph.is-open .level-estimate-detail { visibility: visible; opacity: 1; transition: opacity 300ms ease-out 100ms, visibility 0s; }
+.level-estimate-morph.is-open .level-estimate-detail { visibility: visible; opacity: 1; transition: opacity 300ms ease-out 100ms, visibility 0s; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--jlt-border) transparent; }
+.level-estimate-morph.is-open .level-estimate-detail::-webkit-scrollbar { width: 8px; }
+.level-estimate-morph.is-open .level-estimate-detail::-webkit-scrollbar-track { background: transparent; }
+.level-estimate-morph.is-open .level-estimate-detail::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--jlt-border); }
 .level-estimate-detail-inner { padding-top: 0.6rem; transform: translateY(6px); transition: transform 300ms ease-out; }
 .level-estimate-morph.is-open .level-estimate-detail-inner { transform: none; }
 .level-estimate-subline { font-size: 0.875rem; line-height: 1.5; color: var(--jlt-muted); }

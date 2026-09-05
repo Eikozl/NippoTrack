@@ -416,6 +416,41 @@ test('Header morph: desktop and mobile never open together', async () => {
   control.destroy();
 });
 
+test('Header morph: expanded surface is viewport-bounded with an inner scroll region', () => {
+  const css = readSource('src/styles.css');
+  // Viewport-aware cap: dvh preferred (mobile dynamic toolbars), vh fallback.
+  assert.match(css, /100dvh/);
+  assert.match(css, /max-height:\s*min\(32rem,\s*calc\(100vh\s*-\s*6rem\)\)/);
+  // The INNER detail region scrolls; the outer shell keeps overflow:hidden
+  // for the morph shape (no whole-surface scroll, no detached popup).
+  assert.match(css, /\.level-estimate-morph\.is-open \.level-estimate-detail\s*\{[^}]*overflow-y:\s*auto/);
+  assert.match(css, /\.level-estimate-morph\.is-open \.level-estimate-detail\s*\{[^}]*overscroll-behavior:\s*contain/);
+  for (const block of css.matchAll(/\.level-estimate-morph\.is-open\s*\{([^}]*)\}/g)) {
+    assert.doesNotMatch(block[1], /overflow/, 'outer shell must not scroll; only the inner region does');
+  }
+  assert.match(css, /scrollbar-width:\s*thin/);
+});
+
+test('Header morph: same-surface structure keeps a scrollable detail region past the fixed face', async () => {
+  const { control, desktopWrapper, face, morph, click } = setup();
+  await control.load();
+  click(face(desktopWrapper));
+  const node = morph(desktopWrapper);
+  assert.ok(node.classList.contains('is-open'));
+  const detail = node.querySelector('.level-estimate-detail');
+  assert.ok(detail, 'detail region lives inside the same morph surface');
+  assert.equal(detail.parentNode, node, 'no detached dropdown/popover/modal wrapper');
+  const inner = detail.querySelector('.level-estimate-detail-inner');
+  assert.ok(inner, 'inner content region exists for the scroll container');
+  assert.match(textOf(inner), /not an official JLPT assessment/, 'disclaimer stays inside the scrollable region');
+  assert.match(textOf(inner), /How this is estimated/, 'expandable details live inside the scrollable region');
+  // The face stays fixed above the scroll region: it is the morph's first
+  // row, not nested inside the detail container.
+  assert.equal(node.firstElementChild, face(desktopWrapper), 'face remains the fixed first row');
+  assert.ok(!detail.contains(face(desktopWrapper)), 'face is outside the scrolling region');
+  control.destroy();
+});
+
 test('Header morph: detail renderer covers copy without a browser', () => {
   const doc = new FakeDocument();
   const nodes = renderLevelDetail(makeH(doc), {
