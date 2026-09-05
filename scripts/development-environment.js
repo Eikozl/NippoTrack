@@ -6,7 +6,10 @@ function selectDevelopmentServices(argumentsList = []) {
       name: 'API',
       directory: 'server',
       npmArguments: ['run', 'dev'],
-      environment: integration ? { POSTGRES_RUNTIME_ENV_FILE: '.env.integration' } : {}
+      // Plain development uses the safe LOCAL runtime file and must never
+      // fall through to server/.env.runtime (which may target Production).
+      // See server/.env.development.example for the documented shape.
+      environment: integration ? { POSTGRES_RUNTIME_ENV_FILE: '.env.integration' } : { POSTGRES_RUNTIME_ENV_FILE: '.env.development' }
     },
     {
       name: 'frontend',

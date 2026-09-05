@@ -8,11 +8,11 @@ test('uses the native npm executable instead of nesting the parent npm CLI', () 
   assert.equal(selectNpmExecutable('linux'), 'npm');
 });
 
-test('normal development starts the API and browser with their default environment', () => {
+test('normal development starts the API against the safe local runtime file, never Production fallthrough', () => {
   const services = selectDevelopmentServices([]);
 
   assert.deepEqual(services, [
-    { name: 'API', directory: 'server', npmArguments: ['run', 'dev'], environment: {} },
+    { name: 'API', directory: 'server', npmArguments: ['run', 'dev'], environment: { POSTGRES_RUNTIME_ENV_FILE: '.env.development' } },
     { name: 'frontend', directory: 'client', npmArguments: ['run', 'dev'], environment: {} }
   ]);
 });

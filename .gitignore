@@ -6,6 +6,7 @@ node_modules/
 .env.*
 !.env.example
 !.env.postgres.example
+!.env.development.example
 !.env.test
 
 # IDE
@@ -37,3 +38,5 @@ supabase/.temp/
 # Vercel CLI local build/link state
 .vercel/
 .env*
+# Tracked environment documentation (real credentials stay ignored above)
+!.env.development.example

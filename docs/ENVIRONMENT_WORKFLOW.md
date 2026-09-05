@@ -12,9 +12,27 @@ Run the normal local environment with:
 npm.cmd run dev
 ```
 
-It uses `client/.env.local` and `server/.env.runtime`. These ignored files target the
-development Supabase project and must use matching `SUPABASE_URL` and publishable-key
-values.
+It starts the API with `server/.env.development` (safe local PostgreSQL;
+see `server/.env.development.example`) and Vite with `client/.env.local`.
+`npm run dev` never resolves to Production: a fail-closed guard
+(`scripts/production-guard.js`, enforced in `dev.js` and `server/index.js`)
+refuses development-mode startup when the resolved database/auth identity
+matches the Production project. The local database only has the legacy
+baseline schema, so features needing Supabase-auth migrations (Phase 11+)
+require the integration workflow below.
+
+## Production safety
+
+- `npm.cmd run dev` = safe local workflow (local PostgreSQL).
+- `npm.cmd run dev:integration` = disposable Supabase-compatible workflow.
+- Production must never be used for normal smoke testing.
+- `server/.env.runtime` is no longer loaded by `npm run dev`. If a legacy
+  `.env.runtime` file points at Production, development startup aborts with
+  "Refusing to start development server against Production" instead of
+  connecting. Intentional production startup is `NODE_ENV=production`
+  with explicit production configuration (Vercel deployments use
+  `api/index.js` with platform environment variables and are unaffected
+  by the development guard).
 
 ## Isolated integration environment
 
