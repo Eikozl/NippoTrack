@@ -42,6 +42,9 @@ export async function renderReview(container) {
         withPendingAction(button, async () => {
           await apiRequest(`/api/review/${record.id_review_item}`, { method: 'POST', body: { result } });
           showToast(`Review recorded: ${result}.`);
+          // Review evidence can change the study-level estimate; the header
+          // control refreshes on this event (nothing else needs to).
+          window.dispatchEvent(new Event('jlt-review-complete'));
           const card = button.closest('article');
           if (card) completeCard(card);
           else await load();

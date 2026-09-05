@@ -6,6 +6,7 @@ import { apiRequest } from './api';
 import { kanjiReferenceRoute, parseKanjiReferenceRoute } from './kanjiReference';
 import { icon, moduleIconMap } from './icons';
 import { confirmDialog, element, openDialog, showToast } from './ui';
+import { createLevelEstimateControl } from './levelEstimateControl';
 import { authConfigured, localAuthBypass, localAuthBypassEmail, supabase } from './authClient';
 import { getLocale, setLocale, t, translateDocument } from './i18n';
 
@@ -192,13 +193,14 @@ async function bootstrapApp() {
     if (!session.authenticated) return;
     authRoot.replaceChildren();
     appShell.hidden = false;
+    levelEstimateControl.load();
     await navigate(window.location.hash.slice(1) || 'dashboard', { updateHash: false });
   } catch {
     renderAuthGate('Authentication service is unavailable.');
   }
 }
 
-window.addEventListener('jlt-auth-required', (event) => renderAuthGate(event.detail?.code === 'EMAIL_UNVERIFIED' ? 'Please verify your email before continuing.' : 'Your session has ended. Please sign in again.'));
+window.addEventListener('jlt-auth-required', (event) => { levelEstimateControl.reset(); renderAuthGate(event.detail?.code === 'EMAIL_UNVERIFIED' ? 'Please verify your email before continuing.' : 'Your session has ended. Please sign in again.'); });
 
 async function signOut() {
   try { await supabase.auth.signOut(); await apiRequest('/api/auth/logout', { method: 'POST', notifyAuth: false }); } finally { renderAuthGate(); }
@@ -244,6 +246,22 @@ async function openAccountDialog() {
 accountButtons.forEach((button) => button?.addEventListener('click', () => {
   openAccountDialog().catch((error) => showToast(error.message || 'Unable to load your account.', 'error'));
 }));
+
+// Phase 9 refinement — single header level-estimate control. One instance
+// manages both the desktop and mobile header buttons (only one header is
+// ever visible); the expanded panel is a singleton reparented to whichever
+// host opened it. Freshness: initial load after sign-in plus review
+// evidence only — analyzer/import/session events cannot change the
+// estimate, so nothing subscribes to them.
+const levelEstimateControl = createLevelEstimateControl({
+  fetchEstimate: () => apiRequest('/api/level/estimate'),
+  createElement: element,
+  doc: document,
+  win: window
+});
+if (themeToggle?.parentElement) levelEstimateControl.mount(themeToggle.parentElement);
+if (mobileThemeToggle?.parentElement) levelEstimateControl.mount(mobileThemeToggle.parentElement);
+window.addEventListener('jlt-review-complete', () => levelEstimateControl.refresh());
 window.addEventListener('jlt-locale-change', () => {
   translateDocument();
   accountButtons.forEach((button) => {

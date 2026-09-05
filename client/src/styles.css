@@ -148,6 +148,33 @@
   white-space: nowrap;
 }
 
+/* Phase 9 refinement — compact header level-estimate control. A collapsed
+   pill in the header expands into a floating panel from the same area.
+   CSS-only motion (~300ms ease-out on transform/opacity/border-radius);
+   prefers-reduced-motion expands/collapses without motion (see global
+   reset below and the synchronous close path in levelEstimateControl). */
+.level-estimate-host { position: relative; }
+.level-estimate-toggle { display: inline-flex; min-height: 2.5rem; align-items: center; gap: 0.45rem; padding: 0 0.85rem; border-radius: 999px; color: var(--jlt-ink); font-size: 0.875rem; font-weight: 600; background: var(--jlt-surface); box-shadow: var(--shadow-raised-sm); transition: box-shadow 160ms ease, background-color 160ms ease; }
+.level-estimate-toggle:hover { box-shadow: var(--shadow-raised-md); }
+.level-estimate-toggle:active { box-shadow: var(--shadow-inset-sm); }
+.level-estimate-toggle[aria-expanded="true"] { box-shadow: var(--shadow-inset-sm); }
+.level-estimate-dot { color: var(--jlt-primary); font-size: 1rem; line-height: 1; }
+.level-estimate-panel { position: absolute; top: calc(100% + 0.6rem); right: 0; z-index: 40; width: min(22rem, calc(100vw - 2rem)); max-height: min(32rem, calc(100vh - 6rem)); overflow-y: auto; padding: 1.1rem 1.2rem 1.2rem; border-radius: 20px; background: var(--jlt-surface); box-shadow: var(--shadow-raised-md); transform: scale(0.92) translateY(-6px); transform-origin: top right; opacity: 0; transition: transform 300ms ease-out, opacity 300ms ease-out, border-radius 300ms ease-out; }
+.level-estimate-panel.is-open { transform: none; border-radius: 20px; opacity: 1; }
+.level-estimate-panel h2 { margin-top: 0.35rem; font-size: 1.25rem; font-weight: 600; letter-spacing: -0.01em; color: var(--jlt-ink); }
+.level-estimate-subline { margin-top: 0.4rem; font-size: 0.875rem; line-height: 1.5; color: var(--jlt-muted); }
+.level-estimate-confidence { margin-top: 0.5rem; font-size: 0.8125rem; font-weight: 600; color: var(--jlt-ink); }
+.level-estimate-pills { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.7rem; }
+.level-estimate-details { margin-top: 0.8rem; }
+.level-estimate-details > summary { cursor: pointer; font-size: 0.875rem; font-weight: 600; color: var(--jlt-ink); }
+.level-estimate-details h3 { margin-top: 0.7rem; font-size: 0.8125rem; font-weight: 600; color: var(--jlt-ink); }
+.level-estimate-list { margin-top: 0.3rem; padding-left: 1.1rem; list-style: disc; font-size: 0.8125rem; line-height: 1.55; color: var(--jlt-muted); }
+.level-estimate-list > li + li { margin-top: 0.15rem; }
+.level-estimate-disclaimer { margin-top: 0.85rem; font-size: 0.8125rem; font-weight: 600; line-height: 1.5; color: var(--jlt-ink); }
+@media (prefers-reduced-motion: reduce) {
+  .level-estimate-panel { transition: none; }
+}
+
 @keyframes spin { to { transform: rotate(360deg); } }
 
 @media (prefers-reduced-motion: reduce) {
