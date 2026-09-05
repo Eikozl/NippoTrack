@@ -101,14 +101,39 @@ function parseKanjidic2(xmlText) {
   return { version, entries, duplicates };
 }
 
+const singleHanCodePoint = /^\p{Script=Han}$/u;
+
+// CJK Compatibility Ideographs (e.g. U+FA10 塚) NFKC-fold to unified Han
+// characters that already exist as their own KANJIDIC2 rows. They are
+// compatibility aliases, not distinct Kanji: collapse them so the canonical
+// universe holds one linguistic row per unified character. This decision
+// applies ONLY to character identity/literals — readings, meanings, and
+// stroke data are never NFKC-normalized.
+function collapseCompatibilityAliases(entries) {
+  const collapsed = [];
+  for (const [character] of entries) {
+    const folded = character.normalize('NFKC');
+    if (folded === character) continue;
+    if (!singleHanCodePoint.test(folded)) continue;
+    if (!entries.has(folded)) continue;
+    entries.delete(character);
+    collapsed.push({ alias: character, canonical: folded });
+  }
+  collapsed.sort((left, right) => sortCharacter(left.alias, right.alias));
+  return collapsed;
+}
+
 function sortCharacter(left, right) {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function mergeReferences(kanjidic, openjlptRecords) {
+  const collapsedAliases = collapseCompatibilityAliases(kanjidic.entries);
   const report = {
-    kanjidicEntries: kanjidic.entries.size,
+    kanjidicEntries: kanjidic.entries.size + collapsedAliases.length,
     kanjidicDuplicates: kanjidic.duplicates.length,
+    compatibilityAliasesCollapsed: collapsedAliases.length,
+    collapsedAliases,
     openjlptInput: openjlptRecords.length,
     openjlptMatched: 0,
     openjlptOnly: [],
@@ -266,4 +291,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { parseKanjidic2, mergeReferences };
+module.exports = { parseKanjidic2, mergeReferences, collapseCompatibilityAliases };

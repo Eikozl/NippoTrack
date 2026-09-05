@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { parseKanjidic2, mergeReferences } = require('../scripts/build-kanji-reference');
+const { parseKanjidic2, mergeReferences, collapseCompatibilityAliases } = require('../scripts/build-kanji-reference');
 const { importKanjiReferences } = require('../src/services/kanjiReference');
 
 const FIXTURE_XML = `<?xml version="1.0" encoding="UTF-8"?>
@@ -114,4 +114,83 @@ test('importer upserts null-jlpt rows idempotently without touching user data', 
   const oreIndex = oreParams.findIndex((param) => param === '俺');
   assert.ok(oreIndex !== -1);
   assert.equal(oreParams[oreIndex + 1], null);
+});
+
+const COMPAT_FIXTURE_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<kanjidic2>
+<header><file_version>4</file_version><database_version>2026-001</database_version><date_of_creation>2026-01-01</date_of_creation></header>
+<character>
+<literal>塚</literal>
+<misc><stroke_count>12</stroke_count></misc>
+<reading_meaning><rmgroup>
+<reading r_type="ja_on">チョウ</reading>
+<reading r_type="ja_kun">つか</reading>
+<meaning>mound</meaning>
+</rmgroup></reading_meaning>
+</character>
+<character>
+<literal>塚</literal>
+<misc><stroke_count>12</stroke_count></misc>
+<reading_meaning><rmgroup>
+<reading r_type="ja_on">チョウ</reading>
+<reading r_type="ja_kun">つか</reading>
+<meaning>mound</meaning>
+</rmgroup></reading_meaning>
+</character>
+<character>
+<literal>俺</literal>
+<misc><grade>8</grade><stroke_count>10</stroke_count></misc>
+<reading_meaning><rmgroup>
+<reading r_type="ja_on">エン</reading>
+<reading r_type="ja_kun">おれ</reading>
+<meaning>I</meaning>
+</rmgroup></reading_meaning>
+</character>
+<character>
+<literal>日</literal>
+<misc><grade>1</grade><stroke_count>4</stroke_count></misc>
+<reading_meaning><rmgroup>
+<reading r_type="ja_on">ニチ</reading>
+<reading r_type="ja_kun">ひ</reading>
+<meaning>day</meaning>
+<meaning>sun</meaning>
+</rmgroup></reading_meaning>
+</character>
+</kanjidic2>`;
+
+test('compatibility alias collapses to its unified counterpart', () => {
+  const kanjidic = parseKanjidic2(COMPAT_FIXTURE_XML);
+  assert.equal(kanjidic.entries.size, 4);
+  const { references, report } = mergeReferences(kanjidic, []);
+  assert.equal(report.compatibilityAliasesCollapsed, 1);
+  assert.deepEqual(report.collapsedAliases, [{ alias: '塚', canonical: '塚' }]);
+  assert.equal(references.length, 3);
+  const characters = references.map((reference) => reference.character);
+  assert.ok(characters.includes('塚'));
+  assert.ok(!characters.includes('塚'));
+  const tsuka = references.find((reference) => reference.character === '塚');
+  assert.deepEqual(tsuka.kunyomi, ['つか']);
+  assert.deepEqual(tsuka.meanings, ['mound']);
+});
+
+test('collapse leaves ordinary kanji and 俺 untouched', () => {
+  const kanjidic = parseKanjidic2(COMPAT_FIXTURE_XML);
+  const { references } = mergeReferences(kanjidic, OPENJLPT_FIXTURE);
+  const ore = references.find((reference) => reference.character === '俺');
+  assert.ok(ore);
+  assert.equal(ore.jlpt_level, null);
+  assert.deepEqual(ore.meanings, ['I']);
+  const nichi = references.find((reference) => reference.character === '日');
+  assert.ok(nichi);
+  assert.deepEqual(nichi.onyomi, ['ニチ']);
+  assert.equal(nichi.jlpt_level, 'N5');
+});
+
+test('collapse keeps all OpenJLPT classifications and stays deterministic', () => {
+  const first = mergeReferences(parseKanjidic2(COMPAT_FIXTURE_XML), OPENJLPT_FIXTURE);
+  const second = mergeReferences(parseKanjidic2(COMPAT_FIXTURE_XML), OPENJLPT_FIXTURE);
+  assert.deepEqual(first.references, second.references);
+  assert.deepEqual(first.report, second.report);
+  assert.equal(first.report.openjlptMatched, 1);
+  assert.equal(first.report.classified, 1);
 });
