@@ -11,6 +11,7 @@
     <script src="/theme-init.js"></script>
   </head>
   <body>
+    <a href="#app-content" class="skip-link"><span data-i18n="Skip to main content">Skip to main content</span></a>
     <div id="auth-root"></div>
     <div id="app-shell" class="min-h-screen lg:grid lg:grid-cols-[17rem_1fr]" hidden>
       <div id="mobile-backdrop" class="fixed inset-0 z-30 hidden bg-ink/25 backdrop-blur-[1px] lg:hidden"></div>
@@ -30,18 +31,21 @@
         </div>
 
         <nav class="mt-10 grid gap-1" aria-label="Primary navigation">
+          <p class="nav-group-label" aria-hidden="true"><span data-i18n="Study">Study</span></p>
           <button class="nav-item is-active" type="button" data-page="dashboard"><span class="nav-icon" data-jlt-icon="dashboard" aria-hidden="true"></span><span data-i18n="Dashboard">Dashboard</span></button>
+          <button class="nav-item" type="button" data-page="review"><span class="nav-icon" data-jlt-icon="review" aria-hidden="true"></span><span data-i18n="Review">Review</span></button>
           <button class="nav-item" type="button" data-page="sessions"><span class="nav-icon" data-jlt-icon="sessions" aria-hidden="true"></span><span data-i18n="Sessions">Sessions</span></button>
+          <button class="nav-item" type="button" data-page="goals"><span class="nav-icon" data-jlt-icon="goals" aria-hidden="true"></span><span data-i18n="Goals">Goals</span></button>
+          <p class="nav-group-label" aria-hidden="true"><span data-i18n="Library">Library</span></p>
           <button class="nav-item" type="button" data-page="vocabulary"><span class="nav-icon" data-jlt-icon="vocabulary" aria-hidden="true"></span><span data-i18n="Vocabulary">Vocabulary</span></button>
           <button class="nav-item" type="button" data-page="kanji"><span class="nav-icon" data-jlt-icon="kanji" aria-hidden="true"></span><span data-i18n="Kanji">Kanji</span></button>
-          <button class="nav-item" type="button" data-page="analyzer"><span class="nav-icon" data-jlt-icon="analyzer" aria-hidden="true"></span><span data-i18n="Text Analyzer">Text Analyzer</span></button>
           <button class="nav-item" type="button" data-page="grammar"><span class="nav-icon" data-jlt-icon="grammar" aria-hidden="true"></span><span data-i18n="Grammar">Grammar</span></button>
-          <button class="nav-item" type="button" data-page="goals"><span class="nav-icon" data-jlt-icon="goals" aria-hidden="true"></span><span data-i18n="Goals">Goals</span></button>
-          <button class="nav-item" type="button" data-page="content"><span class="nav-icon" data-jlt-icon="content" aria-hidden="true"></span><span data-i18n="Content">Content</span></button>
           <button class="nav-item" type="button" data-page="notes"><span class="nav-icon" data-jlt-icon="notes" aria-hidden="true"></span><span data-i18n="Notes">Notes</span></button>
-          <button class="nav-item" type="button" data-page="tags"><span class="nav-icon" data-jlt-icon="tags" aria-hidden="true"></span><span data-i18n="Tags">Tags</span></button>
-          <button class="nav-item" type="button" data-page="review"><span class="nav-icon" data-jlt-icon="review" aria-hidden="true"></span><span data-i18n="Review">Review</span></button>
+          <button class="nav-item" type="button" data-page="content"><span class="nav-icon" data-jlt-icon="content" aria-hidden="true"></span><span data-i18n="Content Log">Content Log</span></button>
+          <p class="nav-group-label" aria-hidden="true"><span data-i18n="Tools">Tools</span></p>
+          <button class="nav-item" type="button" data-page="analyzer"><span class="nav-icon" data-jlt-icon="analyzer" aria-hidden="true"></span><span data-i18n="Text Analyzer">Text Analyzer</span></button>
           <button class="nav-item" type="button" data-page="statistics"><span class="nav-icon" data-jlt-icon="statistics" aria-hidden="true"></span><span data-i18n="Statistics">Statistics</span></button>
+          <p class="nav-group-label" aria-hidden="true"><span data-i18n="System">System</span></p>
           <button class="nav-item" type="button" data-page="settings"><span class="nav-icon" data-jlt-icon="settings" aria-hidden="true"></span><span data-i18n="Settings">Settings</span></button>
         </nav>
 
@@ -58,9 +62,9 @@
         <header class="hidden h-20 items-center justify-between px-7 lg:flex lg:px-10">
           <div class="relative w-full max-w-xl">
             <label class="sr-only" for="global-search">Global search</label>
-            <input id="global-search" class="field-control pr-12" type="search" autocomplete="off" placeholder="Search vocabulary, kanji, grammar, sessions, notes…" />
+            <input id="global-search" class="field-control pr-12" type="search" autocomplete="off" placeholder="Search vocabulary, kanji, grammar, sessions, notes…" role="combobox" aria-expanded="false" aria-controls="global-search-results" aria-autocomplete="list" />
             <kbd class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-xs text-muted shadow-[var(--shadow-inset-sm)]">/</kbd>
-            <div id="global-search-results" class="absolute inset-x-0 top-[calc(100%+.6rem)] z-30 hidden max-h-96 overflow-y-auto rounded-[18px] p-2" aria-live="polite"></div>
+            <div id="global-search-results" class="absolute inset-x-0 top-[calc(100%+.6rem)] z-30 hidden max-h-96 overflow-y-auto rounded-[18px] p-2" role="listbox" aria-label="Global search results" aria-live="polite"></div>
           </div>
           <div class="ml-5 flex shrink-0 gap-2">
             <button id="theme-toggle" class="icon-button" type="button" aria-label="Switch to dark mode" title="Switch to dark mode" aria-pressed="false"><span id="theme-toggle-icon" aria-hidden="true"></span></button>
@@ -68,13 +72,19 @@
           </div>
         </header>
         <header class="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-stone bg-canvas/90 px-4 backdrop-blur-md sm:px-7 lg:hidden">
-          <button id="open-navigation" class="icon-button" type="button" aria-label="Open navigation"><span data-jlt-icon="menu" aria-hidden="true"></span></button>
+          <button id="open-navigation" class="icon-button" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar"><span data-jlt-icon="menu" aria-hidden="true"></span></button>
           <p class="text-sm font-semibold text-ink">Japanese Learning Tracker</p>
           <div class="flex gap-2">
+            <button id="mobile-search-button" class="icon-button" type="button" aria-label="Open search" aria-expanded="false" aria-controls="mobile-search-bar"><span data-jlt-icon="search" aria-hidden="true"></span></button>
             <button id="mobile-theme-toggle" class="icon-button" type="button" aria-label="Switch to dark mode" title="Switch to dark mode" aria-pressed="false"><span id="mobile-theme-toggle-icon" aria-hidden="true"></span></button>
             <button id="mobile-account-button" class="icon-button" type="button" aria-label="Manage account" title="Manage account"><span data-jlt-icon="user" aria-hidden="true"></span></button>
           </div>
         </header>
+        <div id="mobile-search-bar" class="border-b border-stone bg-canvas/95 px-4 pb-3 pt-1 lg:hidden" hidden>
+          <label class="sr-only" for="mobile-search">Global search</label>
+          <input id="mobile-search" class="field-control" type="search" autocomplete="off" placeholder="Search vocabulary, kanji, grammar, sessions, notes…" role="combobox" aria-expanded="false" aria-controls="mobile-search-results" aria-autocomplete="list" />
+          <div id="mobile-search-results" class="mt-2 max-h-96 overflow-y-auto rounded-[18px] p-2 surface" role="listbox" aria-label="Global search results" aria-live="polite" hidden></div>
+        </div>
 
         <main id="app-content" class="mx-auto min-h-screen max-w-[92rem] px-4 py-7 sm:px-7 sm:py-9 lg:px-10" tabindex="-1"></main>
       </div>
