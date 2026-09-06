@@ -39,7 +39,7 @@ export async function renderAnalyzer(container) {
   container.append(pageHeader({
     eyebrow: 'Study tools',
     title: 'Text Analyzer',
-    description: 'Paste Japanese text to see the kanji it contains, which ones are already in your collection, and which reference-backed kanji you can add.'
+    description: 'Paste Japanese text to see the kanji it contains, which ones are already in your collection, and which reference-backed kanji you can add. Does not estimate your level or prove knowledge.'
   }));
 
   let analysis = null;
@@ -229,7 +229,7 @@ export async function renderAnalyzer(container) {
         else selectedChars.delete(entry.character);
         renderResults();
       });
-      const addButton = element('button', { className: 'button-secondary min-h-8 px-3 py-1 text-xs', text: 'Add to My Kanji', attrs: { type: 'button' } });
+      const addButton = element('button', { className: 'button-secondary min-h-10 px-4 py-2 text-xs', text: 'Add to My Kanji', attrs: { type: 'button' } });
       addButton.addEventListener('click', () => {
         withPendingAction(addButton, async () => {
           await importKanji([entry.character]);

@@ -350,7 +350,7 @@ export function renderSessions(container) {
         field({ name: 'category', label: 'Session type', required: true, value: record.category || 'Vocabulary', options: CATEGORIES.map((value) => ({ value, label: value })) }),
         field({ name: 'session_date', label: 'Date', type: 'date', required: true, value: String(record.session_date || '').slice(0, 10) }),
         field({ name: 'duration_minutes', label: 'Duration (minutes)', type: 'number', required: true, value: record.duration_minutes || 30 }),
-        field({ name: 'resource', label: 'Resource', maxLength: 255, value: record.resource || '', placeholder: 'Genki, NHK, conversation…' }),
+        field({ name: 'resource', label: 'Resource', maxLength: 255, value: record.resource || '', placeholder: 'Genki, NHK, conversation…', description: 'What you studied with. For a media diary, use Content Log.' }),
         element('section', { className: 'rounded-lg border border-stone bg-paper/40 p-4 sm:col-span-2' }, [
           element('h3', { className: 'font-semibold text-ink', text: 'Writing' }),
           element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: 'Your study output — the content you created.' }),

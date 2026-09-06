@@ -8,9 +8,9 @@ const jlpt = options(['N5', 'N4', 'N3', 'N2', 'N1']);
 const status = options(['New', 'Learning', 'Familiar', 'Mastered']);
 const measureOptions = [
   { value: 'study_minutes', label: 'Study Minutes' },
-  { value: 'vocabulary_count', label: 'New vocabulary' },
-  { value: 'kanji_count', label: 'New Kanjis' },
-  { value: 'grammar_count', label: 'Grammar Refinement' }
+  { value: 'vocabulary_count', label: 'New vocabulary entries' },
+  { value: 'kanji_count', label: 'New kanji' },
+  { value: 'grammar_count', label: 'New grammar entries' }
 ];
 const periodOptions = [
   { value: 'weekly', label: 'This week' },
@@ -19,19 +19,24 @@ const periodOptions = [
 ];
 const measureLabels = Object.fromEntries(measureOptions.map(({ value, label }) => [value, label]));
 const periodLabels = Object.fromEntries(periodOptions.map(({ value, label }) => [value, label]));
+// Stored note categories use compact values; display the human-readable label.
+function noteCategoryLabel(category) {
+  if (category === 'JapaneseQuestion') return 'Japanese question';
+  return category;
+}
 const sharedLinkGroups = ['sessions', 'vocabulary', 'kanji', 'grammar'];
 
-const CONFIGS = {
+export const CONFIGS = {
   goals: {
     endpoint: '/api/goals', id: 'id_goal', eyebrow: 'Plan', title: 'Goals', singular: 'goal', description: 'Set measurable targets; progress is calculated from your real records.', emptyDescription: 'Goals help you turn study intentions into measurable targets. Progress updates automatically from your sessions and library entries.',
     fields: [
       { name: 'title', label: 'Title', required: true, maxLength: 120 },
       { name: 'goal_type', label: 'Measure', required: true, options: [{ value: '', label: 'Choose a measure' }, ...measureOptions] },
-      { name: 'target_value', label: 'Target amount', type: 'number', required: true, description: 'How many minutes or new items you want to reach.' },
+      { name: 'target_value', label: 'Target amount', type: 'number', required: true, description: 'Total to reach — minutes for Study Minutes, entries otherwise.' },
       { name: 'period_type', label: 'Time period', required: true, options: [{ value: '', label: 'Choose a time period' }, ...periodOptions] },
       { name: 'start_date', label: 'Start date', type: 'date', required: true },
       { name: 'due_date', label: 'Due date', type: 'date' },
-      { name: 'target_jlpt_level', label: 'Only count this JLPT level', description: 'Optional. Leave blank to count entries from every level.', options: jlpt },
+      { name: 'target_jlpt_level', label: 'Limit counting to JLPT level', description: 'Optional per-goal filter. Leave blank to count every level. Does not change the Target JLPT level in Statistics.', options: jlpt },
       { name: 'target_status', label: 'Only count entries with this status', description: 'Optional. A newly added entry normally starts as New, so it will not count toward Familiar or Mastered.', options: status },
       { name: 'is_active', label: 'Active', editOnly: true, options: [{ value: '1', label: 'Active' }, { value: '0', label: 'Inactive' }] }
     ],
@@ -42,7 +47,7 @@ const CONFIGS = {
     ]
   },
   content: {
-    endpoint: '/api/content', id: 'id_content_entry', eyebrow: 'Log', title: 'Content', singular: 'content entry', description: 'Keep a lightweight log of Japanese media and conversations.', emptyDescription: 'Content entries record the Japanese media or conversations you spend time with, so you can remember what you studied and how it felt.',
+    endpoint: '/api/content', id: 'id_content_entry', eyebrow: 'Log', title: 'Content Log', singular: 'content entry', description: 'Record what you watched, read, listened to, or used for study. Sessions record focused study time.', emptyDescription: 'Content entries record the Japanese media or conversations you spend time with, so you can remember what you studied and how it felt.',
     linkGroups: ['sessions'],
     fields: [
       { name: 'title', label: 'Title', required: true, maxLength: 255 },
@@ -64,10 +69,10 @@ const CONFIGS = {
     linkGroups: sharedLinkGroups,
     fields: [
       { name: 'title', label: 'Title', maxLength: 150 },
-      { name: 'category', label: 'Category', required: true, options: options(['Grammar', 'Vocabulary', 'JapaneseQuestion', 'Correction', 'Resource', 'General'], 'Choose a category') },
+      { name: 'category', label: 'Category', required: true, options: [{ value: '', label: 'Choose a category' }, { value: 'Grammar', label: 'Grammar' }, { value: 'Vocabulary', label: 'Vocabulary' }, { value: 'JapaneseQuestion', label: 'Japanese question' }, { value: 'Correction', label: 'Correction' }, { value: 'Resource', label: 'Resource' }, { value: 'General', label: 'General' }] },
       { name: 'body', label: 'Note', type: 'textarea', required: true, maxLength: 10000, wide: true }
     ],
-    card: (item) => [item.category, item.body, item.updated_at ? `Updated ${formatDate(item.updated_at)}` : '']
+    card: (item) => [noteCategoryLabel(item.category), item.body, item.updated_at ? `Updated ${formatDate(item.updated_at)}` : '']
   },
   tags: {
     endpoint: '/api/tags', id: 'id_tag', eyebrow: 'Organize', title: 'Tags', singular: 'tag', description: 'Create reusable labels for the V2 relationship features.', emptyDescription: 'Tags are short reusable labels—such as “Genki”, “N5” or “travel”—that will help you group and find related study records as relationships are added.',
@@ -188,7 +193,7 @@ export function renderV2Page(container, kind) {
       element('div', { className: 'flex items-start justify-between gap-3' }, [element('div', { className: 'flex items-start gap-3' }, [iconTile(iconForTitle(config.title), { className: 'preview-icon shrink-0' }), element('h2', { className: 'text-lg font-semibold text-ink', text: record.title || record.name })]), element('span', { className: 'status-pill', text: meta })]),
       ...(detail ? [element('p', { className: 'mt-3 line-clamp-3 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: detail })] : []),
       ...(Array.isArray(footer) ? footer.map((line) => element('p', { className: 'mt-1 line-clamp-3 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: line })) : []),
-      element('div', { className: 'mt-auto flex items-end justify-start gap-3 pt-5' }, [element('div', { className: 'flex shrink-0 flex-nowrap gap-2' }, [links, del, edit]), ...(Array.isArray(footer) || !footer ? [] : [element('span', { className: 'ml-auto text-xs font-semibold text-muted', text: footer })])])
+      element('div', { className: 'mt-auto flex items-end justify-start gap-3 pt-5' }, [element('div', { className: 'flex shrink-0 flex-nowrap gap-2' }, [links, del, edit]), ...(Array.isArray(footer) || !footer ? [] : [element('span', { className: footer === 'Complete' ? 'status-pill goal-complete ml-auto' : 'ml-auto text-xs font-semibold text-muted', text: footer })])])
     ]);
   }
 

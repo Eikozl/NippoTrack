@@ -53,8 +53,8 @@ export const ENTITY_CONFIGS = {
       element('dl', { className: 'grid gap-3 text-sm sm:grid-cols-2' }, [
         element('div', {}, [element('dt', { className: 'text-muted', text: 'Word reading (authoritative for this entry)' }), element('dd', { className: 'mt-1 font-medium text-ink', text: wordReading || 'Not recorded', attrs: { lang: 'ja' } })]),
         element('div', {}, [element('dt', { className: 'text-muted', text: 'Meaning' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.meaning })]),
-        element('div', {}, [element('dt', { className: 'text-muted', text: 'JLPT level' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.jlpt_level || 'Not set' })]),
-        element('div', {}, [element('dt', { className: 'text-muted', text: 'Status' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.status || 'New' })])
+        element('div', {}, [element('dt', { className: 'text-muted', text: 'JLPT tag' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.jlpt_level || 'Not set' })]),
+        element('div', {}, [element('dt', { className: 'text-muted', text: 'Status (self-reported)' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.status || 'New' })])
       ]),
       ...(item.notes ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Notes' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: item.notes })])] : []),
       element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'aria-label': 'Kanji reading context' } }, [
@@ -107,8 +107,8 @@ export const ENTITY_CONFIGS = {
       { name: 'example_sentence', label: 'Example sentence', type: 'textarea', maxLength: 2000, wide: true, createOnly: true, section: 'example' },
       { name: 'example_translation', label: 'Translation', type: 'textarea', maxLength: 2000, createOnly: true, section: 'example' },
       { name: 'example_notes', label: 'Example notes', type: 'textarea', maxLength: 1500, createOnly: true, section: 'example' },
-      { name: 'jlpt_level', label: 'JLPT level', options: JLPT_OPTIONS },
-      { name: 'status', label: 'Status', options: STATUS_OPTIONS, defaultValue: 'New' },
+      { name: 'jlpt_level', label: 'JLPT tag', options: JLPT_OPTIONS, description: 'Your label for filtering — not official reference data.' },
+      { name: 'status', label: 'Status', options: STATUS_OPTIONS, defaultValue: 'New', description: 'Your personal status label — not review-verified.' },
       { name: 'notes', label: 'Entry notes', type: 'textarea', maxLength: 1500, wide: true }
     ]
   },
@@ -173,7 +173,7 @@ renderDetail: (item) => {
             element('h2', { className: 'text-2xl font-semibold text-ink', text: refMeanings.length ? refMeanings.join(' · ') : (item.meaning || 'Meaning not recorded') }),
             element('div', { className: 'mt-2 flex flex-wrap items-center gap-2' }, [
               refJlpt && element('span', { className: 'status-pill status-jlpt', text: `JLPT ${refJlpt} (Reference)` }),
-              element('span', { className: `status-pill ${statusColors[status] || 'bg-stone text-stone-foreground'}`, text: status }),
+              element('span', { className: `status-pill ${statusColors[status] || 'bg-stone text-stone-foreground'}`, text: status, attrs: { title: 'Self-reported status' } }),
               refStrokeCount && element('span', { className: 'status-pill bg-stone text-stone-foreground', text: `${refStrokeCount} strokes (Ref)` })
             ]),
             element('p', { className: 'mt-2 text-sm text-muted', text: `Character: ${item.character_kanji}` })
@@ -202,9 +202,10 @@ renderDetail: (item) => {
           ]) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No review scheduled' })
         ]),
 
-        // 4. Encounter Intelligence
+        // 4. Encounter Intelligence — exposure only, never review evidence.
         element('section', { className: 'rounded-lg border border-stone p-4' }, [
           element('h3', { className: 'font-semibold text-ink', text: 'Encounter Intelligence' }),
+          element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: 'Seen in your words and writings — exposure only, not review evidence.' }),
           element('dl', { className: 'mt-3 grid gap-4 sm:grid-cols-2' }, [
             element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Total Encounters' }), element('dd', { className: 'mt-1 font-medium text-ink', text: String(encounters.count) })]),
             element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'First Seen' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatDate(encounters.firstEncounteredAt) })]),
@@ -271,8 +272,8 @@ renderDetail: (item) => {
       { name: 'meaning', label: 'Meaning', required: true, maxLength: 255 },
       { name: 'onyomi', label: 'Onyomi', maxLength: 255 },
       { name: 'kunyomi', label: 'Kunyomi', maxLength: 255 },
-      { name: 'jlpt_level', label: 'JLPT level', options: JLPT_OPTIONS },
-      { name: 'status', label: 'Status', options: STATUS_OPTIONS, defaultValue: 'New' },
+      { name: 'jlpt_level', label: 'JLPT tag', options: JLPT_OPTIONS, description: 'Your label for filtering — not official reference data.' },
+      { name: 'status', label: 'Status', options: STATUS_OPTIONS, defaultValue: 'New', description: 'Your personal status label — not review-verified.' },
       { name: 'notes', label: 'Notes', type: 'textarea', maxLength: 1500, wide: true }
     ]
   },
@@ -293,8 +294,8 @@ renderDetail: (item) => {
       element('dl', { className: 'grid gap-3 text-sm sm:grid-cols-2' }, [
         element('div', {}, [element('dt', { className: 'text-muted', text: 'Grammar point' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.grammar_point })]),
         element('div', {}, [element('dt', { className: 'text-muted', text: 'Meaning' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.meaning })]),
-        element('div', {}, [element('dt', { className: 'text-muted', text: 'JLPT level' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.jlpt_level || 'Not set' })]),
-        element('div', {}, [element('dt', { className: 'text-muted', text: 'Status' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.status || 'New' })])
+        element('div', {}, [element('dt', { className: 'text-muted', text: 'JLPT tag' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.jlpt_level || 'Not set' })]),
+        element('div', {}, [element('dt', { className: 'text-muted', text: 'Status (self-reported)' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.status || 'New' })])
       ]),
       ...(item.structure ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Structure' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: item.structure })])] : []),
       ...(item.example ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Example' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: item.example })])] : []),
@@ -305,8 +306,8 @@ renderDetail: (item) => {
       { name: 'meaning', label: 'Meaning', required: true, maxLength: 255 },
       { name: 'structure', label: 'Structure', type: 'textarea', maxLength: 2000, wide: true },
       { name: 'example', label: 'Example', type: 'textarea', maxLength: 2000, wide: true },
-      { name: 'jlpt_level', label: 'JLPT level', options: JLPT_OPTIONS },
-      { name: 'status', label: 'Status', options: STATUS_OPTIONS, defaultValue: 'New' },
+      { name: 'jlpt_level', label: 'JLPT tag', options: JLPT_OPTIONS, description: 'Your label for filtering — not official reference data.' },
+      { name: 'status', label: 'Status', options: STATUS_OPTIONS, defaultValue: 'New', description: 'Your personal status label — not review-verified.' },
       { name: 'notes', label: 'Notes', type: 'textarea', maxLength: 1500, wide: true }
     ]
   }
@@ -571,11 +572,11 @@ function recordCard(item, config, onView, onEdit, onDelete) {
           element('p', { className: 'mt-1 text-sm text-muted', text: config.secondary(item) })
         ])
       ]),
-      element('span', { className: 'status-pill shrink-0', text: item.status || 'New' })
+      element('span', { className: 'status-pill shrink-0', text: item.status || 'New', attrs: { title: 'Self-reported status' } })
     ]),
     element('p', { className: 'mt-4 line-clamp-3 text-sm leading-6 text-ink/80', text: config.detail(item) }),
     element('div', { className: 'mt-auto flex items-end justify-between gap-3 pt-5' }, [
-      element('span', { className: 'text-xs font-semibold text-muted', text: item.jlpt_level || 'JLPT not set' }),
+      element('span', { className: 'text-xs font-semibold text-muted', text: item.jlpt_level || 'JLPT tag not set' }),
       element('div', { className: 'flex gap-2' }, [viewButton, editButton, deleteButton])
     ])
   ]);
@@ -587,7 +588,7 @@ export function renderEntityPage(container, config) {
   let loadSequence = 0;
   const addButton = element('button', { className: 'button-primary', text: `Add ${config.singular}`, attrs: { type: 'button' } });
   const search = element('input', { className: 'field-control', attrs: { type: 'search', placeholder: config.searchPlaceholder, 'aria-label': `Search ${config.title}` } });
-  const jlpt = element('select', { className: 'field-control', attrs: { 'aria-label': 'Filter by JLPT level' } }, JLPT_OPTIONS.map((option) => element('option', { text: option.label, attrs: { value: option.value } })));
+  const jlpt = element('select', { className: 'field-control', attrs: { 'aria-label': 'Filter by JLPT tag' } }, JLPT_OPTIONS.map((option) => element('option', { text: option.label, attrs: { value: option.value } })));
   const status = element('select', { className: 'field-control', attrs: { 'aria-label': 'Filter by status' } }, [
     element('option', { text: 'Any status', attrs: { value: '' } }),
     ...STATUS_OPTIONS.map((option) => element('option', { text: option.label, attrs: { value: option.value } }))
