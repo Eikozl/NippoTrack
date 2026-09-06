@@ -3,6 +3,11 @@
   "installCommand": "npm ci && npm --prefix server ci && npm --prefix client ci",
   "buildCommand": "npm --prefix client run build",
   "outputDirectory": "client/dist",
+  "functions": {
+    "api/*.js": {
+      "includeFiles": "server/node_modules/@sglkc/kuromoji/dict/*.dat.gz"
+    }
+  },
   "rewrites": [
     {
       "source": "/api/:path*",
