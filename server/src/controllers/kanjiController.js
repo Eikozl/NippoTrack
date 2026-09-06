@@ -13,7 +13,6 @@ const {
 } = require('../validation');
 const { fetchEntityById, rollbackAndRelease } = require('./helpers');
 const { executePaginatedList } = require('./listHelpers');
-const { createReviewItem } = require('./reviewController');
 const { findKanjiReferenceId, getKanjiReferenceById, lookupKanjiReference: lookupReference, searchKanjiReferences } = require('../services/kanjiReference');
 const { findUserKanjiByCharacter } = require('../services/kanjiLearning');
 const { getKanjiEncounterSummary } = require('../services/kanjiEncounters');
@@ -276,7 +275,6 @@ async function createKanji(req, res) {
       'INSERT INTO kanji (character_kanji, meaning, onyomi, kunyomi, jlpt_level, status, notes, user_id, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [values.character, values.meaning, values.onyomi, values.kunyomi, values.jlptLevel, values.status, values.notes, req.user.id, referenceId]
     );
-    await createReviewItem(connection, 'id_kanji', result.insertId);
     await connection.commit();
     connection.release();
     connection = null;

@@ -13,7 +13,6 @@ const {
 } = require('../validation');
 const { fetchEntityById } = require('./helpers');
 const { executePaginatedList } = require('./listHelpers');
-const { createReviewItem } = require('./reviewController');
 
 async function listGrammar(req, res) {
   try {
@@ -164,7 +163,6 @@ async function createGrammar(req, res) {
       'INSERT INTO grammar_points (grammar_point, meaning, structure, example, jlpt_level, status, notes, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [values.grammarPoint, values.meaning, values.structure, values.example, values.jlptLevel, values.status, values.notes, req.user.id]
     );
-    await createReviewItem(pool, 'id_grammar', result.insertId);
     return res.status(201).json(await fetchEntityById('grammar', result.insertId, req.user.id));
   } catch (error) {
     return sendRouteError(res, error, {

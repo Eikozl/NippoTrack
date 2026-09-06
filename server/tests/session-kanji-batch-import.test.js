@@ -132,8 +132,8 @@ test('Phase 7: batch of several valid missing kanji all import (201 each)', asyn
     const inserts = stub.seen.filter(({ sql }) => /^INSERT INTO kanji /i.test(sql));
     assert.equal(inserts.length, 3);
     for (const insert of inserts) assert.deepEqual(insert.params[7], TEST_USER);
-    // Bounded writes: one review item per kanji, no session/encounter writes.
-    assert.equal(stub.seen.filter(({ sql }) => /INSERT INTO review_items/i.test(sql)).length, 3);
+    // R-B cutover: no auto-enrollment — zero review_items writes, no session/encounter writes.
+    assert.equal(stub.seen.filter(({ sql }) => /INSERT INTO review_items/i.test(sql)).length, 0);
     assert.equal(stub.seen.filter(({ sql }) => /kanji_encounters|session_writings/i.test(sql)).length, 0);
   } finally {
     await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));

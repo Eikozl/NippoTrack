@@ -13,7 +13,6 @@ const {
 } = require('../validation');
 const { fetchEntityById, rollbackAndRelease } = require('./helpers');
 const { executePaginatedList } = require('./listHelpers');
-const { createReviewItem } = require('./reviewController');
 const { extractUniqueKanji, syncVocabularyKanjiLinks } = require('../services/kanjiVocabularyLinks');
 const { buildFullVocabularyReadingContext } = require('../services/vocabularyReading');
 const { ENCOUNTER_SOURCE_TYPES, recordKanjiEncounters } = require('../services/kanjiEncounters');
@@ -215,7 +214,6 @@ async function createVocabulary(req, res) {
     if (exampleSentence) {
       await connection.execute('INSERT INTO usage_examples (id_vocabulary, sentence, translation, notes) VALUES (?, ?, ?, ?)', [result.insertId, exampleSentence, exampleTranslation, exampleNotes]);
     }
-    await createReviewItem(connection, 'id_vocabulary', result.insertId);
     await connection.commit();
     connection.release();
     connection = null;

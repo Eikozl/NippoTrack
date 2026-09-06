@@ -83,7 +83,7 @@ test('syncVocabularyKanjiLinks is set-based, idempotent, and scoped to one user'
   assert.equal(statements.flatMap((statement) => statement.params).includes('user-b'), false);
 });
 
-test('POST /api/vocabulary creates review and derived kanji links in one transaction', async () => {
+test('POST /api/vocabulary creates derived kanji links without review_items writes in one transaction (R-B)', async () => {
   const statements = [];
   let committed = false;
   let released = false;
@@ -117,7 +117,7 @@ test('POST /api/vocabulary creates review and derived kanji links in one transac
       assert.equal(statements.filter(({ sql }) => /^INSERT INTO kanji_vocabulary/i.test(sql)).length, 1);
       const linkInsert = statements.find(({ sql }) => /^INSERT INTO kanji_vocabulary/i.test(sql));
       assert.deepEqual(linkInsert.params, [51, 51, '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '食', '物']);
-      assert.equal(statements.some(({ sql }) => /INSERT INTO review_items/i.test(sql)), true);
+      assert.equal(statements.some(({ sql }) => /INSERT INTO review_items/i.test(sql)), false, 'R-B: zero review_items writes on vocabulary create');
     } finally {
       await stopServer(server);
     }
