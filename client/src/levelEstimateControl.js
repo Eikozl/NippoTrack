@@ -19,10 +19,15 @@
 //   shared `element` helper from ui.js.
 // - Desktop / mobile headers each get one morph (only one header is ever
 //   visible — same precedent as the theme toggles); at most one is ever
-//   open. The morph is absolutely anchored inside its fixed-size host, so
-//   expansion never pushes the theme/account buttons and always originates
-//   from the exact pill location, growing leftward/downward within the
-//   viewport.
+//   open. On desktop the morph is absolutely anchored inside its fixed-size
+//   host, so expansion never pushes the theme/account buttons and always
+//   originates from the exact pill location, growing leftward/downward.
+// - Narrow viewports use a lightweight FLIP morph instead: the shell is
+//   pinned over the collapsed trigger rect, then inline geometry animates to
+//   a computed viewport sheet while .is-open transitions the visual styles;
+//   close reverses the same rects in the same fixed coordinate space and
+//   restores normal positioning only on the shell transitionend. The sheet
+//   covers neighboring header controls without reflowing them.
 // - Detail content reuses the CACHED model: opening never fetches. Refresh
 //   happens on initial load and on `jlt-review-complete` only. Analyzer
 //   analysis and unreviewed imports cannot change the estimate, so nothing
@@ -34,6 +39,21 @@
 import { levelEstimateModel } from './levelEstimate.js';
 
 export const LEVEL_ESTIMATE_MORPH_CLASS = 'level-estimate-morph';
+
+// Narrow-viewport FLIP geometry: the expanded sheet insets. The collapsed
+// trigger rect is the source of truth for the animation origin.
+const FLIP_MEDIA = '(max-width: 640px)';
+const FLIP_INSET = 12;
+
+// computeExpandedRect(trigger, viewport) -> viewport-safe expanded rect.
+// Pure and unit-testable: full usable width with safe insets, top at the
+// trigger origin, bottom inset preserved.
+export function computeExpandedRect(trigger, viewport) {
+  const width = Math.max(0, viewport.width - FLIP_INSET * 2);
+  const top = Math.max(0, Math.min(trigger.top, viewport.height - FLIP_INSET - 1));
+  const height = Math.max(0, viewport.height - top - FLIP_INSET);
+  return { top, left: FLIP_INSET, width, height };
+}
 
 export function levelControlLabel(model) {
   if (!model) return 'JLT estimated study level';
@@ -98,6 +118,59 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
     return Boolean(win) && typeof win.matchMedia === 'function' && win.matchMedia('(prefers-reduced-motion: reduce)').matches;
   }
 
+  function viewportSize() {
+    const width = Number(win && win.innerWidth) || 0;
+    const height = Number(win && win.innerHeight) || 0;
+    return { width, height };
+  }
+
+  // FLIP morph is used only where the trigger-anchored popover cannot fit.
+  // Everywhere else (desktop, reduced motion, unknown environment) the
+  // legacy class-driven morph runs unchanged.
+  function useFlipMorph() {
+    if (prefersReducedMotion()) return false;
+    if (!win || typeof win.matchMedia !== 'function') return false;
+    try {
+      return Boolean(win.matchMedia(FLIP_MEDIA).matches);
+    } catch {
+      return false;
+    }
+  }
+
+  function measureTrigger(parts) {
+    const node = parts && parts.face;
+    if (node && typeof node.getBoundingClientRect === 'function') {
+      const rect = node.getBoundingClientRect();
+      if (rect && Number.isFinite(rect.width) && Number.isFinite(rect.height) && (rect.width > 0 || rect.height > 0)) {
+        return { top: rect.top || 0, left: rect.left || 0, width: rect.width || 0, height: rect.height || 0 };
+      }
+    }
+    return null;
+  }
+
+  function applyInlineGeometry(morph, rect) {
+    if (!morph || !morph.style) return;
+    morph.style.position = 'fixed';
+    morph.style.top = `${rect.top}px`;
+    morph.style.left = `${rect.left}px`;
+    morph.style.width = `${rect.width}px`;
+    morph.style.height = `${rect.height}px`;
+    morph.style.maxHeight = 'none';
+    morph.style.margin = '0';
+  }
+
+  function clearInlineGeometry(morph) {
+    if (!morph || !morph.style) return;
+    for (const key of ['position', 'top', 'left', 'width', 'height', 'maxHeight', 'margin']) morph.style[key] = '';
+  }
+
+  function teardownFlip(parts) {
+    if (!parts) return;
+    clearInlineGeometry(parts.morph);
+    parts.morph.classList.remove('is-flip');
+    parts.morph.classList.remove('is-closing');
+  }
+
   // Closing lifecycle: removing .is-open reverts the shell geometry, but on
   // mobile it also drops the viewport-fixed positioning instantly — the
   // still-expanded surface used to snap back into the header and collapse
@@ -111,20 +184,20 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
     if (!closing) return;
     state.closing = null;
     closing.morph.removeEventListener('transitionend', closing.onTransitionEnd);
-    closing.morph.classList.remove('is-closing');
+    if (typeof closing.done === 'function') closing.done();
   }
 
-  function onClosingTransitionEnd(event) {
-    const closing = state.closing;
+  function onClosingTransitionEnd(closing, event) {
     if (!closing || !event || event.target !== closing.morph) return;
-    if (event.propertyName !== 'width' && event.propertyName !== 'grid-template-rows') return;
+    const name = event.propertyName;
+    if (name !== 'width' && name !== 'height' && name !== 'grid-template-rows') return;
     finishClosing();
   }
 
-  function watchClosing(morph) {
+  function watchClosing(morph, done) {
     finishClosing();
-    const closing = { morph, onTransitionEnd: null };
-    closing.onTransitionEnd = (event) => onClosingTransitionEnd(event);
+    const closing = { morph, done, onTransitionEnd: null };
+    closing.onTransitionEnd = (event) => onClosingTransitionEnd(closing, event);
     morph.addEventListener('transitionend', closing.onTransitionEnd);
     state.closing = closing;
   }
@@ -169,15 +242,41 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
   }
 
   function open(host) {
-    if (!state.model || !state.partsByHost.has(host)) return;
     finishClosing();
-    if (state.openHost && state.openHost !== host) setOpen(state.openHost, false);
+    if (!state.model || !state.partsByHost.has(host)) return;
+    if (state.openHost && state.openHost !== host) {
+      const previous = state.partsByHost.get(state.openHost);
+      setOpen(state.openHost, false);
+      teardownFlip(previous);
+    }
     state.openHost = host;
     renderOpenContent();
-    setOpen(host, true);
+    const parts = state.partsByHost.get(host);
+    if (parts && useFlipMorph()) openFlip(host, parts);
+    else setOpen(host, true);
     doc.addEventListener('click', onDocumentClick);
     doc.addEventListener('keydown', onDocumentKeydown);
     syncFaces();
+  }
+
+  // Narrow-viewport FLIP open: pin the shell over the collapsed trigger
+  // rect, commit that frame, then animate inline geometry to the computed
+  // viewport sheet while .is-open transitions the visual styles. The shell
+  // covers neighboring header controls (higher stacking, no reflow) and
+  // owns interaction in its region until it closes.
+  function openFlip(host, parts) {
+    const viewport = viewportSize();
+    const trigger = measureTrigger(parts);
+    if (!viewport.width || !viewport.height || !trigger) {
+      setOpen(host, true);
+      return;
+    }
+    const expanded = computeExpandedRect(trigger, viewport);
+    parts.morph.classList.add('is-flip');
+    applyInlineGeometry(parts.morph, trigger);
+    void parts.morph.offsetWidth;
+    parts.morph.classList.add('is-open');
+    applyInlineGeometry(parts.morph, expanded);
   }
 
   function setOpen(host, isOpen) {
@@ -192,19 +291,41 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
     const host = state.openHost;
     const parts = state.partsByHost.get(host);
     state.openHost = null;
-    if (parts && !prefersReducedMotion()) {
-      // Commit the expanded frame first: without this flush the class swap
-      // below collapses in a single recalc and no transition runs.
+    if (parts && parts.morph.classList.contains('is-flip') && !prefersReducedMotion()) {
+      closeFlip(host, parts);
+    } else if (parts && !prefersReducedMotion()) {
+      // Legacy path: commit the expanded frame first (see design notes),
+      // then contract with expanded positioning retained via .is-closing.
       parts.morph.classList.add('is-closing');
       void parts.morph.offsetWidth;
       setOpen(host, false);
-      watchClosing(parts.morph);
+      watchClosing(parts.morph, () => parts.morph.classList.remove('is-closing'));
     } else {
+      // Legacy or reduced-motion path: also drop any stranded FLIP state
+      // (e.g. reduced motion enabled mid-session) before collapsing.
+      if (parts) teardownFlip(parts);
       setOpen(host, false);
     }
     doc.removeEventListener('click', onDocumentClick);
     doc.removeEventListener('keydown', onDocumentKeydown);
     syncFaces();
+  }
+
+  // Narrow-viewport FLIP close: the exact reverse of openFlip. Geometry
+  // animates back to the CURRENT trigger rect in the same fixed coordinate
+  // space; only the geometry transitionend restores normal positioning.
+  function closeFlip(host, parts) {
+    const trigger = measureTrigger(parts);
+    if (!trigger) {
+      teardownFlip(parts);
+      setOpen(host, false);
+      return;
+    }
+    parts.morph.classList.add('is-closing');
+    void parts.morph.offsetWidth;
+    parts.morph.classList.remove('is-open');
+    applyInlineGeometry(parts.morph, trigger);
+    watchClosing(parts.morph, () => teardownFlip(parts));
   }
 
   function toggle(host, event) {
@@ -282,7 +403,12 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
 
   function destroy() {
     finishClosing();
-    close();
+    if (state.openHost) {
+      const parts = state.partsByHost.get(state.openHost);
+      setOpen(state.openHost, false);
+      state.openHost = null;
+      teardownFlip(parts);
+    }
     doc.removeEventListener('click', onDocumentClick);
     doc.removeEventListener('keydown', onDocumentKeydown);
     for (const host of state.hosts) {

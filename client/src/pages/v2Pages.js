@@ -1,5 +1,5 @@
 import { apiRequest, queryString } from '../api';
-import { isValidTargetAmount, TARGET_AMOUNT_ERROR } from '../goalValidation';
+import { attachDigitGuard, isValidTargetAmount, TARGET_AMOUNT_ERROR } from '../goalValidation';
 import { t } from '../i18n';
 import { iconForTitle, iconTile } from '../icons';
 import { confirmDialog, debounce, element, emptyState, errorState, field, formatDate,
@@ -46,7 +46,7 @@ export const CONFIGS = {
     fields: [
       { name: 'title', label: 'Title', required: true, maxLength: 120 },
       { name: 'goal_type', label: 'Measure', required: true, options: [{ value: '', label: 'Choose a measure' }, ...measureOptions] },
-      { name: 'target_value', label: 'Target amount', type: 'text', required: true, maxLength: 3, inputmode: 'numeric', description: 'Whole number from 1 to 999 — minutes for Study Minutes, entries otherwise.' },
+      { name: 'target_value', label: 'Target amount', type: 'text', required: true, maxLength: 3, inputmode: 'numeric', autocomplete: 'off', description: 'Whole number from 1 to 999 — minutes for Study Minutes, entries otherwise.' },
       { name: 'period_type', label: 'Time period', required: true, options: [{ value: '', label: 'Choose a time period' }, ...periodOptions] },
       { name: 'start_date', label: 'Start date', type: 'date', required: true },
       { name: 'due_date', label: 'Due date', type: 'date' },
@@ -187,6 +187,10 @@ export function renderV2Page(container, kind) {
     };
     periodSelect.addEventListener('change', sync);
     sync();
+    const targetInput = fields
+      .map((node) => (node.querySelector ? node.querySelector('input[name="target_value"]') : null))
+      .find(Boolean);
+    if (targetInput) attachDigitGuard(targetInput, { maxDigits: 3 });
   }
 
   async function openLinks(record) {

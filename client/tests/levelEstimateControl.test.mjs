@@ -10,7 +10,8 @@ const {
   createLevelEstimateControl,
   LEVEL_ESTIMATE_MORPH_CLASS,
   levelControlLabel,
-  renderLevelDetail
+  renderLevelDetail,
+  computeExpandedRect
 } = controlModule;
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -36,6 +37,8 @@ class FakeNode {
     this.textContent = '';
     this.attributes = new Map();
     this.dataset = {};
+    this.style = {};
+    this._rect = null;
     this._classes = new Set();
     this._listeners = new Map();
     this.focused = false;
@@ -93,6 +96,10 @@ class FakeNode {
     return true;
   }
   focus() { this.focused = true; }
+  getBoundingClientRect() {
+    const base = this._rect || { top: 8, left: 240, width: 68, height: 40 };
+    return { top: base.top, left: base.left, width: base.width, height: base.height, right: base.left + base.width, bottom: base.top + base.height, x: base.left, y: base.top };
+  }
   contains(node) {
     if (node === this) return true;
     return this.children.some((child) => child.contains(node));
@@ -143,13 +150,19 @@ class FakeDocument extends FakeNode {
 }
 
 class FakeWindow {
-  constructor({ reducedMotion = false } = {}) {
+  constructor({ reducedMotion = false, narrowViewport = false } = {}) {
     this._listeners = new Map();
     this._reducedMotion = reducedMotion;
+    this._narrowViewport = narrowViewport;
+    this.innerWidth = 360;
+    this.innerHeight = 740;
     this.setTimeout = (fn, ms) => setTimeout(fn, ms);
     this.clearTimeout = (id) => clearTimeout(id);
   }
-  matchMedia() { return { matches: this._reducedMotion }; }
+  matchMedia(query) {
+    if (String(query).includes('max-width')) return { matches: Boolean(this._narrowViewport) };
+    return { matches: this._reducedMotion };
+  }
   addEventListener(type, handler) {
     if (!this._listeners.has(type)) this._listeners.set(type, []);
     this._listeners.get(type).push(handler);
@@ -197,9 +210,9 @@ const insufficientPayload = () => ({
   disclaimer: 'This is a JLT study estimate based on reviewed kanji only — not an official JLPT assessment, certification, or proof of passing.'
 });
 
-function setup({ payload = estimatedPayload(), reducedMotion = false } = {}) {
+function setup({ payload = estimatedPayload(), reducedMotion = false, narrowViewport = false } = {}) {
   const doc = new FakeDocument();
-  const win = new FakeWindow({ reducedMotion });
+  const win = new FakeWindow({ reducedMotion, narrowViewport });
   const h = makeH(doc);
   let calls = 0;
   const fetchEstimate = async () => { calls += 1; return typeof payload === 'function' ? payload(calls) : payload; };
@@ -545,5 +558,77 @@ test('Header morph: reduced motion closes instantly with no closing state', asyn
   click(face(desktopWrapper));
   assert.ok(!node.classList.contains('is-open'));
   assert.ok(!node.classList.contains('is-closing'), 'no closing lifecycle under reduced motion');
+  control.destroy();
+});
+
+test('FLIP geometry: expanded rect uses safe insets from the trigger origin', () => {
+  for (const viewport of [{ width: 320, height: 568 }, { width: 360, height: 740 }, { width: 414, height: 896 }]) {
+    const expanded = computeExpandedRect({ top: 8, left: 240, width: 68, height: 40 }, viewport);
+    assert.equal(expanded.top, 8, 'top originates at the trigger');
+    assert.ok(expanded.left >= 12 && expanded.left <= 16, 'safe left inset');
+    assert.ok(expanded.left + expanded.width <= viewport.width - 12, 'safe right inset');
+    assert.equal(expanded.top + expanded.height, viewport.height - 12, 'safe bottom inset');
+  }
+  const clamped = computeExpandedRect({ top: 700, left: 10, width: 68, height: 40 }, { width: 360, height: 740 });
+  assert.ok(clamped.top >= 0 && clamped.top + clamped.height <= 740, 'low trigger stays onscreen');
+  assert.ok(clamped.left >= 0 && clamped.width > 0, 'no negative geometry');
+});
+
+test('FLIP morph: open pins the shell over the trigger then expands inline', async () => {
+  const { control, desktopWrapper, face, morph, click } = setup({ narrowViewport: true });
+  await control.load();
+  click(face(desktopWrapper));
+  const node = morph(desktopWrapper);
+  assert.ok(node.classList.contains('is-open'));
+  assert.ok(node.classList.contains('is-flip'), 'fixed coordinate space for the morph');
+  assert.equal(node.style.position, 'fixed');
+  assert.equal(node.style.top, '8px', 'expansion originates at the trigger top');
+  assert.equal(node.style.left, '12px', 'expands to the safe left inset');
+  assert.equal(node.style.width, '336px', 'uses nearly all viewport width');
+  assert.equal(node.style.maxHeight, 'none', 'JS-driven height is not capped by the class rule');
+  control.destroy();
+});
+
+test('FLIP morph: close contracts to the current trigger rect before teardown', async () => {
+  const { control, desktopWrapper, face, morph, click } = setup({ narrowViewport: true });
+  await control.load();
+  click(face(desktopWrapper));
+  const node = morph(desktopWrapper);
+  click(face(desktopWrapper));
+  assert.ok(!control.isOpen());
+  assert.ok(!node.classList.contains('is-open'));
+  assert.ok(node.classList.contains('is-flip'), 'same coordinate space retained');
+  assert.equal(node.style.left, '240px', 'contracts toward the trigger');
+  assert.equal(node.style.width, '68px', 'no thin intermediate persists');
+  assert.equal(node.style.top, '8px');
+  node.dispatchEvent({ type: 'transitionend', target: node, propertyName: 'height' });
+  assert.ok(!node.classList.contains('is-flip'), 'normal positioning restored after geometry finishes');
+  assert.ok(!node.classList.contains('is-closing'));
+  assert.equal(node.style.width, '', 'inline geometry cleared');
+  control.destroy();
+});
+
+test('FLIP morph: desktop keeps the legacy anchored morph', async () => {
+  const { control, desktopWrapper, face, morph, click } = setup();
+  await control.load();
+  click(face(desktopWrapper));
+  const node = morph(desktopWrapper);
+  assert.ok(node.classList.contains('is-open'));
+  assert.ok(!node.classList.contains('is-flip'), 'no fixed shell on desktop');
+  click(face(desktopWrapper));
+  assert.ok(!node.classList.contains('is-open'));
+  control.destroy();
+});
+
+test('FLIP morph: reduced motion on narrow screens stays on the instant path', async () => {
+  const { control, desktopWrapper, face, morph, click } = setup({ reducedMotion: true, narrowViewport: true });
+  await control.load();
+  click(face(desktopWrapper));
+  const node = morph(desktopWrapper);
+  assert.ok(node.classList.contains('is-open'));
+  assert.ok(!node.classList.contains('is-flip'), 'no FLIP shell under reduced motion');
+  click(face(desktopWrapper));
+  assert.ok(!node.classList.contains('is-open'));
+  assert.ok(!node.classList.contains('is-closing'));
   control.destroy();
 });
