@@ -39,10 +39,12 @@ class FakeNode {
     this.dataset = {};
     this.style = {};
     this._rect = null;
+    this._scrollHeight = 0;
     this._classes = new Set();
     this._listeners = new Map();
     this.focused = false;
   }
+  get scrollHeight() { return this._scrollHeight; }
   get className() { return [...this._classes].join(' '); }
   set className(value) { this._classes = new Set(String(value || '').split(/\s+/).filter(Boolean)); }
   get classList() {
@@ -630,5 +632,76 @@ test('FLIP morph: reduced motion on narrow screens stays on the instant path', a
   click(face(desktopWrapper));
   assert.ok(!node.classList.contains('is-open'));
   assert.ok(!node.classList.contains('is-closing'));
+  control.destroy();
+});
+
+test('Progressive disclosure: summary open targets content height, not viewport height', async () => {
+  const { control, desktopWrapper, face, morph, click } = setup({ narrowViewport: true });
+  await control.load();
+  click(face(desktopWrapper));
+  const node = morph(desktopWrapper);
+  const inner = node.querySelector('.level-estimate-detail-inner');
+  inner._scrollHeight = 300;
+  // The detail container persists across opens (only its children render),
+  // so content height survives a close/open cycle.
+  click(face(desktopWrapper));
+  node.dispatchEvent({ type: 'transitionend', target: node, propertyName: 'width' });
+  click(face(desktopWrapper));
+  const reopened = morph(desktopWrapper);
+  // face 40 + content 300 + fallback padding 30 = 370, far below the 728px
+  // full sheet (740 viewport) — no permanent empty area.
+  assert.equal(reopened.style.height, '370px');
+  assert.ok(Number(reopened.style.height.replace('px', '')) < 740 - 8 - 12, 'compact, not viewport-filling');
+  control.destroy();
+});
+
+test('Progressive disclosure: details toggle expands and contracts the shell', async () => {
+  const { control, desktopWrapper, face, morph, click } = setup({ narrowViewport: true });
+  await control.load();
+  click(face(desktopWrapper));
+  const node = morph(desktopWrapper);
+  const inner = node.querySelector('.level-estimate-detail-inner');
+  const details = inner.querySelector('details');
+  assert.ok(details, 'details element present');
+  inner._scrollHeight = 300;
+  details.dispatchEvent({ type: 'toggle', target: details });
+  const summaryHeight = node.style.height;
+  inner._scrollHeight = 900;
+  details.dispatchEvent({ type: 'toggle', target: details });
+  const expandedHeight = node.style.height;
+  assert.ok(Number(expandedHeight.replace('px', '')) > Number(summaryHeight.replace('px', '')), 'shell grows downward on details open');
+  assert.ok(Number(expandedHeight.replace('px', '')) <= 740 - 8 - 12, 'expanded shell stays viewport bounded');
+  inner._scrollHeight = 300;
+  details.dispatchEvent({ type: 'toggle', target: details });
+  assert.equal(node.style.height, summaryHeight, 'shell contracts back on details close');
+  control.destroy();
+});
+
+test('Progressive disclosure: overflowing details cap the shell instead of the viewport', async () => {
+  const { control, desktopWrapper, face, morph, click } = setup({ narrowViewport: true });
+  await control.load();
+  click(face(desktopWrapper));
+  const node = morph(desktopWrapper);
+  const inner = node.querySelector('.level-estimate-detail-inner');
+  const details = inner.querySelector('details');
+  inner._scrollHeight = 5000;
+  details.dispatchEvent({ type: 'toggle', target: details });
+  assert.equal(node.style.height, `${740 - 8 - 12}px`, 'shell stops at the safe maximum; inner region scrolls');
+  control.destroy();
+});
+
+test('Progressive disclosure: whole close still returns to the trigger rect', async () => {
+  const { control, desktopWrapper, face, morph, click } = setup({ narrowViewport: true });
+  await control.load();
+  click(face(desktopWrapper));
+  const node = morph(desktopWrapper);
+  const inner = node.querySelector('.level-estimate-detail-inner');
+  inner._scrollHeight = 900;
+  inner.querySelector('details').dispatchEvent({ type: 'toggle', target: inner.querySelector('details') });
+  click(face(desktopWrapper));
+  assert.ok(!node.classList.contains('is-open'));
+  assert.equal(node.style.width, '68px', 'contracts to the trigger regardless of details state');
+  node.dispatchEvent({ type: 'transitionend', target: node, propertyName: 'height' });
+  assert.ok(!node.classList.contains('is-flip'), 'normal positioning restored');
   control.destroy();
 });

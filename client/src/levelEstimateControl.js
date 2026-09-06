@@ -169,6 +169,7 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
     clearInlineGeometry(parts.morph);
     parts.morph.classList.remove('is-flip');
     parts.morph.classList.remove('is-closing');
+    delete parts.flipTop;
   }
 
   // Closing lifecycle: removing .is-open reverts the shell geometry, but on
@@ -250,33 +251,84 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
       teardownFlip(previous);
     }
     state.openHost = host;
-    renderOpenContent();
     const parts = state.partsByHost.get(host);
     if (parts && useFlipMorph()) openFlip(host, parts);
-    else setOpen(host, true);
+    else {
+      renderOpenContent();
+      setOpen(host, true);
+    }
     doc.addEventListener('click', onDocumentClick);
     doc.addEventListener('keydown', onDocumentKeydown);
     syncFaces();
   }
 
   // Narrow-viewport FLIP open: pin the shell over the collapsed trigger
-  // rect, commit that frame, then animate inline geometry to the computed
-  // viewport sheet while .is-open transitions the visual styles. The shell
-  // covers neighboring header controls (higher stacking, no reflow) and
-  // owns interaction in its region until it closes.
+  // rect, commit that frame, then animate inline geometry to the SUMMARY
+  // rect (content-measured, not viewport-filling) while .is-open transitions
+  // the visual styles. The shell covers neighboring header controls (higher
+  // stacking, no reflow) and owns interaction in its region until it closes.
   function openFlip(host, parts) {
     const viewport = viewportSize();
     const trigger = measureTrigger(parts);
     if (!viewport.width || !viewport.height || !trigger) {
+      renderOpenContent();
       setOpen(host, true);
       return;
     }
-    const expanded = computeExpandedRect(trigger, viewport);
+    renderOpenContent();
+    wireDetailsToggle(parts);
+    const sheet = computeExpandedRect(trigger, viewport);
+    parts.flipTop = sheet.top;
+    const summaryHeight = measureOpenHeight(parts, viewport, sheet.top) ?? sheet.height;
     parts.morph.classList.add('is-flip');
     applyInlineGeometry(parts.morph, trigger);
     void parts.morph.offsetWidth;
     parts.morph.classList.add('is-open');
-    applyInlineGeometry(parts.morph, expanded);
+    applyInlineGeometry(parts.morph, { ...sheet, height: summaryHeight });
+  }
+
+  // Content-measured open height: face + currently visible detail content +
+  // shell padding, capped at the viewport-safe maximum. Because the fresh
+  // <details> starts closed, this is the compact summary height on open;
+  // after a toggle it is the expanded (or re-compacted) height. Returns
+  // null when layout cannot be measured (caller falls back to full sheet).
+  function measureOpenHeight(parts, viewport, top) {
+    try {
+      const faceHeight = parts.face.getBoundingClientRect().height;
+      const contentHeight = parts.detailInner.scrollHeight;
+      let padding = 30;
+      if (win && typeof win.getComputedStyle === 'function') {
+        const styles = win.getComputedStyle(parts.morph);
+        const paddingTop = parseFloat(styles.paddingTop);
+        const paddingBottom = parseFloat(styles.paddingBottom);
+        if (Number.isFinite(paddingTop) && Number.isFinite(paddingBottom)) padding = paddingTop + paddingBottom;
+      }
+      if (!Number.isFinite(faceHeight) || !Number.isFinite(contentHeight)) return null;
+      const maxHeight = Math.max(0, viewport.height - top - FLIP_INSET);
+      return Math.max(0, Math.min(faceHeight + contentHeight + padding, maxHeight));
+    } catch {
+      return null;
+    }
+  }
+
+  function wireDetailsToggle(parts) {
+    const details = parts.detailInner.querySelector && parts.detailInner.querySelector('details');
+    if (!details || typeof details.addEventListener !== 'function') return;
+    details.addEventListener('toggle', () => onDetailsToggle(parts));
+  }
+
+  // B <-> C: animate the shell block-size to the newly required content
+  // height (downward expansion, upward contraction). Capped at the viewport
+  // maximum — beyond that the shell stops growing and the inner detail
+  // region scrolls instead.
+  function onDetailsToggle(parts) {
+    if (!state.openHost || state.closing) return;
+    if (!parts.morph.classList.contains('is-flip')) return;
+    const viewport = viewportSize();
+    if (!viewport.width || !viewport.height) return;
+    const top = Number.isFinite(parts.flipTop) ? parts.flipTop : 0;
+    const target = measureOpenHeight(parts, viewport, top) ?? Math.max(0, viewport.height - top - FLIP_INSET);
+    parts.morph.style.height = `${target}px`;
   }
 
   function setOpen(host, isOpen) {
