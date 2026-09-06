@@ -160,6 +160,33 @@ class FakeWindow {
     this.innerHeight = 740;
     this.setTimeout = (fn, ms) => setTimeout(fn, ms);
     this.clearTimeout = (id) => clearTimeout(id);
+    // Frame scheduler double for the staged FLIP open: callbacks queue
+    // until the test runs them, so each layout phase is observable.
+    this._rafQueue = [];
+    this._rafId = 0;
+    this._rafRuns = 0;
+  }
+  requestAnimationFrame(callback) {
+    this._rafId += 1;
+    this._rafQueue.push({ id: this._rafId, callback });
+    return this._rafId;
+  }
+  pendingAnimationFrames() { return this._rafQueue.length; }
+  animationFrameRuns() { return this._rafRuns; }
+  runNextFrame() {
+    const next = this._rafQueue.shift();
+    if (!next) return false;
+    this._rafRuns += 1;
+    next.callback();
+    return true;
+  }
+  runAllFrames() {
+    let runs = 0;
+    while (this.runNextFrame()) {
+      runs += 1;
+      if (runs > 10) throw new Error('animation frame storm: staged open reschedules without bound');
+    }
+    return runs;
   }
   matchMedia(query) {
     if (String(query).includes('max-width')) return { matches: Boolean(this._narrowViewport) };
@@ -576,14 +603,19 @@ test('FLIP geometry: expanded rect uses safe insets from the trigger origin', ()
   assert.ok(clamped.left >= 0 && clamped.width > 0, 'no negative geometry');
 });
 
-test('FLIP morph: open pins the shell over the trigger then expands inline', async () => {
-  const { control, desktopWrapper, face, morph, click } = setup({ narrowViewport: true });
+test('FLIP morph: open stages hidden at expanded width, then expands to measured inline geometry', async () => {
+  const { control, desktopWrapper, face, morph, click, win } = setup({ narrowViewport: true });
   await control.load();
   click(face(desktopWrapper));
   const node = morph(desktopWrapper);
-  assert.ok(node.classList.contains('is-open'));
   assert.ok(node.classList.contains('is-flip'), 'fixed coordinate space for the morph');
   assert.equal(node.style.position, 'fixed');
+  assert.equal(node.style.width, '336px', 'staged at the target expanded width before measuring');
+  assert.equal(node.style.visibility, 'hidden', 'no intermediate frame is visible');
+  assert.equal(win.pendingAnimationFrames(), 1, 'measurement deferred to the next frame');
+  win.runNextFrame();
+  assert.ok(node.classList.contains('is-open'));
+  assert.equal(node.style.visibility, '', 'staging invisibility removed for the visible animation');
   assert.equal(node.style.top, '8px', 'expansion originates at the trigger top');
   assert.equal(node.style.left, '12px', 'expands to the safe left inset');
   assert.equal(node.style.width, '336px', 'uses nearly all viewport width');
@@ -592,9 +624,10 @@ test('FLIP morph: open pins the shell over the trigger then expands inline', asy
 });
 
 test('FLIP morph: close contracts to the current trigger rect before teardown', async () => {
-  const { control, desktopWrapper, face, morph, click } = setup({ narrowViewport: true });
+  const { control, desktopWrapper, face, morph, click, win } = setup({ narrowViewport: true });
   await control.load();
   click(face(desktopWrapper));
+  win.runNextFrame();
   const node = morph(desktopWrapper);
   click(face(desktopWrapper));
   assert.ok(!control.isOpen());
@@ -635,30 +668,130 @@ test('FLIP morph: reduced motion on narrow screens stays on the instant path', a
   control.destroy();
 });
 
-test('Progressive disclosure: summary open targets content height, not viewport height', async () => {
-  const { control, desktopWrapper, face, morph, click } = setup({ narrowViewport: true });
+test('Progressive disclosure FIRST OPEN: compact summary height with no full-height sheet', async () => {
+  // Regression test for the first-open bug: measuring the summary at the
+  // collapsed pill width produced an excessive wrapped height that the
+  // viewport cap clamped to a full-height sheet. The open must instead
+  // stage at the target expanded width, defer measurement one frame, and
+  // land on the compact summary rect — the same geometry a details
+  // close produces later.
+  const { control, desktopWrapper, face, morph, click, win } = setup({ narrowViewport: true });
   await control.load();
-  click(face(desktopWrapper));
   const node = morph(desktopWrapper);
   const inner = node.querySelector('.level-estimate-detail-inner');
   inner._scrollHeight = 300;
-  // The detail container persists across opens (only its children render),
-  // so content height survives a close/open cycle.
   click(face(desktopWrapper));
-  node.dispatchEvent({ type: 'transitionend', target: node, propertyName: 'width' });
-  click(face(desktopWrapper));
-  const reopened = morph(desktopWrapper);
+  // Staged, not visibly open: hidden, expanded width, one frame pending.
+  assert.ok(!node.classList.contains('is-closing'));
+  assert.equal(node.style.visibility, 'hidden', 'first visible frame has not run yet');
+  assert.equal(node.style.width, '336px', 'measurement width is the expanded target, not the pill');
+  assert.equal(win.pendingAnimationFrames(), 1, 'measurement deferred until layout settles');
+  win.runNextFrame();
+  // First visible frame: compact summary, never the viewport sheet.
+  assert.ok(node.classList.contains('is-open'));
+  assert.equal(node.style.visibility, '', 'staging invisibility removed');
   // face 40 + content 300 + fallback padding 30 = 370, far below the 728px
   // full sheet (740 viewport) — no permanent empty area.
-  assert.equal(reopened.style.height, '370px');
-  assert.ok(Number(reopened.style.height.replace('px', '')) < 740 - 8 - 12, 'compact, not viewport-filling');
+  assert.equal(node.style.height, '370px');
+  assert.ok(Number(node.style.height.replace('px', '')) < 740 - 8 - 12, 'compact, not viewport-filling');
+  assert.equal(win.pendingAnimationFrames(), 0, 'no further frames once measured');
+  control.destroy();
+});
+
+test('Progressive disclosure FIRST OPEN: unmeasurable layout defers across frames, never fills the viewport', async () => {
+  const { control, desktopWrapper, face, morph, click, win } = setup({ narrowViewport: true });
+  await control.load();
+  const node = morph(desktopWrapper);
+  const inner = node.querySelector('.level-estimate-detail-inner');
+  let reads = 0;
+  Object.defineProperty(inner, 'scrollHeight', {
+    configurable: true,
+    get() { reads += 1; return reads < 2 ? NaN : 300; }
+  });
+  click(face(desktopWrapper));
+  assert.equal(win.pendingAnimationFrames(), 1);
+  win.runNextFrame();
+  // First frame unmeasurable: still hidden, one more bounded frame queued —
+  // no viewport-height substitution.
+  assert.equal(node.style.visibility, 'hidden', 'still no visible frame');
+  assert.ok(!node.classList.contains('is-closing'));
+  assert.notEqual(node.style.height, `${740 - 8 - 12}px`, 'viewport sheet never used as a fallback');
+  assert.equal(win.pendingAnimationFrames(), 1, 'exactly one retry frame scheduled');
+  win.runNextFrame();
+  assert.equal(node.style.height, '370px', 'compact summary once layout is measurable');
+  assert.equal(node.style.visibility, '');
+  assert.equal(win.animationFrameRuns(), 2, 'two layout phases total');
+  control.destroy();
+});
+
+test('Progressive disclosure FIRST OPEN: exhausted measurement uses minimal compact geometry, not the sheet', async () => {
+  const { control, desktopWrapper, face, morph, click, win } = setup({ narrowViewport: true });
+  await control.load();
+  const node = morph(desktopWrapper);
+  const inner = node.querySelector('.level-estimate-detail-inner');
+  Object.defineProperty(inner, 'scrollHeight', { configurable: true, get() { return NaN; } });
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => { warnings.push(args.join(' ')); };
+  try {
+    click(face(desktopWrapper));
+    win.runAllFrames();
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.ok(node.classList.contains('is-open'), 'open still completes');
+  // face 40 + fallback padding 30 = minimal compact summary, capped.
+  assert.equal(node.style.height, '70px');
+  assert.ok(warnings.length === 1, 'exhaustion reports the condition once');
+  // The wrong fallback is gone from the implementation: an unmeasurable
+  // first open must never resolve to the viewport sheet.
+  const source = readSource('src/levelEstimateControl.js');
+  assert.doesNotMatch(source, /\?\?\s*sheet\.height/, 'no viewport-sheet fallback on the open path');
+  control.destroy();
+});
+
+test('Progressive disclosure FIRST OPEN: closing mid-stage cancels without stranding hidden state', async () => {
+  const { control, desktopWrapper, face, morph, click, win } = setup({ narrowViewport: true });
+  await control.load();
+  click(face(desktopWrapper));
+  assert.equal(win.pendingAnimationFrames(), 1);
+  click(face(desktopWrapper));
+  const node = morph(desktopWrapper);
+  assert.ok(!control.isOpen(), 'close wins over the staged open');
+  assert.equal(node.style.visibility, '', 'staging invisibility removed by cancel');
+  win.runNextFrame();
+  assert.ok(!node.classList.contains('is-open'), 'stale measure frame cannot reopen');
+  node.dispatchEvent({ type: 'transitionend', target: node, propertyName: 'height' });
+  assert.ok(!node.classList.contains('is-flip'), 'normal positioning restored');
+  assert.equal(node.style.visibility, '');
+  control.destroy();
+});
+
+test('Progressive disclosure: first-open summary matches the post-details-close summary', async () => {
+  const { control, desktopWrapper, face, morph, click, win } = setup({ narrowViewport: true });
+  await control.load();
+  const node = morph(desktopWrapper);
+  const inner = node.querySelector('.level-estimate-detail-inner');
+  inner._scrollHeight = 300;
+  click(face(desktopWrapper));
+  win.runNextFrame();
+  const firstOpenHeight = node.style.height;
+  assert.equal(firstOpenHeight, '370px');
+  const details = inner.querySelector('details');
+  inner._scrollHeight = 900;
+  details.dispatchEvent({ type: 'toggle', target: details });
+  assert.ok(Number(node.style.height.replace('px', '')) > Number(firstOpenHeight.replace('px', '')), 'details open grows downward');
+  inner._scrollHeight = 300;
+  details.dispatchEvent({ type: 'toggle', target: details });
+  assert.equal(node.style.height, firstOpenHeight, 'details close returns to THE SAME compact summary as first open');
   control.destroy();
 });
 
 test('Progressive disclosure: details toggle expands and contracts the shell', async () => {
-  const { control, desktopWrapper, face, morph, click } = setup({ narrowViewport: true });
+  const { control, desktopWrapper, face, morph, click, win } = setup({ narrowViewport: true });
   await control.load();
   click(face(desktopWrapper));
+  win.runNextFrame();
   const node = morph(desktopWrapper);
   const inner = node.querySelector('.level-estimate-detail-inner');
   const details = inner.querySelector('details');
@@ -678,9 +811,10 @@ test('Progressive disclosure: details toggle expands and contracts the shell', a
 });
 
 test('Progressive disclosure: overflowing details cap the shell instead of the viewport', async () => {
-  const { control, desktopWrapper, face, morph, click } = setup({ narrowViewport: true });
+  const { control, desktopWrapper, face, morph, click, win } = setup({ narrowViewport: true });
   await control.load();
   click(face(desktopWrapper));
+  win.runNextFrame();
   const node = morph(desktopWrapper);
   const inner = node.querySelector('.level-estimate-detail-inner');
   const details = inner.querySelector('details');
@@ -691,9 +825,10 @@ test('Progressive disclosure: overflowing details cap the shell instead of the v
 });
 
 test('Progressive disclosure: whole close still returns to the trigger rect', async () => {
-  const { control, desktopWrapper, face, morph, click } = setup({ narrowViewport: true });
+  const { control, desktopWrapper, face, morph, click, win } = setup({ narrowViewport: true });
   await control.load();
   click(face(desktopWrapper));
+  win.runNextFrame();
   const node = morph(desktopWrapper);
   const inner = node.querySelector('.level-estimate-detail-inner');
   inner._scrollHeight = 900;

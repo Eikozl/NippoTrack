@@ -23,11 +23,12 @@
 //   host, so expansion never pushes the theme/account buttons and always
 //   originates from the exact pill location, growing leftward/downward.
 // - Narrow viewports use a lightweight FLIP morph instead: the shell is
-//   pinned over the collapsed trigger rect, then inline geometry animates to
-//   a computed viewport sheet while .is-open transitions the visual styles;
-//   close reverses the same rects in the same fixed coordinate space and
-//   restores normal positioning only on the shell transitionend. The sheet
-//   covers neighboring header controls without reflowing them.
+//   staged at the target expanded width while hidden, the compact summary
+//   height is measured there after layout settles, and only then does the
+//   visible animation run from the collapsed trigger rect to that measured
+//   summary rect; close reverses the same rects in the same fixed coordinate
+//   space and restores normal positioning only on the shell transitionend.
+//   The sheet covers neighboring header controls without reflowing them.
 // - Detail content reuses the CACHED model: opening never fetches. Refresh
 //   happens on initial load and on `jlt-review-complete` only. Analyzer
 //   analysis and unreviewed imports cannot change the estimate, so nothing
@@ -41,9 +42,21 @@ import { levelEstimateModel } from './levelEstimate.js';
 export const LEVEL_ESTIMATE_MORPH_CLASS = 'level-estimate-morph';
 
 // Narrow-viewport FLIP geometry: the expanded sheet insets. The collapsed
-// trigger rect is the source of truth for the animation origin.
+// trigger rect is the source of truth for the animation origin; the sheet
+// supplies the target expanded width/top and the viewport-safe maximum
+// height (a cap, never an opening target).
 const FLIP_MEDIA = '(max-width: 640px)';
 const FLIP_INSET = 12;
+
+// Bounded pre-measurement frames for the initial open: render, then
+// requestAnimationFrame, then measure. Measurement is deferred while layout
+// reports unmeasurable values — it is NEVER replaced with viewport height.
+const OPEN_MEASURE_MAX_FRAMES = 3;
+
+// Shell vertical padding fallback when computed styles are unavailable
+// (non-browser hosts). Matches the open-state CSS padding closely enough
+// that the measured summary height stays compact.
+const OPEN_MEASURE_FALLBACK_PADDING = 30;
 
 // computeExpandedRect(trigger, viewport) -> viewport-safe expanded rect.
 // Pure and unit-testable: full usable width with safe insets, top at the
@@ -247,6 +260,7 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
     if (!state.model || !state.partsByHost.has(host)) return;
     if (state.openHost && state.openHost !== host) {
       const previous = state.partsByHost.get(state.openHost);
+      cancelOpenMeasure(previous);
       setOpen(state.openHost, false);
       teardownFlip(previous);
     }
@@ -262,11 +276,17 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
     syncFaces();
   }
 
-  // Narrow-viewport FLIP open: pin the shell over the collapsed trigger
-  // rect, commit that frame, then animate inline geometry to the SUMMARY
-  // rect (content-measured, not viewport-filling) while .is-open transitions
-  // the visual styles. The shell covers neighboring header controls (higher
-  // stacking, no reflow) and owns interaction in its region until it closes.
+  // Narrow-viewport FLIP open, two phases. Phase 1 (here, synchronous):
+  // render the open SUMMARY content with details closed, then stage the
+  // shell hidden at the TARGET expanded width — summary height depends on
+  // final text wrapping, so measuring at the collapsed pill width produced
+  // an excessive wrapped height that the viewport cap clamped to a
+  // full-height sheet (the first-open bug). .is-open is applied during
+  // staging so open-state padding/face geometry is what gets measured; the
+  // shell stays invisible (visibility:hidden + pointer-events:none), so no
+  // intermediate frame is ever seen. Phase 2 runs on animation frames
+  // (measureOpenFrame): measure the real compact summary height, commit the
+  // trigger rect while still hidden, then unhide and animate to it.
   function openFlip(host, parts) {
     const viewport = viewportSize();
     const trigger = measureTrigger(parts);
@@ -279,24 +299,93 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
     wireDetailsToggle(parts);
     const sheet = computeExpandedRect(trigger, viewport);
     parts.flipTop = sheet.top;
-    const summaryHeight = measureOpenHeight(parts, viewport, sheet.top) ?? sheet.height;
+    parts.measureToken = (parts.measureToken || 0) + 1;
+    parts.measuring = true;
+    const token = parts.measureToken;
     parts.morph.classList.add('is-flip');
+    parts.morph.classList.add('is-open');
+    applyInlineGeometry(parts.morph, { top: sheet.top, left: sheet.left, width: sheet.width, height: trigger.height });
+    parts.morph.style.visibility = 'hidden';
+    parts.morph.style.pointerEvents = 'none';
+    requestMeasureFrame(() => measureOpenFrame(host, parts, sheet, trigger, token, 0));
+  }
+
+  function requestMeasureFrame(callback) {
+    if (win && typeof win.requestAnimationFrame === 'function') {
+      win.requestAnimationFrame(callback);
+      return;
+    }
+    // Non-browser host without a frame scheduler: the shell is already
+    // staged at the expanded width, so measure synchronously.
+    callback();
+  }
+
+  // Phase 2 of the FLIP open. Defers while layout is unmeasurable (bounded
+  // retries); a measurement failure means "wait one more frame", never
+  // "fill the viewport". Past the bound, the minimal compact geometry
+  // (face + padding) is used and the condition is reported — still never
+  // the viewport sheet.
+  function measureOpenFrame(host, parts, sheet, trigger, token, attempt) {
+    if (!parts.measuring || parts.measureToken !== token) return;
+    if (state.openHost !== host || state.closing) { cancelOpenMeasure(parts); return; }
+    const viewport = viewportSize();
+    if (!viewport.width || !viewport.height) { cancelOpenMeasure(parts); finishStagedOpen(parts, sheet, trigger, minimalSummaryHeight(parts, viewport, sheet.top)); return; }
+    const height = measureOpenHeight(parts, viewport, sheet.top);
+    if (height == null && attempt + 1 < OPEN_MEASURE_MAX_FRAMES) {
+      requestMeasureFrame(() => measureOpenFrame(host, parts, sheet, trigger, token, attempt + 1));
+      return;
+    }
+    let summaryHeight = height;
+    if (summaryHeight == null) {
+      summaryHeight = minimalSummaryHeight(parts, viewport, sheet.top);
+      if (typeof console !== 'undefined' && console && typeof console.warn === 'function') {
+        console.warn('[level-estimate] summary height unmeasurable after staged layout; using minimal compact geometry');
+      }
+    }
+    finishStagedOpen(parts, sheet, trigger, summaryHeight);
+  }
+
+  // Commits the collapsed trigger rect while still hidden (no visible
+  // artifact), flushes, then unhides and animates to the measured summary
+  // rect. This commit-then-animate step is the FIRST visible frame, so the
+  // open starts compact — identical geometry to a post-details-close
+  // summary, which measures the same content at the same width.
+  function finishStagedOpen(parts, sheet, trigger, summaryHeight) {
+    parts.measuring = false;
     applyInlineGeometry(parts.morph, trigger);
     void parts.morph.offsetWidth;
+    parts.morph.style.visibility = '';
+    parts.morph.style.pointerEvents = '';
     parts.morph.classList.add('is-open');
     applyInlineGeometry(parts.morph, { ...sheet, height: summaryHeight });
   }
 
+  // Cancels a staged (not yet visibly opened) FLIP open: drops the
+  // measurement flag so pending frames abort, invalidates their token, and
+  // removes the staging invisibility. Called from close/open/destroy before
+  // those paths touch FLIP state.
+  function cancelOpenMeasure(parts) {
+    if (!parts || !parts.measuring) return;
+    parts.measuring = false;
+    parts.measureToken = (parts.measureToken || 0) + 1;
+    parts.morph.style.visibility = '';
+    parts.morph.style.pointerEvents = '';
+  }
+
   // Content-measured open height: face + currently visible detail content +
-  // shell padding, capped at the viewport-safe maximum. Because the fresh
-  // <details> starts closed, this is the compact summary height on open;
-  // after a toggle it is the expanded (or re-compacted) height. Returns
-  // null when layout cannot be measured (caller falls back to full sheet).
+  // shell padding, capped at the viewport-safe maximum (a cap, not a
+  // target). Because the fresh <details> starts closed, this is the compact
+  // summary height on open; after a toggle it is the expanded (or
+  // re-compacted) height. Must be called with the shell staged at the
+  // target expanded width — at the collapsed pill width the same content
+  // wraps excessively and the cap clamps it to a full-height sheet.
+  // Returns null when layout cannot be measured yet (caller defers, never
+  // substitutes viewport height).
   function measureOpenHeight(parts, viewport, top) {
     try {
       const faceHeight = parts.face.getBoundingClientRect().height;
       const contentHeight = parts.detailInner.scrollHeight;
-      let padding = 30;
+      let padding = OPEN_MEASURE_FALLBACK_PADDING;
       if (win && typeof win.getComputedStyle === 'function') {
         const styles = win.getComputedStyle(parts.morph);
         const paddingTop = parseFloat(styles.paddingTop);
@@ -309,6 +398,22 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
     } catch {
       return null;
     }
+  }
+
+  // Safest natural-content geometry when staged layout stays unmeasurable:
+  // face plus shell padding (minimal compact height), still capped at the
+  // viewport-safe maximum. Deliberately NOT the viewport sheet — a first
+  // open must never produce a full-height empty panel.
+  function minimalSummaryHeight(parts, viewport, top) {
+    let faceHeight = 0;
+    try {
+      const measured = parts.face.getBoundingClientRect().height;
+      if (Number.isFinite(measured)) faceHeight = Math.max(0, measured);
+    } catch {
+      faceHeight = 0;
+    }
+    const maxHeight = Math.max(0, (viewport && viewport.height || 0) - top - FLIP_INSET);
+    return Math.max(0, Math.min(faceHeight + OPEN_MEASURE_FALLBACK_PADDING, maxHeight));
   }
 
   function wireDetailsToggle(parts) {
@@ -343,6 +448,10 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
     const host = state.openHost;
     const parts = state.partsByHost.get(host);
     state.openHost = null;
+    // A staged-but-not-yet-visible open is cancelled first: pending measure
+    // frames abort and the staging invisibility is removed before the
+    // close path touches FLIP state.
+    cancelOpenMeasure(parts);
     if (parts && parts.morph.classList.contains('is-flip') && !prefersReducedMotion()) {
       closeFlip(host, parts);
     } else if (parts && !prefersReducedMotion()) {
@@ -457,6 +566,7 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
     finishClosing();
     if (state.openHost) {
       const parts = state.partsByHost.get(state.openHost);
+      cancelOpenMeasure(parts);
       setOpen(state.openHost, false);
       state.openHost = null;
       teardownFlip(parts);
