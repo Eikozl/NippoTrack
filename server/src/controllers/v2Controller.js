@@ -36,7 +36,7 @@ function goalValues(body) {
   const periodType = requiredText(body.period_type, 20, 'period_type');
   validateAllowedValues(goalType, GOAL_TYPES, 'goal_type');
   validateAllowedValues(periodType, GOAL_PERIODS, 'period_type');
-  const targetValue = optionalInteger(body.target_value, 'target_value', { min: 1 });
+  const targetValue = optionalInteger(body.target_value, 'target_value', { min: 1, max: 999 });
   const startDate = requiredDate(body.start_date, 'start_date');
   const dueDate = optionalDate(body.due_date, 'due_date');
   const targetJlpt = normalizeText(body.target_jlpt_level, 2, 'target_jlpt_level');
@@ -231,4 +231,4 @@ const contentLinks = linkHandlers('content');
 const noteLinks = linkHandlers('notes');
 const tagLinks = linkHandlers('tags');
 
-module.exports = { listGoals, createGoal, updateGoal, deleteGoal, content, notes, tags, contentLinks, noteLinks, tagLinks };
+module.exports = { listGoals, createGoal, updateGoal, deleteGoal, goalValues, content, notes, tags, contentLinks, noteLinks, tagLinks };
