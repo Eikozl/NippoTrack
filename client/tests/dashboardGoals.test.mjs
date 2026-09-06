@@ -38,10 +38,23 @@ test('preview navigates via existing routing with a restrained view-all', () => 
   assert.ok(!previewBlock.includes("'Edit'") && !previewBlock.includes("'Delete'"), 'no edit/delete controls in preview');
 });
 
+test('preview grid is count-aware: 1/2/3 goals fill the section width', () => {
+  const source = readSource('src/pages/dashboard.js');
+  const previewBlock = source.slice(source.indexOf('function goalsPreview'), source.indexOf('export async function'));
+  assert.ok(previewBlock.includes('items.length > 2'), 'three-goal layout selected by rendered count');
+  assert.ok(previewBlock.includes('items.length > 1'), 'two-goal layout selected by rendered count');
+  assert.ok(previewBlock.includes("'mt-3 grid gap-4'"), 'single goal uses one full-width column');
+  assert.ok(previewBlock.includes("'mt-3 grid gap-4 sm:grid-cols-2'"), 'two goals share two equal columns');
+  assert.ok(previewBlock.includes("'mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-3'"), 'three goals share three equal columns on desktop');
+  assert.ok(!previewBlock.includes('absolute'), 'no absolute positioning');
+  assert.ok(!previewBlock.includes('slice('), 'no re-capping here — the max-3 cap stays at the call site');
+});
+
 test('preview stays compact and responsive', () => {
   const source = readSource('src/pages/dashboard.js');
   assert.ok(source.includes('sm:grid-cols-2 xl:grid-cols-3'), 'stacks on mobile, grid on wider layouts');
   assert.ok(source.includes('break-words'), 'long titles wrap');
+  assert.ok(source.includes('min-w-0'), 'children never force overflow');
 });
 
 test('existing dashboard content still renders', () => {

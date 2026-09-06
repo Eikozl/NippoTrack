@@ -39,12 +39,21 @@ function recentSessions(items) {
 function goalsPreview(items, showAll) {
   // Preview only: title + canonical progress lines, no forms or edit
   // controls. Each card navigates to the Goals page via existing routing.
+  // Count-aware grid: the rendered card count selects the column layout so
+  // one goal uses the full section width instead of a narrow left column.
+  // Mobile is always one column; tablet adds a second column by width;
+  // desktop matches the column count to the rendered cards.
+  const gridClass = items.length > 2
+    ? 'mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-3'
+    : items.length > 1
+      ? 'mt-3 grid gap-4 sm:grid-cols-2'
+      : 'mt-3 grid gap-4';
   return element('section', { className: 'mt-5' }, [
     element('div', { className: 'flex items-baseline justify-between gap-3' }, [
       element('h2', { className: 'font-semibold text-ink', text: 'Active goals' }),
       ...(showAll ? [element('a', { className: 'text-sm font-semibold text-vermilion hover:underline', text: 'View all goals', attrs: { href: '#goals' } })] : [])
     ]),
-    element('div', { className: 'mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-3' }, items.map((item) => {
+    element('div', { className: gridClass }, items.map((item) => {
       const [, progressLine, detailLine] = CONFIGS.goals.card(item);
       return element('a', { className: 'surface metric-link block min-w-0 p-4', attrs: { href: '#goals', 'aria-label': `${item.title}: ${progressLine} — open goals` } }, [
         element('p', { className: 'break-words font-semibold text-ink', text: item.title }),
