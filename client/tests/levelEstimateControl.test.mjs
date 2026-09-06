@@ -477,3 +477,73 @@ test('Sessions page: dedicated Add Session flow remains fully functional', () =>
   assert.match(source, /text: 'Add session'/);
   assert.match(source, /addButton\.addEventListener\('click', \(\) => openSessionDialog\(\)\)/);
 });
+
+test('Header morph: close retains expanded geometry until the shell transition ends', async () => {
+  const { control, desktopWrapper, face, morph, click } = setup();
+  await control.load();
+  click(face(desktopWrapper));
+  const node = morph(desktopWrapper);
+  assert.ok(node.classList.contains('is-open'));
+  click(face(desktopWrapper));
+  assert.ok(!control.isOpen());
+  assert.ok(!node.classList.contains('is-open'), 'expanded class removed synchronously');
+  assert.ok(node.classList.contains('is-closing'), 'expanded positioning retained during contraction');
+  node.dispatchEvent({ type: 'transitionend', target: node, propertyName: 'width' });
+  assert.ok(!node.classList.contains('is-closing'), 'positioning state removed after geometry finishes');
+  control.destroy();
+});
+
+test('Header morph: grid-template-rows end also finishes closing (mobile sheet path)', async () => {
+  const { control, desktopWrapper, face, morph, click } = setup();
+  await control.load();
+  click(face(desktopWrapper));
+  const node = morph(desktopWrapper);
+  click(face(desktopWrapper));
+  assert.ok(node.classList.contains('is-closing'));
+  node.dispatchEvent({ type: 'transitionend', target: node, propertyName: 'grid-template-rows' });
+  assert.ok(!node.classList.contains('is-closing'));
+  control.destroy();
+});
+
+test('Header morph: unrelated transitions do not finish closing early', async () => {
+  const { control, desktopWrapper, face, morph, click } = setup();
+  await control.load();
+  click(face(desktopWrapper));
+  const node = morph(desktopWrapper);
+  click(face(desktopWrapper));
+  const detail = node.querySelector('.level-estimate-detail');
+  node.dispatchEvent({ type: 'transitionend', target: detail, propertyName: 'opacity' });
+  assert.ok(node.classList.contains('is-closing'), 'child opacity transition ignored');
+  node.dispatchEvent({ type: 'transitionend', target: node, propertyName: 'opacity' });
+  assert.ok(node.classList.contains('is-closing'), 'non-geometry property ignored');
+  node.dispatchEvent({ type: 'transitionend', target: node, propertyName: 'width' });
+  assert.ok(!node.classList.contains('is-closing'));
+  control.destroy();
+});
+
+test('Header morph: reopening mid-close cancels the closing lifecycle', async () => {
+  const { control, desktopWrapper, face, morph, click } = setup();
+  await control.load();
+  click(face(desktopWrapper));
+  const node = morph(desktopWrapper);
+  click(face(desktopWrapper));
+  assert.ok(node.classList.contains('is-closing'));
+  click(face(desktopWrapper));
+  assert.ok(node.classList.contains('is-open'), 'reopened');
+  assert.ok(!node.classList.contains('is-closing'), 'closing cancelled');
+  node.dispatchEvent({ type: 'transitionend', target: node, propertyName: 'width' });
+  assert.ok(node.classList.contains('is-open'), 'stale transitionend cannot collapse the reopened surface');
+  assert.ok(!node.classList.contains('is-closing'));
+  control.destroy();
+});
+
+test('Header morph: reduced motion closes instantly with no closing state', async () => {
+  const { control, desktopWrapper, face, morph, click } = setup({ reducedMotion: true });
+  await control.load();
+  click(face(desktopWrapper));
+  const node = morph(desktopWrapper);
+  click(face(desktopWrapper));
+  assert.ok(!node.classList.contains('is-open'));
+  assert.ok(!node.classList.contains('is-closing'), 'no closing lifecycle under reduced motion');
+  control.destroy();
+});

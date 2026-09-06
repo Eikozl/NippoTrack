@@ -228,6 +228,27 @@ async function openAccountDialog() {
     closeDialog();
     confirmSignOut();
   });
+  // Account language section (mobile entry point; desktop has the permanent
+  // header control too). Same setLocale mechanism — switching language only
+  // re-renders content, never touches the session.
+  const accountLocaleButtons = new Map();
+  const accountLocaleRow = element('div', { className: 'flex flex-wrap gap-2' });
+  for (const [value, label] of [['en', 'English'], ['es', 'Spanish']]) {
+    const button = element('button', { className: 'button-secondary', text: label, attrs: { type: 'button', 'aria-pressed': 'false' } });
+    button.addEventListener('click', () => { setLocale(value); syncAccountLocale(); });
+    accountLocaleButtons.set(value, { button, label });
+    accountLocaleRow.appendChild(button);
+  }
+  function syncAccountLocale() {
+    const current = getLocale();
+    for (const [value, { button, label }] of accountLocaleButtons) {
+      const active = value === current;
+      button.className = active ? 'button-primary' : 'button-secondary';
+      button.setAttribute('aria-pressed', String(active));
+      button.textContent = t(label);
+    }
+  }
+  syncAccountLocale();
   closeDialog = openDialog({
     title: 'Your account',
     submitLabel: null,
@@ -237,6 +258,10 @@ async function openAccountDialog() {
       element('div', { className: 'grid gap-1.5' }, [
         element('p', { className: 'text-sm font-semibold text-ink', text: 'Signed in as' }),
         element('p', { className: 'break-all text-sm text-muted', text: email })
+      ]),
+      element('div', { className: 'grid gap-1.5' }, [
+        element('p', { className: 'text-sm font-semibold text-ink', text: 'Language' }),
+        accountLocaleRow
       ]),
       element('div', { className: 'flex flex-col gap-3 sm:flex-row sm:items-center' }, [signOutButton])
     ])]
@@ -260,6 +285,55 @@ const levelEstimateControl = createLevelEstimateControl({
 });
 if (themeToggle?.parentElement) levelEstimateControl.mount(themeToggle.parentElement);
 if (mobileThemeToggle?.parentElement) levelEstimateControl.mount(mobileThemeToggle.parentElement);
+
+// Header language control (desktop header only — it mounts into the desktop
+// controls group, which is hidden below lg, so the compact mobile header
+// gains no permanent button). Same locale mechanism as the auth gate and
+// Settings: setLocale persists to localStorage and dispatches
+// jlt-locale-change; switching language never touches the session.
+const localeWrap = element('span', { className: 'header-locale-wrap' });
+const localeButton = element('button', { className: 'icon-button header-locale-button', text: 'EN', attrs: { type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': t('Language'), title: t('Language') } });
+const localeOptions = [['en', 'English'], ['es', 'Spanish']].map(([value, label]) => {
+  const option = element('button', { className: 'header-locale-option', text: label, attrs: { type: 'button', role: 'menuitemradio', 'aria-checked': 'false', 'data-locale': value } });
+  option.addEventListener('click', () => { setLocale(value); syncLocaleControl(); closeLocaleMenu(); });
+  return option;
+});
+const localeMenu = element('div', { className: 'header-locale-menu', attrs: { role: 'menu', hidden: '' } }, localeOptions);
+localeWrap.append(localeButton, localeMenu);
+function syncLocaleControl() {
+  const current = getLocale();
+  localeButton.textContent = current === 'es' ? 'ES' : 'EN';
+  localeButton.setAttribute('aria-label', t('Language'));
+  localeButton.setAttribute('title', t('Language'));
+  localeOptions.forEach((option) => {
+    const active = option.dataset.locale === current;
+    option.setAttribute('aria-checked', String(active));
+    option.textContent = t(option.dataset.locale === 'en' ? 'English' : 'Spanish');
+  });
+}
+function closeLocaleMenu(refocus = false) {
+  localeMenu.setAttribute('hidden', '');
+  localeButton.setAttribute('aria-expanded', 'false');
+  if (refocus) localeButton.focus();
+}
+localeButton.addEventListener('click', (event) => {
+  event.stopPropagation();
+  if (localeMenu.hasAttribute('hidden')) {
+    localeMenu.removeAttribute('hidden');
+    localeButton.setAttribute('aria-expanded', 'true');
+  } else closeLocaleMenu();
+});
+localeWrap.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !localeMenu.hasAttribute('hidden')) { event.stopPropagation(); closeLocaleMenu(true); }
+});
+document.addEventListener('click', (event) => {
+  if (!localeMenu.hasAttribute('hidden') && !localeWrap.contains(event.target)) closeLocaleMenu();
+});
+// Mount between the estimate control and the theme toggle:
+// [ Estimate ] [ Language ] … [ Theme ] [ User ].
+themeToggle?.before(localeWrap);
+syncLocaleControl();
+window.addEventListener('jlt-locale-change', () => syncLocaleControl());
 window.addEventListener('jlt-review-complete', () => levelEstimateControl.refresh());
 window.addEventListener('jlt-locale-change', () => {
   translateDocument();

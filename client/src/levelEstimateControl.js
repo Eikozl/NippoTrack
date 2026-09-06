@@ -89,9 +89,45 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
     loading: false,
     stale: false,
     openHost: null,
+    closing: null,
     hosts: [],
     partsByHost: new Map()
   };
+
+  function prefersReducedMotion() {
+    return Boolean(win) && typeof win.matchMedia === 'function' && win.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+
+  // Closing lifecycle: removing .is-open reverts the shell geometry, but on
+  // mobile it also drops the viewport-fixed positioning instantly — the
+  // still-expanded surface used to snap back into the header and collapse
+  // there as a tall, narrow pill. close() therefore commits the expanded
+  // geometry first (add .is-closing, flush), then removes .is-open so the
+  // contraction animates in place; .is-closing is removed only when the
+  // shell geometry transition ends. No timers: transitionend drives it, and
+  // any subsequent open/destroy/load finishes it early.
+  function finishClosing() {
+    const closing = state.closing;
+    if (!closing) return;
+    state.closing = null;
+    closing.morph.removeEventListener('transitionend', closing.onTransitionEnd);
+    closing.morph.classList.remove('is-closing');
+  }
+
+  function onClosingTransitionEnd(event) {
+    const closing = state.closing;
+    if (!closing || !event || event.target !== closing.morph) return;
+    if (event.propertyName !== 'width' && event.propertyName !== 'grid-template-rows') return;
+    finishClosing();
+  }
+
+  function watchClosing(morph) {
+    finishClosing();
+    const closing = { morph, onTransitionEnd: null };
+    closing.onTransitionEnd = (event) => onClosingTransitionEnd(event);
+    morph.addEventListener('transitionend', closing.onTransitionEnd);
+    state.closing = closing;
+  }
 
   function syncFaces() {
     for (const [host, parts] of state.partsByHost.entries()) {
@@ -134,6 +170,7 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
 
   function open(host) {
     if (!state.model || !state.partsByHost.has(host)) return;
+    finishClosing();
     if (state.openHost && state.openHost !== host) setOpen(state.openHost, false);
     state.openHost = host;
     renderOpenContent();
@@ -152,8 +189,19 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
 
   function close() {
     if (!state.openHost) return;
-    setOpen(state.openHost, false);
+    const host = state.openHost;
+    const parts = state.partsByHost.get(host);
     state.openHost = null;
+    if (parts && !prefersReducedMotion()) {
+      // Commit the expanded frame first: without this flush the class swap
+      // below collapses in a single recalc and no transition runs.
+      parts.morph.classList.add('is-closing');
+      void parts.morph.offsetWidth;
+      setOpen(host, false);
+      watchClosing(parts.morph);
+    } else {
+      setOpen(host, false);
+    }
     doc.removeEventListener('click', onDocumentClick);
     doc.removeEventListener('keydown', onDocumentKeydown);
     syncFaces();
@@ -233,6 +281,7 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
   }
 
   function destroy() {
+    finishClosing();
     close();
     doc.removeEventListener('click', onDocumentClick);
     doc.removeEventListener('keydown', onDocumentKeydown);

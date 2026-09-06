@@ -109,11 +109,10 @@ test('Goal periods use clearer labels backed by real counting windows', () => {
 
 test('Target Amount enforces whole numbers 1–999 without clamping', () => {
   const source = readSource('src/pages/v2Pages.js');
-  assert.ok(source.includes('TARGET_AMOUNT_ERROR'), 'rejection message constant');
-  assert.ok(source.includes('Enter a whole number from 1 to 999.'), 'user-facing explanation');
-  assert.ok(source.includes('isValidTargetAmount'), 'client-side guard');
-  assert.ok(source.includes('max: 999'), 'native max attribute');
-  assert.ok(source.includes("inputmode: 'numeric'"), 'numeric keyboard hint');
+  assert.ok(source.includes("from '../goalValidation'"), 'client-side guard imported from the tested contract');
+  assert.ok(source.includes('isValidTargetAmount(raw)'), 'submit rejects invalid amounts');
+  const contract = readSource('src/goalValidation.js');
+  assert.ok(contract.includes('Enter a whole number from 1 to 999.'), 'user-facing explanation');
   const ui = readSource('src/ui.js');
   assert.ok(ui.includes('inputmode'), 'field helper passes inputmode through');
 });

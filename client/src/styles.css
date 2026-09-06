@@ -223,6 +223,32 @@
     .level-estimate-morph.is-open { max-height: min(40rem, calc(100dvh - 5.5rem)); }
   }
 }
+/* Closing lifecycle: .is-closing is added while .is-open is still present
+   and removed only when the shell geometry transition ends, so the expanded
+   positioning context survives the whole contraction and close mirrors open.
+   Desktop needs no rule (its absolute anchoring never changes); mobile keeps
+   the viewport sheet. Detail content fades early so no text sits in a
+   narrowing column — this is what removes the tall/narrow artifact. */
+@media (max-width: 640px) {
+  .level-estimate-morph.is-closing {
+    position: fixed;
+    top: 4.5rem;
+    left: 0.75rem;
+    right: 0.75rem;
+    width: auto;
+    max-height: min(40rem, calc(100vh - 5.5rem));
+  }
+}
+@supports (max-height: 100dvh) {
+  @media (max-width: 640px) {
+    .level-estimate-morph.is-closing { max-height: min(40rem, calc(100dvh - 5.5rem)); }
+  }
+}
+.level-estimate-morph.is-closing .level-estimate-detail {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 160ms ease-out, visibility 0s linear 200ms;
+}
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -373,3 +399,11 @@ nav .nav-group-label:first-child { margin-top: 0; }
 /* Reference Kanji Progress explanation: native disclosure, no animation. */
 .jlpt-progress-details { margin-top: 1rem; }
 .jlpt-progress-details > summary { cursor: pointer; font-size: 0.875rem; font-weight: 600; color: var(--jlt-ink); }
+/* Header language control (desktop header only): compact locale button +
+   dropdown menu in the auth-gate visual language. */
+.header-locale-wrap { position: relative; display: inline-flex; flex: none; }
+.header-locale-button { font-size: 0.8rem; font-weight: 700; letter-spacing: 0.04em; }
+.header-locale-menu { position: absolute; top: calc(100% + 0.5rem); right: 0; z-index: 60; display: grid; min-width: 9rem; gap: 0.25rem; padding: 0.4rem; border-radius: 14px; background: var(--jlt-surface); box-shadow: var(--shadow-raised-md); }
+.header-locale-menu[hidden] { display: none; }
+.header-locale-option { padding: 0.55rem 0.7rem; border-radius: 9px; color: var(--jlt-ink); font-size: 0.8rem; text-align: left; }
+.header-locale-option:hover, .header-locale-option[aria-checked="true"] { background: color-mix(in srgb, var(--jlt-primary-soft) 65%, transparent); color: var(--jlt-primary); }

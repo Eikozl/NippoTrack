@@ -1,4 +1,5 @@
 import { apiRequest, queryString } from '../api';
+import { isValidTargetAmount, TARGET_AMOUNT_ERROR } from '../goalValidation';
 import { t } from '../i18n';
 import { iconForTitle, iconTile } from '../icons';
 import { confirmDialog, debounce, element, emptyState, errorState, field, formatDate,
@@ -28,13 +29,8 @@ const PERIOD_HELPERS = {
   cumulative: 'Counts matching activity from the selected start date onward (up to the deadline, if one is set).',
   by_deadline: 'Counts matching activity between the start date and deadline.'
 };
-// Target Amount contract (mirrors the backend): a whole number, 1–999.
-// Never silently clamped — invalid input is rejected with an explanation.
-const TARGET_AMOUNT_ERROR = 'Enter a whole number from 1 to 999.';
-function isValidTargetAmount(raw) {
-  const text = String(raw ?? '').trim();
-  return /^\d{1,3}$/.test(text) && Number(text) >= 1 && Number(text) <= 999;
-}
+// Target Amount contract lives in ../goalValidation (DOM-free and
+// unit-tested): whole numbers 1–999, never silently clamped.
 const measureLabels = Object.fromEntries(measureOptions.map(({ value, label }) => [value, label]));
 const periodLabels = Object.fromEntries(periodOptions.map(({ value, label }) => [value, label]));
 // Stored note categories use compact values; display the human-readable label.
@@ -50,7 +46,7 @@ export const CONFIGS = {
     fields: [
       { name: 'title', label: 'Title', required: true, maxLength: 120 },
       { name: 'goal_type', label: 'Measure', required: true, options: [{ value: '', label: 'Choose a measure' }, ...measureOptions] },
-      { name: 'target_value', label: 'Target amount', type: 'number', required: true, max: 999, inputmode: 'numeric', description: 'Whole number from 1 to 999 — minutes for Study Minutes, entries otherwise.' },
+      { name: 'target_value', label: 'Target amount', type: 'text', required: true, maxLength: 3, inputmode: 'numeric', description: 'Whole number from 1 to 999 — minutes for Study Minutes, entries otherwise.' },
       { name: 'period_type', label: 'Time period', required: true, options: [{ value: '', label: 'Choose a time period' }, ...periodOptions] },
       { name: 'start_date', label: 'Start date', type: 'date', required: true },
       { name: 'due_date', label: 'Due date', type: 'date' },
