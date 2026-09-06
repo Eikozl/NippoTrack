@@ -92,3 +92,12 @@ test('touch targets and focus visibility get a targeted pass', () => {
   assert.ok(css.includes('summary:focus-visible'), 'details summaries show focus');
   assert.ok(css.includes('.metric-link'), 'metric deep links styled');
 });
+
+test('estimate morph gains narrow-screen containment only', () => {
+  const css = readSource('src/styles.css');
+  assert.ok(css.includes('@media (max-width: 480px)'), 'narrow-screen containment rule');
+  assert.ok(css.includes('.level-estimate-morph.is-open'), 'expanded surface constrained');
+  assert.ok(css.includes('position: fixed'), 'trigger-relative placement overridden on narrow screens');
+  assert.ok(css.includes('100dvh - 8rem') || css.includes('100dvh'), 'dvh-aware max height');
+  assert.ok(css.includes('.level-estimate-morph, .level-estimate-morph *, .level-estimate-detail, .level-estimate-detail-inner { transition: none !important; }'), 'reduced motion preserved');
+});

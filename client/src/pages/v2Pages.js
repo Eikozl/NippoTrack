@@ -1,4 +1,5 @@
 import { apiRequest, queryString } from '../api';
+import { t } from '../i18n';
 import { iconForTitle, iconTile } from '../icons';
 import { confirmDialog, debounce, element, emptyState, errorState, field, formatDate,
 loadingState, openDialog, pageHeader, paginationControls, searchableMultiSelect, showToast, withGlobalLoading } from '../ui';
@@ -13,10 +14,27 @@ const measureOptions = [
   { value: 'grammar_count', label: 'New grammar entries' }
 ];
 const periodOptions = [
-  { value: 'weekly', label: 'This week' },
-  { value: 'cumulative', label: 'Since start date' },
-  { value: 'by_deadline', label: 'Until deadline' }
+  { value: 'weekly', label: 'Current week' },
+  { value: 'cumulative', label: 'From start date onward' },
+  { value: 'by_deadline', label: 'From start date to deadline' }
 ];
+// Stored period enum values are unchanged; only display labels were
+// clarified. Helpers mirror the backend counting windows exactly:
+// weekly counts from the start of the current week, cumulative from the
+// start date (up to the deadline when one is set), by_deadline between
+// the start date and the required deadline.
+const PERIOD_HELPERS = {
+  weekly: 'Counts matching activity from the start of the current week.',
+  cumulative: 'Counts matching activity from the selected start date onward (up to the deadline, if one is set).',
+  by_deadline: 'Counts matching activity between the start date and deadline.'
+};
+// Target Amount contract (mirrors the backend): a whole number, 1–999.
+// Never silently clamped — invalid input is rejected with an explanation.
+const TARGET_AMOUNT_ERROR = 'Enter a whole number from 1 to 999.';
+function isValidTargetAmount(raw) {
+  const text = String(raw ?? '').trim();
+  return /^\d{1,3}$/.test(text) && Number(text) >= 1 && Number(text) <= 999;
+}
 const measureLabels = Object.fromEntries(measureOptions.map(({ value, label }) => [value, label]));
 const periodLabels = Object.fromEntries(periodOptions.map(({ value, label }) => [value, label]));
 // Stored note categories use compact values; display the human-readable label.
@@ -32,7 +50,7 @@ export const CONFIGS = {
     fields: [
       { name: 'title', label: 'Title', required: true, maxLength: 120 },
       { name: 'goal_type', label: 'Measure', required: true, options: [{ value: '', label: 'Choose a measure' }, ...measureOptions] },
-      { name: 'target_value', label: 'Target amount', type: 'number', required: true, description: 'Total to reach — minutes for Study Minutes, entries otherwise.' },
+      { name: 'target_value', label: 'Target amount', type: 'number', required: true, max: 999, inputmode: 'numeric', description: 'Whole number from 1 to 999 — minutes for Study Minutes, entries otherwise.' },
       { name: 'period_type', label: 'Time period', required: true, options: [{ value: '', label: 'Choose a time period' }, ...periodOptions] },
       { name: 'start_date', label: 'Start date', type: 'date', required: true },
       { name: 'due_date', label: 'Due date', type: 'date' },
@@ -48,7 +66,9 @@ export const CONFIGS = {
   },
   content: {
     endpoint: '/api/content', id: 'id_content_entry', eyebrow: 'Log', title: 'Content Log', singular: 'content entry', description: 'Record what you watched, read, listened to, or used for study. Sessions record focused study time.', emptyDescription: 'Content entries record the Japanese media or conversations you spend time with, so you can remember what you studied and how it felt.',
-    linkGroups: ['sessions'],
+    // Manual linking controls are hidden from the normal Content Log UX
+    // (Content Log is not merged with Sessions). Backend link endpoints,
+    // relation tables, and stored relationships are fully preserved.
     fields: [
       { name: 'title', label: 'Title', required: true, maxLength: 255 },
       { name: 'content_type', label: 'Type', required: true, options: options(['Anime', 'Manga', 'Book', 'Article', 'YouTube', 'Podcast', 'Game', 'Conversation'], 'Choose a type') },
@@ -66,7 +86,10 @@ export const CONFIGS = {
   },
   notes: {
     endpoint: '/api/notes', id: 'id_note', eyebrow: 'Capture', title: 'Notes', singular: 'note', description: 'Save questions, corrections, resources and free-form study notes.', emptyDescription: 'Notes give you a place to keep explanations, questions, corrections and useful resources outside a single vocabulary or grammar entry.',
-    linkGroups: sharedLinkGroups,
+    // Manual vocabulary/kanji/grammar linking is hidden from the normal
+    // Notes UX; session linking stays. Backend link endpoints, relation
+    // tables, and stored relationships are fully preserved.
+    linkGroups: ['sessions'],
     fields: [
       { name: 'title', label: 'Title', maxLength: 150 },
       { name: 'category', label: 'Category', required: true, options: [{ value: '', label: 'Choose a category' }, { value: 'Grammar', label: 'Grammar' }, { value: 'Vocabulary', label: 'Vocabulary' }, { value: 'JapaneseQuestion', label: 'Japanese question' }, { value: 'Correction', label: 'Correction' }, { value: 'Resource', label: 'Resource' }, { value: 'General', label: 'General' }] },
@@ -139,10 +162,35 @@ export function renderV2Page(container, kind) {
   ]));
 
   function openRecord(record = null) {
-    openDialog({ title: `${record ? 'Edit' : 'Add'} ${config.singular}`, content: formFields(config, record || {}), onSubmit: async (form, close) => {
+    const fields = formFields(config, record || {});
+    // Goals-only helpers: a dynamic period explanation plus hiding the
+    // due-date field for weekly goals (the backend weekly window ignores
+    // due dates). Hidden fields still submit, so stored data is preserved.
+    if (kind === 'goals') attachGoalHelpers(fields);
+    openDialog({ title: `${record ? 'Edit' : 'Add'} ${config.singular}`, content: fields, onSubmit: async (form, close) => {
+      if (kind === 'goals') {
+        const raw = new FormData(form).get('target_value');
+        if (!isValidTargetAmount(raw)) { showToast(TARGET_AMOUNT_ERROR, 'error'); return; }
+      }
       await apiRequest(record ? `${config.endpoint}/${record[config.id]}` : config.endpoint, { method: record ? 'PUT' : 'POST', body: payload(form, config) });
       close(); showToast(`${config.singular} saved.`); await load();
     } });
+  }
+
+  // Dynamic per-period helper + weekly due-date hiding for the goal form.
+  function attachGoalHelpers(fields) {
+    const periodHolder = fields.find((node) => node.querySelector && node.querySelector('select[name="period_type"]'));
+    const dueHolder = fields.find((node) => node.querySelector && node.querySelector('input[name="due_date"]'));
+    if (!periodHolder) return;
+    const periodSelect = periodHolder.querySelector('select[name="period_type"]');
+    const helper = element('span', { className: 'text-xs font-normal leading-5 text-muted', text: PERIOD_HELPERS[periodSelect.value] || '' });
+    periodHolder.appendChild(helper);
+    const sync = () => {
+      helper.textContent = t(PERIOD_HELPERS[periodSelect.value] || '');
+      if (dueHolder) dueHolder.hidden = periodSelect.value === 'weekly';
+    };
+    periodSelect.addEventListener('change', sync);
+    sync();
   }
 
   async function openLinks(record) {
@@ -190,7 +238,7 @@ export function renderV2Page(container, kind) {
     links?.addEventListener('click', () => openLinks(record));
     const del = element('button', { className: 'button-danger', text: 'Delete', attrs: { type: 'button' } }); del.addEventListener('click', () => remove(record));
     return element('article', { className: 'surface flex min-h-44 flex-col p-5' }, [
-      element('div', { className: 'flex items-start justify-between gap-3' }, [element('div', { className: 'flex items-start gap-3' }, [iconTile(iconForTitle(config.title), { className: 'preview-icon shrink-0' }), element('h2', { className: 'text-lg font-semibold text-ink', text: record.title || record.name })]), element('span', { className: 'status-pill', text: meta })]),
+      element('div', { className: 'flex items-start justify-between gap-3' }, [element('div', { className: 'flex min-w-0 items-start gap-3' }, [iconTile(iconForTitle(config.title), { className: 'preview-icon shrink-0' }), element('h2', { className: 'break-words text-lg font-semibold text-ink', text: record.title || record.name })]), element('span', { className: 'status-pill', text: meta })]),
       ...(detail ? [element('p', { className: 'mt-3 line-clamp-3 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: detail })] : []),
       ...(Array.isArray(footer) ? footer.map((line) => element('p', { className: 'mt-1 line-clamp-3 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: line })) : []),
       element('div', { className: 'mt-auto flex items-end justify-start gap-3 pt-5' }, [element('div', { className: 'flex shrink-0 flex-nowrap gap-2' }, [links, del, edit]), ...(Array.isArray(footer) || !footer ? [] : [element('span', { className: footer === 'Complete' ? 'status-pill goal-complete ml-auto' : 'ml-auto text-xs font-semibold text-muted', text: footer })])])

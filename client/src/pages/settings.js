@@ -33,22 +33,22 @@ export async function renderSettings(container) {
   });
   container.replaceChildren(element('section', {}, [
     pageHeader({ eyebrow: 'Preferences', title: 'Settings', description: 'Personal interface preferences stored only in this browser.' }),
-    element('article', { className: 'surface max-w-2xl p-6' }, [
+    element('article', { className: 'surface max-w-5xl p-6' }, [
       element('h2', { className: 'text-lg font-semibold text-ink', text: 'Appearance' }),
       element('p', { className: 'mt-2 text-sm leading-6 text-muted', text: 'Choose a deliberate light or dark neumorphic surface. Your choice is remembered locally.' }),
       element('div', { className: 'mt-5 flex flex-wrap gap-3' }, [light, dark])
     ]),
-    element('article', { className: 'surface mt-5 max-w-2xl p-6' }, [
+    element('article', { className: 'surface mt-5 max-w-5xl p-6' }, [
       element('h2', { className: 'text-lg font-semibold text-ink', text: 'Language' }),
       element('p', { className: 'mt-2 text-sm leading-6 text-muted', text: 'Choose the interface language. Study content, Japanese text, and your own entries are never translated.' }),
       element('div', { className: 'mt-5 flex flex-wrap gap-3' }, [english, spanish])
     ]),
-    element('article', { className: 'surface mt-5 max-w-2xl p-6' }, [
+    element('article', { className: 'surface mt-5 max-w-5xl p-6' }, [
       element('h2', { className: 'text-lg font-semibold text-ink', text: 'Study loop' }),
       element('p', { className: 'mt-2 text-sm leading-6 text-muted', text: 'A simple cycle for building consistent study habits: study, record what you learned, review it later, and measure your progress over time.' }),
       exportButton
     ]),
-    element('article', { className: 'surface mt-5 max-w-2xl p-6' }, [
+    element('article', { className: 'surface mt-5 max-w-5xl p-6' }, [
       element('h2', { className: 'text-lg font-semibold text-ink', text: 'Data sources' }),
       element('p', { className: 'mt-2 text-sm leading-6 text-muted', text: 'JLPT reference data provided in part by OpenJLPT and its upstream sources.' }),
       element('p', { className: 'mt-2 text-sm leading-6 text-muted', text: 'JLPT classifications are community/reference data and are not an official JLPT syllabus.' }),
@@ -62,7 +62,7 @@ export async function renderSettings(container) {
         }
       })
     ]),
-    element('article', { className: 'surface mt-5 max-w-2xl p-6' }, [
+    element('article', { className: 'surface mt-5 max-w-5xl p-6' }, [
       element('h2', { className: 'text-lg font-semibold text-ink', text: 'Keyboard shortcuts' }),
       element('dl', { className: 'mt-4 grid gap-3 text-sm sm:grid-cols-2' }, [
         element('div', {}, [element('dt', { className: 'font-semibold text-ink', text: '/' }), element('dd', { className: 'mt-1 text-muted', text: 'Focus global search' })]),

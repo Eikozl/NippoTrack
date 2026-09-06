@@ -67,3 +67,11 @@ test('drawer trigger exposes expanded state', () => {
   assert.ok(source.includes('id="open-navigation"'), 'drawer trigger present');
   assert.ok(source.includes('aria-expanded="false" aria-controls="sidebar"'), 'trigger reports expanded state for the sidebar');
 });
+
+test('mobile header hides brand text on narrow widths, keeps every control', () => {
+  const source = html();
+  assert.ok(source.includes('hidden text-sm font-semibold text-ink sm:block'), 'brand text hidden below sm, shown above');
+  for (const id of ['open-navigation', 'mobile-search-button', 'mobile-theme-toggle', 'mobile-account-button']) {
+    assert.ok(source.includes(`id="${id}"`), `control ${id} preserved`);
+  }
+});

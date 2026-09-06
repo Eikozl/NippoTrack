@@ -86,8 +86,70 @@ test('Spanish translations cover the new copy', () => {
     'Content Log', 'New vocabulary entries', 'New kanji', 'New grammar entries',
     'Limit counting to JLPT level', 'JLPT tag', 'Self-reported status',
     'Status (self-reported)', 'Japanese question', 'Complete', 'Study', 'Library',
-    'Tools', 'System', 'Skip to main content', 'View detailed analytics in Statistics'
+    'Tools', 'System', 'Skip to main content', 'View detailed analytics in Statistics',
+    'Current week', 'From start date onward', 'From start date to deadline',
+    'How this coverage is calculated',
+    'Reference Kanji coverage only — not official JLPT exam readiness.'
   ]) {
     assert.ok(i18n.includes(`'${key}':`), `es translation for "${key}"`);
   }
+});
+
+test('Goal periods use clearer labels backed by real counting windows', () => {
+  const source = readSource('src/pages/v2Pages.js');
+  assert.ok(source.includes("label: 'Current week'"), 'weekly relabeled');
+  assert.ok(source.includes("label: 'From start date onward'"), 'cumulative relabeled');
+  assert.ok(source.includes("label: 'From start date to deadline'"), 'by_deadline relabeled');
+  assert.ok(!source.includes("label: 'This week'"), 'old weekly label removed from goals');
+  assert.ok(source.includes('Counts matching activity from the start of the current week.'), 'weekly helper');
+  assert.ok(source.includes('Counts matching activity from the selected start date onward'), 'cumulative helper');
+  assert.ok(source.includes('Counts matching activity between the start date and deadline.'), 'deadline helper');
+  assert.ok(source.includes('dueHolder.hidden'), 'due date hidden for weekly goals');
+});
+
+test('Target Amount enforces whole numbers 1–999 without clamping', () => {
+  const source = readSource('src/pages/v2Pages.js');
+  assert.ok(source.includes('TARGET_AMOUNT_ERROR'), 'rejection message constant');
+  assert.ok(source.includes('Enter a whole number from 1 to 999.'), 'user-facing explanation');
+  assert.ok(source.includes('isValidTargetAmount'), 'client-side guard');
+  assert.ok(source.includes('max: 999'), 'native max attribute');
+  assert.ok(source.includes("inputmode: 'numeric'"), 'numeric keyboard hint');
+  const ui = readSource('src/ui.js');
+  assert.ok(ui.includes('inputmode'), 'field helper passes inputmode through');
+});
+
+test('Notes and Content Log hide manual vocabulary/kanji/grammar linking', () => {
+  const source = readSource('src/pages/v2Pages.js');
+  const notesBlock = source.slice(source.indexOf('notes: {'), source.indexOf('tags: {'));
+  assert.ok(notesBlock.includes("linkGroups: ['sessions']"), 'notes keep session linking only');
+  assert.ok(!notesBlock.includes('sharedLinkGroups'), 'notes no longer use the full linking set');
+  const contentBlock = source.slice(source.indexOf('content: {'), source.indexOf('notes: {'));
+  assert.ok(!contentBlock.includes('linkGroups'), 'content log exposes no Links button');
+  const tagsBlock = source.slice(source.indexOf('tags: {'));
+  assert.ok(tagsBlock.includes('linkGroups: sharedLinkGroups'), 'tags backend relations preserved');
+  const server = readSource('../server/src/controllers/v2Controller.js');
+  assert.ok(server.includes('contentLinks') && server.includes('noteLinks'), 'backend link handlers preserved');
+});
+
+test('Statistics collapses the long explanation but keeps the honesty line', () => {
+  const source = readSource('src/pages/statistics.js');
+  assert.ok(source.includes("element('details'"), 'native disclosure used');
+  assert.ok(source.includes('How this coverage is calculated'), 'concise summary label');
+  assert.ok(source.includes('Reference Kanji coverage only — not official JLPT exam readiness.'), 'permanent line stays visible');
+  assert.ok(source.includes('they are not pass/fail certification'), 'grades boundary preserved inside details');
+  const css = readSource('src/styles.css');
+  assert.ok(css.includes('.jlpt-progress-details'), 'details styled for both themes');
+});
+
+test('Settings uses the desktop canvas without stretching edge to edge', () => {
+  const source = readSource('src/pages/settings.js');
+  assert.ok(source.includes('max-w-5xl'), 'cards widen to ~1024px');
+  assert.ok(!source.includes('max-w-2xl'), 'narrow column removed');
+});
+
+test('Analyzer containers shrink instead of overflowing narrow screens', () => {
+  const source = readSource('src/pages/analyzer.js');
+  assert.ok(source.includes('grid min-w-0'), 'result grids allow shrinkage');
+  assert.ok(source.includes('surface min-w-0'), 'cards allow shrinkage');
+  assert.ok(source.includes('break-words'), 'long text wraps inside cards');
 });

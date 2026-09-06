@@ -74,7 +74,7 @@ export function showToast(message, type = 'success') {
   window.setTimeout(() => toast.remove(), 3600);
 }
 
-export function field({ name, label, type = 'text', value = '', required = false, maxLength, options, multiple = false, placeholder = '', description = '' }) {
+export function field({ name, label, type = 'text', value = '', required = false, maxLength, max, inputmode, options, multiple = false, placeholder = '', description = '' }) {
   let control;
 
   if (options) {
@@ -107,7 +107,9 @@ export function field({ name, label, type = 'text', value = '', required = false
         placeholder,
         ...(required ? { required: '' } : {}),
         ...(maxLength ? { maxlength: maxLength } : {}),
-        ...(type === 'number' ? { min: '1', step: '1' } : {})
+        ...(type === 'number' ? { min: '1', step: '1' } : {}),
+        ...(type === 'number' && max !== undefined ? { max: String(max) } : {}),
+        ...(inputmode ? { inputmode } : {})
       }
     });
   }

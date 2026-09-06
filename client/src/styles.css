@@ -201,6 +201,25 @@
 @media (prefers-reduced-motion: reduce) {
   .level-estimate-morph, .level-estimate-morph *, .level-estimate-detail, .level-estimate-detail-inner { transition: none !important; }
 }
+/* Narrow-screen containment only: the expanded surface becomes viewport-
+   fixed with safe insets so it can never clip left/right regardless of the
+   trigger position. Shape, content, internal scroll, animation, and desktop
+   behavior are unchanged. */
+@media (max-width: 480px) {
+  .level-estimate-morph.is-open {
+    position: fixed;
+    top: 4rem;
+    left: 1rem;
+    right: 1rem;
+    width: auto;
+    max-height: min(32rem, calc(100vh - 8rem));
+  }
+}
+@supports (max-height: 100dvh) {
+  @media (max-width: 480px) {
+    .level-estimate-morph.is-open { max-height: min(32rem, calc(100dvh - 8rem)); }
+  }
+}
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -348,3 +367,6 @@ nav .nav-group-label:first-child { margin-top: 0; }
 /* Quiet dashboard deep links: cards keep their shape, gain affordance. */
 .metric-link { text-decoration: none; }
 .metric-link:hover { box-shadow: var(--shadow-raised-lg); }
+/* Reference Kanji Progress explanation: native disclosure, no animation. */
+.jlpt-progress-details { margin-top: 1rem; }
+.jlpt-progress-details > summary { cursor: pointer; font-size: 0.875rem; font-weight: 600; color: var(--jlt-ink); }

@@ -565,11 +565,11 @@ function recordCard(item, config, onView, onEdit, onDelete) {
 
   return element('article', { className: 'surface flex min-h-48 flex-col p-5' }, [
     element('div', { className: 'flex items-start justify-between gap-4' }, [
-      element('div', { className: 'flex items-start gap-3' }, [
+      element('div', { className: 'flex min-w-0 items-start gap-3' }, [
         iconTile(iconForTitle(config.title), { className: 'preview-icon shrink-0' }),
-        element('div', {}, [
-          element('h2', { className: 'text-lg font-semibold text-ink', text: config.primary(item) }),
-          element('p', { className: 'mt-1 text-sm text-muted', text: config.secondary(item) })
+        element('div', { className: 'min-w-0' }, [
+          element('h2', { className: 'break-words text-lg font-semibold text-ink', text: config.primary(item) }),
+          element('p', { className: 'mt-1 break-words text-sm text-muted', text: config.secondary(item) })
         ])
       ]),
       element('span', { className: 'status-pill shrink-0', text: item.status || 'New', attrs: { title: 'Self-reported status' } })

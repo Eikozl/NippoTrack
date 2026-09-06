@@ -49,8 +49,8 @@ export async function renderAnalyzer(container) {
   let activeFilter = 'all';
   let selectedChars = new Set();
 
-  const formCard = element('section', { className: 'surface p-5 sm:p-6' });
-  const resultsSection = element('section', { className: 'mt-6 grid gap-5' });
+  const formCard = element('section', { className: 'surface min-w-0 p-5 sm:p-6' });
+  const resultsSection = element('section', { className: 'mt-6 grid min-w-0 gap-5' });
   container.append(formCard, resultsSection);
 
   const input = element('textarea', {
@@ -120,15 +120,15 @@ export async function renderAnalyzer(container) {
       .join(' · ');
     const distributionCard = element('div', { className: 'surface p-4' }, [
       element('h3', { className: 'text-sm font-semibold text-ink', text: 'Kanji reference distribution' }),
-      element('p', { className: 'mt-1 text-sm text-ink/80', text: distributionLine }),
+      element('p', { className: 'mt-1 break-words text-sm text-ink/80', text: distributionLine }),
       element('p', { className: 'mt-1 text-xs text-muted', text: 'Unique kanji by reference level only — not a text level, not a proficiency estimate.' })
     ]);
 
     const notice = element('p', { className: 'rounded-lg border border-stone bg-paper p-4 text-xs leading-5 text-muted', text: analysis.notice || '' });
 
-    const filterBar = element('div', { className: 'flex flex-wrap gap-2', attrs: { role: 'group', 'aria-label': 'Filter analyzed kanji' } });
-    const grid = element('ul', { className: 'grid gap-3 sm:grid-cols-2 lg:grid-cols-3' });
-    const importBar = element('div', { className: 'surface flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between' });
+    const filterBar = element('div', { className: 'flex min-w-0 flex-wrap gap-2', attrs: { role: 'group', 'aria-label': 'Filter analyzed kanji' } });
+    const grid = element('ul', { className: 'grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3' });
+    const importBar = element('div', { className: 'surface flex min-w-0 flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between' });
 
     const renderGrid = () => {
       const visible = filterAnalyzerEntries(formatted, activeFilter);
@@ -210,8 +210,8 @@ export async function renderAnalyzer(container) {
     ].join(' · ');
     const readings = [entry.referenceOnyomi, entry.referenceKunyomi].filter(Boolean).join(' · ');
     const rows = [header];
-    if (meaning) rows.push(element('p', { className: 'mt-2 text-sm text-ink/80', text: meaning }));
-    if (metaLine) rows.push(element('p', { className: 'mt-1 text-xs text-muted', text: metaLine }));
+    if (meaning) rows.push(element('p', { className: 'mt-2 break-words text-sm text-ink/80', text: meaning }));
+    if (metaLine) rows.push(element('p', { className: 'mt-1 break-words text-xs text-muted', text: metaLine }));
     if (readings) {
       const details = element('details', { className: 'mt-2 text-xs' });
       details.append(
@@ -240,7 +240,7 @@ export async function renderAnalyzer(container) {
         addButton
       ]));
     }
-    return element('li', { className: 'surface p-4' }, rows);
+    return element('li', { className: 'surface min-w-0 p-4' }, rows);
   };
 
   // Phase 7 import semantics: sequential POST /api/kanji (per-item

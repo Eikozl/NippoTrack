@@ -206,14 +206,20 @@ function referenceKanjiProgressPanel(model, targetState = {}) {
       iconTile('distribution', { className: 'panel-icon' }),
       element('h2', { className: 'font-semibold text-ink', text: 'Reference Kanji Progress' })
     ]),
-    element('p', { className: 'mt-1 text-sm text-muted', text: 'Reviewed kanji counted against the shared reference set — not exam readiness.' }),
+    // Permanent honesty line: the essential meaning stays visible next to
+    // the coverage data; the longer explanation collapses below.
+    element('p', { className: 'mt-1 text-sm text-muted', text: 'Reference Kanji coverage only — not official JLPT exam readiness.' }),
     element('div', { className: 'mt-4 grid gap-4' }, rows),
-    element('p', { className: 'mt-4 text-sm text-muted', text: `Reference Kanji coverage through each band — ${model.cumulative.map((entry) => entry.line).join(' · ')}` }),
-    ...(model.unclassifiedReviewed > 0
-      ? [element('p', { className: 'mt-2 text-xs text-muted', text: `${model.unclassifiedReviewed} reviewed kanji have no reference JLPT classification and are excluded from band counts.` })]
-      : []),
-    element('p', { className: 'mt-3 text-xs text-muted', text: model.limitationLines.join(' ') }),
-    element('p', { className: 'mt-1 text-xs text-muted', text: model.disclaimer }),
+    element('details', { className: 'jlpt-progress-details' }, [
+      element('summary', { text: 'How this coverage is calculated' }),
+      element('p', { className: 'mt-3 text-sm text-muted', text: `Reference Kanji coverage through each band — ${model.cumulative.map((entry) => entry.line).join(' · ')}` }),
+      ...(model.unclassifiedReviewed > 0
+        ? [element('p', { className: 'mt-2 text-xs text-muted', text: `${model.unclassifiedReviewed} reviewed kanji have no reference JLPT classification and are excluded from band counts.` })]
+        : []),
+      element('p', { className: 'mt-3 text-xs text-muted', text: model.limitationLines.join(' ') }),
+      element('p', { className: 'mt-1 text-xs text-muted', text: model.disclaimer }),
+      element('p', { className: 'mt-1 text-xs text-muted', text: 'Review grades set scheduling only — they are not pass/fail certification.' })
+    ]),
     targetBlock
   ]);
 }
