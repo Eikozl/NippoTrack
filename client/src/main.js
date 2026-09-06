@@ -267,6 +267,7 @@ window.addEventListener('jlt-locale-change', () => {
     button?.setAttribute('aria-label', t('Manage account'));
     button?.setAttribute('title', t('Manage account'));
   });
+  mobileSearchButton?.setAttribute('aria-label', t(mobileSearchBar?.hidden === false ? 'Close search' : 'Open search'));
   updateThemeControls(document.documentElement.dataset.theme);
   if (appShell.hidden) renderAuthGate(authMessage, authView);
   else navigate(window.location.hash.slice(1) || 'dashboard', { updateHash: false });
@@ -288,15 +289,20 @@ async function loadSidebarStreak({ force = false } = {}) {
     const weekDays = Array.from({ length: 7 }, (_, index) => {
       const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (6 - index));
       const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-      return { label: ['S', 'M', 'T', 'W', 'T', 'F', 'S'][date.getDay()], active: activeDates.has(key) };
+      const active = activeDates.has(key);
+      return {
+        label: ['S', 'M', 'T', 'W', 'T', 'F', 'S'][date.getDay()],
+        active,
+        stateLabel: `${date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}: ${active ? 'active' : 'no study activity'}`
+      };
     });
     sidebarStreak.replaceChildren(
       element('p', { className: 'streak-value text-2xl font-semibold tracking-tight text-ink', text: `${current} ${current === 1 ? 'day' : 'days'}` }),
       element('p', { className: 'mt-1 text-xs text-muted', text: `Current streak · best ${longest} ${longest === 1 ? 'day' : 'days'}` })
     );
-    sidebarStreak.appendChild(element('div', { className: 'streak-week mt-4', attrs: { 'aria-label': 'Study activity for the last seven days' } }, weekDays.map((day) => element('div', { className: 'grid justify-items-center gap-1' }, [
+    sidebarStreak.appendChild(element('div', { className: 'streak-week mt-4', attrs: { 'aria-label': 'Study activity for the last seven days' } }, weekDays.map((day) => element('div', { className: 'grid justify-items-center gap-1', attrs: { 'aria-label': day.stateLabel } }, [
       element('span', { className: `streak-day ${day.active ? 'is-active' : ''}`, text: day.active ? '✓' : '', attrs: { 'aria-hidden': 'true' } }),
-      element('span', { className: 'text-[10px] font-medium text-muted', text: day.label })
+      element('span', { className: 'text-[10px] font-medium text-muted', text: day.label, attrs: { 'aria-hidden': 'true' } })
     ]))));
   } catch {
     sidebarStreak.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Streak unavailable.' }));
@@ -309,48 +315,173 @@ window.addEventListener('jlt-sidebar-activity', (event) => {
   loadSidebarStreak();
 });
 
-function closeSearch() { searchResults.classList.add('hidden'); searchResults.replaceChildren(); searchSequence += 1; searchAbort?.abort(); }
-let searchSequence = 0;
-let searchAbort = null;
-async function globalSearch(query, sequence) {
-  if (!query.trim()) return closeSearch();
-  searchResults.classList.remove('hidden'); searchResults.className = 'absolute inset-x-0 top-[calc(100%+.6rem)] z-30 max-h-96 overflow-y-auto rounded-[18px] p-2 surface';
-  searchResults.textContent = 'Searching…';
-  searchAbort?.abort();
-  const controller = new AbortController();
-  searchAbort = controller;
-  try {
-    const referenceRequest = apiRequest(`/api/kanji/reference?search=${encodeURIComponent(query)}&limit=5`, { signal: controller.signal })
-      .then((data) => data.items)
-      .catch((error) => { if (error?.name === 'AbortError') throw error; return []; });
-    const [vocabulary, kanji, grammar, sessions, notes, references] = await Promise.all([
-      apiRequest(`/api/vocabulary?search=${encodeURIComponent(query)}&limit=5`, { signal: controller.signal }), apiRequest(`/api/kanji?search=${encodeURIComponent(query)}&limit=5`, { signal: controller.signal }), apiRequest(`/api/grammar?search=${encodeURIComponent(query)}&limit=5`, { signal: controller.signal }), apiRequest(`/api/sessions?search=${encodeURIComponent(query)}&limit=5`, { signal: controller.signal }).catch((error) => { if (error?.name === 'AbortError') throw error; return { items: [] }; }), apiRequest(`/api/notes?search=${encodeURIComponent(query)}&limit=5`, { signal: controller.signal }).catch((error) => { if (error?.name === 'AbortError') throw error; return { items: [] }; }), referenceRequest
-    ]);
-    if (sequence !== searchSequence || controller.signal.aborted) return;
-    const groups = [
-      ['Kanji reference', references, null, (x) => `${x.character} · ${x.meanings.join(', ')}`],
-      ['Vocabulary', vocabulary.items, 'vocabulary', (x) => `${x.word} · ${x.meaning}`],
-      ['Kanji', kanji.items, 'kanji', (x) => `${x.character_kanji} · ${x.meaning}`],
-      ['Grammar', grammar.items, 'grammar', (x) => `${x.grammar_point} · ${x.meaning}`],
-      ['Sessions', sessions.items, 'sessions', (x) => `${x.category} · ${x.session_date}`],
-      ['Notes', notes.items, 'notes', (x) => x.title || x.category]
-    ];
-    searchResults.replaceChildren(...groups.filter(([, items]) => items?.length).map(([label, items, page, text]) => element('section', { className: 'p-2' }, [element('p', { className: 'eyebrow', text: label }), ...items.map((item) => { const button = element('button', { className: 'block w-full rounded-xl px-3 py-2 text-left text-sm text-ink hover:bg-paper', text: text(item), attrs: { type: 'button' } }); button.addEventListener('click', () => { closeSearch(); searchInput.value = ''; navigate(page || kanjiReferenceRoute(item.character)); }); return button; })])));
-    if (!searchResults.childNodes.length) searchResults.textContent = 'No matching study records.';
-  } catch (error) { if (error?.name === 'AbortError' || sequence !== searchSequence) return; searchResults.textContent = 'Unable to search right now.'; }
-}
-let searchTimer;
-searchInput?.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => globalSearch(searchInput.value, ++searchSequence), 220); });
+// Global search combobox: one controller per input/results pair (desktop
+// header + mobile bar). Results render as listbox options with ArrowUp /
+// ArrowDown / Enter keyboard support; mouse click keeps working.
+function createSearch(inputEl, resultsEl, { onEscape = null } = {}) {
+  if (!inputEl || !resultsEl) return null;
+  const listId = resultsEl.id || 'search-results';
+  let sequence = 0;
+  let aborter = null;
+  let timer = null;
+  let options = [];
+  let activeIndex = -1;
 
-function closeNavigation() {
+  function setExpanded(open) {
+    inputEl.setAttribute('aria-expanded', String(open));
+  }
+
+  function close(clearQuery = false) {
+    sequence += 1;
+    aborter?.abort();
+    aborter = null;
+    options = [];
+    activeIndex = -1;
+    inputEl.removeAttribute('aria-activedescendant');
+    setExpanded(false);
+    resultsEl.classList.add('hidden');
+    resultsEl.setAttribute('hidden', '');
+    resultsEl.replaceChildren();
+    if (clearQuery) inputEl.value = '';
+  }
+
+  function show() {
+    resultsEl.classList.remove('hidden');
+    resultsEl.removeAttribute('hidden');
+  }
+
+  function setActive(index) {
+    activeIndex = index;
+    const nodes = Array.from(resultsEl.querySelectorAll('[role="option"]'));
+    nodes.forEach((node, position) => {
+      const active = position === index;
+      node.setAttribute('aria-selected', String(active));
+      node.classList.toggle('search-option-active', active);
+    });
+    const current = nodes[index];
+    if (current) {
+      inputEl.setAttribute('aria-activedescendant', current.id);
+      if (typeof current.scrollIntoView === 'function') current.scrollIntoView({ block: 'nearest' });
+    } else {
+      inputEl.removeAttribute('aria-activedescendant');
+    }
+  }
+
+  async function run(query, current) {
+    if (!query.trim()) { close(); return; }
+    show();
+    setExpanded(false);
+    resultsEl.textContent = 'Searching…';
+    aborter?.abort();
+    const controller = new AbortController();
+    aborter = controller;
+    try {
+      const referenceRequest = apiRequest(`/api/kanji/reference?search=${encodeURIComponent(query)}&limit=5`, { signal: controller.signal })
+        .then((data) => data.items)
+        .catch((error) => { if (error?.name === 'AbortError') throw error; return []; });
+      const [vocabulary, kanji, grammar, sessions, notes, references] = await Promise.all([
+        apiRequest(`/api/vocabulary?search=${encodeURIComponent(query)}&limit=5`, { signal: controller.signal }), apiRequest(`/api/kanji?search=${encodeURIComponent(query)}&limit=5`, { signal: controller.signal }), apiRequest(`/api/grammar?search=${encodeURIComponent(query)}&limit=5`, { signal: controller.signal }), apiRequest(`/api/sessions?search=${encodeURIComponent(query)}&limit=5`, { signal: controller.signal }).catch((error) => { if (error?.name === 'AbortError') throw error; return { items: [] }; }), apiRequest(`/api/notes?search=${encodeURIComponent(query)}&limit=5`, { signal: controller.signal }).catch((error) => { if (error?.name === 'AbortError') throw error; return { items: [] }; }), referenceRequest
+      ]);
+      if (current !== sequence || controller.signal.aborted) return;
+      const groups = [
+        ['Kanji reference', references, null, (x) => `${x.character} · ${x.meanings.join(', ')}`],
+        ['Vocabulary', vocabulary.items, 'vocabulary', (x) => `${x.word} · ${x.meaning}`],
+        ['Kanji', kanji.items, 'kanji', (x) => `${x.character_kanji} · ${x.meaning}`],
+        ['Grammar', grammar.items, 'grammar', (x) => `${x.grammar_point} · ${x.meaning}`],
+        ['Sessions', sessions.items, 'sessions', (x) => `${x.category} · ${x.session_date}`],
+        ['Notes', notes.items, 'notes', (x) => x.title || x.category]
+      ];
+      resultsEl.replaceChildren();
+      options = [];
+      let counter = 0;
+      groups.filter(([, items]) => items?.length).forEach(([label, items, page, text]) => {
+        const group = element('div', { className: 'p-2', attrs: { role: 'group', 'aria-label': label } }, [
+          element('p', { className: 'eyebrow', text: label, attrs: { 'aria-hidden': 'true' } })
+        ]);
+        items.forEach((item) => {
+          counter += 1;
+          const id = `${listId}-option-${counter}`;
+          const activate = () => { close(true); navigate(page || kanjiReferenceRoute(item.character)); };
+          const button = element('button', { className: 'search-option block w-full rounded-xl px-3 py-2 text-left text-sm text-ink hover:bg-paper', text: text(item), attrs: { type: 'button', role: 'option', id, 'aria-selected': 'false' } });
+          button.addEventListener('click', activate);
+          options.push({ id, activate });
+          group.appendChild(button);
+        });
+        resultsEl.appendChild(group);
+      });
+      if (!options.length) {
+        resultsEl.textContent = 'No matching study records.';
+        setExpanded(false);
+      } else {
+        setActive(-1);
+        setExpanded(true);
+      }
+    } catch (error) { if (error?.name === 'AbortError' || current !== sequence) return; resultsEl.textContent = 'Unable to search right now.'; }
+  }
+
+  inputEl.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => run(inputEl.value, ++sequence), 220);
+  });
+  inputEl.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowDown' && options.length) { event.preventDefault(); setActive((activeIndex + 1) % options.length); }
+    else if (event.key === 'ArrowUp' && options.length) { event.preventDefault(); setActive((activeIndex - 1 + options.length) % options.length); }
+    else if (event.key === 'Enter' && activeIndex >= 0 && options[activeIndex]) { event.preventDefault(); options[activeIndex].activate(); }
+    else if (event.key === 'Escape') { event.preventDefault(); close(); if (typeof onEscape === 'function') onEscape(); }
+  });
+  return { close };
+}
+
+const desktopSearch = createSearch(searchInput, searchResults);
+const mobileSearchInput = document.getElementById('mobile-search');
+const mobileSearchResults = document.getElementById('mobile-search-results');
+const mobileSearchBar = document.getElementById('mobile-search-bar');
+const mobileSearchButton = document.getElementById('mobile-search-button');
+function openMobileSearch() {
+  if (!mobileSearchBar) return;
+  mobileSearchBar.hidden = false;
+  mobileSearchButton?.setAttribute('aria-expanded', 'true');
+  mobileSearchButton?.setAttribute('aria-label', t('Close search'));
+  mobileSearchInput?.focus();
+}
+function closeMobileSearch({ refocus = false } = {}) {
+  mobileSearch?.close();
+  if (mobileSearchBar) mobileSearchBar.hidden = true;
+  mobileSearchButton?.setAttribute('aria-expanded', 'false');
+  mobileSearchButton?.setAttribute('aria-label', t('Open search'));
+  if (refocus) mobileSearchButton?.focus();
+}
+const mobileSearch = createSearch(mobileSearchInput, mobileSearchResults, { onEscape: () => closeMobileSearch({ refocus: true }) });
+mobileSearchButton?.addEventListener('click', () => {
+  if (mobileSearchBar?.hidden) openMobileSearch();
+  else closeMobileSearch();
+});
+
+function closeNavigation({ refocus = false } = {}) {
   sidebar.classList.add('-translate-x-full');
   backdrop.classList.add('hidden');
+  syncDrawerState();
+  if (refocus) openNavigationButton?.focus();
 }
 
 function openNavigation() {
   sidebar.classList.remove('-translate-x-full');
   backdrop.classList.remove('hidden');
+  syncDrawerState();
 }
+
+// Mobile drawer focus hygiene: the trigger reports expanded state, Escape
+// closes with focus return, and the off-canvas sidebar is inert on mobile
+// widths only (it is permanently visible on desktop).
+const openNavigationButton = document.getElementById('open-navigation');
+const drawerMedia = window.matchMedia('(max-width: 1023px)');
+function syncDrawerState() {
+  const open = !sidebar.classList.contains('-translate-x-full');
+  openNavigationButton?.setAttribute('aria-expanded', String(open));
+  sidebar.inert = drawerMedia.matches && !open;
+}
+if (typeof drawerMedia.addEventListener === 'function') drawerMedia.addEventListener('change', syncDrawerState);
+syncDrawerState();
 
 async function navigate(pageName, { updateHash = true } = {}) {
   const referenceCharacter = parseKanjiReferenceRoute(pageName);
@@ -368,7 +499,7 @@ async function navigate(pageName, { updateHash = true } = {}) {
   else await pages[page](content);
   loadSidebarStreak();
   content.focus({ preventScroll: true });
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  window.scrollTo({ top: 0, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
 }
 
 navigationButtons.forEach((button) => button.addEventListener('click', () => navigate(button.dataset.page)));
@@ -376,7 +507,7 @@ document.getElementById('open-navigation').addEventListener('click', openNavigat
 document.getElementById('close-navigation').addEventListener('click', closeNavigation);
 backdrop.addEventListener('click', closeNavigation);
 window.addEventListener('hashchange', () => navigate(window.location.hash.slice(1), { updateHash: false }));
-window.addEventListener('keydown', (event) => { const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName); if (event.key === 'Escape') closeSearch(); if (event.key === '/' && !typing) { event.preventDefault(); searchInput?.focus(); } if (!typing && event.key.toLowerCase() === 'g') { window.__jltGo = true; window.setTimeout(() => { window.__jltGo = false; }, 700); } else if (!typing && window.__jltGo && event.key.toLowerCase() === 'd') { window.__jltGo = false; navigate('dashboard'); } else if (!typing && window.__jltGo && event.key.toLowerCase() === 'r') { window.__jltGo = false; navigate('review'); } });
+window.addEventListener('keydown', (event) => { const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName); if (event.key === 'Escape') { desktopSearch?.close(); if (drawerMedia.matches && !sidebar.classList.contains('-translate-x-full')) closeNavigation({ refocus: true }); } if (event.key === '/' && !typing) { event.preventDefault(); searchInput?.focus(); } if (!typing && event.key.toLowerCase() === 'g') { window.__jltGo = true; window.setTimeout(() => { window.__jltGo = false; }, 700); } else if (!typing && window.__jltGo && event.key.toLowerCase() === 'd') { window.__jltGo = false; navigate('dashboard'); } else if (!typing && window.__jltGo && event.key.toLowerCase() === 'r') { window.__jltGo = false; navigate('review'); } });
 document.getElementById('export-data')?.addEventListener('click', async (event) => {
   const button = event.currentTarget;
   button.disabled = true;

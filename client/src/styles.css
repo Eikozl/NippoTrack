@@ -50,7 +50,7 @@
   html { background: var(--jlt-bg); }
   body { @apply m-0 bg-canvas font-sans text-ink antialiased; background: radial-gradient(circle at 50% -15%, #FFF8EC 0, var(--jlt-bg) 47rem); }
   button, input, select, textarea { font: inherit; }
-  button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a[href]:focus-visible, summary:focus-visible {
     @apply outline-2 outline-offset-2 outline-vermilion;
   }
 }
@@ -332,3 +332,19 @@
 }
 :root[data-theme="dark"] body { background:var(--jlt-bg); }
 @media (max-width: 1023px) { .surface { border-radius: 18px; } }
+
+/* UX cleanup pass — product IA + accessibility baseline. Additive only:
+   no existing rule above is altered, and the Almond/Mocha tokens are reused
+   so both themes follow automatically. */
+.skip-link { position: fixed; top: -100px; left: 1rem; z-index: 300; padding: 0.6rem 1rem; border-radius: 12px; background: var(--jlt-surface); color: var(--jlt-ink); font-size: 0.875rem; font-weight: 600; box-shadow: var(--shadow-raised-md); transition: top 160ms ease; }
+.skip-link:focus-visible { top: 1rem; }
+.visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; margin: -1px !important; padding: 0 !important; overflow: hidden !important; clip: rect(0 0 0 0) !important; white-space: nowrap !important; border: 0 !important; }
+.nav-group-label { margin: 0.9rem 0 0.15rem; padding: 0 1rem; font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--jlt-muted); opacity: 0.85; }
+nav .nav-group-label:first-child { margin-top: 0; }
+/* Restrained completed-goal state: same pill shape, brand-ink text. */
+.goal-complete { color: var(--jlt-primary); }
+/* Keyboard-selected search option mirrors the hover wash. */
+.search-option-active { background: var(--jlt-surface-soft); }
+/* Quiet dashboard deep links: cards keep their shape, gain affordance. */
+.metric-link { text-decoration: none; }
+.metric-link:hover { box-shadow: var(--shadow-raised-lg); }

@@ -43,7 +43,7 @@ function bandEntry(source, band) {
 }
 
 // jlptProgressModel(payload) -> plain display model, or null when the
-// progress fetch failed (statistics then hides the section gracefully).
+// progress payload is unusable (statistics then shows an error with retry).
 function jlptProgressModel(payload) {
   if (!payload || typeof payload !== 'object' || !payload.bands) return null;
   const rows = BAND_ORDER.map((band) => bandEntry(payload.bands, band));

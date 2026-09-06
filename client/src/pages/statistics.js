@@ -27,8 +27,13 @@ export async function renderStatistics(container) {
       const data = await apiRequest('/api/dashboard');
       const activeDays = data.weeklyActivity.filter((item) => Number(item.minutes) > 0).length;
       const categories = data.studyDistribution.filter((item) => Number(item.minutes) > 0).length;
-      const weeklyCanvas = element('canvas', { attrs: { 'aria-label': 'Weekly minutes chart', role: 'img' } });
-      const distributionCanvas = element('canvas', { attrs: { 'aria-label': 'Category minutes chart', role: 'img' } });
+      // Non-visual equivalents for the canvas charts: concise summaries from
+      // the same data, referenced via aria-describedby. No visible tables —
+      // the numbers on screen stay the single visual source.
+      const weeklySummary = element('p', { className: 'visually-hidden', attrs: { id: 'weekly-chart-summary' }, text: describeWeeklyActivity(data.weeklyActivity) });
+      const distributionSummary = element('p', { className: 'visually-hidden', attrs: { id: 'distribution-chart-summary' }, text: describeDistribution(data.studyDistribution) });
+      const weeklyCanvas = element('canvas', { attrs: { 'aria-label': 'Weekly minutes chart', role: 'img', 'aria-describedby': 'weekly-chart-summary' } });
+      const distributionCanvas = element('canvas', { attrs: { 'aria-label': 'Category minutes chart', role: 'img', 'aria-describedby': 'distribution-chart-summary' } });
 
       content.replaceChildren(
         element('div', { className: 'grid gap-4 sm:grid-cols-3' }, [
@@ -37,8 +42,8 @@ export async function renderStatistics(container) {
           summary('distribution', 'Categories', categories, 'Categories represented')
         ]),
         element('div', { className: 'mt-5 grid gap-5 xl:grid-cols-2' }, [
-          chartPanel('activity', 'Last seven days', 'Daily study minutes from real session data.', weeklyCanvas),
-          chartPanel('distribution', 'Category balance', 'Recorded minutes grouped by study category.', distributionCanvas)
+          chartPanel('activity', 'Last seven days', 'Daily study minutes from real session data.', weeklyCanvas, weeklySummary),
+          chartPanel('distribution', 'Category balance', 'Recorded minutes grouped by study category.', distributionCanvas, distributionSummary)
         ])
       );
       weeklyChart(weeklyCanvas, data.weeklyActivity);
@@ -56,9 +61,10 @@ export async function renderStatistics(container) {
         apiRequest('/api/level/estimate')
       ]);
       const model = jlptProgressModel(progressPayload);
-      // Hide gracefully on failure, mirroring the Phase 9 estimate section.
+      // A failed or unusable progress load stays visible with a retry —
+      // the panel must never silently disappear.
       if (!model) {
-        progressSlot.replaceChildren();
+        progressSlot.replaceChildren(errorState(new Error('Reference Kanji progress is unavailable right now.'), loadProgress));
         return;
       }
       const target = targetPayload && typeof targetPayload.targetLevel === 'string'
@@ -78,8 +84,8 @@ export async function renderStatistics(container) {
           return saved && typeof saved.targetLevel === 'string' ? saved.targetLevel : null;
         }
       }));
-    } catch {
-      progressSlot.replaceChildren();
+    } catch (error) {
+      progressSlot.replaceChildren(errorState(error, loadProgress));
     }
   }
 
@@ -95,12 +101,30 @@ function summary(iconName, label, value, note) {
   ]);
 }
 
-function chartPanel(iconName, title, description, canvas) {
+function chartPanel(iconName, title, description, canvas, summary = null) {
   return element('article', { className: 'surface min-h-96 p-5 sm:p-6' }, [
     element('div', { className: 'flex items-center gap-3' }, [iconTile(iconName, { className: 'panel-icon' }), element('h2', { className: 'font-semibold text-ink', text: title })]),
     element('p', { className: 'mt-1 text-sm text-muted', text: description }),
-    element('div', { className: 'mt-6 h-72' }, [canvas])
+    element('div', { className: 'mt-6 h-72' }, [canvas]),
+    summary
   ]);
+}
+
+function describeWeeklyActivity(weeklyActivity) {
+  const days = Array.isArray(weeklyActivity) ? weeklyActivity : [];
+  const total = days.reduce((sum, item) => sum + Number(item.minutes || 0), 0);
+  const active = days.filter((item) => Number(item.minutes) > 0);
+  if (!active.length) return 'Weekly minutes chart: no study minutes recorded in the last seven days.';
+  const peak = active.reduce((best, item) => (Number(item.minutes) > Number(best.minutes) ? item : best), active[0]);
+  return `Weekly minutes chart: ${total} minutes across ${active.length} active days in the last seven days. Most active: ${String(peak.date).slice(0, 10)} with ${Number(peak.minutes)} minutes.`;
+}
+
+function describeDistribution(studyDistribution) {
+  const entries = Array.isArray(studyDistribution) ? studyDistribution.filter((item) => Number(item.minutes) > 0) : [];
+  const total = entries.reduce((sum, item) => sum + Number(item.minutes || 0), 0);
+  if (!entries.length) return 'Category balance chart: no categorized study minutes recorded.';
+  const top = entries.reduce((best, item) => (Number(item.minutes) > Number(best.minutes) ? item : best), entries[0]);
+  return `Category balance chart: ${total} minutes across ${entries.length} categories. Largest: ${top.category} with ${Number(top.minutes)} minutes.`;
 }
 
 // Phase 10 — Reference Kanji Progress panel. One compact row per band with

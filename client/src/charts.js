@@ -15,11 +15,18 @@ function themeColors() {
   };
 }
 
+function prefersReducedMotion() {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 function commonOptions() {
   const { chartText } = themeColors();
   return {
     responsive: true,
     maintainAspectRatio: false,
+    // Respect reduced motion: Chart.js animates by default, which bypasses
+    // the CSS reduced-motion handling. Functionality is unchanged.
+    ...(prefersReducedMotion() ? { animation: false } : {}),
     plugins: {
       legend: { labels: { color: chartText, usePointStyle: true, boxWidth: 8 } },
       tooltip: { displayColors: false }
