@@ -201,23 +201,26 @@
 @media (prefers-reduced-motion: reduce) {
   .level-estimate-morph, .level-estimate-morph *, .level-estimate-detail, .level-estimate-detail-inner { transition: none !important; }
 }
-/* Narrow-screen containment only: the expanded surface becomes viewport-
-   fixed with safe insets so it can never clip left/right regardless of the
-   trigger position. Shape, content, internal scroll, animation, and desktop
-   behavior are unchanged. */
-@media (max-width: 480px) {
+/* Mobile viewport sheet: below the tablet breakpoint the trigger-anchored
+   popover cannot fit (the host sits mid-header, so leftward expansion clips
+   offscreen). The SAME surface instead becomes a viewport sheet — nearly
+   full width with safe insets, top just below the header, dvh-safe bottom
+   inset. Shape, content, internal scroll, transitions, and desktop behavior
+   are unchanged; only geometry is constrained. */
+@media (max-width: 640px) {
   .level-estimate-morph.is-open {
     position: fixed;
-    top: 4rem;
-    left: 1rem;
-    right: 1rem;
+    top: 4.5rem;
+    left: 0.75rem;
+    right: 0.75rem;
     width: auto;
-    max-height: min(32rem, calc(100vh - 8rem));
+    max-height: min(40rem, calc(100vh - 5.5rem));
+    transform-origin: top right;
   }
 }
 @supports (max-height: 100dvh) {
-  @media (max-width: 480px) {
-    .level-estimate-morph.is-open { max-height: min(32rem, calc(100dvh - 8rem)); }
+  @media (max-width: 640px) {
+    .level-estimate-morph.is-open { max-height: min(40rem, calc(100dvh - 5.5rem)); }
   }
 }
 

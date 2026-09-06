@@ -195,6 +195,8 @@ const translations = {
     'Close search': 'Cerrar búsqueda',
     'Global search results': 'Resultados de la búsqueda global',
     'View detailed analytics in Statistics': 'Ver análisis detallados en Estadísticas',
+    'Active goals': 'Objetivos activos',
+    'View all goals': 'Ver todos los objetivos',
     'New vocabulary entries': 'Nuevas entradas de vocabulario',
     'New kanji': 'Nuevo kanji',
     'New grammar entries': 'Nuevas entradas de gramática',

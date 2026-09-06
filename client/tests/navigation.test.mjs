@@ -68,10 +68,18 @@ test('drawer trigger exposes expanded state', () => {
   assert.ok(source.includes('aria-expanded="false" aria-controls="sidebar"'), 'trigger reports expanded state for the sidebar');
 });
 
-test('mobile header hides brand text on narrow widths, keeps every control', () => {
+test('mobile topbar carries controls, not brand text', () => {
   const source = html();
-  assert.ok(source.includes('hidden text-sm font-semibold text-ink sm:block'), 'brand text hidden below sm, shown above');
+  const mobileHeader = source.slice(source.indexOf('<header class="sticky top-0'), source.indexOf('id="app-content"'));
+  assert.ok(mobileHeader.length > 0, 'compact topbar located');
+  assert.ok(!mobileHeader.includes('Japanese Learning Tracker'), 'no brand text in the compact topbar');
   for (const id of ['open-navigation', 'mobile-search-button', 'mobile-theme-toggle', 'mobile-account-button']) {
     assert.ok(source.includes(`id="${id}"`), `control ${id} preserved`);
   }
+});
+
+test('desktop sidebar branding remains', () => {
+  const source = html();
+  assert.ok(source.includes('id="brand-logo"'), 'sidebar brand logo preserved');
+  assert.ok(source.includes('data-i18n="Japanese Learning"'), 'sidebar product name preserved');
 });
