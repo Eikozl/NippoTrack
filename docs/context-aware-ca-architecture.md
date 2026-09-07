@@ -218,3 +218,92 @@ closed status sets across UNIQUE/MULTIPLE/NO_MATCH/UNAVAILABLE wire).
   runtime config (whose local `.env.runtime` points at Production) outside
   the startup guards, issuing one read-only `SELECT` that failed with
   `42P01`; nothing was read or written.
+
+## CA-B3 product integration (as built — UI only, backend untouched)
+
+Request: the Analyzer sends `context: { enabled: true }` alongside lexical
+on the same Analyze call (no duplicate request, same budget). API stays
+opt-in; only the Analyzer UI uses the capability.
+
+Card hierarchy (augments Phase 12 cards, compact by default): canonical word
+→ POS/existing metadata → observed/reading lines → Context intelligence →
+Add action. Presentation mapping lives in `client/src/contextAnalyzer.js`
+(pure; backend objects never mutated, statuses/remainingCount/truncation
+trusted, never recomputed).
+
+- UNIQUE + COMPATIBLE: `Compatible meaning` + same-sense glosses joined
+  (`to begin · to start`); dictionary reading shown with `(JMdict)` cue.
+- UNIQUE + AMBIGUOUS: reading kept; `Possible meanings` + sense list +
+  `JLT couldn't reliably distinguish one meaning from this context.` First
+  sense never picked.
+- MULTIPLE: `Multiple dictionary matches` + headword — gloss rows, no
+  authoritative reading, no entry election; `More dictionary matches exist.`
+  when `lookupTruncated`.
+- NO_MATCH: quiet `No reliable dictionary match found.` UNAVAILABLE (item):
+  `Context details are temporarily unavailable.` UNSUPPORTED: no panel
+  (existing Needs-verification stays primary).
+- Truncation: user copy only (`More meanings exist.`, ambiguity-kept note);
+  caps (5+1/64+1/150/100 KB) never exposed.
+- `Why this matches` (collapsed `<details>`): evidence codes mapped
+  (LEMMA_EXACT→Dictionary form matches, ORTHOGRAPHIC_EXACT→Spelling
+  matches, READING_COMPATIBLE→Reading matches,
+  READING_RESTRICTED→Reading is valid for this spelling, POS_EXACT→Part of
+  speech matches, POS_BROAD→Part of speech is compatible,
+  INFLECTION_FAMILY_COMPATIBLE→Conjugation matches the dictionary verb
+  family); excludedBy collapsed to spelling/reading/part-of-speech kinds.
+  Raw codes never render.
+- Block failure: compact `role="status"` notice; `Retry analysis` ONLY when
+  `retryable === true` (reuses the normal Analyze action);
+  `version-absent` → neutral environment wording, no Retry.
+- Attribution (one footer per vocabulary section, only with provenance):
+  `Dictionary data: JMdict © EDRDG (CC BY-SA 4.0)` with hardcoded JMdict/CC
+  links + `Reference version` disclosure (converter version, release date).
+  Never per card; never `sourceId`.
+
+Add-dialog matrix (existing dialog reused; open ≠ write; save explicit):
+
+| match | interpretation | word | reading | meaning |
+|---|---|---|---|---|
+| UNIQUE | COMPATIBLE | prefill | prefill (dictionary, if suggested) | prefill (first gloss) |
+| UNIQUE | AMBIGUOUS | prefill | prefill (if suggested) | blank + explicit `Use “…”` picks (user action) |
+| MULTIPLE / NO_MATCH / UNSUPPORTED / UNAVAILABLE | any | lexical default | lexical default | blank |
+
+Stale safety: suggestions tagged to the candidate identity; editing WORD
+away clears untouched context-derived reading/meaning (never reapplies),
+disables sense picks until restored; user-typed values always preserved.
+Romaji conversion untouched (`iku→いく`, `gakkou→がっこう`, kana preserved,
+failure/race behavior intact).
+
+Responsive/accessibility: intrinsic CSS only (no JS measurement, estimate
+code untouched); verified 320–1280px with no horizontal overflow; native
+`<details>` disclosures; named buttons incl. `Use meaning “…” for …`;
+`aria-expanded` via native semantics; `role="status"` notices; retry gated
+semantically; both themes via existing `--jlt-*` variables (no hardcoded
+colors). All rendering through `textContent`; licence links hardcoded.
+
+Tests: 13 client unit (`contextAnalyzer.test.mjs`: states, matrix, stale
+model, evidence, retryable, truncation, attribution) + 17 browser
+(`contextAware.browser.test.mjs`: full matrix incl. stale/romaji/
+unavailable-retry/evidence-focus/7-width geometry/dark mode). Reviews:
+japanese-language PASS, security PASS WITH FINDINGS (2 non-blocking minors,
+`noopener` applied).
+
+Local live proof (loopback, tiny snapshot, since removed): real Kuromoji +
+real SQL + real wire + real mapper — 学校 UNIQUE/COMPATIBLE, 行く
+UNIQUE/AMBIGUOUS with reading, はし MULTIPLE ×3, 田中 conservative,
+ctx 8–151 ms warm, ~2.3 KB blocks. Local DB left exactly as found
+(snapshots 1–2 intact, pointer →1, no scaffold policies).
+
+Known limitations: Preview closure conditional — integration project has
+migrations 010/011 applied but an empty `jmdict_sources` (pointer NULL),
+and no admin/BYPASSRLS credentials exist locally (runtime role is
+SELECT-only), so the approved bulk import cannot run from here; Preview
+backend env target unverifiable without Vercel access, so no remote smoke
+was run (zero Production contact). Owner steps: run the approved importer
+against integration (inactive → verify → C1 → explicit activate), confirm
+Preview env alignment, smoke (§46 list).
+
+Owner smoke (8): 1. `学校に行った。` states. 2. 行く ambiguous Add flow.
+3. はし multiple-match flow. 4. Add 学校, verify prefill. 5. Edit word
+before saving, confirm stale suggestions clear. 6. Narrow mobile width.
+7. Dark mode. 8. Context unavailable state if practical.
