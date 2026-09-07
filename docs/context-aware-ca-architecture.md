@@ -288,6 +288,15 @@ unavailable-retry/evidence-focus/7-width geometry/dark mode). Reviews:
 japanese-language PASS, security PASS WITH FINDINGS (2 non-blocking minors,
 `noopener` applied).
 
+CA-B3.1 polish: block-level `partial` is NOT an outage — structural
+reasons (`candidate-cap-reached`, `lookup-truncated`,
+`evaluation-truncated`) render neutral informational copy with no Retry;
+only transient backend-marked failures (`reference-query-failed`,
+`sense-evaluation-failed`, `context-failed`) use temporary-unavailable
+wording with Retry. `context.truncated === true` adds one compact
+payload-budget disclosure per vocabulary section (no Retry, cards
+unchanged).
+
 Local live proof (loopback, tiny snapshot, since removed): real Kuromoji +
 real SQL + real wire + real mapper — 学校 UNIQUE/COMPATIBLE, 行く
 UNIQUE/AMBIGUOUS with reading, はし MULTIPLE ×3, 田中 conservative,

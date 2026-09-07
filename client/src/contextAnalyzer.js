@@ -151,8 +151,16 @@ export function addSuggestion(item) {
   return base;
 }
 
-// Block-level failure model. Retry is offered ONLY when the backend marks
-// the block retryable (transient); deterministic absences stay quiet.
+// Block-level failure model. Structural partials (bounded results) are NOT
+// outages: they report state 'partial' with neutral copy and never offer
+// Retry. Only transient backend-marked failures are 'unavailable' +
+// retryable. Deterministic absences stay quiet and non-retryable.
+const STRUCTURAL_PARTIAL_COPY = {
+  'candidate-cap-reached': 'Dictionary context was generated for part of the vocabulary in this analysis.',
+  'lookup-truncated': 'Some dictionary matches were omitted.',
+  'evaluation-truncated': 'Some dictionary possibilities could not be fully evaluated.'
+};
+
 export function contextBlockModel(context) {
   if (!context || typeof context !== 'object') return { state: 'pending', retryable: false, notice: null };
   if (context.status === 'ok') return { state: 'ok', retryable: false, notice: null };
@@ -163,11 +171,30 @@ export function contextBlockModel(context) {
   if (context.reason === 'version-absent') {
     return { state: 'unavailable', retryable: false, notice: "Dictionary context isn't available in this environment yet." };
   }
-  return {
-    state: 'unavailable',
-    retryable,
-    notice: 'Dictionary context is temporarily unavailable.'
-  };
+  if (typeof context.reason === 'string' && Object.hasOwn(STRUCTURAL_PARTIAL_COPY, context.reason)) {
+    return { state: 'partial', retryable: false, notice: STRUCTURAL_PARTIAL_COPY[context.reason] };
+  }
+  if (retryable) {
+    return {
+      state: 'unavailable',
+      retryable: true,
+      notice: context.status === 'partial'
+        ? 'Dictionary context is temporarily unavailable for some results.'
+        : 'Dictionary context is temporarily unavailable.'
+    };
+  }
+  // Unknown non-retryable shape: neutral partial, never outage wording.
+  return { state: 'partial', retryable: false, notice: 'Some dictionary context details are incomplete.' };
+}
+
+// Payload-budget disclosure: backend trimmed presentation data to fit.
+// Informational only — independent of match statuses, no Retry, shown once
+// per vocabulary section (the renderer combines it with any block notice).
+export function payloadTruncationNotice(context) {
+  if (context && typeof context === 'object' && context.truncated === true) {
+    return 'Some dictionary context details were omitted to keep this analysis compact.';
+  }
+  return null;
 }
 
 export function truncationNotes(item) {

@@ -213,6 +213,62 @@ test('Context-Aware analyzer browser integration', { skip: !process.env.JLT_BROW
     assert.doesNotMatch(result.absentSection, /Retry analysis/);
   });
 
+  await t.test('structural partial shows neutral copy, never outage wording or Retry', async () => {
+    const result = await run(`(async () => {
+      window.analysis = window.fullAnalysis();
+      const item = window.multipleItem();
+      item.dictionaryMatch.lookupTruncated = true;
+      window.analysis.lexical.context = { status: 'partial', reason: 'lookup-truncated', dictionary: window.dictionary(),
+        items: [item], summary: window.analysis.lexical.context.summary,
+        warnings: ['lookup-truncated'], retryable: false, truncated: false, durationMs: 9 };
+      await openAnalyzer();
+      return sectionText();
+    })()`);
+    assert.match(result, /Some dictionary matches were omitted/);
+    assert.match(result, /Multiple dictionary matches/);
+    assert.match(result, /More dictionary matches exist/);
+    assert.doesNotMatch(result, /temporarily unavailable/);
+    assert.doesNotMatch(result, /Retry analysis/);
+  });
+
+  await t.test('transient partial degrades with Retry that re-analyzes', async () => {
+    const result = await run(`(async () => {
+      const bad = { key: 'noun::学校', canonical: '学校',
+        dictionaryMatch: { status: 'UNAVAILABLE', identityStrategy: null, lookupTruncated: false, entries: [], entryCount: 0, selectedEntryId: null, readings: { suggested: null, alternatives: [], provenance: null }, reason: 'sense-evaluation-failed' },
+        interpretation: { status: 'UNAVAILABLE', evaluationTruncated: false, selectedSense: null, compatibleSenses: [], remainingCount: 0, evidenceSummary: { codes: [], excludedBy: {} }, reason: 'sense-evaluation-failed' } };
+      window.analysis = { kanji: [], notice: '', jlptDistribution: {},
+        lexical: window.lexicalBase({ candidates: [window.cand({ key: 'noun::学校', canonical: '学校', lemma: '学校', pos: 'noun', lemmaReading: 'がっこう' })],
+          context: { status: 'partial', reason: 'sense-evaluation-failed', dictionary: window.dictionary(), items: [bad],
+            summary: { dictionary: { UNIQUE: 0, MULTIPLE: 0, NO_MATCH: 0, UNSUPPORTED: 0, UNAVAILABLE: 1 },
+              interpretation: { COMPATIBLE: 0, AMBIGUOUS: 0, NOT_APPLICABLE: 0, UNAVAILABLE: 1 }, truncated: { lookup: 0, evaluation: 0 } },
+            warnings: ['sense-evaluation-failed'], retryable: true, truncated: false, durationMs: 4 } }) };
+      await openAnalyzer();
+      const section = sectionText();
+      const before = requests.filter(r => r === '/api/analyze/text').length;
+      window.clickText('Retry analysis'); await tick();
+      return { section, retried: requests.filter(r => r === '/api/analyze/text').length - before };
+    })()`);
+    assert.match(result.section, /temporarily unavailable for some results/);
+    assert.match(result.section, /Retry analysis/);
+    assert.match(result.section, /学校/);
+    assert.equal(result.retried, 1);
+  });
+
+  await t.test('payload truncation discloses once without Retry; cards remain', async () => {
+    const result = await run(`(async () => {
+      window.analysis = window.fullAnalysis();
+      window.analysis.lexical.context.truncated = true;
+      await openAnalyzer();
+      const text = sectionText();
+      return { text, disclosures: text.split('keep this analysis compact').length - 1,
+        cards: document.querySelectorAll('[data-context-kind]').length };
+    })()`);
+    assert.equal(result.disclosures, 1);
+    assert.match(result.text, /Some dictionary context details were omitted to keep this analysis compact/);
+    assert.doesNotMatch(result.text, /Retry analysis/);
+    assert.ok(result.cards >= 3);
+  });
+
   await t.test('evidence disclosure expands without raw codes; dialog traps focus', async () => {
     const result = await run(`(async () => {
       window.analysis = window.fullAnalysis(); await openAnalyzer();

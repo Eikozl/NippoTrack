@@ -11,6 +11,7 @@ import {
   evidenceLines,
   excludedSummary,
   multipleEntryRows,
+  payloadTruncationNotice,
   senseChoices,
   truncationNotes
 } from '../src/contextAnalyzer.js';
@@ -231,6 +232,47 @@ test('contextBlockModel offers retry only for transient failures', () => {
   assert.equal(truncated.retryable, false);
   const lexical = contextBlockModel({ status: 'unavailable', reason: 'lexical-required', retryable: false });
   assert.equal(lexical.state, 'pending');
+});
+
+test('structural partials are partial, never temporarily-unavailable (table-driven)', () => {
+  // Would fail against the old model, which mapped every non-ok block to
+  // unavailable outage wording even when the system worked and returned a
+  // bounded result.
+  const cases = [
+    { reason: 'lookup-truncated', notice: 'Some dictionary matches were omitted.' },
+    { reason: 'evaluation-truncated', notice: 'Some dictionary possibilities could not be fully evaluated.' },
+    { reason: 'candidate-cap-reached', notice: 'Dictionary context was generated for part of the vocabulary in this analysis.' }
+  ];
+  for (const { reason, notice } of cases) {
+    const model = contextBlockModel({ status: 'partial', reason, retryable: false });
+    assert.equal(model.state, 'partial', reason);
+    assert.equal(model.retryable, false, reason);
+    assert.equal(model.notice, notice, reason);
+    assert.ok(!model.notice.includes('temporarily unavailable'), `${reason} must not use outage wording`);
+  }
+});
+
+test('transient partial degrades with retry; transient outage keeps retry', () => {
+  const degraded = contextBlockModel({ status: 'partial', reason: 'sense-evaluation-failed', retryable: true });
+  assert.equal(degraded.retryable, true);
+  assert.match(degraded.notice, /temporarily unavailable for some results/);
+  const outage = contextBlockModel({ status: 'unavailable', reason: 'reference-query-failed', retryable: true });
+  assert.equal(outage.state, 'unavailable');
+  assert.equal(outage.retryable, true);
+  assert.equal(outage.notice, 'Dictionary context is temporarily unavailable.');
+  const absent = contextBlockModel({ status: 'unavailable', reason: 'version-absent', retryable: false });
+  assert.equal(absent.state, 'unavailable');
+  assert.equal(absent.retryable, false);
+});
+
+test('payload truncation discloses once, without retry or status change', () => {
+  assert.equal(
+    payloadTruncationNotice({ status: 'ok', truncated: true }),
+    'Some dictionary context details were omitted to keep this analysis compact.'
+  );
+  assert.equal(payloadTruncationNotice({ status: 'ok', truncated: false }), null);
+  assert.equal(payloadTruncationNotice({ status: 'ok' }), null);
+  assert.equal(payloadTruncationNotice(null), null);
 });
 
 test('attribution model carries the canonical acknowledgement, never sourceId', () => {

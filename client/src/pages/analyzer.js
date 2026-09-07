@@ -36,7 +36,8 @@ import {
   addSuggestion,
   attributionModel,
   contextBlockModel,
-  contextItemModel
+  contextItemModel,
+  payloadTruncationNotice
 } from '../contextAnalyzer.js';
 
 function statePill(formatted) {
@@ -183,14 +184,22 @@ export async function renderAnalyzer(container) {
           text: 'Vocabulary collection matching is unavailable. Candidates are shown without ownership state.'
         }));
       }
-      // Context block failure never hides Phase 12 candidates: a compact
-      // notice, with Retry only for transient (backend-marked) failures.
-      // Retry reuses the normal Analyze action — same request, same budget.
+      // Context block state never hides Phase 12 candidates: structural
+      // partials get a neutral informational notice (no Retry — retrying
+      // repeats the same bounded result); transient failures get Retry only
+      // when the backend marks them retryable. A payload-budget trim adds
+      // one compact disclosure line in the same box. Retry reuses the normal
+      // Analyze action — same request, same budget.
       const contextState = contextBlockModel(lexical.context);
-      if (contextState.state === 'unavailable') {
-        const notice = element('div', { className: 'mt-3 rounded-lg border border-stone bg-paper p-3', attrs: { role: 'status' } }, [
-          element('p', { className: 'break-words text-sm text-ink/80', text: contextState.notice })
-        ]);
+      const truncationNotice = payloadTruncationNotice(lexical.context);
+      if (contextState.state === 'unavailable' || contextState.state === 'partial' || truncationNotice) {
+        const notice = element('div', { className: 'mt-3 rounded-lg border border-stone bg-paper p-3', attrs: { role: 'status' } });
+        if (contextState.notice) {
+          notice.append(element('p', { className: 'break-words text-sm text-ink/80', text: contextState.notice }));
+        }
+        if (truncationNotice) {
+          notice.append(element('p', { className: 'mt-1 break-words text-xs leading-5 text-muted', text: truncationNotice }));
+        }
         if (contextState.retryable) {
           const retryButton = element('button', { className: 'button-secondary mt-2 min-h-9 px-3 py-1.5 text-xs', text: 'Retry analysis', attrs: { type: 'button' } });
           retryButton.addEventListener('click', () => analyzeButton.click());
