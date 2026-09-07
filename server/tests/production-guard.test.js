@@ -230,3 +230,34 @@ test('mismatch errors never contain secret values', () => {
   assert.match(message, /mismatched Supabase Auth projects/);
   assert.ok(!message.includes(FAKE_SECRET));
 });
+
+test('direct DB target: Production ref refuses before any connection', () => {
+  // Would fail if a probe/test checked only loopback shape and let a
+  // Production user/host through (the CA-B2 accidental-read path).
+  // Pure: no database is contacted — refusal happens on identity alone.
+  assert.throws(
+    () => guard.assertSafeDbTarget({ host: 'aws-0-us-east-2.pooler.supabase.com', user: `jlt_runtime.${PROD}`, source: 'probe' }),
+    /refusing before any database connection/
+  );
+  assert.throws(
+    () => guard.assertSafeDbTarget({ host: '127.0.0.1', user: `jlt_runtime.${PROD}`, source: 'probe' }),
+    /Production project ref/
+  );
+  assert.throws(
+    () => guard.assertSafeDbTarget({ host: `https://${PROD}.supabase.co`, user: 'postgres', source: 'probe' }),
+    /Production project ref/
+  );
+});
+
+test('direct DB target: integration and loopback targets are allowed', () => {
+  const integration = guard.assertSafeDbTarget({
+    host: 'aws-0-us-west-2.pooler.supabase.com',
+    user: `jlt_runtime.${SAFE}`,
+    source: 'integration test'
+  });
+  assert.equal(integration.user, `jlt_runtime.${SAFE}`);
+  const local = guard.assertSafeDbTarget({ host: '127.0.0.1', user: 'jlt_agent', source: 'local test' });
+  assert.equal(local.host, '127.0.0.1');
+  const localhost = guard.assertSafeDbTarget({ host: 'localhost', user: 'postgres', source: 'local test' });
+  assert.equal(localhost.host, 'localhost');
+});

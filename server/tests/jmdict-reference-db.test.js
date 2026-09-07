@@ -22,6 +22,15 @@ const runnable = enabled && LOOPBACK.has(host);
 if (enabled && !LOOPBACK.has(host)) {
   throw new Error(`JLT_RUN_JMDICT_DB_TESTS requires a loopback POSTGRES_HOST, got: ${host}`);
 }
+if (enabled) {
+  // Belt and braces beside the loopback gate: refuse a Production project
+  // ref in the resolved target BEFORE any connection is opened.
+  require('../../scripts/production-guard').assertSafeDbTarget({
+    host: process.env.POSTGRES_HOST,
+    user: process.env.POSTGRES_USER,
+    source: 'jmdict-reference-db.test.js POSTGRES_*'
+  });
+}
 
 const fixture = enabled
   ? JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'jmdict-sample.json'), 'utf8'))

@@ -298,7 +298,10 @@ function finalizeCandidate(input) {
     matchReason = truncated
       ? 'lookup-truncated'
       : (excludedTruncated ? 'evaluation-truncated' : 'multiple-compatible-entries');
-    if (survivingEntries.length === 1) selectedEntryId = survivingEntries[0].entryId;
+    // Frozen invariant: selectedEntryId is non-null ONLY for UNIQUE. A lone
+    // visible survivor beside truncated/excluded cohorts is still MULTIPLE
+    // with selectedEntryId null — inferring an identity from commonness,
+    // survivor count, or partial evaluation would mislead CA-B3.
   }
 
   // Readings at item level come from the selected entry when UNIQUE,

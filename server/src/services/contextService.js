@@ -20,7 +20,6 @@ const {
 const { runQ1, runQ2, CONTEXT_MAX_ENTRIES_Q2 } = require('./contextReference');
 const { MATCH, INTERP, finalizeCandidate } = require('./contextFilters');
 const { buildItem, buildBlock } = require('./contextResponse');
-const { JMDICT_SOURCE_NAME, JMDICT_CONVERTER } = require('./jmdictReference');
 
 function unsupportedItem(candidate, reason) {
   return {
@@ -92,11 +91,14 @@ function noMatchItem(candidate, identity) {
 }
 
 function pinDictionary(pin) {
+  // Provenance comes ONLY from the pinned snapshot row Q1 actually read —
+  // never from importer constants. The zero-match path pins the same row
+  // (same single query), so provenance is identical with matches or not.
   return {
-    source: JMDICT_SOURCE_NAME,
+    source: pin.sourceName,
     version: pin.converterVersion,
     fileDate: pin.fileDate,
-    converter: JMDICT_CONVERTER,
+    converter: pin.converter,
     sourceId: pin.sourceId
   };
 }
@@ -295,10 +297,15 @@ async function resolveInner({ pool, candidates, tokens, options, started }) {
 
   let status = 'ok';
   let reason = null;
+  // retryable is true ONLY when a transient/infrastructure failure
+  // contributed: deterministic structural limits (candidate cap, lookup or
+  // evaluation truncation) repeat identically on retry, so they stay false.
+  let transientFailure = false;
   for (const slot of slots) {
     if (slot.item.dictionaryMatch.status === MATCH.UNAVAILABLE) {
       status = 'partial';
       reason = reason || 'sense-evaluation-failed';
+      transientFailure = true;
     }
     if (slot.item.dictionaryMatch.lookupTruncated && status === 'ok') {
       status = 'partial';
@@ -317,7 +324,7 @@ async function resolveInner({ pool, candidates, tokens, options, started }) {
     if (reason === 'lookup-truncated' && !warnings.includes('lookup-truncated')) warnings.push('lookup-truncated');
     if (reason === 'evaluation-truncated' && !warnings.includes('evaluation-truncated')) warnings.push('evaluation-truncated');
   }
-  return finishBlock({ status, reason, dictionary, retryable: status !== 'ok' });
+  return finishBlock({ status, reason, dictionary, retryable: transientFailure });
 }
 
 module.exports = {

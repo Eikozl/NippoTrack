@@ -187,3 +187,34 @@ assert, F13 zero-match pin, 011 plan shape, N+1, Han-miss, fixture F1–F5),
 10 API (`context-analyze-api`: flags, degradation, caps, reason codes,
 closed status sets across UNIQUE/MULTIPLE/NO_MATCH/UNAVAILABLE wire).
 65 context tests total, all green; full server suite green (see report).
+
+## CA-B2.1 contract polish (as built — behavior fixes only, no redesign)
+
+- `selectedEntryId` invariant (frozen): non-null ONLY when
+  `dictionaryMatch.status === UNIQUE`. A lone visible survivor beside a
+  truncated/excluded cohort is still `MULTIPLE` with `selectedEntryId: null`
+  — no identity is ever inferred from commonness, survivor count, or partial
+  evaluation. `UNIQUE` + `AMBIGUOUS` (行く) keeps its identity.
+- `retryable` truthfulness: true ONLY when a transient failure contributed
+  (`reference-query-failed`, `sense-evaluation-failed`, `context-failed`).
+  Deterministic structural outcomes are false: `candidate-cap-reached`,
+  `lookup-truncated`, `evaluation-truncated` (`partial`), `version-absent`
+  and `lexical-required` (`unavailable`). Statuses, reasons, and warnings
+  are unchanged — only the retryable flag was corrected.
+- Snapshot provenance: Q1 also selects `s.converter`; the pin carries
+  `{sourceId, sourceName, converter, converterVersion, fileDate}` from the
+  actual snapshot row, and the API `dictionary` block is derived from that
+  pin alone (no importer constants on the response path; constants remain
+  for importer/default use). Zero-match path reports the same provenance
+  from the same single Q1 round trip.
+- Environment safety (process rule): any DB-backed command outside server
+  startup must resolve its explicit target and refuse a Production project
+  ref (`milayuvlajmgrcxmrxdg`) BEFORE connecting — loopback and the
+  disposable integration project (`mufxygohcjikhlktvrcy`) pass. Implemented
+  as `assertSafeDbTarget({host, user, source})` in the existing
+  `scripts/production-guard.js` (reuses `isProductionValue`; no new env
+  architecture) and wired into both gated DB test files beside their
+  loopback gates. Cause of the CA-B2 incident: an ad-hoc probe loaded the
+  runtime config (whose local `.env.runtime` points at Production) outside
+  the startup guards, issuing one read-only `SELECT` that failed with
+  `42P01`; nothing was read or written.

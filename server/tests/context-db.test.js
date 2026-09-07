@@ -27,6 +27,15 @@ const runnable = enabled && LOOPBACK.has(host);
 if (enabled && !LOOPBACK.has(host)) {
   throw new Error(`JLT_RUN_JMDICT_DB_TESTS requires a loopback POSTGRES_HOST, got: ${host}`);
 }
+if (enabled) {
+  // Belt and braces beside the loopback gate: refuse a Production project
+  // ref in the resolved target BEFORE any connection is opened.
+  require('../../scripts/production-guard').assertSafeDbTarget({
+    host: process.env.POSTGRES_HOST,
+    user: process.env.POSTGRES_USER,
+    source: 'context-db.test.js POSTGRES_*'
+  });
+}
 
 const createdSourceIds = [];
 let originalActive = null;
@@ -45,14 +54,15 @@ async function setScaffold(client, up) {
   }
 }
 
-async function makeSnapshot(client, tag, words) {
+async function makeSnapshot(client, tag, words, provenance = {}) {
   const identity = {
     fileDate: '2026-09-07',
     converterVersion: `context-test-${tag}-${Date.now()}`,
     dictRevisions: ['test'],
     entCount: words.length,
     sha256: service.sha256Hex(`context-test-${tag}-${Date.now()}`),
-    sha256Verified: false
+    sha256Verified: false,
+    ...provenance
   };
   const { sourceId, reused } = await service.allocateSnapshot(client, identity);
   assert.equal(reused, false);
@@ -558,6 +568,39 @@ test('orthographic cohort never imports reading homophones; kana fallback stays 
     assert.equal(hashi.dictionaryMatch.entryCount, 3);
     assert.equal(hashi.dictionaryMatch.selectedEntryId, null);
     assert.equal(hashi.interpretation.status, 'AMBIGUOUS');
+  } finally {
+    client.release();
+  }
+});
+
+test('dictionary provenance echoes the actual pinned snapshot row on real SQL', { skip: !runnable }, async () => {
+  // Would fail against hardcoded source/converter labels: this snapshot is
+  // created with deliberately non-default provenance, and both a hit and a
+  // miss must report exactly that row (single Q1 round trip, no re-read).
+  const client = await pool.connect();
+  try {
+    const sourceId = await makeSnapshot(client, 'provenance', [
+      synthWord(2140001, { keb: [['学校', true]], reb: [['がっこう', ['*'], true]], senses: [{ pos: ['n'], gloss: 'school' }] })
+    ], { sourceName: 'Context-Test', converter: 'context-test-converter' });
+    await service.activateSnapshot(client, sourceId);
+    const db = shim(client);
+    const block = await resolveContext({
+      pool: db,
+      candidates: [cand({ lemma: '学校', pos: 'noun' }), cand({ lemma: '本', pos: 'noun' })],
+      tokens: []
+    });
+    assert.deepEqual(block.dictionary, {
+      source: 'Context-Test',
+      converter: 'context-test-converter',
+      version: block.dictionary.version,
+      fileDate: '2026-09-07',
+      sourceId: String(sourceId)
+    });
+    assert.ok(block.dictionary.version.startsWith('context-test-provenance-'));
+    assert.equal(block.items[0].dictionaryMatch.status, 'UNIQUE');
+    assert.equal(block.items[1].dictionaryMatch.status, 'NO_MATCH');
+    const q1calls = db.calls.filter((call) => call.sql.includes('jmdict_active_snapshot'));
+    assert.equal(q1calls.length, 1);
   } finally {
     client.release();
   }

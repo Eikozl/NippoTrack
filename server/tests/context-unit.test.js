@@ -473,6 +473,9 @@ test('UNIQUE entry with two senses stays AMBIGUOUS but keeps the reading (F2 cor
   assert.equal(result.interpretationStatus, INTERP.AMBIGUOUS);
   assert.equal(result.selectedSense, null);
   assert.equal(result.compatibleSenses.length, 2);
+  // CA-B2.1 §6: the selectedEntryId cleanup must not strip a valid UNIQUE
+  // identity just because the interpretation stays AMBIGUOUS.
+  assert.equal(result.selectedEntryId, '1000006');
 });
 
 test('zero survivors is NO_MATCH with NOT_APPLICABLE interpretation', () => {
@@ -492,6 +495,43 @@ test('lookup truncation forbids UNIQUE even with a single survivor (F11)', () =>
   assert.equal(result.lookupTruncated, true);
   assert.equal(result.interpretationStatus, INTERP.AMBIGUOUS);
   assert.equal(result.selectedSense, null);
+  // CA-B2.1: a lone visible survivor beside a truncated cohort is still
+  // MULTIPLE — selectedEntryId must stay null (CA-B3 must not read identity).
+  assert.equal(result.selectedEntryId, null);
+});
+
+test('one visible survivor plus an excluded evaluation-truncated entry stays MULTIPLE with null identity', () => {
+  // Would fail against the old MULTIPLE branch, which assigned the sole
+  // visible survivor as selectedEntryId even though a hidden tail could
+  // resurrect a second entry.
+  const visible = {
+    senses: [{ senseNo: 1, pos: ['n'], glossEn: ['school'], stagk: [], stagr: [] }],
+    evaluationTruncated: false,
+    forms: [{ surface: 'がっこう', normalized: 'がっこう', kind: 'reb', restr: [], isCommon: true, nokanji: false }],
+    formsTruncated: false,
+    posSummary: ['n'],
+    isCommon: true
+  };
+  const hiddenTail = {
+    senses: [{ senseNo: 1, pos: ['n'], glossEn: ['other'], stagk: ['他'], stagr: [] }],
+    evaluationTruncated: true,
+    forms: [],
+    formsTruncated: false,
+    posSummary: ['n'],
+    isCommon: false
+  };
+  const result = finalizeCandidate({
+    candidate: candidate({ key: 'noun::学校', canonical: '学校', lemma: '学校', pos: 'noun' }),
+    identity: { strategy: 'ORTHOGRAPHIC', kind: 'keb', keys: [{ value: '学校', normalized: '学校' }], lemmaReading: null },
+    cohortRows: [{ entryId: '1000001', surface: '学校', normalized: '学校', kind: 'keb' }],
+    lookupTruncated: false,
+    entries: new Map([['1000001', visible], ['1000002', hiddenTail]]),
+    inflectionType: null
+  });
+  assert.equal(result.matchStatus, MATCH.MULTIPLE);
+  assert.equal(result.matchReason, 'evaluation-truncated');
+  assert.equal(result.selectedEntryId, null);
+  assert.equal(result.interpretationStatus, INTERP.AMBIGUOUS);
 });
 
 test('late sense #6 is discovered: evaluation precedes display truncation (F8)', () => {
@@ -871,6 +911,11 @@ test('unsupported candidates resolve without any database query', async () => {
   assert.deepEqual(block.items.map((item) => item.dictionaryMatch.status), ['UNSUPPORTED', 'UNSUPPORTED']);
   assert.deepEqual(block.items.map((item) => item.interpretation.status), ['NOT_APPLICABLE', 'NOT_APPLICABLE']);
   assert.deepEqual(block.summary.dictionary, { UNIQUE: 0, MULTIPLE: 0, NO_MATCH: 0, UNSUPPORTED: 2, UNAVAILABLE: 0 });
+  // CA-B2.1: non-UNIQUE statuses never elect identity — including the
+  // service-layer-only UNSUPPORTED (proper nouns never reach the API wire).
+  for (const item of block.items) {
+    assert.equal(item.dictionaryMatch.selectedEntryId, null);
+  }
 });
 
 test('resolveContext enforces the 30-candidate cap with an honest warning', async () => {
@@ -883,7 +928,7 @@ test('resolveContext enforces the 30-candidate cap with an honest warning', asyn
       calls.push(1);
       // Pin present, zero matches: cohorts stay empty, items go NO_MATCH.
       return [[{
-        source_id: '7', source_name: 'JMdict', converter_version: '3.6.2', file_date: '2026-08-31',
+        source_id: '7', source_name: 'JMdict-Test', converter: 'fixture-converter', converter_version: '9.9.9', file_date: '2026-08-31',
         candidate_idx: 0, key_normalized: 'x', key_kind: 'keb', entry_id: null,
         surface: null, form_normalized: null, form_kind: null, is_common: 0, nokanji: 0, restr: []
       }]];
@@ -897,6 +942,9 @@ test('resolveContext enforces the 30-candidate cap with an honest warning', asyn
   assert.equal(block.items.length, 30);
   assert.ok(block.warnings.includes('candidate-cap-reached'));
   assert.equal(block.status, 'partial');
+  assert.equal(block.reason, 'candidate-cap-reached');
+  // CA-B2.1: a deterministic structural cap repeats on retry — not retryable.
+  assert.equal(block.retryable, false);
   assert.ok(calls.length <= 3);
 });
 
@@ -929,8 +977,163 @@ test('resolveContext never throws, even with a hostile pool', async () => {
   });
   assert.equal(block.status, 'unavailable');
   assert.equal(block.reason, 'reference-query-failed');
+  assert.equal(block.retryable, true);
   const empty = await resolveContext({ pool: null, candidates: [], tokens: [] });
   assert.equal(empty.status, 'ok');
   assert.deepEqual(empty.items, []);
   assert.equal(empty.dictionary, null);
+});
+
+// --- CA-B2.1 contract polish ------------------------------------------------
+
+// Deliberately non-default provenance: every pin assertion below must echo
+// THESE values, which fails against the old hardcoded source/converter.
+const CUSTOM_PIN = {
+  source_id: '7',
+  source_name: 'JMdict-Test',
+  converter: 'fixture-converter',
+  converter_version: '9.9.9',
+  file_date: '2026-08-31'
+};
+
+function q1Row(overrides = {}) {
+  return {
+    ...CUSTOM_PIN,
+    candidate_idx: 0,
+    key_normalized: '学校',
+    key_kind: 'keb',
+    entry_id: null,
+    surface: null,
+    form_normalized: null,
+    form_kind: null,
+    is_common: 0,
+    nokanji: 0,
+    restr: [],
+    ...overrides
+  };
+}
+
+function nounCandidate(key = 'noun::学校') {
+  return { key, canonical: '学校', lemma: '学校', pos: 'noun', lemmaReading: null, surfaceReading: null, observed: [] };
+}
+
+// Minimal faithful service stub: routes Q1/Q2-shaped SQL to canned rows.
+function stubPool({ q1Rows, senseRows = [], formRows = [], failQ1 = false, failQ2 = false } = {}) {
+  return {
+    execute: async (sql) => {
+      if (/jmdict_active_snapshot/i.test(sql)) {
+        if (failQ1) throw new Error('reference lookup down');
+        return [q1Rows];
+      }
+      if (/jmdict_senses/i.test(sql) || /FROM ranked/i.test(sql)) {
+        if (failQ2) throw new Error('sense fetch down');
+        return [/jmdict_senses/i.test(sql) ? senseRows : formRows];
+      }
+      throw new Error(`unexpected SQL in contract test: ${sql.slice(0, 60)}`);
+    }
+  };
+}
+
+function senseRow(entryId, senseNo) {
+  return { entry_id: entryId, pos_summary: ['n'], is_common: 1, sense_no: senseNo, pos: ['n'], gloss_en: [`sense ${senseNo}`], stagk: [], stagr: [] };
+}
+
+function formRow(entryId) {
+  return { entry_id: entryId, surface: '学校', normalized: '学校', kind: 'keb', restr: [], is_common: 1, nokanji: 0, rn: 1, total: 2 };
+}
+
+test('retryable contract: only transient failures are retryable (table-driven)', async () => {
+  // Would fail against the old `retryable: status !== 'ok'`, which marked
+  // every structural partial retryable — retrying those repeats the result.
+  const { resolveContext } = require('../src/services/contextService');
+  const sixCohort = [1, 2, 3, 4, 5, 6].map((n) => q1Row({
+    entry_id: String(n), surface: '学校', form_normalized: '学校', form_kind: 'keb', is_common: 1
+  }));
+  const sixSenses = [1, 2, 3, 4, 5, 6].map((n) => senseRow(String(n), 1));
+  const sixForms = [1, 2, 3, 4, 5, 6].map((n) => formRow(String(n)));
+  const valveSenses = Array.from({ length: 65 }, (_, index) => senseRow('1', index + 1));
+  const cases = [
+    {
+      name: 'lookup-truncated partial is structural, not retryable',
+      pool: stubPool({ q1Rows: sixCohort, senseRows: sixSenses, formRows: sixForms }),
+      candidates: [nounCandidate()],
+      want: { status: 'partial', reason: 'lookup-truncated', retryable: false }
+    },
+    {
+      name: 'evaluation-truncated partial is structural, not retryable',
+      pool: stubPool({ q1Rows: [q1Row({ entry_id: '1', surface: '学校', form_normalized: '学校', form_kind: 'keb', is_common: 1 })], senseRows: valveSenses, formRows: [formRow('1')] }),
+      candidates: [nounCandidate()],
+      want: { status: 'partial', reason: 'evaluation-truncated', retryable: false }
+    },
+    {
+      name: 'reference-query-failed is transient and retryable',
+      pool: stubPool({ q1Rows: [], failQ1: true }),
+      candidates: [nounCandidate()],
+      want: { status: 'unavailable', reason: 'reference-query-failed', retryable: true }
+    },
+    {
+      name: 'sense-evaluation-failed partial is transient and retryable',
+      pool: stubPool({ q1Rows: [q1Row({ entry_id: '1', surface: '学校', form_normalized: '学校', form_kind: 'keb', is_common: 1 })], failQ2: true }),
+      candidates: [nounCandidate()],
+      want: { status: 'partial', reason: 'sense-evaluation-failed', retryable: true }
+    },
+    {
+      name: 'version-absent is deterministic and not retryable',
+      pool: stubPool({ q1Rows: [] }),
+      candidates: [nounCandidate()],
+      want: { status: 'unavailable', reason: 'version-absent', retryable: false }
+    },
+    {
+      name: 'context-failed is transient and retryable',
+      pool: {}, // no execute(): internal contract violation, caught at the top
+      candidates: [nounCandidate()],
+      want: { status: 'unavailable', reason: 'context-failed', retryable: true }
+    }
+  ];
+  for (const { name, pool, candidates, want } of cases) {
+    const block = await resolveContext({ pool, candidates, tokens: [] });
+    assert.equal(block.status, want.status, `${name}: status`);
+    assert.equal(block.reason, want.reason, `${name}: reason`);
+    assert.equal(block.retryable, want.retryable, `${name}: retryable`);
+  }
+});
+
+test('dictionary provenance echoes the actual pinned snapshot, never constants', async () => {
+  // Would fail against the old pinDictionary, which hardcoded source
+  // 'JMdict' and converter 'jmdict-simplified' regardless of the pin.
+  const { resolveContext } = require('../src/services/contextService');
+  const pool = stubPool({
+    q1Rows: [q1Row({ entry_id: '1', surface: '学校', form_normalized: '学校', form_kind: 'keb', is_common: 1 })],
+    senseRows: [senseRow('1', 1)],
+    formRows: [formRow('1'), { entry_id: '1', surface: 'がっこう', normalized: 'がっこう', kind: 'reb', restr: [], is_common: 1, nokanji: 0, rn: 2, total: 2 }]
+  });
+  const block = await resolveContext({ pool, candidates: [nounCandidate()], tokens: [] });
+  assert.deepEqual(block.dictionary, {
+    source: 'JMdict-Test',
+    converter: 'fixture-converter',
+    version: '9.9.9',
+    fileDate: '2026-08-31',
+    sourceId: '7'
+  });
+  assert.equal(block.items[0].dictionaryMatch.status, 'UNIQUE');
+  assert.equal(block.items[0].dictionaryMatch.selectedEntryId, '1');
+});
+
+test('zero-match path carries the same actual provenance without another pointer read', async () => {
+  // Would fail if the miss path fell back to constants or issued a second
+  // snapshot query: the pin row rides the same single Q1 round trip.
+  const { resolveContext } = require('../src/services/contextService');
+  let queries = 0;
+  const pool = stubPool({ q1Rows: [q1Row()] });
+  const counting = { execute: async (sql, params) => { queries += 1; return pool.execute(sql, params); } };
+  const block = await resolveContext({ pool: counting, candidates: [nounCandidate()], tokens: [] });
+  assert.equal(queries, 1);
+  assert.equal(block.items[0].dictionaryMatch.status, 'NO_MATCH');
+  assert.deepEqual(block.dictionary, {
+    source: 'JMdict-Test',
+    converter: 'fixture-converter',
+    version: '9.9.9',
+    fileDate: '2026-08-31',
+    sourceId: '7'
+  });
 });

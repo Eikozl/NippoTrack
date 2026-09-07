@@ -43,12 +43,12 @@ function buildQ1(sqlKeys) {
   const values = sqlKeys.map(() => '(?, ?, ?)').join(', ');
   const sql =
     'WITH active AS (' +
-    ' SELECT s.source_id, s.source_name, s.converter_version, s.file_date' +
+    ' SELECT s.source_id, s.source_name, s.converter, s.converter_version, s.file_date' +
     ' FROM jmdict_active_snapshot a' +
     ' JOIN jmdict_sources s ON s.source_id = a.source_id' +
     " WHERE a.singleton = 1 AND s.status = 'ready'" +
     '), keys (candidate_idx, normalized, kind) AS (VALUES ' + values + ')' +
-    ' SELECT a.source_id, a.source_name, a.converter_version, a.file_date,' +
+    ' SELECT a.source_id, a.source_name, a.converter, a.converter_version, a.file_date,' +
     ' k.candidate_idx::int AS candidate_idx, k.normalized AS key_normalized, k.kind AS key_kind,' +
     ' f.entry_id, f.surface, f.normalized AS form_normalized, f.kind AS form_kind,' +
     ' f.is_common, f.nokanji, f.restr' +
@@ -74,8 +74,9 @@ async function runQ1(pool, sqlKeys) {
   const first = rows[0];
   const pin = {
     sourceId: String(first.source_id),
-    sourceName: first.source_name,
-    converterVersion: first.converter_version,
+    sourceName: String(first.source_name),
+    converter: String(first.converter),
+    converterVersion: String(first.converter_version),
     fileDate: first.file_date instanceof Date
       ? first.file_date.toISOString().slice(0, 10)
       : String(first.file_date)

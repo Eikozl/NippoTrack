@@ -9,10 +9,13 @@
 // server/src/auth/supabase.js. Project refs are public environment
 // identity (they appear in hostnames); never put secrets here.
 //
-// Enforced in two places, both development-entry only:
+// Enforced in three places, all development-entry only:
 // - dev.js (root launcher) checks before spawning any service.
 // - server/index.js checks before listening (Vercel uses api/index.js and
 //   never executes that file, so deployments are unaffected).
+// - assertSafeDbTarget (below) is called by DB-backed test/probe commands
+//   that resolve their own connection target outside server startup.
+// Explicit production startup (NODE_ENV=production) is never blocked.
 // Explicit production startup (NODE_ENV=production) is never blocked.
 
 const fs = require('node:fs');
@@ -174,6 +177,25 @@ function assertAlignedEnvironments({ backendSupabaseUrl, clientSupabaseUrl, mode
   return { backendRef, clientRef };
 }
 
+// Direct-DB guard for commands that bypass server startup (ad-hoc probes,
+// DB-backed test files, one-off scripts): they resolve their own target
+// instead of going through assertSafeDevelopmentEnvironment, so they must
+// check the EXPLICIT target before opening any connection. Refuses when the
+// host or user resolves to the Production project ref; loopback and the
+// disposable integration project pass. Inspects non-secret identity only.
+// Never throws for missing values — callers validate their own config.
+function assertSafeDbTarget({ host, user, source = 'explicit target' } = {}) {
+  const hits = [];
+  if (isProductionValue(host)) hits.push('host');
+  if (isProductionValue(user)) hits.push('user');
+  if (hits.length > 0) {
+    throw new Error(
+      `${REFUSAL_MESSAGE} (Production project ref '${PRODUCTION_PROJECT_REF}' detected via ${hits.join(', ')} from ${source}; refusing before any database connection.)`
+    );
+  }
+  return { host: host === undefined ? null : String(host), user: user === undefined ? null : String(user), source };
+}
+
 module.exports = {
   PRODUCTION_PROJECT_REF,
   REFUSAL_MESSAGE,
@@ -184,6 +206,7 @@ module.exports = {
   parseEnvFile,
   resolveDevelopmentIdentity,
   assertSafeDevelopmentEnvironment,
+  assertSafeDbTarget,
   resolveClientSupabaseUrl,
   assertSafeClientEnvironment,
   assertAlignedEnvironments

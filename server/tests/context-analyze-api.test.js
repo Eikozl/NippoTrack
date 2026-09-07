@@ -11,7 +11,7 @@ process.env.JLT_AUTH_BYPASS_FOR_TESTS = 'true';
 
 const TEST_USER = '00000000-0000-4000-8000-000000000001';
 
-const PIN = { source_id: '7', source_name: 'JMdict', converter_version: '3.6.2', file_date: '2026-08-31' };
+const PIN = { source_id: '7', source_name: 'JMdict-Test', converter: 'fixture-converter', converter_version: '9.9.9', file_date: '2026-08-31' };
 
 // Minimal in-memory reference: one single-sense noun, one two-sense verb,
 // one kana-homograph trio. Served through the real Q1/Q2 code path.
@@ -233,7 +233,10 @@ test('lexical + context resolves UNIQUE/COMPATIBLE and UNIQUE/AMBIGUOUS additive
       assert.equal(body.lexical.status, 'ok');
       const context = body.lexical.context;
       assert.equal(context.status, 'ok');
-      assert.deepEqual(context.dictionary, { source: 'JMdict', version: '3.6.2', fileDate: '2026-08-31', converter: 'jmdict-simplified', sourceId: '7' });
+      assert.equal(context.retryable, false);
+      // Provenance echoes the pinned snapshot fixture, never constants —
+      // fails against the old hardcoded source/converter.
+      assert.deepEqual(context.dictionary, { source: 'JMdict-Test', version: '9.9.9', fileDate: '2026-08-31', converter: 'fixture-converter', sourceId: '7' });
       const gakkou = itemByKey(context, 'noun::学校');
       assert.equal(gakkou.dictionaryMatch.status, 'UNIQUE');
       assert.equal(gakkou.dictionaryMatch.identityStrategy, 'ORTHOGRAPHIC');
@@ -275,6 +278,9 @@ test('kana homograph stays MULTIPLE/AMBIGUOUS; unknown lemma is NO_MATCH', async
       assert.equal(honItem.dictionaryMatch.status, 'NO_MATCH');
       assert.equal(honItem.dictionaryMatch.reason, 'no-compatible-entry');
       assert.equal(honItem.interpretation.status, 'NOT_APPLICABLE');
+      // Zero-match path carries the same actual provenance (same single Q1
+      // round trip, no second pointer read) — fails against hardcoded labels.
+      assert.deepEqual(hon.body.lexical.context.dictionary, { source: 'JMdict-Test', version: '9.9.9', fileDate: '2026-08-31', converter: 'fixture-converter', sourceId: '7' });
     });
   } finally {
     stub.restore();
@@ -342,6 +348,7 @@ test('reference Q1 failure: HTTP 200 with retryable query failure; Q2 failure de
       assert.equal(status, 200);
       const context = body.lexical.context;
       assert.equal(context.status, 'partial');
+      assert.equal(context.retryable, true);
       const gakkou = itemByKey(context, 'noun::学校');
       assert.equal(gakkou.dictionaryMatch.status, 'UNAVAILABLE');
       assert.equal(gakkou.interpretation.status, 'UNAVAILABLE');
@@ -436,4 +443,47 @@ test('unknown-token input yields an honest empty context, not an error', async (
   } finally {
     stub.restore();
   }
+});
+
+test('selectedEntryId exists only for UNIQUE across every status on the wire', async () => {
+  // Would fail against the old MULTIPLE branch, which assigned the sole
+  // visible survivor as selectedEntryId: CA-B3 must never read identity
+  // from a non-UNIQUE match. (UNSUPPORTED is unreachable through this
+  // endpoint — proper nouns travel in `unverified`, never in `candidates` —
+  // so it is covered at the service layer instead; see context-unit.)
+  const stub = installStub();
+  const seen = { UNIQUE: 0, MULTIPLE: 0, NO_MATCH: 0, UNAVAILABLE: 0 };
+  try {
+    await withServer(async (base) => {
+      const clean = await postAnalysis(base, { text: '学校に行く。', lexical: { enabled: true }, context: { enabled: true } });
+      const multi = await postAnalysis(base, { text: 'はし', lexical: { enabled: true }, context: { enabled: true } });
+      const miss = await postAnalysis(base, { text: '学校と本', lexical: { enabled: true }, context: { enabled: true } });
+      for (const body of [clean.body, multi.body, miss.body]) {
+        for (const item of body.lexical.context.items) {
+          seen[item.dictionaryMatch.status] += 1;
+          if (item.dictionaryMatch.status === 'UNIQUE') {
+            assert.ok(item.dictionaryMatch.selectedEntryId, `${item.key} UNIQUE keeps identity`);
+          } else {
+            assert.equal(item.dictionaryMatch.selectedEntryId, null, `${item.key} ${item.dictionaryMatch.status} must not elect identity`);
+          }
+        }
+      }
+    });
+  } finally {
+    stub.restore();
+  }
+  const q2down = installStub({ pin: 'q2fail' });
+  try {
+    await withServer(async (base) => {
+      const { body } = await postAnalysis(base, { text: '学校に行く。', lexical: { enabled: true }, context: { enabled: true } });
+      for (const item of body.lexical.context.items) {
+        seen[item.dictionaryMatch.status] += 1;
+        assert.equal(item.dictionaryMatch.selectedEntryId, null, `UNAVAILABLE ${item.key} must not elect identity`);
+      }
+    });
+  } finally {
+    q2down.restore();
+  }
+  assert.ok(seen.UNIQUE > 0 && seen.MULTIPLE > 0 && seen.NO_MATCH > 0 && seen.UNAVAILABLE > 0,
+    `scan covered every wire-reachable status: ${JSON.stringify(seen)}`);
 });
