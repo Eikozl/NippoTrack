@@ -137,7 +137,7 @@ test.after(async () => {
 
 test('composite snapshot PK keeps same ent_seq with different content per snapshot', { skip: !runnable }, async () => {
   // Bug guarded: mutable PRIMARY KEY(ent_seq) — the second import would
-  // overwrite the first and both reads would return identical checksums.
+  // overwrite the first and both reads would return identical glosses.
   const client = await pool.connect();
   try {
     const first = await makeSnapshot(client, 'pk-a', fixture.words.slice(0, 2));
@@ -145,11 +145,11 @@ test('composite snapshot PK keeps same ent_seq with different content per snapsh
     altered[0].sense[0].gloss = [{ text: 'altered school', lang: 'eng' }];
     const second = await makeSnapshot(client, 'pk-b', altered);
     const rows = await client.query(
-      'SELECT source_id, checksum FROM jmdict_entries WHERE ent_seq = 1000001 AND source_id IN ($1, $2) ORDER BY source_id',
+      'SELECT source_id, gloss_en FROM jmdict_senses WHERE entry_id = 1000001 AND sense_no = 1 AND source_id IN ($1, $2) ORDER BY source_id',
       [first, second]
     );
     assert.equal(rows.rowCount, 2);
-    assert.notEqual(rows.rows[0].checksum, rows.rows[1].checksum);
+    assert.notDeepEqual(rows.rows[0].gloss_en, rows.rows[1].gloss_en);
   } finally {
     client.release();
   }
@@ -418,7 +418,7 @@ test('failed import never moves the active pointer', { skip: !runnable }, async 
 
 async function readSnapshotRows(client, sourceId) {
   const entries = (await client.query(
-    'SELECT ent_seq, doc, pos_summary, is_common, checksum FROM jmdict_entries WHERE source_id = $1 ORDER BY ent_seq',
+    'SELECT ent_seq, pos_summary, is_common FROM jmdict_entries WHERE source_id = $1 ORDER BY ent_seq',
     [sourceId]
   )).rows;
   const forms = (await client.query(
@@ -436,7 +436,7 @@ test('bulk path stores byte-exact normalized rows', { skip: !runnable }, async (
   // Bug guarded: the SQL-batched rewrite changing reference semantics —
   // every stored column must equal the normalizer output exactly (display
   // surfaces verbatim, folded keys, restr/nokanji, pos, glosses, stagk/stagr,
-  // doc, checksum). Fails if jsonb_to_recordset mistypes any column.
+  // entry metadata). Fails if jsonb_to_recordset mistypes any column.
   const client = await pool.connect();
   try {
     const sourceId = await makeSnapshot(client, 'equiv', fixture.words);
@@ -446,10 +446,8 @@ test('bulk path stores byte-exact normalized rows', { skip: !runnable }, async (
     for (const [index, record] of expected.entries()) {
       const row = stored.entries[index];
       assert.equal(Number(row.ent_seq), record.entSeq);
-      assert.deepEqual(row.doc, record.doc);
       assert.deepEqual(row.pos_summary, record.posSummary);
       assert.equal(row.is_common, record.isCommon);
-      assert.equal(row.checksum, record.checksum);
     }
     const expectedForms = expected.flatMap((record) => record.forms.map((form) => ({
       entry_id: String(record.entSeq), ...form, is_common: form.isCommon

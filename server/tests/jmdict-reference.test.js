@@ -53,8 +53,9 @@ test('basic noun normalizes with keb/reb forms and single sense', () => {
   assert.deepEqual(record.forms[1], { surface: 'がっこう', normalized: 'がっこう', kind: 'reb', restr: [], isCommon: true, nokanji: false });
   assert.equal(record.senses.length, 1);
   assert.deepEqual(record.senses[0].glossEn, ['school']);
-  assert.match(record.checksum, /^[0-9a-f]{64}$/);
-  assert.deepEqual(record.doc.id, '1000001');
+  // JSO-B lean projection: the normalized record carries exactly the runtime
+  // columns (no doc JSONB, no per-entry checksum).
+  assert.deepEqual(Object.keys(record).sort(), ['entSeq', 'forms', 'isCommon', 'posSummary', 'senses']);
 });
 
 test('verb keeps raw POS codes verbatim for the C1/B2 mapping table', () => {
@@ -148,12 +149,13 @@ test('malformed words fail loudly, never partially', () => {
   assert.throws(() => normalizeJmdictWord(dup), /duplicate reb/);
 });
 
-test('checksum is deterministic for identical input', () => {
-  // Bug guarded: unstable integrity hashes (key order, spacing) making row
-  // checksums unverifiable across runs.
-  const first = normalizeJmdictWord(word('1000001'));
-  const second = normalizeJmdictWord(JSON.parse(JSON.stringify(word('1000001'))));
-  assert.equal(first.checksum, second.checksum);
+test('lean record carries no doc or checksum', () => {
+  // Bug guarded: reintroducing unprojected payload (doc JSONB) or per-entry
+  // integrity bytes (checksum) into the normalized record. Snapshot integrity
+  // rests on the source artifact sha256 + importer version + verification.
+  const record = normalizeJmdictWord(word('1000001'));
+  assert.equal(record.doc, undefined);
+  assert.equal(record.checksum, undefined);
 });
 
 test('snapshot identity refuses untraceable provenance', () => {

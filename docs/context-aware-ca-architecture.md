@@ -3,7 +3,8 @@
 Canonical design record. Phases: CA-A (source/storage/model), CA-A.1 (snapshot
 correctness, two-axis model, bounded queries), CA-A.2 (pinning, overflow
 safety, precedence, valve precision), CA-B1 (reference foundation, built),
-CA-B1.1 (bulk import, Q1 index, doc corrections), CA-B2 (context core, built).
+CA-B1.1 (bulk import, Q1 index, doc corrections), CA-B2 (context core, built),
+JSO-B (lean runtime projection, built, migration `012`).
 
 ## What it is
 
@@ -35,8 +36,10 @@ Hybrid PostgreSQL model, five tables, all GLOBAL (no `user_id`, no user FKs):
   `(source_name, file_date, converter, converter_version, sha256)`.
 - `jmdict_active_snapshot` — singleton pointer `(1, source_id NULLABLE)`.
   `NULL` = dictionary not loaded. Activation/rollback = one atomic row write.
-- `jmdict_entries(source_id, ent_seq)` — canonical `doc JSONB`, `pos_summary`,
-  `is_common`, row checksum. `ent_seq` is upstream identity, never the sole PK.
+- `jmdict_entries(source_id, ent_seq)` — lean `pos_summary`, `is_common` only
+  (JSO-B `012` removed `doc JSONB` + row checksum: zero runtime/verify/
+  recovery consumers; source artifact sha256 + verification carry integrity).
+  `ent_seq` is upstream identity, never the sole PK.
 - `jmdict_forms(source_id, entry_id, kind, surface)` — exact `surface` +
   folded `normalized` key (NFKC + katakana→hiragana only), `restr`,
   `is_common`, `nokanji`. Hot index `idx_jmdict_forms_q1_lookup(source_id,

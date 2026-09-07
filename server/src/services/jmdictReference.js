@@ -23,7 +23,7 @@ const { katakanaToHiragana } = require('../search/japaneseSearch');
 
 const JMDICT_SOURCE_NAME = 'JMdict';
 const JMDICT_CONVERTER = 'jmdict-simplified';
-const JMDICT_IMPORTER_VERSION = 'cab1-1';
+const JMDICT_IMPORTER_VERSION = 'cab2-lean-1';
 const IMPORT_BATCH_SIZE = 500;
 // Max child rows per bulk INSERT statement. A 500-entry batch carries ~1150
 // forms / ~580 senses on average (measured pin 3.6.2), so one chunk each in
@@ -86,7 +86,9 @@ function englishGlosses(glossArray, entryId) {
   }
   // Plain translations first; typed glosses (literal/figurative/explanation)
   // only as a deterministic fallback so gloss_en is never empty while real
-  // translation text exists. Full typed fidelity remains in doc.
+  // translation text exists. gloss_en is the retained fidelity: JSO-B stores
+  // no raw entry document (no doc JSONB), so only projected English text
+  // survives — typed-gloss labels beyond the plain-first ordering do not.
   const plain = english.filter((gloss) => !gloss.type);
   const chosen = plain.length ? plain : english;
   return [...new Set(chosen.map((gloss) => gloss.text))];
@@ -208,12 +210,10 @@ function normalizeJmdictWord(word) {
   });
 
   const record = { entSeq, posSummary, isCommon: forms.some((form) => form.isCommon), forms, senses };
-  const checksum = sha256Hex(stableStringify(record));
-  return {
-    ...record,
-    doc: { id: word.id, kanji: word.kanji, kana: word.kana, sense: word.sense },
-    checksum
-  };
+  // JSO-B lean projection: no raw entry document (doc JSONB) and no per-entry
+  // checksum are stored. Snapshot integrity rests on the source artifact
+  // sha256 + importer version in jmdict_sources plus structural verification.
+  return record;
 }
 
 // ---------------------------------------------------------------------------
@@ -296,19 +296,17 @@ async function insertNormalizedBatch(client, sourceId, records) {
   if (!records.length) return { entries: 0, forms: 0, senses: 0, statements: 0 };
   let statements = 0;
   await client.query(
-    `INSERT INTO jmdict_entries (source_id, ent_seq, doc, pos_summary, is_common, checksum)
-     SELECT $1, batch.ent_seq, batch.doc, batch.pos_summary, batch.is_common, batch.checksum
+    `INSERT INTO jmdict_entries (source_id, ent_seq, pos_summary, is_common)
+     SELECT $1, batch.ent_seq, batch.pos_summary, batch.is_common
      FROM jsonb_to_recordset($2::jsonb)
-       AS batch(ent_seq bigint, doc jsonb, pos_summary text[], is_common boolean, checksum text)
+       AS batch(ent_seq bigint, pos_summary text[], is_common boolean)
      ON CONFLICT (source_id, ent_seq) DO UPDATE SET
-       doc = EXCLUDED.doc, pos_summary = EXCLUDED.pos_summary,
-       is_common = EXCLUDED.is_common, checksum = EXCLUDED.checksum`,
+       pos_summary = EXCLUDED.pos_summary,
+       is_common = EXCLUDED.is_common`,
     [sourceId, JSON.stringify(records.map((record) => ({
       ent_seq: record.entSeq,
-      doc: record.doc,
       pos_summary: record.posSummary,
-      is_common: record.isCommon,
-      checksum: record.checksum
+      is_common: record.isCommon
     })))]
   );
   statements += 1;
