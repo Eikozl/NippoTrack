@@ -1,8 +1,9 @@
-# Context-Aware Vocabulary Intelligence — Frozen Architecture (CA-A → CA-B1)
+# Context-Aware Vocabulary Intelligence — Frozen Architecture (CA-A → CA-B2)
 
 Canonical design record. Phases: CA-A (source/storage/model), CA-A.1 (snapshot
 correctness, two-axis model, bounded queries), CA-A.2 (pinning, overflow
-safety, precedence, valve precision), CA-B1 (reference foundation, built).
+safety, precedence, valve precision), CA-B1 (reference foundation, built),
+CA-B1.1 (bulk import, Q1 index, doc corrections), CA-B2 (context core, built).
 
 ## What it is
 
@@ -51,11 +52,14 @@ restores rows (proven A→B→A in CA-B1); prune protects ACTIVE + rollback
 target; idempotent reimport; crash recovery restarts under a fresh id.
 Runtime `SELECT`-only, forced RLS role-boundary, admin-only lifecycle.
 
-## Two-axis intelligence model (frozen; built in CA-B2, not here)
+## Two-axis intelligence model (frozen; built in CA-B2)
 
 - `dictionaryMatch`: `UNIQUE | MULTIPLE | NO_MATCH | UNSUPPORTED | UNAVAILABLE`
   — which entry/form/readings the candidate maps to. Resolved ONLY after all
   Q2-dependent hard filters (H1–H6 + POS table) run over the full evaluated set.
+  Zero evaluated survivors + a tripped sense valve is `MULTIPLE` (never
+  `NO_MATCH` — the unevaluated tail may hide a match); a tripped valve on a
+  fully-excluded entry likewise forbids `UNIQUE`/`COMPATIBLE`.
 - `interpretation`: `COMPATIBLE | AMBIGUOUS | NOT_APPLICABLE | UNAVAILABLE` —
   which sense, if any, is justified. `COMPATIBLE` iff exactly one sense
   survives in a `UNIQUE` match with no valve trip. **No `LIKELY` in v1.**
@@ -100,10 +104,86 @@ used as a hard exclusion in CA-B2 — unknown is not incompatible). **maxSensesP
 zero orphans; zero gloss-less senses. Storage ≈ 367 MB reference
 (entries 195 / forms 112 / senses 60 MB, measured local PG18).
 
-## CA-B2 handoff (foundation guarantees)
+## CA-B2 handoff (foundation guarantees — all implemented)
 
 One-request-one-snapshot pinning (Q1 returns pin incl. zero-match path);
 orthographic-first lookup with kind-enforced keys; no inflected identity
 keys; Q1 5+1 overflow sentinel; Q2 full-set evaluation with 64+1 valve;
 post-filter `dictionaryMatch`; interpretation after match; display truncation
-last. DO NOT implement here — CA-B2 block, audited separately.
+last.
+
+## CA-B2 implementation (as built)
+
+Service topology (`server/src/services/`, reusable beyond the Analyzer —
+input is candidate-shaped data, never raw text):
+
+- `contextIdentity.js` — eligibility (Phase 12 content words only; proper
+  nouns/unknowns/function words → `UNSUPPORTED`), safe keys (lemma +
+  canonical dedup; observed surfaces only when `surface === lemma`), strategy
+  driven by the LEMMA alone (a kana lemma never upgrades to `ORTHOGRAPHIC`
+  on an unobserved Han canonical), head-token inflection recovery.
+- `contextPos.js` — centralized compatibility table → `EXACT_COMPATIBLE |
+  BROAD_COMPATIBLE | INCOMPATIBLE | UNKNOWN`; only `INCOMPATIBLE` excludes.
+  `unc`, unrecognized codes and empty lists are wildcards. Audit-hardened
+  broad sets: `aux-v`/`exp` for verbs; `exp`/`aux-adj` for i-adjectives;
+  `vs`/`exp`/counters for na-adjectives; `adv`/`vs`/`int`/counters/`exp`
+  for nouns (adverbial nouns/pronouns: 何 stays `AMBIGUOUS`, never
+  niche-`COMPATIBLE`); full `n` range + `exp` for adverbs; `adv`/`n`/`exp`
+  for interjections. `pn` still strikes (names out of v1 scope; a pn-only
+  entry is honestly `NO_MATCH` for a common-noun observation).
+  Inflection (`一段→v1`, `五段・行→v5*`, `カ変→vk`, `サ変→vs`) corroborates
+  only (`INFLECTION_FAMILY_COMPATIBLE`), never vetoes.
+- `contextReference.js` — Q1 (active CTE × keys × `LEFT JOIN LATERAL`,
+  one round trip, pin preserved on zero matches; ≤120 keys guarded,
+  5+1/key, ≤720 rows) + Q2 senses (pinned source param, per-entry 64+1
+  via `LATERAL`) + Q2 forms (per-entry cap 200 with truncation flag).
+  Adapter-safe (`?` only, counts asserted, no `LIKE`/JSON-operators).
+- `contextFilters.js` — H1–H6 with normalized restriction membership; H2
+  uses parser `lemmaReading` only (dictionary form observed; frozen rule —
+  an IPADIC misreading propagates, so the behavior is pinned by test and
+  disclosed here); reading resolution (`ORTHOGRAPHIC`: all applicable reb;
+  fallback: matched rows only); two-axis finalization incl. the
+  excluded-tail rule above.
+- `contextResponse.js` — diet (entries ≤5, senses ≤3, glosses ≤3, no `doc`),
+  summary counts, reason codes, 100 KB cap (presentation-only trim that
+  provably preserves statuses).
+- `contextService.js` — `resolveContext({pool, candidates, tokens})`:
+  ≤3 queries, ≤150-entry Q2 budget (overflow → `MULTIPLE` + truncated,
+  never `NO_MATCH`), never throws, logs nothing.
+
+API (`POST /api/analyze/text`, additive double opt-in): `lexical.enabled`
+unchanged; `context.enabled` requires lexical (else `lexical-required`,
+HTTP 200). Context rides the lexical budget (no second limiter). Failure
+semantics: Kanji OK / lexical OK / context `UNAVAILABLE` (`version-absent`,
+`reference-query-failed`, `sense-evaluation-failed`, `lexical-required`,
+`lexical-unavailable`), HTTP 200 throughout. Runtime pool only
+(`config/db`); services never import admin *or* runtime pools (pool is
+injected; asserted by test). No writes, no user tables, no external calls,
+no content logging (counts/durations only).
+
+Known limitations (safe direction, future work — NOT v1 bugs):
+- `stagkNone`/`stagrNone` (kana-only senses) are not persisted (CA-B1
+  schema frozen): collapsed to unrestricted, so Han observations keep such
+  senses (over-keep → `AMBIGUOUS`). Needs a future migration to represent.
+- H2 trusts the IPADIC dictionary-form reading; a parser misreading narrows
+  to the wrong sense. Absent reading evidence always keeps ambiguity.
+
+Measured local facts (snapshot 1, 218,672 entries; loopback admin,
+read-only): Q1 `Limit > Index Scan(idx_jmdict_forms_q1_lookup)`, no sort,
+on 1/1/6/6-row probes (2–6 ms, 6–11 buffers); widest cohort 52 rows
+(こう/reb) → 6-row fetch; max forms/entry 40 (cap 200 dormant); max
+senses/entry 27 (valve 64 dormant). Corpus: 19 texts, ≤3 queries each,
+1.5–3.5 KB blocks, 7–33 ms. Adversarial outcomes: 行く `UNIQUE` without
+逝く/往く; かける trio identically `MULTIPLE` + truncated (no WSD);
+箸 `COMPATIBLE` chopsticks; はし `MULTIPLE`; 田中 absent (proper noun);
+ググった empty-ok; エモい ambiguous (no invented definition). One live
+correction made during verification: 何/なに stays `AMBIGUOUS` across its
+`n` + `adv` senses (noun↔adverb broadened) instead of `COMPATIBLE` on the
+niche noun sense.
+
+Tests: 40 unit (`context-unit`), 15 DB (`context-db`, loopback-gated:
+bounds, sentinels both directions, F12 race with single-pointer-read
+assert, F13 zero-match pin, 011 plan shape, N+1, Han-miss, fixture F1–F5),
+10 API (`context-analyze-api`: flags, degradation, caps, reason codes,
+closed status sets across UNIQUE/MULTIPLE/NO_MATCH/UNAVAILABLE wire).
+65 context tests total, all green; full server suite green (see report).
