@@ -65,7 +65,7 @@ test('Phase 12 real DOM stabilization', { skip: !process.env.JLT_BROWSER, timeou
     assert.match(result, /New Vocabulary \(1\)/);
     assert.doesNotMatch(result, /Already in Vocabulary \(1\)/);
   });
-  for (const width of [320,360,375,390,430,1280]) {
+  for (const width of [320,360,375,390,430,768,1280]) {
     await t.test(`Estimate ${width}px: first and subsequent open fit natural content`, async () => {
       await browser.send('Emulation.setDeviceMetricsOverride', {width,height:800,deviceScaleFactor:1,mobile:false});
         const result = await run(`(async()=>{
@@ -81,8 +81,7 @@ test('Phase 12 real DOM stabilization', { skip: !process.env.JLT_BROWSER, timeou
         for(let i=0;i<2;i++) {
           host.querySelector('button').click();await wait();
           const rect=morph.getBoundingClientRect(),style=getComputedStyle(morph);
-          const expected=host.querySelector('button').getBoundingClientRect().height+host.querySelector('.level-estimate-detail-inner').scrollHeight+parseFloat(style.paddingTop)+parseFloat(style.paddingBottom);
-          measurements.push({width:rect.width,left:rect.left,right:rect.right,height:rect.height,expected,overflow:document.documentElement.scrollWidth>innerWidth});
+          measurements.push({width:rect.width,left:rect.left,right:rect.right,height:rect.height,overflow:document.documentElement.scrollWidth>innerWidth,inlineHeight:morph.style.height,inlineMaxHeight:morph.style.maxHeight,position:style.position,maxHeight:style.maxHeight,flip:morph.classList.contains('is-flip')});
           control.close();await wait();
         }
         control.destroy();return measurements;
@@ -90,6 +89,13 @@ test('Phase 12 real DOM stabilization', { skip: !process.env.JLT_BROWSER, timeou
       for (const rect of result) {
         assert.ok(rect.left>=0 && rect.right<=width+1 && !rect.overflow, 'viewport fit');
         assert.ok(rect.height < 0.9 * 800, `summary height ${rect.height} should not become a viewport sheet`);
+        assert.equal(rect.inlineHeight, '', 'no inline measured height');
+        assert.equal(rect.inlineMaxHeight, '', 'no inline measured max-height');
+        assert.equal(rect.flip, false, 'mobile and desktop use the shared connected surface');
+        if (width <= 640) {
+          assert.equal(rect.position, 'absolute', 'mobile surface stays anchored to its host');
+          assert.equal(rect.maxHeight, 'none', 'mobile height is intrinsic');
+        }
       }
       assert.ok(Math.abs(result[0].height-result[1].height)<3, 'first and subsequent open agree');
     });

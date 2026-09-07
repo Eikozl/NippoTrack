@@ -159,26 +159,12 @@
 /* Phase 9 refinement — morphing header level-estimate control. ONE surface
    (.level-estimate-morph) morphs between a collapsed pill (whose only
    visual identity is the level itself — no decorative icon) and the
-   expanded detail card. CSS grid-template-rows animates the height,
-   width/border-radius/padding animate the shape (~340ms, natural
-   ease-out); detail content fades/slides via the inner wrapper. The morph
-   is absolutely anchored in its fixed-size host, so expansion originates
-   from the exact pill location, grows leftward/downward within the
-   viewport, and never pushes the theme/account buttons.
-   Viewport safety: the OUTER shell keeps overflow:hidden for the morph
-   shape; the INNER .level-estimate-detail region (below the always-visible
-   face) is the scroll container, bounded by a dvh-based max-height with a
-   vh fallback, so long content (open "How this is estimated" details,
-   disclaimer) stays reachable via inner scroll on any viewport.
-   prefers-reduced-motion: state still toggles, motion becomes instant. */
+   expanded detail card. Desktop/tablet retain the anchored grid morph;
+   narrow viewports switch to an intrinsic-height surface below so the
+   browser owns the content height. */
 .level-estimate-host { position: relative; flex: none; width: 4.25rem; height: 2.5rem; }
 .level-estimate-morph { position: absolute; top: 0; right: 0; z-index: 40; display: grid; grid-template-rows: auto 0fr; width: 4.25rem; padding: 0 0.5rem; overflow: hidden; border-radius: 999px; background: var(--jlt-surface); box-shadow: var(--shadow-raised-sm); transition: width 340ms cubic-bezier(0.22, 0.9, 0.26, 1), grid-template-rows 340ms cubic-bezier(0.22, 0.9, 0.26, 1), border-radius 340ms cubic-bezier(0.22, 0.9, 0.26, 1), padding 340ms cubic-bezier(0.22, 0.9, 0.26, 1), box-shadow 200ms ease; }
 .level-estimate-morph.is-open { width: min(22rem, calc(100vw - 2rem)); max-height: min(32rem, calc(100vh - 6rem)); grid-template-rows: auto 1fr; padding: 0.8rem 1.1rem 1.1rem; border-radius: 20px; box-shadow: var(--shadow-raised-md); }
-/* Narrow-viewport FLIP shell: geometry is driven by inline rects (collapsed
-   trigger rect <-> computed viewport sheet), so top/left/width/height join
-   the same 340ms morph transition. Visual styles still key off .is-open;
-   the shell keeps header stacking and owns pointer interaction while open. */
-.level-estimate-morph.is-flip { position: fixed; z-index: 40; margin: 0; transition: top 340ms cubic-bezier(0.22, 0.9, 0.26, 1), left 340ms cubic-bezier(0.22, 0.9, 0.26, 1), width 340ms cubic-bezier(0.22, 0.9, 0.26, 1), height 340ms cubic-bezier(0.22, 0.9, 0.26, 1), grid-template-rows 340ms cubic-bezier(0.22, 0.9, 0.26, 1), border-radius 340ms cubic-bezier(0.22, 0.9, 0.26, 1), padding 340ms cubic-bezier(0.22, 0.9, 0.26, 1), box-shadow 200ms ease; }
 @supports (max-height: 100dvh) {
   .level-estimate-morph.is-open { max-height: min(32rem, calc(100dvh - 6rem)); }
 }
@@ -194,11 +180,6 @@
 .level-estimate-morph.is-open .level-estimate-detail::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--jlt-border); }
 .level-estimate-detail-inner { padding-top: 0.6rem; transform: translateY(6px); transition: transform 300ms ease-out; }
 .level-estimate-morph.is-open .level-estimate-detail-inner { transform: none; }
-/* Measure final wrapping and padding, never an in-flight CSS transition.
-   Shell opacity also hides descendants with explicit visibility:visible. */
-.level-estimate-morph.is-measuring { opacity: 0; }
-.level-estimate-morph.is-measuring,
-.level-estimate-morph.is-measuring * { transition: none !important; }
 .level-estimate-subline { font-size: 0.875rem; line-height: 1.5; color: var(--jlt-muted); }
 .level-estimate-confidence { margin-top: 0.5rem; font-size: 0.8125rem; font-weight: 600; color: var(--jlt-ink); }
 .level-estimate-pills { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.7rem; }
@@ -211,47 +192,28 @@
 @media (prefers-reduced-motion: reduce) {
   .level-estimate-morph, .level-estimate-morph *, .level-estimate-detail, .level-estimate-detail-inner { transition: none !important; }
 }
-/* Mobile viewport sheet: below the tablet breakpoint the trigger-anchored
-   popover cannot fit (the host sits mid-header, so leftward expansion clips
-   offscreen). The SAME surface instead becomes a viewport sheet — nearly
-   full width with safe insets, top just below the header, dvh-safe bottom
-   inset. Shape, content, internal scroll, transitions, and desktop behavior
-   are unchanged; only geometry is constrained. */
+/* Mobile keeps the same connected surface but drops all viewport geometry.
+   Its height is intrinsic to the rendered copy: no fixed sheet, cap, or
+   JavaScript-provided height is needed. Width is still bounded by the
+   viewport so wrapped copy cannot create horizontal overflow. */
 @media (max-width: 640px) {
+  .level-estimate-morph { overflow: hidden; transition: opacity 160ms ease-out, transform 160ms ease-out; }
   .level-estimate-morph.is-open {
-    position: fixed;
-    top: 4.5rem;
-    left: 0.75rem;
-    right: 0.75rem;
-    width: auto;
-    max-height: min(40rem, calc(100vh - 5.5rem));
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: min(22rem, calc(100vw - 2rem));
+    height: auto;
+    max-width: calc(100vw - 1.5rem);
+    max-height: none;
+    grid-template-rows: auto auto;
+    overflow: visible;
     transform-origin: top right;
   }
-}
-@supports (max-height: 100dvh) {
-  @media (max-width: 640px) {
-    .level-estimate-morph.is-open { max-height: min(40rem, calc(100dvh - 5.5rem)); }
-  }
-}
-/* Closing lifecycle: .is-closing is added while .is-open is still present
-   and removed only when the shell geometry transition ends, so the expanded
-   positioning context survives the whole contraction and close mirrors open.
-   Desktop needs no rule (its absolute anchoring never changes); mobile keeps
-   the viewport sheet. Detail content fades early so no text sits in a
-   narrowing column — this is what removes the tall/narrow artifact. */
-@media (max-width: 640px) {
-  .level-estimate-morph.is-closing {
-    position: fixed;
-    top: 4.5rem;
-    left: 0.75rem;
-    right: 0.75rem;
-    width: auto;
-    max-height: min(40rem, calc(100vh - 5.5rem));
-  }
-}
-@supports (max-height: 100dvh) {
-  @media (max-width: 640px) {
-    .level-estimate-morph.is-closing { max-height: min(40rem, calc(100dvh - 5.5rem)); }
+  .level-estimate-morph.is-open .level-estimate-detail {
+    overflow: visible;
+    max-height: none;
+    overscroll-behavior: auto;
   }
 }
 .level-estimate-morph.is-closing .level-estimate-detail {

@@ -1,4 +1,4 @@
-// Dashboard Active Goals preview + estimate viewport sheet.
+// Dashboard Active Goals preview + estimate intrinsic mobile layout.
 // Static source assertions; no DOM, servers, or browsers required.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -65,14 +65,16 @@ test('existing dashboard content still renders', () => {
   assert.ok(!source.includes('weeklyChart'), 'charts stay removed');
 });
 
-test('estimate morph uses a viewport sheet below the tablet breakpoint', () => {
+test('estimate morph uses intrinsic mobile layout below the tablet breakpoint', () => {
   const css = readSource('src/styles.css');
-  assert.ok(css.includes('@media (max-width: 640px)'), 'tablet-range containment');
-  assert.ok(css.includes('left: 0.75rem'), 'left inset');
-  assert.ok(css.includes('right: 0.75rem'), 'right inset');
-  assert.ok(css.includes('top: 4.5rem'), 'top below the header region');
-  assert.ok(css.includes('100dvh'), 'dvh-safe bottom geometry');
-  assert.ok(css.includes('position: fixed'), 'trigger-relative placement overridden');
+  const start = css.indexOf('@media (max-width: 640px)');
+  const mobile = css.slice(start, css.indexOf('@keyframes spin', start));
+  assert.ok(start >= 0, 'narrow breakpoint exists');
+  assert.ok(mobile.includes('height: auto'), 'mobile height stays intrinsic');
+  assert.ok(mobile.includes('max-height: none'), 'mobile has no height cap');
+  assert.ok(mobile.includes('overflow: visible'), 'mobile content is not clipped');
+  assert.ok(!mobile.includes('position: fixed'), 'mobile does not use a viewport sheet');
+  assert.ok(!mobile.includes('100dvh'), 'mobile does not depend on viewport geometry');
   assert.ok(!css.includes('@media (max-width: 480px)'), 'old narrow fix superseded');
   assert.ok(css.includes('.level-estimate-morph { position: absolute'), 'desktop anchoring intact');
   assert.ok(css.includes('.level-estimate-morph, .level-estimate-morph *, .level-estimate-detail, .level-estimate-detail-inner { transition: none !important; }'), 'reduced motion preserved');
