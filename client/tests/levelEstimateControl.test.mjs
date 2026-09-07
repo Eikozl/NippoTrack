@@ -656,16 +656,20 @@ test('Desktop keeps the anchored transition lifecycle', async () => {
   control.destroy();
 });
 
-test('Mobile CSS owns natural height and has no viewport sheet geometry', () => {
+test('Mobile CSS owns viewport width and capped intrinsic height without JS geometry', () => {
   const css = readSource('src/styles.css');
   const start = css.indexOf('@media (max-width: 640px)');
   assert.ok(start >= 0);
   const mobile = css.slice(start, css.indexOf('@keyframes spin', start));
   assert.match(mobile, /height:\s*auto/);
-  assert.match(mobile, /max-height:\s*none/);
-  assert.match(mobile, /overflow:\s*visible/);
-  assert.doesNotMatch(mobile, /position:\s*fixed/);
-  assert.doesNotMatch(mobile, /transition:[^;]*height/);
+  assert.match(mobile, /position:\s*fixed/);
+  assert.match(mobile, /left:\s*1rem/);
+  assert.match(mobile, /right:\s*1rem/);
+  assert.match(mobile, /width:\s*auto/);
+  assert.match(mobile, /max-width:\s*none/);
+  assert.match(mobile, /max-height:\s*calc\(100dvh\s*-\s*1\.5rem\)/);
+  assert.match(mobile, /overflow-y:\s*auto/);
+  assert.doesNotMatch(mobile, /transition:[^;]*(?:height|width|left|right)/);
   const source = readSource('src/levelEstimateControl.js');
   assert.doesNotMatch(source, /getBoundingClientRect|scrollHeight|requestAnimationFrame|style\.height|style\.maxHeight/);
 });

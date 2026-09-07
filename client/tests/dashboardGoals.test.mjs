@@ -65,16 +65,19 @@ test('existing dashboard content still renders', () => {
   assert.ok(!source.includes('weeklyChart'), 'charts stay removed');
 });
 
-test('estimate morph uses intrinsic mobile layout below the tablet breakpoint', () => {
+test('estimate morph uses viewport-fitted intrinsic mobile layout below the tablet breakpoint', () => {
   const css = readSource('src/styles.css');
   const start = css.indexOf('@media (max-width: 640px)');
   const mobile = css.slice(start, css.indexOf('@keyframes spin', start));
   assert.ok(start >= 0, 'narrow breakpoint exists');
   assert.ok(mobile.includes('height: auto'), 'mobile height stays intrinsic');
-  assert.ok(mobile.includes('max-height: none'), 'mobile has no height cap');
-  assert.ok(mobile.includes('overflow: visible'), 'mobile content is not clipped');
-  assert.ok(!mobile.includes('position: fixed'), 'mobile does not use a viewport sheet');
-  assert.ok(!mobile.includes('100dvh'), 'mobile does not depend on viewport geometry');
+  assert.ok(mobile.includes('left: 1rem'), 'mobile keeps the left viewport margin');
+  assert.ok(mobile.includes('right: 1rem'), 'mobile keeps the right viewport margin');
+  assert.ok(mobile.includes('width: auto'), 'viewport insets control mobile width');
+  assert.ok(mobile.includes('max-width: none'), 'desktop width cap is removed on mobile');
+  assert.ok(mobile.includes('position: fixed'), 'mobile positioning is viewport-based');
+  assert.ok(mobile.includes('100dvh'), 'mobile height cap follows the dynamic viewport');
+  assert.ok(mobile.includes('overflow-y: auto'), 'tall mobile content scrolls within the panel');
   assert.ok(!css.includes('@media (max-width: 480px)'), 'old narrow fix superseded');
   assert.ok(css.includes('.level-estimate-morph { position: absolute'), 'desktop anchoring intact');
   assert.ok(css.includes('.level-estimate-morph, .level-estimate-morph *, .level-estimate-detail, .level-estimate-detail-inner { transition: none !important; }'), 'reduced motion preserved');

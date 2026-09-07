@@ -192,28 +192,37 @@
 @media (prefers-reduced-motion: reduce) {
   .level-estimate-morph, .level-estimate-morph *, .level-estimate-detail, .level-estimate-detail-inner { transition: none !important; }
 }
-/* Mobile keeps the same connected surface but drops all viewport geometry.
-   Its height is intrinsic to the rendered copy: no fixed sheet, cap, or
-   JavaScript-provided height is needed. Width is still bounded by the
-   viewport so wrapped copy cannot create horizontal overflow. */
+/* Mobile keeps the same connected surface but replaces the desktop host
+   anchor with viewport-owned CSS geometry. Horizontal insets make the panel
+   fill the available width regardless of its position in the header control
+   group. Height remains intrinsic until content reaches the viewport-safe
+   cap, where the surface becomes the vertical scroll container. */
 @media (max-width: 640px) {
   .level-estimate-morph { overflow: hidden; transition: opacity 160ms ease-out, transform 160ms ease-out; }
   .level-estimate-morph.is-open {
-    position: absolute;
-    top: 0;
-    right: 0;
-    width: min(22rem, calc(100vw - 2rem));
+    position: fixed;
+    top: 0.75rem;
+    left: 1rem;
+    right: 1rem;
+    width: auto;
     height: auto;
-    max-width: calc(100vw - 1.5rem);
-    max-height: none;
+    max-width: none;
+    max-height: calc(100vh - 1.5rem);
     grid-template-rows: auto auto;
-    overflow: visible;
-    transform-origin: top right;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    transform-origin: top center;
   }
   .level-estimate-morph.is-open .level-estimate-detail {
     overflow: visible;
     max-height: none;
     overscroll-behavior: auto;
+  }
+}
+@supports (max-height: 100dvh) {
+  @media (max-width: 640px) {
+    .level-estimate-morph.is-open { max-height: calc(100dvh - 1.5rem); }
   }
 }
 .level-estimate-morph.is-closing .level-estimate-detail {

@@ -66,38 +66,80 @@ test('Phase 12 real DOM stabilization', { skip: !process.env.JLT_BROWSER, timeou
     assert.doesNotMatch(result, /Already in Vocabulary \(1\)/);
   });
   for (const width of [320,360,375,390,430,768,1280]) {
-    await t.test(`Estimate ${width}px: first and subsequent open fit natural content`, async () => {
-      await browser.send('Emulation.setDeviceMetricsOverride', {width,height:800,deviceScaleFactor:1,mobile:false});
+    await t.test(`Estimate ${width}px: first and subsequent open fit the real header geometry`, async () => {
+      const viewportHeight = width <= 430 ? 568 : 800;
+      await browser.send('Emulation.setDeviceMetricsOverride', {width,height:viewportHeight,deviceScaleFactor:1,mobile:false});
         const result = await run(`(async()=>{
         document.getElementById('modal-root').replaceChildren();
-        document.getElementById('app').innerHTML='<header style="display:flex;justify-content:flex-end;padding:16px"><div id="estimate-host"></div></header>';
+        document.getElementById('app').innerHTML='<header style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px"><button style="width:40px;height:40px"></button><div id="estimate-controls" style="display:flex;gap:8px"><button style="width:40px;height:40px"></button><button style="width:40px;height:40px"></button><button style="width:40px;height:40px"></button></div></header>';
         const {element}=await import('/src/ui.js');
         const {createLevelEstimateControl}=await import('/src/levelEstimateControl.js');
         const control=createLevelEstimateControl({createElement:element,doc:document,win:window,fetchEstimate:async()=>({estimate:{level:'N5',status:'estimated',confidence:'moderate'}})});
-        const host=control.mount(document.getElementById('estimate-host'));await control.load();
+        const host=control.mount(document.getElementById('estimate-controls'));await control.load();
         const wait=()=>new Promise(resolve=>setTimeout(resolve,450));await wait();
         const morph=host.querySelector('section');
         const measurements=[];
         for(let i=0;i<2;i++) {
           host.querySelector('button').click();await wait();
           const rect=morph.getBoundingClientRect(),style=getComputedStyle(morph);
-          measurements.push({width:rect.width,left:rect.left,right:rect.right,height:rect.height,overflow:document.documentElement.scrollWidth>innerWidth,inlineHeight:morph.style.height,inlineMaxHeight:morph.style.maxHeight,position:style.position,maxHeight:style.maxHeight,flip:morph.classList.contains('is-flip')});
+          measurements.push({width:rect.width,left:rect.left,right:rect.right,top:rect.top,bottom:rect.bottom,height:rect.height,faceHeight:host.querySelector('button').getBoundingClientRect().height,contentOverflowX:morph.scrollWidth>morph.clientWidth,overflow:document.documentElement.scrollWidth>innerWidth,inlineHeight:morph.style.height,inlineMaxHeight:morph.style.maxHeight,position:style.position,maxHeight:style.maxHeight,overflowY:style.overflowY,flip:morph.classList.contains('is-flip')});
           control.close();await wait();
         }
         control.destroy();return measurements;
       })()`);
       for (const rect of result) {
-        assert.ok(rect.left>=0 && rect.right<=width+1 && !rect.overflow, 'viewport fit');
-        assert.ok(rect.height < 0.9 * 800, `summary height ${rect.height} should not become a viewport sheet`);
+        assert.ok(!rect.overflow, 'underlying page has no horizontal overflow');
+        assert.ok(!rect.contentOverflowX, 'panel content has no horizontal clipping');
         assert.equal(rect.inlineHeight, '', 'no inline measured height');
         assert.equal(rect.inlineMaxHeight, '', 'no inline measured max-height');
         assert.equal(rect.flip, false, 'mobile and desktop use the shared connected surface');
         if (width <= 640) {
-          assert.equal(rect.position, 'absolute', 'mobile surface stays anchored to its host');
-          assert.equal(rect.maxHeight, 'none', 'mobile height is intrinsic');
+          assert.ok(rect.left >= 15, `left edge ${rect.left} keeps the mobile margin`);
+          assert.ok(rect.right <= width - 15, `right edge ${rect.right} keeps the mobile margin`);
+          assert.ok(Math.abs(rect.width - (width - 32)) < 2, `width ${rect.width} fills the available viewport`);
+          assert.ok(rect.top >= 11 && rect.bottom <= viewportHeight - 11, 'panel remains vertically viewport-safe');
+          assert.ok(rect.height > rect.faceHeight, 'panel expands downward beyond the collapsed face');
+          assert.equal(rect.position, 'fixed', 'mobile geometry is viewport-based CSS');
+          assert.notEqual(rect.maxHeight, 'none', 'mobile has a viewport-safe height cap');
+          assert.equal(rect.overflowY, 'auto', 'mobile scrolls only when content exceeds the cap');
+        } else {
+          assert.ok(rect.left >= 0 && rect.right <= width + 1, 'desktop/tablet viewport fit');
         }
       }
-      assert.ok(Math.abs(result[0].height-result[1].height)<3, 'first and subsequent open agree');
+      if (width <= 640) {
+        for (const key of ['left','right','width','top','bottom','height']) {
+          assert.ok(Math.abs(result[0][key]-result[1][key])<1, `${key} agrees on first and subsequent mobile open`);
+        }
+      } else {
+        assert.ok(Math.abs(result[0].height-result[1].height)<3, 'desktop/tablet open height stays coherent');
+      }
+      t.diagnostic(`${width}px first ${JSON.stringify(result[0])}; second ${JSON.stringify(result[1])}`);
     });
   }
+  await t.test('Estimate mobile long content stays viewport-safe and scrollable', async () => {
+    await browser.send('Emulation.setDeviceMetricsOverride', {width:360,height:480,deviceScaleFactor:1,mobile:false});
+    const result = await run(`(async()=>{
+      document.getElementById('app').innerHTML='<header style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px"><button style="width:40px;height:40px"></button><div id="estimate-controls" style="display:flex;gap:8px"><button style="width:40px;height:40px"></button><button style="width:40px;height:40px"></button><button style="width:40px;height:40px"></button></div></header>';
+      const {element}=await import('/src/ui.js');
+      const {createLevelEstimateControl}=await import('/src/levelEstimateControl.js');
+      const longLines=Array.from({length:16},(_,i)=>'Long responsive evidence line '+i+' remains readable inside the mobile panel.');
+      const control=createLevelEstimateControl({createElement:element,doc:document,win:window,fetchEstimate:async()=>({estimate:{level:'N5',status:'estimated',confidence:'moderate'},reasoning:longLines,limitations:longLines})});
+      const host=control.mount(document.getElementById('estimate-controls'));await control.load();
+      host.querySelector('button').click();
+      await new Promise(resolve=>setTimeout(resolve,200));
+      const morph=host.querySelector('section'),details=morph.querySelector('details');
+      details.open=true;
+      await new Promise(resolve=>setTimeout(resolve,200));
+      const rect=morph.getBoundingClientRect(),style=getComputedStyle(morph);
+      const outcome={left:rect.left,right:rect.right,top:rect.top,bottom:rect.bottom,clientHeight:morph.clientHeight,scrollHeight:morph.scrollHeight,contentOverflowX:morph.scrollWidth>morph.clientWidth,overflowY:style.overflowY,pageOverflow:document.documentElement.scrollWidth>innerWidth};
+      control.destroy();return outcome;
+    })()`);
+    assert.ok(result.left >= 15 && result.right <= 345, 'long panel keeps both mobile margins');
+    assert.ok(result.top >= 11 && result.bottom <= 469, 'long panel stays inside the mobile viewport');
+    assert.ok(result.scrollHeight > result.clientHeight, 'long content exceeds the visible panel height');
+    assert.equal(result.overflowY, 'auto', 'long content receives controlled vertical scrolling');
+    assert.equal(result.contentOverflowX, false, 'long content remains horizontally readable');
+    assert.equal(result.pageOverflow, false, 'long content does not create horizontal page scrolling');
+    t.diagnostic(`360x480 long-content ${JSON.stringify(result)}`);
+  });
 });
