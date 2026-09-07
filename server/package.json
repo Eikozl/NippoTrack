@@ -31,7 +31,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@sglkc/kuromoji": "^1.1.0",
+    "@sglkc/kuromoji": "1.1.0",
     "@supabase/supabase-js": "^2.112.4",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",

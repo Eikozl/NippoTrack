@@ -11,7 +11,7 @@
 // only — never the reading used in the pasted text.
 
 import { apiRequest } from '../api.js';
-import { element, pageHeader, setActionPending, showToast, withGlobalLoading, withPendingAction } from '../ui.js';
+import { element, field, openDialog, pageHeader, setActionPending, showToast, withGlobalLoading, withPendingAction } from '../ui.js';
 import {
   buildKanjiImportPayload,
   getDiscoveryState,
@@ -26,6 +26,11 @@ import {
   formatAnalyzerEntries,
   summarizeAnalyzerEntries
 } from '../textAnalyzer.js';
+import {
+  LEXICAL_ANALYSIS_MAX_LENGTH,
+  buildVocabularyImportPayload,
+  groupLexicalCandidates
+} from '../lexicalAnalyzer.js';
 
 function statePill(formatted) {
   const state = getDiscoveryState(formatted);
@@ -48,6 +53,11 @@ export async function renderAnalyzer(container) {
   const localCollection = new Map();
   let activeFilter = 'all';
   let selectedChars = new Set();
+  // Phase 12-B lexical state: canonical forms added this session (flips cards
+  // to "Already in Vocabulary" without re-analysis) + analyzed length for the
+  // >2000-char vocabulary notice.
+  const localVocabAdded = new Set();
+  let analyzedTextLength = 0;
 
   const formCard = element('section', { className: 'surface min-w-0 p-5 sm:p-6' });
   const resultsSection = element('section', { className: 'mt-6 grid min-w-0 gap-5' });
@@ -79,7 +89,7 @@ export async function renderAnalyzer(container) {
   formCard.append(
     element('label', { className: 'field', attrs: { for: 'analyzer-text' } }, [
       element('span', { text: 'Japanese text' }),
-      element('span', { className: 'text-xs font-normal leading-5 text-muted', text: `Analysis is read-only — nothing is saved or added unless you explicitly import. Up to ${ANALYZER_MAX_LENGTH} characters.` })
+      element('span', { className: 'text-xs font-normal leading-5 text-muted', text: `Analysis is read-only — nothing is saved or added unless you explicitly import. Up to ${ANALYZER_MAX_LENGTH} characters; vocabulary analysis runs automatically for texts up to ${LEXICAL_ANALYSIS_MAX_LENGTH} characters.` })
     ]),
     input,
     counter,
@@ -129,6 +139,138 @@ export async function renderAnalyzer(container) {
     const filterBar = element('div', { className: 'flex min-w-0 flex-wrap gap-2', attrs: { role: 'group', 'aria-label': 'Filter analyzed kanji' } });
     const grid = element('ul', { className: 'grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3' });
     const importBar = element('div', { className: 'surface flex min-w-0 flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between' });
+    const lexicalSection = element('section', { className: 'surface min-w-0 p-4 sm:p-5', attrs: { 'aria-label': 'Vocabulary analysis' } });
+
+    const renderLexical = () => {
+      lexicalSection.replaceChildren();
+      lexicalSection.append(element('h2', { className: 'font-semibold text-ink', text: 'Vocabulary' }));
+      const lexical = analysis.lexical || null;
+      if (!lexical && analyzedTextLength > LEXICAL_ANALYSIS_MAX_LENGTH) {
+        lexicalSection.append(element('p', {
+          className: 'mt-2 break-words text-sm text-muted',
+          text: `Vocabulary analysis is available for texts up to ${LEXICAL_ANALYSIS_MAX_LENGTH} characters. Kanji analysis was still completed.`
+        }));
+        return;
+      }
+      if (!lexical || lexical.status !== 'ok') {
+        lexicalSection.append(element('p', {
+          className: 'mt-2 break-words text-sm text-muted',
+          text: (lexical && lexical.warnings && lexical.warnings[0]) || 'Word-level analysis is unavailable. Kanji results below are complete.'
+        }));
+        return;
+      }
+      const summary = lexical.summary || { candidates: 0, existing: 0, new: 0 };
+      const tiles = [
+        ['Vocabulary candidates', String(summary.candidates ?? 0)],
+        ['Already in Vocabulary', String(summary.existing ?? 0)],
+        ['New candidates', String(summary.new ?? 0)]
+      ].map(([label, value]) => element('div', { className: 'rounded-lg border border-stone bg-paper p-3 text-center' }, [
+        element('p', { className: 'text-xl font-semibold text-ink', text: value }),
+        element('p', { className: 'mt-1 text-xs text-muted', text: label })
+      ]));
+      lexicalSection.append(element('div', { className: 'mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3' }, tiles));
+      if (lexical.matching && lexical.matching.available === false) {
+        lexicalSection.append(element('p', {
+          className: 'mt-3 rounded-lg border border-stone bg-paper p-3 text-xs leading-5 text-muted',
+          text: 'Vocabulary collection matching is unavailable. Candidates are shown without ownership state.'
+        }));
+      }
+      const groups = groupLexicalCandidates(lexical, localVocabAdded);
+      const groupSections = [
+        ['Already in Vocabulary', groups.existing],
+        ['New Vocabulary', groups.fresh],
+        ['Needs verification', groups.verify]
+      ];
+      for (const [title, items] of groupSections) {
+        if (!items.length) continue;
+        lexicalSection.append(element('h3', { className: 'mt-4 text-sm font-semibold text-ink', text: `${title} (${items.length})` }));
+        const list = element('ul', { className: 'mt-2 grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3' });
+        for (const view of items) {
+          list.append(lexicalCard(view));
+        }
+        lexicalSection.append(list);
+      }
+      if (!groups.existing.length && !groups.fresh.length && !groups.verify.length) {
+        lexicalSection.append(element('p', { className: 'mt-2 text-sm text-muted', text: 'No vocabulary candidates found in this text.' }));
+      } else {
+        lexicalSection.append(element('p', {
+          className: 'mt-3 text-xs leading-5 text-muted',
+          text: 'Detected words are not knowledge: adding stores them as New vocabulary without scheduling reviews.'
+        }));
+      }
+    };
+
+    const findLexicalCandidate = (key) => (
+      ((analysis.lexical && analysis.lexical.candidates) || []).find((entry) => entry.key === key) || null
+    );
+
+    const lexicalCard = (view) => {
+      const header = element('div', { className: 'flex items-start justify-between gap-3' }, [
+        element('div', { className: 'flex min-w-0 items-baseline gap-2' }, [
+          element('span', { className: 'break-words text-lg font-semibold text-ink', text: view.canonical }),
+          ...(view.occurrences > 1 ? [element('span', { className: 'shrink-0 text-xs font-semibold text-muted', text: `×${view.occurrences}` })] : [])
+        ]),
+        element('span', { className: 'status-pill shrink-0 text-xs', text: view.pill })
+      ]);
+      const rows = [header];
+      rows.push(element('p', { className: 'mt-1 break-words text-xs text-muted', text: view.posLabel }));
+      if (view.observedLine) rows.push(element('p', { className: 'mt-1 break-words text-sm text-ink/80', text: view.observedLine }));
+      if (view.readingLine) rows.push(element('p', { className: 'mt-1 break-words text-sm text-ink/80', text: view.readingLine }));
+      if (view.possibleMatches.length) {
+        rows.push(element('p', {
+          className: 'mt-1 break-words text-xs text-muted',
+          text: `Possible match: ${view.possibleMatches.map((entry) => entry.word).join('、')} — verify the meaning before adding.`
+        }));
+      }
+      if (view.showAdd) {
+        const addButton = element('button', { className: 'button-secondary min-h-10 px-4 py-2 text-xs', text: view.addLabel, attrs: { type: 'button' } });
+        addButton.addEventListener('click', () => {
+          const candidate = findLexicalCandidate(view.key);
+          if (candidate) openVocabularyAddDialog(candidate, view);
+        });
+        rows.push(element('div', { className: 'mt-3 flex items-center justify-end gap-3 border-t border-stone pt-3' }, [addButton]));
+      }
+      return element('li', { className: 'rounded-lg border border-stone bg-paper p-4' }, rows);
+    };
+
+    const openVocabularyAddDialog = (candidate, view) => {
+      const wordField = field({ name: 'word', label: 'Word (dictionary form)', value: candidate.lemma || candidate.canonical, required: true, maxLength: 100 });
+      const readingField = field({
+        name: 'reading',
+        label: 'Reading',
+        value: candidate.lemmaReading || '',
+        maxLength: 150,
+        placeholder: 'ひらがな',
+        description: 'Dictionary-form reading only. Leave blank if unsure — never copy the “as read here” form.'
+      });
+      const meaningField = field({ name: 'meaning', label: 'Meaning', value: '', required: true, maxLength: 255, placeholder: 'Your definition' });
+      openDialog({
+        title: `Add ${view.canonical} to Vocabulary`,
+        content: [
+          element('p', { className: 'text-xs leading-5 text-muted sm:col-span-2', text: 'Confirm this word before saving. Adding stores it as New vocabulary — it does not schedule reviews or claim knowledge.' }),
+          wordField,
+          readingField,
+          meaningField
+        ],
+        submitLabel: 'Add to Vocabulary',
+        onSubmit: async (form, close) => {
+          const data = new FormData(form);
+          const meaning = String(data.get('meaning') || '');
+          if (!meaning.trim()) throw new Error('Meaning is required.');
+          const payload = buildVocabularyImportPayload(candidate, {
+            meaning,
+            word: String(data.get('word') || ''),
+            reading: String(data.get('reading') || '')
+          });
+          if (!payload) throw new Error('Meaning is required.');
+          const created = await apiRequest('/api/vocabulary', { method: 'POST', body: payload });
+          localVocabAdded.add(candidate.canonical);
+          close();
+          renderResults();
+          showToast(`Added ${created && created.word ? created.word : candidate.canonical} to Vocabulary.`);
+        }
+      });
+    };
 
     const renderGrid = () => {
       const visible = filterAnalyzerEntries(formatted, activeFilter);
@@ -190,7 +332,8 @@ export async function renderAnalyzer(container) {
     renderFilters();
     renderGrid();
     renderImportBar();
-    resultsSection.append(summaryGrid, distributionCard, notice, filterBar, grid, importBar);
+    renderLexical();
+    resultsSection.append(summaryGrid, lexicalSection, distributionCard, notice, filterBar, grid, importBar);
   };
 
   const kanjiCard = (entry) => {
@@ -303,12 +446,19 @@ export async function renderAnalyzer(container) {
       // Hybrid: local button state plus the global overlay if analysis is
       // visibly delayed. Imports keep local progress feedback only.
       const result = await withGlobalLoading(
-        () => apiRequest('/api/analyze/text', { method: 'POST', body: { text } }),
+        () => apiRequest('/api/analyze/text', {
+          method: 'POST',
+          // Vocabulary analysis is automatic for eligible lengths; longer
+          // texts stay Kanji-only without touching the lexical parser.
+          body: text.length <= LEXICAL_ANALYSIS_MAX_LENGTH ? { text, lexical: { enabled: true } } : { text }
+        }),
         { label: 'Analyzing text…' }
       );
       analysis = result;
+      analyzedTextLength = text.length;
       rawByChar = new Map((result.kanji || []).map((entry) => [entry.character, entry]));
       localCollection.clear();
+      localVocabAdded.clear();
       activeFilter = 'all';
       applyLocalCollection();
       renderResults();

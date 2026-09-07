@@ -8,40 +8,110 @@ const {
 } = require('../services/textKanjiAnalysis');
 const { adaptTokens } = require('../services/lexicalTokenAdapter');
 const {
+  buildLexicalCandidates,
+  matchOwnedVocabulary,
+  summarizeLexical
+} = require('../services/lexicalCandidates');
+const {
   engineMetadata,
   MAX_LEXICAL_TEXT_LENGTH,
   parseJapanese
 } = require('../services/japaneseParser');
+const { tryConsumeLexical } = require('../services/lexicalRateLimit');
 
-// Phase 12-A — opt-in lexical analysis. Builds the additive `lexical` block
-// for { lexical: { enabled: true } } requests. Kanji analysis always runs
-// first and independently; ANY lexical failure degrades to
-// status 'unavailable' with HTTP 200 so Kanji results survive. No user text
-// ever appears in warnings, reasons, or logs here.
-async function buildLexicalBlock(text) {
+// Log only slow parses, and never with user content: version, sizes,
+// durations, outcome category.
+const SLOW_PARSE_LOG_MS = 1000;
+
+function emptyLexicalPayload(engine, reason, warnings, retryable) {
+  return {
+    status: 'unavailable',
+    reason,
+    engine,
+    tokens: [],
+    candidates: [],
+    unverified: [],
+    summary: summarizeLexical([], [], true),
+    matching: { available: true },
+    warnings,
+    limit: MAX_LEXICAL_TEXT_LENGTH,
+    retryable
+  };
+}
+
+// Payload diet: internal normalized tokens keep per-token engine metadata,
+// but the API serializes one top-level engine block instead of repeating it
+// ~1k times. Internal adapter guarantees are untouched.
+function stripTokenEngine(token) {
+  const { engine, ...rest } = token;
+  return rest;
+}
+
+// Phase 12-B — opt-in lexical analysis. Builds the additive `lexical` block
+// for { lexical: { enabled: true } } requests: diet tokens, aggregated
+// vocabulary candidates, unverified material, owned-vocabulary matching, and
+// a summary. Kanji analysis always runs first and independently; ANY lexical
+// failure degrades to status 'unavailable' with HTTP 200 so Kanji results
+// survive. No user text ever appears in warnings, reasons, or logs here.
+async function buildLexicalBlock(text, { userId, ip } = {}) {
   try {
     // Resolved inside the guarded block so that no lexical failure — even a
     // future throwing metadata path — can escape into the outer 503 handler.
     const engine = engineMetadata();
     if (text.length > MAX_LEXICAL_TEXT_LENGTH) {
-    return {
-      status: 'unavailable',
-      reason: 'lexical-text-too-long',
-      engine,
-      tokens: [],
-      warnings: [
-        `Word-level analysis supports up to ${MAX_LEXICAL_TEXT_LENGTH} characters. Kanji results below cover the full text.`
-      ],
-      limit: MAX_LEXICAL_TEXT_LENGTH,
-      retryable: false
-    };
-  }
-  const { rawTokens, durationMs } = await parseJapanese(text);
+      return emptyLexicalPayload(
+        engine,
+        'lexical-text-too-long',
+        [`Word-level analysis supports up to ${MAX_LEXICAL_TEXT_LENGTH} characters. Kanji results below cover the full text.`],
+        false
+      );
+    }
+    const budget = tryConsumeLexical({ userId, ip });
+    if (!budget.allowed) {
+      return emptyLexicalPayload(
+        engine,
+        'lexical-rate-limited',
+        ['Word-level analysis is temporarily limited. Kanji results below are complete; try again in a few minutes.'],
+        true
+      );
+    }
+    const { rawTokens, durationMs } = await parseJapanese(text);
+    const adapted = adaptTokens(rawTokens, text, engine);
+    const { candidates, unverified } = buildLexicalCandidates(adapted);
+    let matchingAvailable = true;
+    try {
+      await matchOwnedVocabulary(pool, userId, candidates);
+    } catch (_) {
+      // Lookup failure must never read as "all new": mark every candidate
+      // unavailable so the UI shows an explicit degraded state.
+      matchingAvailable = false;
+      for (const candidate of candidates) {
+        candidate.match = { state: 'unavailable', ownedCount: 0, possibleMatches: [] };
+      }
+    }
+    if (durationMs >= SLOW_PARSE_LOG_MS) {
+      console.warn(JSON.stringify({
+        scope: 'lexical-parse-slow',
+        package: engine.package,
+        packageVersion: engine.packageVersion,
+        dictionary: engine.dictionary,
+        chars: text.length,
+        tokens: adapted.length,
+        candidates: candidates.length,
+        durationMs
+      }));
+    }
     return {
       status: 'ok',
       engine,
-      tokens: adaptTokens(rawTokens, text, engine),
-      warnings: [],
+      tokens: adapted.map(stripTokenEngine),
+      candidates,
+      unverified,
+      summary: summarizeLexical(candidates, unverified, matchingAvailable),
+      matching: { available: matchingAvailable },
+      warnings: matchingAvailable
+        ? []
+        : ['Vocabulary collection matching is unavailable. Candidates are shown without ownership state.'],
       limit: MAX_LEXICAL_TEXT_LENGTH,
       durationMs
     };
@@ -51,6 +121,10 @@ async function buildLexicalBlock(text) {
       reason: 'parser-unavailable',
       engine: engineMetadata(),
       tokens: [],
+      candidates: [],
+      unverified: [],
+      summary: summarizeLexical([], [], true),
+      matching: { available: true },
       warnings: ['Word-level analysis is unavailable. Kanji results below are complete.'],
       limit: MAX_LEXICAL_TEXT_LENGTH,
       retryable: true
@@ -85,7 +159,7 @@ async function analyzeText(req, res) {
       // empty analysis — no DB work, and no `IN ()` query is ever built.
       const payload = emptyAnalysis(totalCharacters);
       if (lexicalRequested(req)) {
-        payload.lexical = await buildLexicalBlock(text);
+        payload.lexical = await buildLexicalBlock(text, { userId: req.user && req.user.id, ip: req.ip });
       }
       return res.json(payload);
     }
@@ -104,7 +178,7 @@ async function analyzeText(req, res) {
     const [[userKanjiRows], [referenceRows]] = await Promise.all([userKanjiPromise, referencePromise]);
     const payload = buildTextKanjiAnalysis(scanned, userKanjiRows, referenceRows, totalCharacters);
     if (lexicalRequested(req)) {
-      payload.lexical = await buildLexicalBlock(text);
+      payload.lexical = await buildLexicalBlock(text, { userId: req.user && req.user.id, ip: req.ip });
     }
     return res.json(payload);
   } catch (error) {
