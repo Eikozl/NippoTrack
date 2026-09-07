@@ -50,16 +50,23 @@ export function formatObservedLine(candidate) {
   return `Observed: ${parts.join(' · ')}`;
 }
 
+// Check if any observed form differs from the canonical form (for button label)
+function hasObservedFormDifferentFromCanonical(candidate) {
+  const observed = Array.isArray(candidate.observed) ? candidate.observed : [];
+  return observed.some((entry) => entry.surface !== candidate.canonical);
+}
+
 export function formatLexicalCandidate(candidate, { added = false } = {}) {
   const matchState = added ? 'existing' : (candidate.match && candidate.match.state) || 'new';
   const showAdd = matchState === 'new';
+  const observedDiffers = hasObservedFormDifferentFromCanonical(candidate);
   return {
     key: candidate.key,
     canonical: candidate.canonical,
     pill: lexicalMatchPill(matchState),
     matchState,
     showAdd,
-    addLabel: candidate.lemma && candidate.canonical !== candidate.lemma ? `Add ${candidate.lemma}` : 'Add to Vocabulary',
+    addLabel: observedDiffers ? `Add ${candidate.canonical}` : 'Add to Vocabulary',
     posLabel: lexicalPosLabel(candidate.pos),
     occurrences: candidate.occurrences || 1,
     observedLine: formatObservedLine(candidate),

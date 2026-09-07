@@ -190,3 +190,108 @@ test('summary counts states without inventing knowledge words', () => {
   const degraded = summarizeLexical([{ match: { state: 'new' } }], [], false);
   assert.equal(degraded.new, 0);
 });
+
+test('observed form reconstruction: 行っ + た → 行った', () => {
+  const { candidates } = buildLexicalCandidates([
+    tok('行っ', 'verb', { lemma: '行く', surfaceReading: 'いっ', start: 4, end: 6 }),
+    tok('た', 'auxiliary', { surfaceReading: 'た', isContentWord: false, start: 6, end: 7 })
+  ]);
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].canonical, '行く');
+  assert.equal(candidates[0].observed.length, 1);
+  assert.equal(candidates[0].observed[0].surface, '行った');
+  assert.equal(candidates[0].observed[0].surfaceReading, 'いった');
+});
+
+test('observed form reconstruction: 行き + まし + た → 行きました', () => {
+  const { candidates } = buildLexicalCandidates([
+    tok('行き', 'verb', { lemma: '行く', surfaceReading: 'いき', start: 4, end: 6 }),
+    tok('まし', 'auxiliary', { surfaceReading: 'まし', isContentWord: false, start: 6, end: 8 }),
+    tok('た', 'auxiliary', { surfaceReading: 'た', isContentWord: false, start: 8, end: 9 })
+  ]);
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].canonical, '行く');
+  assert.equal(candidates[0].observed.length, 1);
+  assert.equal(candidates[0].observed[0].surface, '行きました');
+  assert.equal(candidates[0].observed[0].surfaceReading, 'いきました');
+});
+
+test('observed form reconstruction: 食べ + なかっ + た → 食べなかった', () => {
+  const { candidates } = buildLexicalCandidates([
+    tok('食べ', 'verb', { lemma: '食べる', surfaceReading: 'たべ', start: 3, end: 5 }),
+    tok('なかっ', 'auxiliary', { surfaceReading: 'なかっ', isContentWord: false, start: 5, end: 8 }),
+    tok('た', 'auxiliary', { surfaceReading: 'た', isContentWord: false, start: 8, end: 9 })
+  ]);
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].canonical, '食べる');
+  assert.equal(candidates[0].observed[0].surface, '食べなかった');
+  assert.equal(candidates[0].observed[0].surfaceReading, 'たべなかった');
+});
+
+test('observed form reconstruction: 高かっ + た → 高かった', () => {
+  const { candidates } = buildLexicalCandidates([
+    tok('高かっ', 'i-adjective', { lemma: '高い', surfaceReading: 'たかかっ', start: 0, end: 4 }),
+    tok('た', 'auxiliary', { surfaceReading: 'た', isContentWord: false, start: 4, end: 5 })
+  ]);
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].canonical, '高い');
+  assert.equal(candidates[0].observed[0].surface, '高かった');
+  assert.equal(candidates[0].observed[0].surfaceReading, 'たかかった');
+});
+
+test('observed form reconstruction stops at particle boundary', () => {
+  const { candidates } = buildLexicalCandidates([
+    tok('行っ', 'verb', { lemma: '行く', surfaceReading: 'いっ', start: 4, end: 6 }),
+    tok('た', 'auxiliary', { surfaceReading: 'た', isContentWord: false, start: 6, end: 7 }),
+    tok('が', 'particle', { isContentWord: false, start: 7, end: 8 }),
+    tok('来', 'verb', { lemma: '来る', surfaceReading: 'き', start: 8, end: 9 })
+  ]);
+  assert.equal(candidates.length, 2);
+  // First candidate should be 行った (stopped at particle)
+  const iku = candidates.find((c) => c.canonical === '行く');
+  assert.equal(iku.observed[0].surface, '行った');
+  // Second candidate should be 来
+  const kuru = candidates.find((c) => c.canonical === '来る');
+  assert.equal(kuru.observed[0].surface, '来');
+});
+
+test('observed form reconstruction stops at independent content word', () => {
+  const { candidates } = buildLexicalCandidates([
+    tok('食べ', 'verb', { lemma: '食べる', surfaceReading: 'たべ', start: 0, end: 2 }),
+    tok('ない', 'auxiliary', { surfaceReading: 'ない', isContentWord: false, start: 2, end: 4 }),
+    tok('です', 'copula', { surfaceReading: 'です', isContentWord: false, start: 4, end: 6 }),
+    tok('ね', 'particle', { isContentWord: false, start: 6, end: 7 }),
+    tok('行く', 'verb', { lemma: '行く', surfaceReading: 'いく', start: 7, end: 9 })
+  ]);
+  assert.equal(candidates.length, 2);
+  const taberu = candidates.find((c) => c.canonical === '食べる');
+  assert.equal(taberu.observed[0].surface, '食べないです'); // stops at particle
+  const iku = candidates.find((c) => c.canonical === '行く');
+  assert.equal(iku.observed[0].surface, '行く');
+});
+
+test('observed form reconstruction requires contiguous offsets', () => {
+  const { candidates } = buildLexicalCandidates([
+    tok('行っ', 'verb', { lemma: '行く', surfaceReading: 'いっ', start: 4, end: 6 }),
+    tok('た', 'auxiliary', { surfaceReading: 'た', isContentWord: false, start: 7, end: 8 }) // gap!
+  ]);
+  assert.equal(candidates.length, 1);
+  // Should NOT reconstruct because of gap
+  assert.equal(candidates[0].observed[0].surface, '行っ');
+});
+
+test('observed form reading concatenates only when all components have reliable reading', () => {
+  const { candidates } = buildLexicalCandidates([
+    tok('行っ', 'verb', { lemma: '行く', surfaceReading: 'いっ', start: 4, end: 6 }),
+    tok('た', 'auxiliary', { surfaceReading: 'た', isContentWord: false, start: 6, end: 7 })
+  ]);
+  assert.equal(candidates[0].observed[0].surfaceReading, 'いった');
+});
+
+test('observed form reading is null when any component lacks reading', () => {
+  const { candidates } = buildLexicalCandidates([
+    tok('行っ', 'verb', { lemma: '行く', surfaceReading: 'いっ', start: 4, end: 6 }),
+    tok('た', 'auxiliary', { surfaceReading: null, isContentWord: false, start: 6, end: 7 })
+  ]);
+  assert.equal(candidates[0].observed[0].surfaceReading, null);
+});

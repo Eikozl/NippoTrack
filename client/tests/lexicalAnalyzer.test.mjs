@@ -53,15 +53,28 @@ test('formatLexicalCandidate produces view model with add button for new items',
   assert.equal(view.pill, 'New');
 });
 
-test('formatLexicalCandidate shows add label with lemma when surface differs', () => {
+test('formatLexicalCandidate shows add label with canonical when observed differs', () => {
   const c = baseCandidate({
-    canonical: '行った',
+    canonical: '行く',
     lemma: '行く',
+    observed: [{ surface: '行った', surfaceReading: 'いった', occurrences: 1, firstStart: 4 }],
     match: { state: 'new' }
   });
   const view = formatLexicalCandidate(c);
   assert.equal(view.showAdd, true);
   assert.equal(view.addLabel, 'Add 行く');
+});
+
+test('formatLexicalCandidate shows "Add to Vocabulary" when observed equals canonical', () => {
+  const c = baseCandidate({
+    canonical: '学校',
+    lemma: '学校',
+    observed: [{ surface: '学校', surfaceReading: 'がっこう', occurrences: 1, firstStart: 0 }],
+    match: { state: 'new' }
+  });
+  const view = formatLexicalCandidate(c);
+  assert.equal(view.showAdd, true);
+  assert.equal(view.addLabel, 'Add to Vocabulary');
 });
 
 test('formatLexicalCandidate hides add button for existing/ambiguous/unavailable', () => {
