@@ -38,7 +38,11 @@ Hybrid PostgreSQL model, five tables, all GLOBAL (no `user_id`, no user FKs):
   `is_common`, row checksum. `ent_seq` is upstream identity, never the sole PK.
 - `jmdict_forms(source_id, entry_id, kind, surface)` — exact `surface` +
   folded `normalized` key (NFKC + katakana→hiragana only), `restr`,
-  `is_common`, `nokanji`. Hot index `(source_id, normalized)`. No fuzzy/trigram.
+  `is_common`, `nokanji`. Hot index `idx_jmdict_forms_q1_lookup(source_id,
+  normalized, kind, is_common DESC, entry_id)` (migration `011`, measured
+  CA-B1.1: serves the frozen Q1 shape as Limit>Index Scan with no sort on
+  1/5/14/52-row cohorts; replaced the sort-requiring `(source_id,
+  normalized)` index at ~equal storage). No fuzzy/trigram.
 - `jmdict_senses(source_id, entry_id, sense_no)` — `pos[]`, `gloss_en[]`,
   `stagk[]`, `stagr[]` (all SQL-addressable; `["*"]` pre-expanded at import).
 
@@ -89,8 +93,9 @@ is forbidden in v1.
 Restriction-bearing: 466 entries stagk (625 senses), 805 stagr (1,043),
 4,774 re_restr forms, 6,639 applies-to-none readings. n/adj-na overlap: 3,348
 entries / 3,581 senses. Verb families: v1 3,922 · v5 8,041 · vk 38 · vs
-15,016 entries. 83/83 POS codes classified; sole unknown `unc`
-(unclassified — must never filter). **maxSensesPerEntry = 27 ≤ 64 valve**
+15,016 entries. 83 distinct POS codes observed; 82 mapped into known JLT
+audit families; 1 intentionally unknown/unclassified: `unc` (must never be
+used as a hard exclusion in CA-B2 — unknown is not incompatible). **maxSensesPerEntry = 27 ≤ 64 valve**
 (valve provably dormant on this snapshot). All 10 integrity checks green;
 zero orphans; zero gloss-less senses. Storage ≈ 367 MB reference
 (entries 195 / forms 112 / senses 60 MB, measured local PG18).

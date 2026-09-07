@@ -25,6 +25,11 @@ const JMDICT_SOURCE_NAME = 'JMdict';
 const JMDICT_CONVERTER = 'jmdict-simplified';
 const JMDICT_IMPORTER_VERSION = 'cab1-1';
 const IMPORT_BATCH_SIZE = 500;
+// Max child rows per bulk INSERT statement. A 500-entry batch carries ~1150
+// forms / ~580 senses on average (measured pin 3.6.2), so one chunk each in
+// practice; pathological batches split deterministically instead of building
+// one giant statement. Entries are always a single statement per batch.
+const BULK_CHUNK_ROWS = 2000;
 const SNAPSHOT_STATUSES = ['importing', 'validating', 'ready', 'failed'];
 // Frozen CA-B2 evaluation valve: at most this many senses per entry are
 // evaluated; a 65th sense is an overflow sentinel. See docs/jmdict-import.md.
@@ -95,6 +100,14 @@ function stableStringify(value) {
 
 function sha256Hex(value) {
   return crypto.createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function chunkRows(rows, size) {
+  const chunks = [];
+  for (let offset = 0; offset < rows.length; offset += size) {
+    chunks.push(rows.slice(offset, offset + size));
+  }
+  return chunks;
 }
 
 // Normalize one jmdict-simplified word into the frozen hybrid projection.
@@ -268,32 +281,91 @@ async function setSnapshotStatus(client, sourceId, status, { entCount = null } =
 }
 
 async function insertNormalizedBatch(client, sourceId, records) {
+  // SQL-batched import (CA-B1.1): one batch = 1 entry upsert + 1 forms
+  // DELETE + ceil(forms/chunk) forms INSERTs + 1 senses DELETE +
+  // ceil(senses/chunk) senses INSERTs — independent of per-entry child counts.
+  // Payloads ride a single jsonb parameter per statement (option C), so
+  // unrestricted gloss/surface text needs no hand-built array literals and
+  // the 65535-parameter ceiling never applies. Caller owns the transaction.
+  //
+  // Semantics are identical to the former per-row loop: same upsert target,
+  // same source-scoped child replacement, same ON CONFLICT scope. One strict
+  // difference: a duplicate ent_seq WITHIN one artifact now fails loudly
+  // (ON CONFLICT cannot fire twice in one command) instead of last-wins —
+  // fail-loud on corrupt input, consistent with this module's policy.
+  if (!records.length) return { entries: 0, forms: 0, senses: 0, statements: 0 };
+  let statements = 0;
+  await client.query(
+    `INSERT INTO jmdict_entries (source_id, ent_seq, doc, pos_summary, is_common, checksum)
+     SELECT $1, batch.ent_seq, batch.doc, batch.pos_summary, batch.is_common, batch.checksum
+     FROM jsonb_to_recordset($2::jsonb)
+       AS batch(ent_seq bigint, doc jsonb, pos_summary text[], is_common boolean, checksum text)
+     ON CONFLICT (source_id, ent_seq) DO UPDATE SET
+       doc = EXCLUDED.doc, pos_summary = EXCLUDED.pos_summary,
+       is_common = EXCLUDED.is_common, checksum = EXCLUDED.checksum`,
+    [sourceId, JSON.stringify(records.map((record) => ({
+      ent_seq: record.entSeq,
+      doc: record.doc,
+      pos_summary: record.posSummary,
+      is_common: record.isCommon,
+      checksum: record.checksum
+    })))]
+  );
+  statements += 1;
+  const entryIds = records.map((record) => record.entSeq);
+  const formPayload = [];
+  const sensePayload = [];
   for (const record of records) {
-    await client.query(
-      `INSERT INTO jmdict_entries (source_id, ent_seq, doc, pos_summary, is_common, checksum)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (source_id, ent_seq) DO UPDATE SET
-         doc = EXCLUDED.doc, pos_summary = EXCLUDED.pos_summary,
-         is_common = EXCLUDED.is_common, checksum = EXCLUDED.checksum`,
-      [sourceId, record.entSeq, JSON.stringify(record.doc), record.posSummary, record.isCommon, record.checksum]
-    );
-    // Children are delete+insert within the batch transaction: within one
-    // source_id this is restart-idempotent and cannot affect other snapshots.
-    await client.query('DELETE FROM jmdict_forms WHERE source_id = $1 AND entry_id = $2', [sourceId, record.entSeq]);
     for (const form of record.forms) {
-      await client.query(
-        'INSERT INTO jmdict_forms (source_id, entry_id, surface, normalized, kind, restr, is_common, nokanji) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
-        [sourceId, record.entSeq, form.surface, form.normalized, form.kind, form.restr, form.isCommon, form.nokanji]
-      );
+      formPayload.push({
+        entry_id: record.entSeq,
+        surface: form.surface,
+        normalized: form.normalized,
+        kind: form.kind,
+        restr: form.restr,
+        is_common: form.isCommon,
+        nokanji: form.nokanji
+      });
     }
-    await client.query('DELETE FROM jmdict_senses WHERE source_id = $1 AND entry_id = $2', [sourceId, record.entSeq]);
     for (const sense of record.senses) {
-      await client.query(
-        'INSERT INTO jmdict_senses (source_id, entry_id, sense_no, pos, gloss_en, stagk, stagr) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-        [sourceId, record.entSeq, sense.senseNo, sense.pos, sense.glossEn, sense.stagk, sense.stagr]
-      );
+      sensePayload.push({
+        entry_id: record.entSeq,
+        sense_no: sense.senseNo,
+        pos: sense.pos,
+        gloss_en: sense.glossEn,
+        stagk: sense.stagk,
+        stagr: sense.stagr
+      });
     }
   }
+  // Children are set-replaced per batch: within one source_id this is
+  // restart-idempotent and cannot affect other snapshots or entries
+  // outside the batch.
+  await client.query('DELETE FROM jmdict_forms WHERE source_id = $1 AND entry_id = ANY($2::bigint[])', [sourceId, entryIds]);
+  statements += 1;
+  for (const chunk of chunkRows(formPayload, BULK_CHUNK_ROWS)) {
+    await client.query(
+      `INSERT INTO jmdict_forms (source_id, entry_id, surface, normalized, kind, restr, is_common, nokanji)
+       SELECT $1, batch.entry_id, batch.surface, batch.normalized, batch.kind, batch.restr, batch.is_common, batch.nokanji
+       FROM jsonb_to_recordset($2::jsonb)
+         AS batch(entry_id bigint, surface text, normalized text, kind text, restr text[], is_common boolean, nokanji boolean)`,
+      [sourceId, JSON.stringify(chunk)]
+    );
+    statements += 1;
+  }
+  await client.query('DELETE FROM jmdict_senses WHERE source_id = $1 AND entry_id = ANY($2::bigint[])', [sourceId, entryIds]);
+  statements += 1;
+  for (const chunk of chunkRows(sensePayload, BULK_CHUNK_ROWS)) {
+    await client.query(
+      `INSERT INTO jmdict_senses (source_id, entry_id, sense_no, pos, gloss_en, stagk, stagr)
+       SELECT $1, batch.entry_id, batch.sense_no, batch.pos, batch.gloss_en, batch.stagk, batch.stagr
+       FROM jsonb_to_recordset($2::jsonb)
+         AS batch(entry_id bigint, sense_no integer, pos text[], gloss_en text[], stagk text[], stagr text[])`,
+      [sourceId, JSON.stringify(chunk)]
+    );
+    statements += 1;
+  }
+  return { entries: records.length, forms: formPayload.length, senses: sensePayload.length, statements };
 }
 
 // Integrity checks. Fail validation on correctness-critical corruption —
@@ -515,6 +587,7 @@ module.exports = {
   JMDICT_CONVERTER,
   JMDICT_IMPORTER_VERSION,
   IMPORT_BATCH_SIZE,
+  BULK_CHUNK_ROWS,
   SNAPSHOT_STATUSES,
   JMDICT_EVAL_SENSE_VALVE,
   JmdictImportError,

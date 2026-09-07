@@ -9,11 +9,13 @@ const path = require('node:path');
 const {
   JMDICT_IMPORTER_VERSION,
   IMPORT_BATCH_SIZE,
+  BULK_CHUNK_ROWS,
   JMDICT_EVAL_SENSE_VALVE,
   JmdictImportError,
   normalizeJmdictForm,
   hasHanCharacter,
   normalizeJmdictWord,
+  insertNormalizedBatch,
   snapshotIdentity
 } = require('../src/services/jmdictReference');
 
@@ -167,5 +169,97 @@ test('importer constants match frozen architecture', () => {
   // Bug guarded: batch/valve drift from the frozen CA-A.2 contract.
   assert.equal(JMDICT_EVAL_SENSE_VALVE, 64);
   assert.ok(Number.isInteger(IMPORT_BATCH_SIZE) && IMPORT_BATCH_SIZE >= 1 && IMPORT_BATCH_SIZE <= 5000);
+  assert.ok(Number.isInteger(BULK_CHUNK_ROWS) && BULK_CHUNK_ROWS >= 100);
   assert.match(JMDICT_IMPORTER_VERSION, /^[a-z0-9.-]+$/);
+});
+
+function syntheticWord(id, formCount, senseCount) {
+  const kana = [];
+  for (let index = 0; index < formCount; index += 1) {
+    kana.push({ text: `よみ${id}-${index}`, common: false, tags: [], appliesToKanji: ['*'] });
+  }
+  const sense = [];
+  for (let index = 0; index < senseCount; index += 1) {
+    sense.push({
+      partOfSpeech: ['n'], appliesToKanji: ['*'], appliesToKana: ['*'],
+      related: [], antonym: [], field: [], dialect: [], misc: [], info: [], loanwordSource: [],
+      gloss: [{ text: `sense ${id}-${index} "quoted" \\ backslash`, lang: 'eng' }]
+    });
+  }
+  return { id: String(id), kanji: [], kana, sense };
+}
+
+function countingClient() {
+  const calls = [];
+  return {
+    calls,
+    query: async (text, params) => {
+      calls.push({ text, params });
+      return { rows: [], rowCount: 0 };
+    }
+  };
+}
+
+test('bulk batch issues a constant number of statements regardless of child counts', async () => {
+  // Bug guarded: the old per-row importer (1 entry INSERT + 2 DELETEs + one
+  // INSERT per form/sense). For 10 entries x 6 forms x 4 senses the old shape
+  // needed 10*3+60+40 = 130 round trips; the bulk shape needs exactly 5.
+  // This test fails against the old implementation (130 !== 5).
+  const records = [];
+  for (let id = 2000001; id <= 2000010; id += 1) {
+    records.push(normalizeJmdictWord(syntheticWord(id, 6, 4)));
+  }
+  const client = countingClient();
+  const stats = await insertNormalizedBatch(client, 424242, records);
+  assert.equal(client.calls.length, 5);
+  assert.deepEqual(stats, { entries: 10, forms: 60, senses: 40, statements: 5 });
+  const [entryCall, deleteForms, insertForms, deleteSenses, insertSenses] = client.calls;
+  assert.match(entryCall.text, /jsonb_to_recordset/);
+  assert.match(entryCall.text, /ON CONFLICT \(source_id, ent_seq\) DO UPDATE/);
+  assert.match(deleteForms.text, /DELETE FROM jmdict_forms WHERE source_id = \$1 AND entry_id = ANY\(\$2::bigint\[\]\)/);
+  assert.deepEqual(deleteForms.params[1].length, 10);
+  assert.match(insertForms.text, /jsonb_to_recordset/);
+  assert.equal(JSON.parse(insertForms.params[1]).length, 60);
+  assert.match(deleteSenses.text, /DELETE FROM jmdict_senses WHERE source_id = \$1 AND entry_id = ANY\(\$2::bigint\[\]\)/);
+  assert.match(insertSenses.text, /jsonb_to_recordset/);
+  assert.equal(JSON.parse(insertSenses.params[1]).length, 40);
+  // Hostile payload text (quotes, backslashes) survives the JSON envelope.
+  assert.ok(insertSenses.params[1].includes('sense 2000001-0'));
+});
+
+test('bulk child payloads chunk deterministically past the chunk bound', async () => {
+  // Bug guarded: one giant statement for a pathological batch (parameter /
+  // query-size pathology on remote refresh). 2001 forms must split into two
+  // bounded INSERTs; senses still fit in one.
+  const records = [normalizeJmdictWord(syntheticWord(2000100, BULK_CHUNK_ROWS + 1, 1))];
+  const client = countingClient();
+  const stats = await insertNormalizedBatch(client, 424242, records);
+  assert.equal(stats.forms, BULK_CHUNK_ROWS + 1);
+  assert.equal(client.calls.length, 6);
+  const formInserts = client.calls.filter((call) => /INSERT INTO jmdict_forms/.test(call.text));
+  assert.equal(formInserts.length, 2);
+  assert.equal(JSON.parse(formInserts[0].params[1]).length, BULK_CHUNK_ROWS);
+  assert.equal(JSON.parse(formInserts[1].params[1]).length, 1);
+});
+
+test('reading appliesToKanji maps re_nokanji, unrestricted, and explicit restriction', () => {
+  // Bug guarded: the false "re_nokanji is dropped" claim — jmdict-simplified
+  // encodes XML <re_nokanji/> as appliesToKanji: [], ["*"] as unrestricted,
+  // and explicit lists as re_restr targets. All three must map exactly.
+  const base = JSON.parse(JSON.stringify(word('1000001')));
+  const none = JSON.parse(JSON.stringify(base));
+  none.kana[0].appliesToKanji = [];
+  const noneForm = normalizeJmdictWord(none).forms.find((form) => form.kind === 'reb');
+  assert.equal(noneForm.nokanji, true);
+  assert.deepEqual(noneForm.restr, []);
+  const all = JSON.parse(JSON.stringify(base));
+  all.kana[0].appliesToKanji = ['*'];
+  const allForm = normalizeJmdictWord(all).forms.find((form) => form.kind === 'reb');
+  assert.equal(allForm.nokanji, false);
+  assert.deepEqual(allForm.restr, []);
+  const explicit = JSON.parse(JSON.stringify(base));
+  explicit.kana[0].appliesToKanji = ['学校'];
+  const explicitForm = normalizeJmdictWord(explicit).forms.find((form) => form.kind === 'reb');
+  assert.equal(explicitForm.nokanji, false);
+  assert.deepEqual(explicitForm.restr, ['学校']);
 });

@@ -8,7 +8,7 @@ JLT ingests the English-only JMdict distribution through the [jmdict-simplified]
 
 JMdict-derived readings, glosses, and entry metadata are GLOBAL REFERENCE DATA: they never imply that a user added, reviewed, or knows a word, and they never feed Estimated Study Level, JLPT Progress, or Review. Dictionary meaning suggestions always require explicit user confirmation before any vocabulary write.
 
-In-app acknowledgement: the Analyzer's lexical surfaces credit "Dictionary data: JMdict © EDRDG (CC BY-SA)". The EDRDG licence asks dictionary-backed services to refresh from current releases at least monthly; JLT's refresh procedure is documented in `docs/jmdict-import.md`. Commercial use is permitted by the licence; JLT application code remains under its own terms and no copyright over JMdict material is claimed.
+In-app acknowledgement (scheduled for the Context-Aware UI surface, CA-B3 — not yet built): before Context-Aware Preview/Production, the Analyzer's lexical surfaces WILL credit "Dictionary data: JMdict © EDRDG (CC BY-SA)". The EDRDG licence asks dictionary-backed services to refresh from current releases at least monthly; JLT's refresh procedure is documented in `docs/jmdict-import.md`. Commercial use is permitted by the licence; JLT application code remains under its own terms and no copyright over JMdict material is claimed.
 
 ## Kanji reference data (KANJIDIC2 + OpenJLPT)
 

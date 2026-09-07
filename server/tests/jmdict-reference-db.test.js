@@ -406,3 +406,111 @@ test('failed import never moves the active pointer', { skip: !runnable }, async 
     client.release();
   }
 });
+
+async function readSnapshotRows(client, sourceId) {
+  const entries = (await client.query(
+    'SELECT ent_seq, doc, pos_summary, is_common, checksum FROM jmdict_entries WHERE source_id = $1 ORDER BY ent_seq',
+    [sourceId]
+  )).rows;
+  const forms = (await client.query(
+    'SELECT entry_id, surface, normalized, kind, restr, is_common, nokanji FROM jmdict_forms WHERE source_id = $1 ORDER BY entry_id, kind, surface',
+    [sourceId]
+  )).rows;
+  const senses = (await client.query(
+    'SELECT entry_id, sense_no, pos, gloss_en, stagk, stagr FROM jmdict_senses WHERE source_id = $1 ORDER BY entry_id, sense_no',
+    [sourceId]
+  )).rows;
+  return { entries, forms, senses };
+}
+
+test('bulk path stores byte-exact normalized rows', { skip: !runnable }, async () => {
+  // Bug guarded: the SQL-batched rewrite changing reference semantics —
+  // every stored column must equal the normalizer output exactly (display
+  // surfaces verbatim, folded keys, restr/nokanji, pos, glosses, stagk/stagr,
+  // doc, checksum). Fails if jsonb_to_recordset mistypes any column.
+  const client = await pool.connect();
+  try {
+    const sourceId = await makeSnapshot(client, 'equiv', fixture.words);
+    const stored = await readSnapshotRows(client, sourceId);
+    const expected = fixtureRecords();
+    assert.equal(stored.entries.length, expected.length);
+    for (const [index, record] of expected.entries()) {
+      const row = stored.entries[index];
+      assert.equal(Number(row.ent_seq), record.entSeq);
+      assert.deepEqual(row.doc, record.doc);
+      assert.deepEqual(row.pos_summary, record.posSummary);
+      assert.equal(row.is_common, record.isCommon);
+      assert.equal(row.checksum, record.checksum);
+    }
+    const expectedForms = expected.flatMap((record) => record.forms.map((form) => ({
+      entry_id: String(record.entSeq), ...form, is_common: form.isCommon
+    })));
+    assert.equal(stored.forms.length, expectedForms.length);
+    for (const form of expectedForms) {
+      const match = stored.forms.find((row) => String(row.entry_id) === form.entry_id && row.kind === form.kind && row.surface === form.surface);
+      assert.ok(match, `missing form ${form.entry_id}/${form.kind}/${form.surface}`);
+      assert.equal(match.normalized, form.normalized);
+      assert.deepEqual(match.restr, form.restr);
+      assert.equal(match.is_common, form.isCommon);
+      assert.equal(match.nokanji, form.nokanji);
+    }
+    const expectedSenses = expected.flatMap((record) => record.senses.map((sense) => ({
+      entry_id: String(record.entSeq), sense_no: sense.senseNo, pos: sense.pos,
+      gloss_en: sense.glossEn, stagk: sense.stagk, stagr: sense.stagr
+    })));
+    assert.equal(stored.senses.length, expectedSenses.length);
+    for (const sense of expectedSenses) {
+      const match = stored.senses.find((row) => String(row.entry_id) === sense.entry_id && row.sense_no === sense.sense_no);
+      assert.ok(match, `missing sense ${sense.entry_id}#${sense.sense_no}`);
+      assert.deepEqual(match.pos, sense.pos);
+      assert.deepEqual(match.gloss_en, sense.gloss_en);
+      assert.deepEqual(match.stagk, sense.stagk);
+      assert.deepEqual(match.stagr, sense.stagr);
+    }
+  } finally {
+    client.release();
+  }
+});
+
+test('bulk reimport into the same source is restart-idempotent', { skip: !runnable }, async () => {
+  // Bug guarded: set-based child replacement duplicating rows on retry —
+  // re-running the same batch under the same source_id must leave counts
+  // and content identical (simulates a crash-retry before the status flip).
+  const client = await pool.connect();
+  try {
+    const sourceId = await makeSnapshot(client, 'retry', fixture.words);
+    const before = await readSnapshotRows(client, sourceId);
+    await client.query('BEGIN');
+    try {
+      await service.insertNormalizedBatch(client, sourceId, fixtureRecords());
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    }
+    const after = await readSnapshotRows(client, sourceId);
+    assert.deepEqual(after, before);
+  } finally {
+    client.release();
+  }
+});
+
+test('bulk import into one snapshot never modifies another', { skip: !runnable }, async () => {
+  // Bug guarded: a source-scoping slip in the ANY() child replacement
+  // (missing source_id predicate) leaking deletes/inserts across snapshots.
+  const client = await pool.connect();
+  try {
+    const first = await makeSnapshot(client, 'iso-a', fixture.words.slice(0, 2));
+    const before = await readSnapshotRows(client, first);
+    const altered = JSON.parse(JSON.stringify(fixture.words.slice(0, 2)));
+    altered[0].sense[0].gloss = [{ text: 'altered school', lang: 'eng' }];
+    altered[1].kana.push({ text: 'たべる2', common: false, tags: [], appliesToKanji: ['*'] });
+    const second = await makeSnapshot(client, 'iso-b', altered);
+    const secondRows = await readSnapshotRows(client, second);
+    assert.ok(secondRows.senses.some((row) => row.gloss_en.includes('altered school')));
+    assert.ok(secondRows.forms.some((row) => row.surface === 'たべる2'));
+    assert.deepEqual(await readSnapshotRows(client, first), before);
+  } finally {
+    client.release();
+  }
+});

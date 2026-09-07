@@ -55,7 +55,8 @@ asset byte count; content identity: recorded sha256 of the consumed file.
 ```
 resolve pinned source → read artifact → verify checksum (if expected given)
 → allocate NEW source_id (status=importing)
-→ normalize + import in bounded batches (one transaction per batch)
+→ normalize + import in bounded batches (one transaction per batch, one bulk
+  statement per table per batch — entries upsert, set-based child replace)
 → status=validating → integrity checks → C1 audit → status=ready
 → OPTIONAL explicit activate (never automatic)
 ```
@@ -90,16 +91,21 @@ keep the previous snapshot as rollback target, prune older ones explicitly.
 - Pasted Analyzer text never leaves JLT infrastructure: no runtime download,
   no dictionary API, no external calls anywhere on this path.
 
-## Known converter limitation (L1)
+## Reading applicability encoding (`re_nokanji` preserved)
 
-`jmdict-simplified` `JMdictKana` exposes `{text, common, tags,
-appliesToKanji}` but drops XML `re_nokanji`. Consequence: a reading the XML
-marks "cannot be written in kanji" looks fully applicable when its
-`appliesToKanji` is `["*"]`. Residual risk is contained structurally —
-kana-only entries have no `keb` rows so kanji observations can never match
-them, and `appliesToKanji: []` (applies-to-none) is still flagged `nokanji`.
-CA-B2's H4 rule must note this limitation; a future XML sidecar for
-`re_nokanji` is explicitly out of scope for CA-B1.
+`jmdict-simplified` encodes XML `<re_nokanji/>` as `appliesToKanji: []`
+— it is NOT dropped. JLT maps the three states exactly:
+
+- `appliesToKanji: []` → `jmdict_forms.nokanji = true` (reading applies to
+  no keb; a kanji observation can never claim it — H4 direction). The
+  measured snapshot carries 6,639 such readings, which is direct evidence
+  the semantics survive the projection.
+- `appliesToKanji: ["*"]` → unrestricted (`restr = []`, `nokanji = false`).
+- explicit lists (e.g. `["行く"]`) → stored verbatim as `restr` targets
+  (validated against existing keb at import; dangling targets fail loudly).
+
+No XML sidecar is required for CA-v1. Kana-only entries additionally have
+no `keb` rows at all, so kanji observations can never match them.
 
 ## CA-B2 amendments (preserved, not implemented here)
 
