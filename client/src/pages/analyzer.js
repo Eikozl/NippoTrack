@@ -12,6 +12,7 @@
 
 import { apiRequest } from '../api.js';
 import { element, field, openDialog, pageHeader, setActionPending, showToast, withGlobalLoading, withPendingAction } from '../ui.js';
+import { enableRomajiConversion } from '../kanjiReference.js';
 import {
   buildKanjiImportPayload,
   getDiscoveryState,
@@ -244,14 +245,15 @@ export async function renderAnalyzer(container) {
         description: 'Dictionary-form reading only. Leave blank if unsure — never copy the “as read here” form.'
       });
       const meaningField = field({ name: 'meaning', label: 'Meaning', value: '', required: true, maxLength: 255, placeholder: 'Your definition' });
+      const dialogContent = [
+        element('p', { className: 'text-xs leading-5 text-muted sm:col-span-2', text: 'Confirm this word before saving. Adding stores it as New vocabulary — it does not schedule reviews or claim knowledge.' }),
+        wordField,
+        readingField,
+        meaningField
+      ];
       openDialog({
         title: `Add ${view.canonical} to Vocabulary`,
-        content: [
-          element('p', { className: 'text-xs leading-5 text-muted sm:col-span-2', text: 'Confirm this word before saving. Adding stores it as New vocabulary — it does not schedule reviews or claim knowledge.' }),
-          wordField,
-          readingField,
-          meaningField
-        ],
+        content: dialogContent,
         submitLabel: 'Add to Vocabulary',
         onSubmit: async (form, close) => {
           const data = new FormData(form);
@@ -270,6 +272,8 @@ export async function renderAnalyzer(container) {
           showToast(`Added ${created && created.word ? created.word : candidate.canonical} to Vocabulary.`);
         }
       });
+      // Enable romaji → hiragana conversion for the reading field (matches Vocabulary form behavior)
+      enableRomajiConversion(dialogContent, { japaneseTextFields: { reading: 'hiragana' } });
     };
 
     const renderGrid = () => {

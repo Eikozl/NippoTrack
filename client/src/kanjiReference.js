@@ -25,6 +25,28 @@ export function transliteratedValue(transliteration, script) {
   return typeof transliteration[script] === 'string' && transliteration[script] ? transliteration[script] : null;
 }
 
+function findInput(content, name) {
+  return content.map((item) => item.matches?.(`[name="${name}"]`) ? item : item.querySelector?.(`[name="${name}"]`)).find(Boolean);
+}
+
+export function enableRomajiConversion(content, config) {
+  Object.entries(config.japaneseTextFields || {}).forEach(([name, script]) => {
+    const input = findInput(content, name);
+    if (!input) return;
+    input.addEventListener('blur', async () => {
+      const original = input.value.trim();
+      if (!original) return;
+      try {
+        const result = await apiRequest(`/api/kanji/reference?search=${encodeURIComponent(original)}&limit=1`);
+        const converted = transliteratedValue(result.transliteration, script);
+        if (converted && input.value.trim() === original) input.value = converted;
+      } catch {
+        // Leave the user's value unchanged when the reference service is unavailable.
+      }
+    });
+  });
+}
+
 export function existingKanjiFromDuplicateError(error) {
   const existing = error?.status === 409 ? error.data?.existingKanji : null;
   if (!existing || !Number.isInteger(existing.idKanji) || existing.idKanji < 1 || !isSingleHanCodePoint(existing.character)) return null;

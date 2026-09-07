@@ -1,6 +1,6 @@
 import { apiRequest, queryString } from '../api';
 import { buildKanjiImportPayload, getContextKanji, getReadingContext, formatKanjiContextEntry, VOCAB_READING_NOTICE } from '../vocabularyReading.js';
-import { applyPristineKanjiAutofill, changedKanjiReferenceFields, existingKanjiFromDuplicateError, isSingleHanCodePoint, transliteratedValue } from '../kanjiReference';
+import { applyPristineKanjiAutofill, changedKanjiReferenceFields, enableRomajiConversion, existingKanjiFromDuplicateError, isSingleHanCodePoint, transliteratedValue } from '../kanjiReference';
 import {
   debounce,
   confirmDialog,
@@ -344,24 +344,6 @@ function formPayload(form, config) {
 
 function inputFor(content, name) {
   return content.map((item) => item.matches?.(`[name="${name}"]`) ? item : item.querySelector?.(`[name="${name}"]`)).find(Boolean);
-}
-
-function enableRomajiConversion(content, config) {
-  Object.entries(config.japaneseTextFields || {}).forEach(([name, script]) => {
-    const input = inputFor(content, name);
-    if (!input) return;
-    input.addEventListener('blur', async () => {
-      const original = input.value.trim();
-      if (!original) return;
-      try {
-        const result = await apiRequest(`/api/kanji/reference?search=${encodeURIComponent(original)}&limit=1`);
-        const converted = transliteratedValue(result.transliteration, script);
-        if (converted && input.value.trim() === original) input.value = converted;
-      } catch {
-        // Leave the user's value unchanged when the reference service is unavailable.
-      }
-    });
-  });
 }
 
 function enableKanjiReferenceAutofill(content) {
