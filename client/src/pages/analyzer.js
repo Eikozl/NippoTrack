@@ -32,6 +32,12 @@ import {
   buildVocabularyImportPayload,
   groupLexicalCandidates
 } from '../lexicalAnalyzer.js';
+import {
+  addSuggestion,
+  attributionModel,
+  contextBlockModel,
+  contextItemModel
+} from '../contextAnalyzer.js';
 
 function statePill(formatted) {
   const state = getDiscoveryState(formatted);
@@ -177,6 +183,21 @@ export async function renderAnalyzer(container) {
           text: 'Vocabulary collection matching is unavailable. Candidates are shown without ownership state.'
         }));
       }
+      // Context block failure never hides Phase 12 candidates: a compact
+      // notice, with Retry only for transient (backend-marked) failures.
+      // Retry reuses the normal Analyze action — same request, same budget.
+      const contextState = contextBlockModel(lexical.context);
+      if (contextState.state === 'unavailable') {
+        const notice = element('div', { className: 'mt-3 rounded-lg border border-stone bg-paper p-3', attrs: { role: 'status' } }, [
+          element('p', { className: 'break-words text-sm text-ink/80', text: contextState.notice })
+        ]);
+        if (contextState.retryable) {
+          const retryButton = element('button', { className: 'button-secondary mt-2 min-h-9 px-3 py-1.5 text-xs', text: 'Retry analysis', attrs: { type: 'button' } });
+          retryButton.addEventListener('click', () => analyzeButton.click());
+          notice.append(retryButton);
+        }
+        lexicalSection.append(notice);
+      }
       const groupSections = [
         ['Already in Vocabulary', groups.existing],
         ['New Vocabulary', groups.fresh],
@@ -199,11 +220,112 @@ export async function renderAnalyzer(container) {
           text: 'Detected words are not knowledge: adding stores them as New vocabulary without scheduling reviews.'
         }));
       }
+      // One visible source line for the whole vocabulary section (never per
+      // card). Rendered only when the response carries dictionary provenance.
+      const attribution = attributionModel(lexical.context && lexical.context.dictionary);
+      if (attribution) {
+        const footer = element('p', { className: 'mt-3 break-words text-xs leading-5 text-muted' }, [
+          element('span', { text: 'Dictionary data: ' }),
+          element('a', {
+            className: 'font-semibold text-vermilion transition hover:text-vermilion-dark',
+            text: 'JMdict',
+            attrs: { href: 'https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project', target: '_blank', rel: 'noreferrer noopener' }
+          }),
+          element('span', { text: ' © EDRDG (' }),
+          element('a', {
+            className: 'font-semibold text-vermilion transition hover:text-vermilion-dark',
+            text: 'CC BY-SA 4.0',
+            attrs: { href: 'https://creativecommons.org/licenses/by-sa/4.0/', target: '_blank', rel: 'noreferrer noopener' }
+          }),
+          element('span', { text: ').' })
+        ]);
+        lexicalSection.append(footer);
+        if (attribution.detail) {
+          const versionDetails = element('details', { className: 'mt-1 text-xs' });
+          versionDetails.append(
+            element('summary', { className: 'cursor-pointer font-semibold text-vermilion', text: 'Reference version' }),
+            element('p', { className: 'mt-1 break-words leading-5 text-muted', text: attribution.detail })
+          );
+          lexicalSection.append(versionDetails);
+        }
+      }
     };
 
     const findLexicalCandidate = (key) => (
       ((analysis.lexical && analysis.lexical.candidates) || []).find((entry) => entry.key === key) || null
     );
+
+    const findContextItem = (key) => (
+      ((analysis.lexical && analysis.lexical.context && analysis.lexical.context.items) || []).find((entry) => entry.key === key) || null
+    );
+
+    // Compact Context-Aware block inside a vocabulary card. Augments the
+    // Phase 12 card; every branch renders through textContent (no raw HTML).
+    const contextSection = (rawItem) => {
+      const model = contextItemModel(rawItem);
+      if (model.kind === 'pending' || model.kind === 'unsupported') return null;
+      const block = element('div', {
+        className: 'mt-3 rounded-lg border border-stone bg-paper p-3',
+        dataset: { contextKind: model.kind },
+        attrs: { role: 'group', 'aria-label': 'Dictionary context' }
+      });
+      const noteLine = (text) => element('p', { className: 'mt-1 break-words text-xs leading-5 text-muted', text });
+      if (model.kind === 'no-match') {
+        block.append(element('p', { className: 'break-words text-xs text-muted', text: model.notice }));
+        return block;
+      }
+      if (model.kind === 'unavailable') {
+        block.append(element('p', { className: 'break-words text-xs text-muted', text: model.notice }));
+        return block;
+      }
+      const readingLine = () => {
+        if (model.readings.suggested) {
+          return element('p', { className: 'mt-1 break-words text-sm text-ink/80', text: `Dictionary reading: ${model.readings.suggested} (JMdict)` });
+        }
+        if (model.readings.alternatives.length) {
+          return element('p', { className: 'mt-1 break-words text-sm text-ink/80', text: `Dictionary readings: ${model.readings.alternatives.join(' · ')} (JMdict)` });
+        }
+        return null;
+      };
+      const whyDetails = () => {
+        if (!model.evidence?.length && !model.excluded) return null;
+        const details = element('details', { className: 'mt-2 text-xs' });
+        const rows = [];
+        if (model.evidence?.length) {
+          rows.push(element('ul', { className: 'mt-1 grid gap-1' }, model.evidence.map((line) => (
+            element('li', { className: 'break-words leading-5 text-muted', text: `· ${line}` })
+          ))));
+        }
+        if (model.excluded) rows.push(element('p', { className: 'mt-1 break-words leading-5 text-muted', text: model.excluded }));
+        details.append(element('summary', { className: 'cursor-pointer font-semibold text-vermilion', text: 'Why this matches' }), ...rows);
+        return details;
+      };
+      if (model.kind === 'compatible') {
+        block.append(element('p', { className: 'text-sm font-semibold text-ink', text: model.heading }));
+        block.append(element('p', { className: 'mt-1 break-words text-sm text-ink/80', text: model.meaning }));
+        const reading = readingLine();
+        if (reading) block.append(reading);
+      } else if (model.kind === 'ambiguous-unique') {
+        const reading = readingLine();
+        if (reading) block.append(reading);
+        block.append(element('p', { className: 'mt-1 text-sm font-semibold text-ink', text: model.heading }));
+        block.append(element('p', { className: 'mt-1 break-words text-xs leading-5 text-muted', text: model.subheading }));
+        block.append(element('ul', { className: 'mt-1 grid gap-1' }, model.choices.map((choice) => (
+          element('li', { className: 'break-words text-sm text-ink/80', text: `· ${choice.label}` })
+        ))));
+        if (model.moreMeanings) block.append(noteLine('More meanings exist.'));
+      } else if (model.kind === 'multiple') {
+        block.append(element('p', { className: 'text-sm font-semibold text-ink', text: model.heading }));
+        block.append(element('p', { className: 'mt-1 break-words text-xs leading-5 text-muted', text: model.subheading }));
+        block.append(element('ul', { className: 'mt-1 grid gap-1' }, model.rows.map((row) => (
+          element('li', { className: 'break-words text-sm text-ink/80', text: row.gloss ? `${row.headword} — ${row.gloss}` : row.headword })
+        ))));
+      }
+      for (const note of model.notes || []) block.append(noteLine(note));
+      const why = whyDetails();
+      if (why) block.append(why);
+      return block;
+    };
 
     const lexicalCard = (view) => {
       const header = element('div', { className: 'flex items-start justify-between gap-3' }, [
@@ -223,6 +345,11 @@ export async function renderAnalyzer(container) {
           text: `Possible match: ${view.possibleMatches.map((entry) => entry.word).join('、')} — verify the meaning before adding.`
         }));
       }
+      const contextItem = findContextItem(view.key);
+      if (contextItem) {
+        const section = contextSection(contextItem);
+        if (section) rows.push(section);
+      }
       if (view.showAdd) {
         const addButton = element('button', { className: 'button-secondary min-h-10 px-4 py-2 text-xs', text: view.addLabel, attrs: { type: 'button' } });
         addButton.addEventListener('click', () => {
@@ -235,22 +362,84 @@ export async function renderAnalyzer(container) {
     };
 
     const openVocabularyAddDialog = (candidate, view) => {
-      const wordField = field({ name: 'word', label: 'Word (dictionary form)', value: candidate.lemma || candidate.canonical, required: true, maxLength: 100 });
+      // Context-derived suggestions for this exact candidate identity only.
+      // MULTIPLE / NO_MATCH / UNSUPPORTED / UNAVAILABLE yield no context
+      // reading or meaning (addSuggestion degrades to an empty suggestion).
+      const rawContextItem = findContextItem(view.key);
+      const suggestion = rawContextItem ? addSuggestion(rawContextItem) : null;
+      const hasContextSuggestion = !!(suggestion && suggestion.sourceKey === view.key);
+      const identityWord = candidate.lemma || candidate.canonical;
+      const suggestedReading = (hasContextSuggestion && suggestion.reading) || candidate.lemmaReading || '';
+      const suggestedMeaning = (hasContextSuggestion && suggestion.meaning) || '';
+      const wordField = field({ name: 'word', label: 'Word (dictionary form)', value: identityWord, required: true, maxLength: 100 });
       const readingField = field({
         name: 'reading',
         label: 'Reading',
-        value: candidate.lemmaReading || '',
+        value: suggestedReading,
         maxLength: 150,
         placeholder: 'ひらがな',
         description: 'Dictionary-form reading only. Leave blank if unsure — never copy the “as read here” form.'
       });
-      const meaningField = field({ name: 'meaning', label: 'Meaning', value: '', required: true, maxLength: 255, placeholder: 'Your definition' });
+      const meaningField = field({ name: 'meaning', label: 'Meaning', value: suggestedMeaning, required: true, maxLength: 255, placeholder: 'Your definition' });
       const dialogContent = [
         element('p', { className: 'text-xs leading-5 text-muted sm:col-span-2', text: 'Confirm this word before saving. Adding stores it as New vocabulary — it does not schedule reviews or claim knowledge.' }),
         wordField,
         readingField,
         meaningField
       ];
+      // Stale-suggestion safety: context suggestions belong to the original
+      // candidate identity. If the word is edited away from that identity,
+      // untouched context-derived values are cleared (never reapplied) and
+      // sense picks are demoted; anything the USER typed is always kept.
+      const dirtyFields = new Set();
+      const inputFor = (content, name) => content
+        .map((item) => (item.matches?.(`[name="${name}"]`) ? item : item.querySelector?.(`[name="${name}"]`)))
+        .find(Boolean) || null;
+      // UNIQUE + AMBIGUOUS: explicit sense picks. Each choice is a USER
+      // action that fills the meaning field — never an automatic selection.
+      let senseChoiceButtons = [];
+      if (hasContextSuggestion && suggestion.requiresChoice && suggestion.meaningChoices.length) {
+        const choicesBox = element('div', { className: 'grid gap-2 sm:col-span-2', attrs: { role: 'group', 'aria-label': 'Possible meanings from the dictionary' } }, [
+          element('p', { className: 'text-xs font-semibold text-ink', text: 'Possible meanings — choose one:' })
+        ]);
+        senseChoiceButtons = suggestion.meaningChoices.map((choice) => {
+          const useButton = element('button', {
+            className: 'button-secondary min-h-9 justify-start px-3 py-1.5 text-left text-xs',
+            text: `Use “${choice.primaryGloss || choice.label}”`,
+            attrs: { type: 'button', 'aria-label': `Use meaning "${choice.primaryGloss || choice.label}" for ${view.canonical}` }
+          });
+          useButton.addEventListener('click', () => {
+            const meaningInput = inputFor(dialogContent, 'meaning');
+            if (meaningInput) {
+              meaningInput.value = choice.primaryGloss || choice.label;
+              dirtyFields.add('meaning');
+              meaningInput.focus();
+            }
+          });
+          choicesBox.append(useButton);
+          return useButton;
+        });
+        if (suggestion.moreMeanings) {
+          choicesBox.append(element('p', { className: 'text-xs leading-5 text-muted', text: 'More meanings exist.' }));
+        }
+        dialogContent.push(choicesBox);
+      }
+      // Untouched context-derived values clear (never reapplied) when the
+      // word leaves the suggested identity; user-edited fields always win.
+      const syncStaleSuggestions = () => {
+        const wordInput = inputFor(dialogContent, 'word');
+        const readingInput = inputFor(dialogContent, 'reading');
+        const meaningInput = inputFor(dialogContent, 'meaning');
+        const intact = wordInput && wordInput.value.trim() === identityWord;
+        for (const button of senseChoiceButtons) button.disabled = !intact;
+        if (intact || !hasContextSuggestion) return;
+        if (readingInput && !dirtyFields.has('reading') && suggestion.reading && readingInput.value === suggestion.reading) {
+          readingInput.value = '';
+        }
+        if (meaningInput && !dirtyFields.has('meaning') && suggestion.meaning && meaningInput.value === suggestion.meaning) {
+          meaningInput.value = '';
+        }
+      };
       openDialog({
         title: `Add ${view.canonical} to Vocabulary`,
         content: dialogContent,
@@ -272,6 +461,13 @@ export async function renderAnalyzer(container) {
           showToast(`Added ${created && created.word ? created.word : candidate.canonical} to Vocabulary.`);
         }
       });
+      for (const name of ['word', 'reading', 'meaning']) {
+        const input = inputFor(dialogContent, name);
+        if (input) input.addEventListener('input', () => {
+          dirtyFields.add(name);
+          if (name === 'word') syncStaleSuggestions();
+        });
+      }
       // Enable romaji → hiragana conversion for the reading field (matches Vocabulary form behavior)
       enableRomajiConversion(dialogContent, { japaneseTextFields: { reading: 'hiragana' } }, apiRequest);
     };
@@ -454,7 +650,8 @@ export async function renderAnalyzer(container) {
           method: 'POST',
           // Vocabulary analysis is automatic for eligible lengths; longer
           // texts stay Kanji-only without touching the lexical parser.
-          body: text.length <= LEXICAL_ANALYSIS_MAX_LENGTH ? { text, lexical: { enabled: true } } : { text }
+          // Context-Aware rides the same request (no duplicate Analyze call).
+          body: text.length <= LEXICAL_ANALYSIS_MAX_LENGTH ? { text, lexical: { enabled: true }, context: { enabled: true } } : { text }
         }),
         { label: 'Analyzing text…' }
       );
