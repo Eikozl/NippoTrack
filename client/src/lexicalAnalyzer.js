@@ -6,6 +6,9 @@
 // become the reading of a different dictionary form.
 
 export const LEXICAL_ANALYSIS_MAX_LENGTH = 2000;
+// Keep action labels useful on narrow cards without truncating the lexical
+// identity shown in the card or sent in the import payload.
+export const MAX_ADD_LABEL_CODE_POINTS = 12;
 
 export const LEXICAL_POS_LABELS = {
   noun: 'noun',
@@ -60,13 +63,14 @@ export function formatLexicalCandidate(candidate, { added = false } = {}) {
   const matchState = added ? 'existing' : (candidate.match && candidate.match.state) || 'new';
   const showAdd = matchState === 'new';
   const observedDiffers = hasObservedFormDifferentFromCanonical(candidate);
+  const canonicalFitsActionLabel = Array.from(candidate.canonical || '').length <= MAX_ADD_LABEL_CODE_POINTS;
   return {
     key: candidate.key,
     canonical: candidate.canonical,
     pill: lexicalMatchPill(matchState),
     matchState,
     showAdd,
-    addLabel: observedDiffers ? `Add ${candidate.canonical}` : 'Add to Vocabulary',
+    addLabel: observedDiffers && canonicalFitsActionLabel ? `Add ${candidate.canonical}` : 'Add to Vocabulary',
     posLabel: lexicalPosLabel(candidate.pos),
     occurrences: candidate.occurrences || 1,
     observedLine: formatObservedLine(candidate),

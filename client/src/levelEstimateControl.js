@@ -303,8 +303,11 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
     parts.measuring = true;
     const token = parts.measureToken;
     parts.morph.classList.add('is-flip');
+    parts.morph.classList.add('is-measuring');
     parts.morph.classList.add('is-open');
     applyInlineGeometry(parts.morph, { top: sheet.top, left: sheet.left, width: sheet.width, height: trigger.height });
+    // Let the face and summary take their natural height during measurement.
+    parts.morph.style.height = 'auto';
     parts.morph.style.visibility = 'hidden';
     parts.morph.style.pointerEvents = 'none';
     requestMeasureFrame(() => measureOpenFrame(host, parts, sheet, trigger, token, 0));
@@ -354,6 +357,8 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
     parts.measuring = false;
     applyInlineGeometry(parts.morph, trigger);
     void parts.morph.offsetWidth;
+    parts.morph.classList.remove('is-measuring');
+    void parts.morph.offsetWidth;
     parts.morph.style.visibility = '';
     parts.morph.style.pointerEvents = '';
     parts.morph.classList.add('is-open');
@@ -368,6 +373,7 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
     if (!parts || !parts.measuring) return;
     parts.measuring = false;
     parts.measureToken = (parts.measureToken || 0) + 1;
+    parts.morph.classList.remove('is-measuring');
     parts.morph.style.visibility = '';
     parts.morph.style.pointerEvents = '';
   }

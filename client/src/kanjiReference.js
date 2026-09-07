@@ -29,7 +29,8 @@ function findInput(content, name) {
   return content.map((item) => item.matches?.(`[name="${name}"]`) ? item : item.querySelector?.(`[name="${name}"]`)).find(Boolean);
 }
 
-export function enableRomajiConversion(content, config) {
+export function enableRomajiConversion(content, config, request) {
+  if (typeof request !== 'function') return;
   Object.entries(config.japaneseTextFields || {}).forEach(([name, script]) => {
     const input = findInput(content, name);
     if (!input) return;
@@ -37,7 +38,7 @@ export function enableRomajiConversion(content, config) {
       const original = input.value.trim();
       if (!original) return;
       try {
-        const result = await apiRequest(`/api/kanji/reference?search=${encodeURIComponent(original)}&limit=1`);
+        const result = await request(`/api/kanji/reference?search=${encodeURIComponent(original)}&limit=1`);
         const converted = transliteratedValue(result.transliteration, script);
         if (converted && input.value.trim() === original) input.value = converted;
       } catch {

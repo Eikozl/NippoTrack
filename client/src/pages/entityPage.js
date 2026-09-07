@@ -659,7 +659,7 @@ export function renderEntityPage(container, config) {
       );
       duplicateNotice.classList.remove('hidden');
     };
-enableRomajiConversion(content, config);
+    enableRomajiConversion(content, config, apiRequest);
     if (config === ENTITY_CONFIGS.kanji && !record[config.idKey]) {
       content.unshift(duplicateNotice);
       enableKanjiReferenceAutofill(content);

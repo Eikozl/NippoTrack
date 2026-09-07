@@ -194,6 +194,11 @@
 .level-estimate-morph.is-open .level-estimate-detail::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--jlt-border); }
 .level-estimate-detail-inner { padding-top: 0.6rem; transform: translateY(6px); transition: transform 300ms ease-out; }
 .level-estimate-morph.is-open .level-estimate-detail-inner { transform: none; }
+/* Measure final wrapping and padding, never an in-flight CSS transition.
+   Shell opacity also hides descendants with explicit visibility:visible. */
+.level-estimate-morph.is-measuring { opacity: 0; }
+.level-estimate-morph.is-measuring,
+.level-estimate-morph.is-measuring * { transition: none !important; }
 .level-estimate-subline { font-size: 0.875rem; line-height: 1.5; color: var(--jlt-muted); }
 .level-estimate-confidence { margin-top: 0.5rem; font-size: 0.8125rem; font-weight: 600; color: var(--jlt-ink); }
 .level-estimate-pills { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.7rem; }

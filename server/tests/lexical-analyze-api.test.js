@@ -109,6 +109,30 @@ test('lexical-enabled requests return the additive block with normalized tokens'
   }
 });
 
+for (const [text, surface, surfaceReading] of [
+  ['学校に行った。', '行った', 'いった'],
+  ['学校に行きました。', '行きました', 'いきました']
+]) {
+  test(`real parser preserves the full observed inflection in ${text}`, async () => {
+    const stub = installStub();
+    try {
+      await withServer(async (base) => {
+        const { status, body } = await postAnalysis(base, { text, lexical: { enabled: true } });
+        assert.equal(status, 200);
+        assert.equal(body.lexical.status, 'ok');
+        const candidate = body.lexical.candidates.find((entry) => entry.canonical === '行く');
+        assert.ok(candidate, 'dictionary-form candidate survives real parser normalization');
+        assert.deepEqual(candidate.observed.map((entry) => ({
+          surface: entry.surface,
+          surfaceReading: entry.surfaceReading
+        })), [{ surface, surfaceReading }]);
+      });
+    } finally {
+      stub.restore();
+    }
+  });
+}
+
 test('kana-only input with opt-in still returns lexical tokens and empty kanji', async () => {
   const stub = installStub();
   try {

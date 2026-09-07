@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 process.env.NODE_ENV = 'test';
 process.env.JLT_AUTH_BYPASS_FOR_TESTS = 'true';
@@ -319,14 +321,12 @@ test('Phase 5 enhancement: partial collection marks 明 missing and import flips
 // in the current schema. Therefore, POST /api/vocabulary does NOT return 409
 // for duplicate words. This test documents the current behavior by checking
 // the schema directly.
-test('vocabulary schema: no unique constraint on word per user (no 409 contract)', () => {
-  const pool = require('../src/config/db');
-  // Verify schema has no unique index on vocabulary.word per user
-  // The baseline migration only has: PRIMARY KEY on id_vocabulary
-  // No UNIQUE constraint on (user_id, word) exists in any migration
-  // Therefore: no ER_DUP_ENTRY / 23505 for vocabulary word conflicts
-  // The 409 handler in http.js exists for other tables (kanji, grammar) but
-  // does not apply to vocabulary word duplicates.
-  // This is documented here to prevent false assumptions in the Analyzer flow.
-  assert.ok(true, 'Vocabulary has no unique constraint on word per user; 409 duplicate handling not applicable');
+test('vocabulary schema has no per-user word uniqueness contract', () => {
+  const migration = fs.readFileSync(path.join(__dirname, '../db/migrations-postgres/001_jlt_postgres_baseline.sql'), 'utf8');
+  const table = migration.match(/CREATE TABLE vocabulary \(([\s\S]*?)\n\);/i)?.[1];
+  assert.ok(table, 'baseline migration declares vocabulary');
+  assert.match(table, /word\s+(?:varchar\(\d+\)|text)\s+NOT NULL/i);
+  assert.match(table, /id_vocabulary[^\n]*PRIMARY KEY|PRIMARY KEY\s*\(\s*id_vocabulary\s*\)/i);
+  assert.doesNotMatch(table, /UNIQUE/i, 'duplicate words remain allowed for the existing contract');
+  assert.doesNotMatch(migration, /UNIQUE\s*\(\s*user_id\s*,\s*word\s*\)/i);
 });

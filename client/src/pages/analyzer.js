@@ -160,7 +160,8 @@ export async function renderAnalyzer(container) {
         }));
         return;
       }
-      const summary = lexical.summary || { candidates: 0, existing: 0, new: 0 };
+      const groups = groupLexicalCandidates(lexical, localVocabAdded);
+      const summary = { candidates: lexical.candidates?.length || 0, existing: groups.existing.length, new: groups.fresh.length };
       const tiles = [
         ['Vocabulary candidates', String(summary.candidates ?? 0)],
         ['Already in Vocabulary', String(summary.existing ?? 0)],
@@ -176,7 +177,6 @@ export async function renderAnalyzer(container) {
           text: 'Vocabulary collection matching is unavailable. Candidates are shown without ownership state.'
         }));
       }
-      const groups = groupLexicalCandidates(lexical, localVocabAdded);
       const groupSections = [
         ['Already in Vocabulary', groups.existing],
         ['New Vocabulary', groups.fresh],
@@ -266,14 +266,14 @@ export async function renderAnalyzer(container) {
           });
           if (!payload) throw new Error('Meaning is required.');
           const created = await apiRequest('/api/vocabulary', { method: 'POST', body: payload });
-          localVocabAdded.add(candidate.canonical);
+          localVocabAdded.add(created?.word || payload.word);
           close();
           renderResults();
           showToast(`Added ${created && created.word ? created.word : candidate.canonical} to Vocabulary.`);
         }
       });
       // Enable romaji → hiragana conversion for the reading field (matches Vocabulary form behavior)
-      enableRomajiConversion(dialogContent, { japaneseTextFields: { reading: 'hiragana' } });
+      enableRomajiConversion(dialogContent, { japaneseTextFields: { reading: 'hiragana' } }, apiRequest);
     };
 
     const renderGrid = () => {

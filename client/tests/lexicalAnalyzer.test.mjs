@@ -77,6 +77,16 @@ test('formatLexicalCandidate shows "Add to Vocabulary" when observed equals cano
   assert.equal(view.addLabel, 'Add to Vocabulary');
 });
 
+test('formatLexicalCandidate falls back for a long canonical action label', () => {
+  const c = baseCandidate({
+    canonical: '国際連合教育科学文化機関本部',
+    observed: [{ surface: '国際連合教育科学文化機関本部で', surfaceReading: 'こくさいれんごうきょういくぶんかきかんほんぶで' }],
+    match: { state: 'new' }
+  });
+  assert.equal(formatLexicalCandidate(c).addLabel, 'Add to Vocabulary');
+  assert.equal(c.canonical, '国際連合教育科学文化機関本部', 'lexical identity remains intact');
+});
+
 test('formatLexicalCandidate hides add button for existing/ambiguous/unavailable', () => {
   for (const state of ['existing', 'ambiguous', 'unavailable', 'unsupported']) {
     const c = baseCandidate({ match: { state } });
