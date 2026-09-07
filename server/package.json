@@ -23,6 +23,7 @@
     "postgres:test-runtime": "node --test tests/postgres-runtime.test.js",
     "postgres:validate-import": "node scripts/validate-postgres-import.js",
     "kanji-reference:import": "node scripts/import-kanji-reference.js",
+    "jmdict": "node scripts/import-jmdict-reference.js",
     "kanji-reference:normalize-openjlpt": "node scripts/normalize-openjlpt-kanji.js",
     "kanji-reference:build": "node scripts/build-kanji-reference.js"
   },

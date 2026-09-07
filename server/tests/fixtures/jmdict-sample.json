@@ -1,0 +1,114 @@
+{
+  "version": "fixture-1",
+  "dictDate": "2026-09-07",
+  "dictRevisions": ["fixture"],
+  "words": [
+    {
+      "id": "1000001",
+      "kanji": [{ "text": "学校", "common": true, "tags": [] }],
+      "kana": [{ "text": "がっこう", "common": true, "tags": [], "appliesToKanji": ["*"] }],
+      "sense": [{
+        "partOfSpeech": ["n"], "appliesToKanji": ["*"], "appliesToKana": ["*"],
+        "related": [], "antonym": [], "field": [], "dialect": [], "misc": [], "info": [], "loanwordSource": [],
+        "gloss": [{ "text": "school", "lang": "eng" }]
+      }]
+    },
+    {
+      "id": "1000002",
+      "kanji": [{ "text": "食べる", "common": true, "tags": [] }],
+      "kana": [{ "text": "たべる", "common": true, "tags": [], "appliesToKanji": ["*"] }],
+      "sense": [{
+        "partOfSpeech": ["v1", "vt"], "appliesToKanji": ["*"], "appliesToKana": ["*"],
+        "related": [], "antonym": [], "field": [], "dialect": [], "misc": [], "info": [], "loanwordSource": [],
+        "gloss": [{ "text": "to eat", "lang": "eng" }]
+      }]
+    },
+    {
+      "id": "1000003",
+      "kanji": [
+        { "text": "暑い", "common": true, "tags": [] },
+        { "text": "熱い", "common": false, "tags": [] },
+        { "text": "厚い", "common": false, "tags": [] }
+      ],
+      "kana": [{ "text": "あつい", "common": true, "tags": [], "appliesToKanji": ["*"] }],
+      "sense": [
+        {
+          "partOfSpeech": ["adj-i"], "appliesToKanji": ["暑い"], "appliesToKana": ["*"],
+          "related": [], "antonym": [], "field": [], "dialect": [], "misc": [], "info": [], "loanwordSource": [],
+          "gloss": [{ "text": "hot (weather)", "lang": "eng" }]
+        },
+        {
+          "partOfSpeech": ["adj-i"], "appliesToKanji": ["熱い"], "appliesToKana": ["*"],
+          "related": [], "antonym": [], "field": [], "dialect": [], "misc": [], "info": [], "loanwordSource": [],
+          "gloss": [{ "text": "hot (object)", "lang": "eng" }]
+        },
+        {
+          "partOfSpeech": ["adj-i"], "appliesToKanji": ["厚い"], "appliesToKana": ["*"],
+          "related": [], "antonym": [], "field": [], "dialect": [], "misc": [], "info": [], "loanwordSource": [],
+          "gloss": [{ "text": "thick", "lang": "eng" }]
+        }
+      ]
+    },
+    {
+      "id": "1000004",
+      "kanji": [{ "text": "開く", "common": true, "tags": [] }],
+      "kana": [
+        { "text": "ひらく", "common": true, "tags": [], "appliesToKanji": ["*"] },
+        { "text": "あく", "common": true, "tags": [], "appliesToKanji": ["*"] }
+      ],
+      "sense": [
+        {
+          "partOfSpeech": ["v5k", "vt"], "appliesToKanji": ["*"], "appliesToKana": ["ひらく"],
+          "related": [], "antonym": [], "field": [], "dialect": [], "misc": [], "info": [], "loanwordSource": [],
+          "gloss": [{ "text": "to open (transitive)", "lang": "eng" }]
+        },
+        {
+          "partOfSpeech": ["v5k", "vi"], "appliesToKanji": ["*"], "appliesToKana": ["あく"],
+          "related": [], "antonym": [], "field": [], "dialect": [], "misc": [], "info": [], "loanwordSource": [],
+          "gloss": [{ "text": "to open (intransitive)", "lang": "eng" }]
+        }
+      ]
+    },
+    {
+      "id": "1000005",
+      "kanji": [],
+      "kana": [{ "text": "とても", "common": true, "tags": [], "appliesToKanji": ["*"] }],
+      "sense": [{
+        "partOfSpeech": ["adv"], "appliesToKanji": ["*"], "appliesToKana": ["*"],
+        "related": [], "antonym": [], "field": [], "dialect": [], "misc": [], "info": [], "loanwordSource": [],
+        "gloss": [{ "text": "very", "lang": "eng" }]
+      }]
+    },
+    {
+      "id": "1000006",
+      "kanji": [{ "text": "行く", "common": true, "tags": [] }],
+      "kana": [{ "text": "いく", "common": true, "tags": [], "appliesToKanji": ["*"] }],
+      "sense": [
+        {
+          "partOfSpeech": ["v5k-s", "vi"], "appliesToKanji": ["*"], "appliesToKana": ["*"],
+          "related": [], "antonym": [], "field": [], "dialect": [], "misc": [], "info": [], "loanwordSource": [],
+          "gloss": [{ "text": "to go", "lang": "eng" }]
+        },
+        {
+          "partOfSpeech": ["v5k-s", "vi"], "appliesToKanji": ["行く"], "appliesToKana": ["*"],
+          "related": [], "antonym": [], "field": [], "dialect": [], "misc": [], "info": [], "loanwordSource": [],
+          "gloss": [{ "text": "to proceed", "lang": "eng" }]
+        }
+      ]
+    },
+    {
+      "_note": "synthetic nokanji case: second reading applies to no keb",
+      "id": "1000007",
+      "kanji": [{ "text": "仮", "common": false, "tags": [] }],
+      "kana": [
+        { "text": "かり", "common": false, "tags": [], "appliesToKanji": ["*"] },
+        { "text": "け", "common": false, "tags": [], "appliesToKanji": [] }
+      ],
+      "sense": [{
+        "partOfSpeech": ["n"], "appliesToKanji": ["*"], "appliesToKana": ["*"],
+        "related": [], "antonym": [], "field": [], "dialect": [], "misc": [], "info": [], "loanwordSource": [],
+        "gloss": [{ "text": "temporary", "lang": "eng" }]
+      }]
+    }
+  ]
+}

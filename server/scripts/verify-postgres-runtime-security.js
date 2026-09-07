@@ -9,7 +9,14 @@ const applicationTables = `
   ORDER BY c.relname`;
 
 // Tables where jlt_runtime has only SELECT (no writes permitted at runtime).
-const readOnlyRuntimeTables = new Set(['kanji_reference']);
+const readOnlyRuntimeTables = new Set([
+  'kanji_reference',
+  'jmdict_sources',
+  'jmdict_active_snapshot',
+  'jmdict_entries',
+  'jmdict_forms',
+  'jmdict_senses'
+]);
 
 // Tables where jlt_runtime has only SELECT + INSERT (append-only; no UPDATE/DELETE).
 // These use per-command policies instead of a single jlt_runtime_crud/ALL policy.
@@ -27,7 +34,7 @@ const splitPolicyTables = {
 // Returns the list of { name, command } policy descriptors expected for a table.
 function expectedPolicies(tableName) {
   if (readOnlyRuntimeTables.has(tableName)) {
-    return [{ name: 'kanji_reference_runtime_select', command: 'SELECT' }];
+    return [{ name: `${tableName}_runtime_select`, command: 'SELECT' }];
   }
   if (splitPolicyTables[tableName]) return splitPolicyTables[tableName];
   if (appendOnlyRuntimeTables.has(tableName)) {
@@ -87,7 +94,7 @@ async function main() {
     const runtimeSequenceExtra = runtimeSequencePrivileges.rows.filter(({ privilege_type }) => !['USAGE', 'SELECT'].includes(privilege_type));
     const failures = [
       !role || !role.rolcanlogin || role.rolsuper || role.rolcreaterole || role.rolcreatedb || role.rolreplication || role.rolbypassrls || role.rolinherit ? 'jlt_runtime attributes are not least-privilege' : null,
-      tables.length !== 29 ? `expected 29 application tables, found ${tables.length}` : null,
+      tables.length !== 34 ? `expected 34 application tables, found ${tables.length}` : null,
       tables.some(({ rls_enabled, rls_forced }) => !rls_enabled || !rls_forced) ? 'RLS is not enabled and forced on every application table' : null,
       actualMatchCount !== expectedPolicySet.length ? 'missing explicit least-privilege jlt_runtime policies' : null,
       unexpectedPolicies.length ? 'unexpected or broad RLS policies exist' : null,
