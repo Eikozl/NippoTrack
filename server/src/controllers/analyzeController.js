@@ -18,6 +18,8 @@ const {
   parseJapanese
 } = require('../services/japaneseParser');
 const { tryConsumeLexical } = require('../services/lexicalRateLimit');
+const { resolveContext } = require('../services/contextService');
+const { lexicalRequiredBlock, unavailableBlock } = require('../services/contextResponse');
 
 // Log only slow parses, and never with user content: version, sizes,
 // durations, outcome category.
@@ -53,27 +55,27 @@ function stripTokenEngine(token) {
 // a summary. Kanji analysis always runs first and independently; ANY lexical
 // failure degrades to status 'unavailable' with HTTP 200 so Kanji results
 // survive. No user text ever appears in warnings, reasons, or logs here.
-async function buildLexicalBlock(text, { userId, ip } = {}) {
+async function buildLexicalBlock(text, { userId, ip, wantContext } = {}) {
   try {
     // Resolved inside the guarded block so that no lexical failure — even a
     // future throwing metadata path — can escape into the outer 503 handler.
     const engine = engineMetadata();
     if (text.length > MAX_LEXICAL_TEXT_LENGTH) {
-      return emptyLexicalPayload(
+      return attachContext(emptyLexicalPayload(
         engine,
         'lexical-text-too-long',
         [`Word-level analysis supports up to ${MAX_LEXICAL_TEXT_LENGTH} characters. Kanji results below cover the full text.`],
         false
-      );
+      ), wantContext);
     }
     const budget = tryConsumeLexical({ userId, ip });
     if (!budget.allowed) {
-      return emptyLexicalPayload(
+      return attachContext(emptyLexicalPayload(
         engine,
         'lexical-rate-limited',
         ['Word-level analysis is temporarily limited. Kanji results below are complete; try again in a few minutes.'],
         true
-      );
+      ), wantContext);
     }
     const { rawTokens, durationMs } = await parseJapanese(text);
     const adapted = adaptTokens(rawTokens, text, engine);
@@ -101,7 +103,7 @@ async function buildLexicalBlock(text, { userId, ip } = {}) {
         durationMs
       }));
     }
-    return {
+    return attachContext({
       status: 'ok',
       engine,
       tokens: adapted.map(stripTokenEngine),
@@ -114,9 +116,9 @@ async function buildLexicalBlock(text, { userId, ip } = {}) {
         : ['Vocabulary collection matching is unavailable. Candidates are shown without ownership state.'],
       limit: MAX_LEXICAL_TEXT_LENGTH,
       durationMs
-    };
+    }, wantContext, candidates, adapted);
   } catch (_) {
-    return {
+    return attachContext({
       status: 'unavailable',
       reason: 'parser-unavailable',
       engine: engineMetadata(),
@@ -128,12 +130,41 @@ async function buildLexicalBlock(text, { userId, ip } = {}) {
       warnings: ['Word-level analysis is unavailable. Kanji results below are complete.'],
       limit: MAX_LEXICAL_TEXT_LENGTH,
       retryable: true
-    };
+    }, wantContext);
+  }
+}
+
+// Context rides the lexical block: on success it resolves against the real
+// candidates + tokens; on any lexical degradation it degrades alongside
+// (lexical-unavailable) so the two blocks never contradict each other.
+async function attachContext(payload, wantContext, candidates, tokens) {
+  if (!wantContext) return payload;
+  if (payload.status === 'ok' && Array.isArray(candidates)) {
+    payload.context = await buildContextBlock(candidates, tokens || []);
+  } else {
+    payload.context = unavailableBlock('lexical-unavailable', payload.retryable === true);
+  }
+  return payload;
+}
+
+// CA-B2 — additive Context-Aware block. Runs inside the lexical budget (no
+// second limiter, no request amplification): at most 3 batched read-only
+// reference queries under one pinned snapshot. Never throws: any failure
+// degrades to an explicit unavailable block so Kanji + lexical survive.
+async function buildContextBlock(candidates, tokens) {
+  try {
+    return await resolveContext({ pool, candidates, tokens });
+  } catch (_) {
+    return unavailableBlock('context-failed', true);
   }
 }
 
 function lexicalRequested(req) {
   return !!(req.body && req.body.lexical && req.body.lexical.enabled === true);
+}
+
+function contextRequested(req) {
+  return !!(req.body && req.body.context && req.body.context.enabled === true);
 }
 
 // Phase 8 — Smart Text Analyzer. POST /api/analyze/text accepts arbitrary
@@ -159,7 +190,11 @@ async function analyzeText(req, res) {
       // empty analysis — no DB work, and no `IN ()` query is ever built.
       const payload = emptyAnalysis(totalCharacters);
       if (lexicalRequested(req)) {
-        payload.lexical = await buildLexicalBlock(text, { userId: req.user && req.user.id, ip: req.ip });
+        payload.lexical = await buildLexicalBlock(text, { userId: req.user && req.user.id, ip: req.ip, wantContext: contextRequested(req) });
+      } else if (contextRequested(req)) {
+        // Context requires lexical: HTTP 200 survives with an explicit
+        // lexical-required state instead of a fatal error.
+        payload.context = lexicalRequiredBlock();
       }
       return res.json(payload);
     }
@@ -178,7 +213,9 @@ async function analyzeText(req, res) {
     const [[userKanjiRows], [referenceRows]] = await Promise.all([userKanjiPromise, referencePromise]);
     const payload = buildTextKanjiAnalysis(scanned, userKanjiRows, referenceRows, totalCharacters);
     if (lexicalRequested(req)) {
-      payload.lexical = await buildLexicalBlock(text, { userId: req.user && req.user.id, ip: req.ip });
+      payload.lexical = await buildLexicalBlock(text, { userId: req.user && req.user.id, ip: req.ip, wantContext: contextRequested(req) });
+    } else if (contextRequested(req)) {
+      payload.context = lexicalRequiredBlock();
     }
     return res.json(payload);
   } catch (error) {

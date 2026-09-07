@@ -596,6 +596,8 @@ module.exports = {
   normalizeJmdictWord,
   snapshotIdentity,
   findSnapshotByIdentity,
+  POS_FAMILIES,
+  classifyPosCode,
   activeSourceId,
   allocateSnapshot,
   setSnapshotStatus,
