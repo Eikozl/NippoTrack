@@ -39,6 +39,13 @@ import {
   contextItemModel,
   payloadTruncationNotice
 } from '../contextAnalyzer.js';
+import {
+  analyzerPrefillFromContext,
+  composeSenseMeaningMirror,
+  evaluateExampleOffer,
+  fetchAutofillEntry,
+  glossCountNote
+} from '../vocabularyAutofill.js';
 
 function statePill(formatted) {
   const state = getDiscoveryState(formatted);
@@ -371,15 +378,24 @@ export async function renderAnalyzer(container) {
     };
 
     const openVocabularyAddDialog = (candidate, view) => {
-      // Context-derived suggestions for this exact candidate identity only.
-      // MULTIPLE / NO_MATCH / UNSUPPORTED / UNAVAILABLE yield no context
-      // reading or meaning (addSuggestion degrades to an empty suggestion).
+      // VAF-B Analyzer path: ZERO autofill endpoint calls on the normal path.
+      // Seed reading/meaning from the cached context item only (fetchEnabled
+      // = false). Meaning is the bounded same-sense composition — never
+      // primaryGloss-only. The ONLY network call allowed here is an explicit
+      // entry expansion via fetchAutofillEntry under the cached item pin.
       const rawContextItem = findContextItem(view.key);
+      // addSuggestion-compatible identity check (kept for stale semantics).
       const suggestion = rawContextItem ? addSuggestion(rawContextItem) : null;
       const hasContextSuggestion = !!(suggestion && suggestion.sourceKey === view.key);
-      const identityWord = candidate.lemma || candidate.canonical;
-      const suggestedReading = (hasContextSuggestion && suggestion.reading) || candidate.lemmaReading || '';
-      const suggestedMeaning = (hasContextSuggestion && suggestion.meaning) || '';
+      const prefill = analyzerPrefillFromContext(candidate, hasContextSuggestion ? rawContextItem : null)
+        || { word: candidate.lemma || candidate.canonical, reading: candidate.lemmaReading || '', readingProvenance: null, meaning: '', meaningChoices: [], moreMeanings: false, requiresChoice: false, entryRows: [], pin: null, glossMeta: null };
+      const identityWord = prefill.word;
+      // Analyzer reading fallback preserves the pre-VAF behavior: cached
+      // UNIQUE suggestion first, then the parser lemma reading. The VAF
+      // prefill already encodes this; the fallback below only covers a null
+      // prefill (no candidate/context) and never touches the network.
+      const suggestedReading = prefill.reading || '';
+      const suggestedMeaning = prefill.meaning || '';
       const wordField = field({ name: 'word', label: 'Word (dictionary form)', value: identityWord, required: true, maxLength: 100 });
       const readingField = field({
         name: 'reading',
@@ -390,37 +406,129 @@ export async function renderAnalyzer(container) {
         description: 'Dictionary-form reading only. Leave blank if unsure — never copy the “as read here” form.'
       });
       const meaningField = field({ name: 'meaning', label: 'Meaning', value: suggestedMeaning, required: true, maxLength: 255, placeholder: 'Your definition' });
+      // Example-sentence gate (Analyzer only): prefill ONLY when the trimmed
+      // source is short, single-statement, and contains the observed surface.
+      const observedSurface = (Array.isArray(candidate.observed) && candidate.observed[0]?.surface)
+        || identityWord;
+      const exampleOffer = evaluateExampleOffer({ sourceText: input.value, observedSurface });
+      const examplePrefilled = exampleOffer.action === 'prefill';
+      const exampleField = field({
+        name: 'example_sentence',
+        label: 'Example sentence (optional)',
+        type: 'textarea',
+        value: examplePrefilled ? exampleOffer.value : '',
+        maxLength: 2000,
+        placeholder: 'A natural sentence using this word'
+      });
       const dialogContent = [
         element('p', { className: 'text-xs leading-5 text-muted sm:col-span-2', text: 'Confirm this word before saving. Adding stores it as New vocabulary — it does not schedule reviews or claim knowledge.' }),
         wordField,
         readingField,
-        meaningField
+        meaningField,
+        exampleField
       ];
-      // Stale-suggestion safety: context suggestions belong to the original
-      // candidate identity. If the word is edited away from that identity,
-      // untouched context-derived values are cleared (never reapplied) and
-      // sense picks are demoted; anything the USER typed is always kept.
+      // Stale-suggestion identity tracking (declared before the example offer
+      // row so every control participates; semantics extend the pre-VAF
+      // behavior without weakening it).
       const dirtyFields = new Set();
       const inputFor = (content, name) => content
         .map((item) => (item.matches?.(`[name="${name}"]`) ? item : item.querySelector?.(`[name="${name}"]`)))
         .find(Boolean) || null;
-      // UNIQUE + AMBIGUOUS: explicit sense picks. Each choice is a USER
-      // action that fills the meaning field — never an automatic selection.
       let senseChoiceButtons = [];
-      if (hasContextSuggestion && suggestion.requiresChoice && suggestion.meaningChoices.length) {
+      let entryChoiceButtons = [];
+      let exampleOfferButton = null;
+      // Reading/meaning provenance note (verbatim labels, compact, inline).
+      if (prefill.readingProvenance || suggestedMeaning) {
+        const bits = [];
+        if (prefill.readingProvenance) bits.push(`Reading: ${prefill.readingProvenance}`);
+        if (suggestedMeaning) {
+          const note = glossCountNote(prefill.glossMeta || {});
+          bits.push(note ? `Meaning: JMdict · ${note}` : 'Meaning: JMdict');
+          if (prefill.moreMeanings && !(prefill.glossMeta && (prefill.glossMeta.remainingCount || 0) > 0)) bits.push('More meanings exist.');
+        }
+        if (bits.length) {
+          dialogContent.push(element('p', {
+            className: 'break-words text-xs leading-5 text-muted sm:col-span-2',
+            text: `${bits.join(' · ')} — editable.`
+          }));
+        }
+      }
+      if (prefill.moreMeanings && suggestedMeaning && prefill.glossMeta && (prefill.glossMeta.remainingCount || 0) > 0) {
+        dialogContent.push(element('p', {
+          className: 'break-words text-xs leading-5 text-muted sm:col-span-2',
+          text: `+${prefill.glossMeta.remainingCount} more — the closest match is prefilled.`
+        }));
+      }
+      // Example offer row: explicit "Use analyzed text" action unless the
+      // gate prefilled; disabled with an explanation past the server max.
+      if (!examplePrefilled) {
+        if (exampleOffer.action === 'offer') {
+          const useButton = element('button', {
+            className: 'button-secondary min-h-9 justify-self-start px-3 py-1.5 text-xs sm:col-span-2',
+            text: 'Use analyzed text',
+            attrs: { type: 'button', 'aria-label': 'Use the analyzed text as the example sentence' }
+          });
+          useButton.addEventListener('click', () => {
+            const exampleInput = inputFor(dialogContent, 'example_sentence');
+            if (exampleInput) {
+              exampleInput.value = exampleOffer.value;
+              dirtyFields.add('example_sentence');
+              exampleInput.focus();
+            }
+          });
+          dialogContent.push(useButton);
+          exampleOfferButton = useButton;
+        } else if (exampleOffer.action === 'disabled') {
+          const note = element('p', {
+            className: 'break-words text-xs leading-5 text-muted sm:col-span-2',
+            text: exampleOffer.reason || 'The analyzed text is too long to save as an example.',
+            attrs: { role: 'status' }
+          });
+          dialogContent.push(note);
+          const disabledButton = element('button', {
+            className: 'button-secondary min-h-9 justify-self-start px-3 py-1.5 text-xs sm:col-span-2',
+            text: 'Use analyzed text',
+            attrs: { type: 'button', disabled: '', 'aria-disabled': 'true', title: exampleOffer.reason || 'Too long' }
+          });
+          dialogContent.push(disabledButton);
+          exampleOfferButton = disabledButton;
+        }
+      } else {
+        dialogContent.push(element('p', {
+          className: 'break-words text-xs leading-5 text-muted sm:col-span-2',
+          text: 'Example: Context — editable.'
+        }));
+      }
+      // Stale-suggestion safety: context suggestions belong to the original
+      // candidate identity (declared above). Sense/entry picks below are
+      // explicit USER actions; untouched context-derived values clear (never
+      // reapplied) when the word leaves the identity.
+      // UNIQUE + AMBIGUOUS: explicit sense picks with FULL composed previews
+      // (same-sense " · " join, ≤255). Each choice is a USER action that
+      // fills the meaning field — never an automatic selection.
+      if (prefill.requiresChoice && prefill.meaningChoices.length) {
         const choicesBox = element('div', { className: 'grid gap-2 sm:col-span-2', attrs: { role: 'group', 'aria-label': 'Possible meanings from the dictionary' } }, [
           element('p', { className: 'text-xs font-semibold text-ink', text: 'Possible meanings — choose one:' })
         ]);
-        senseChoiceButtons = suggestion.meaningChoices.map((choice) => {
+        let manualNote = null;
+        senseChoiceButtons = prefill.meaningChoices.map((choice) => {
+          const posSuffix = choice.pos?.length ? ` (${choice.pos.join(', ')})` : '';
           const useButton = element('button', {
             className: 'button-secondary min-h-9 justify-start px-3 py-1.5 text-left text-xs',
-            text: `Use “${choice.primaryGloss || choice.label}”`,
-            attrs: { type: 'button', 'aria-label': `Use meaning "${choice.primaryGloss || choice.label}" for ${view.canonical}` }
+            text: `Use “${choice.label}”${posSuffix}`,
+            attrs: { type: 'button', 'aria-label': `Use meaning "${choice.label}" for ${view.canonical}` }
           });
           useButton.addEventListener('click', () => {
             const meaningInput = inputFor(dialogContent, 'meaning');
             if (meaningInput) {
-              meaningInput.value = choice.primaryGloss || choice.label;
+              // Explicit user pick from the backend-supplied full gloss array.
+              // Zero-fit: leave blank + manual note (never the over-long label).
+              const composed = composeSenseMeaningMirror(choice.glosses);
+              meaningInput.value = composed.value || '';
+              if (!composed.value && !manualNote) {
+                manualNote = element('p', { className: 'text-xs leading-5 text-muted', text: 'This dictionary meaning is too long to fill in — please enter it manually.' });
+                choicesBox.append(manualNote);
+              }
               dirtyFields.add('meaning');
               meaningInput.focus();
             }
@@ -428,25 +536,105 @@ export async function renderAnalyzer(container) {
           choicesBox.append(useButton);
           return useButton;
         });
-        if (suggestion.moreMeanings) {
+        if (prefill.moreMeanings) {
           choicesBox.append(element('p', { className: 'text-xs leading-5 text-muted', text: 'More meanings exist.' }));
         }
         dialogContent.push(choicesBox);
       }
+      // MULTIPLE: entry picker. Overflow fetch ONLY on explicit expansion,
+      // reusing the cached item pin. No identity is ever selected here.
+      if (prefill.entryRows.length) {
+        const entriesBox = element('div', { className: 'grid gap-2 sm:col-span-2', attrs: { role: 'group', 'aria-label': 'Dictionary entries — choose one to expand' } }, [
+          element('p', { className: 'text-xs font-semibold text-ink', text: 'Multiple dictionary entries — choose one to see meanings:' })
+        ]);
+        entryChoiceButtons = prefill.entryRows.map((row) => {
+          const kanaSuffix = row.kanaLine ? ` (${row.kanaLine})` : '';
+          const preview = row.glossPreview ? ` — ${row.glossPreview}` : '';
+          const posSuffix = row.pos?.length ? ` · ${row.pos.join(', ')}` : '';
+          const expandButton = element('button', {
+            className: 'button-secondary min-h-9 justify-start px-3 py-1.5 text-left text-xs',
+            text: `${row.headword}${kanaSuffix}${preview}${posSuffix}`,
+            attrs: { type: 'button', 'aria-label': `Show meanings for dictionary entry ${row.headword}` }
+          });
+          expandButton.addEventListener('click', async () => {
+            if (!prefill.pin?.sourceId || row.entryId == null) {
+              showToast('This entry cannot be expanded. Enter the meaning manually.', 'error');
+              return;
+            }
+            expandButton.disabled = true;
+            try {
+              const data = await fetchAutofillEntry({ sourceId: prefill.pin.sourceId, entryId: row.entryId }, {});
+              if (!data || data.status !== 'ok') {
+                showToast('Entry meanings are unavailable. Enter the meaning manually.', 'error');
+                return;
+              }
+              const senses = Array.isArray(data.senses) ? data.senses : [];
+              const wordInput = inputFor(dialogContent, 'word');
+              const intact = wordInput && wordInput.value.trim() === identityWord;
+              if (!intact) return;
+              let overflowManualNote = null;
+              for (const sense of senses.slice(0, 8)) {
+                const glosses = Array.isArray(sense?.glosses) ? sense.glosses : [];
+                const composed = composeSenseMeaningMirror(glosses);
+                const label = composed.value || glosses[0] || 'Untranslated sense';
+                const pick = element('button', {
+                  className: 'button-secondary min-h-9 justify-start px-3 py-1.5 text-left text-xs',
+                  text: `Use “${label}”`,
+                  attrs: { type: 'button', 'aria-label': `Use meaning "${label}" for ${view.canonical}` }
+                });
+                pick.addEventListener('click', () => {
+                  const meaningInput = inputFor(dialogContent, 'meaning');
+                  if (meaningInput) {
+                    // Zero-fit: leave blank + manual note (never the long label).
+                    meaningInput.value = composed.value || '';
+                    if (!composed.value && !overflowManualNote) {
+                      overflowManualNote = element('p', { className: 'text-xs leading-5 text-muted', text: 'This dictionary meaning is too long to fill in — please enter it manually.' });
+                      entriesBox.append(overflowManualNote);
+                    }
+                    dirtyFields.add('meaning');
+                    meaningInput.focus();
+                  }
+                });
+                entriesBox.append(pick);
+                senseChoiceButtons.push(pick);
+              }
+              if (data.truncated || data.nextCursor != null) {
+                entriesBox.append(element('p', { className: 'text-xs leading-5 text-muted', text: 'More meanings exist.' }));
+              }
+            } catch {
+              showToast('Entry meanings are unavailable. Enter the meaning manually.', 'error');
+            } finally {
+              expandButton.disabled = false;
+            }
+          });
+          entriesBox.append(expandButton);
+          return expandButton;
+        });
+        if (prefill.moreMeanings) {
+          entriesBox.append(element('p', { className: 'text-xs leading-5 text-muted', text: 'More dictionary matches exist.' }));
+        }
+        dialogContent.push(entriesBox);
+      }
       // Untouched context-derived values clear (never reapplied) when the
       // word leaves the suggested identity; user-edited fields always win.
+      // Extended to the example prefill without weakening reading/meaning.
       const syncStaleSuggestions = () => {
         const wordInput = inputFor(dialogContent, 'word');
         const readingInput = inputFor(dialogContent, 'reading');
         const meaningInput = inputFor(dialogContent, 'meaning');
+        const exampleInput = inputFor(dialogContent, 'example_sentence');
         const intact = wordInput && wordInput.value.trim() === identityWord;
-        for (const button of senseChoiceButtons) button.disabled = !intact;
+        for (const button of [...senseChoiceButtons, ...entryChoiceButtons]) button.disabled = !intact;
+        if (exampleOfferButton && exampleOffer.action === 'offer') exampleOfferButton.disabled = !intact;
         if (intact || !hasContextSuggestion) return;
-        if (readingInput && !dirtyFields.has('reading') && suggestion.reading && readingInput.value === suggestion.reading) {
+        if (readingInput && !dirtyFields.has('reading') && suggestedReading && readingInput.value === suggestedReading) {
           readingInput.value = '';
         }
-        if (meaningInput && !dirtyFields.has('meaning') && suggestion.meaning && meaningInput.value === suggestion.meaning) {
+        if (meaningInput && !dirtyFields.has('meaning') && suggestedMeaning && meaningInput.value === suggestedMeaning) {
           meaningInput.value = '';
+        }
+        if (exampleInput && !dirtyFields.has('example_sentence') && examplePrefilled && exampleInput.value === exampleOffer.value) {
+          exampleInput.value = '';
         }
       };
       openDialog({
@@ -463,6 +651,10 @@ export async function renderAnalyzer(container) {
             reading: String(data.get('reading') || '')
           });
           if (!payload) throw new Error('Meaning is required.');
+          // Optional example sentence (Analyzer gate only — never required).
+          // Submit path otherwise unchanged: same POST + 409 behavior.
+          const exampleSentence = String(data.get('example_sentence') || '').trim();
+          if (exampleSentence) payload.example_sentence = exampleSentence.slice(0, 2000);
           const created = await apiRequest('/api/vocabulary', { method: 'POST', body: payload });
           localVocabAdded.add(created?.word || payload.word);
           close();
@@ -470,7 +662,7 @@ export async function renderAnalyzer(container) {
           showToast(`Added ${created && created.word ? created.word : candidate.canonical} to Vocabulary.`);
         }
       });
-      for (const name of ['word', 'reading', 'meaning']) {
+      for (const name of ['word', 'reading', 'meaning', 'example_sentence']) {
         const input = inputFor(dialogContent, name);
         if (input) input.addEventListener('input', () => {
           dirtyFields.add(name);

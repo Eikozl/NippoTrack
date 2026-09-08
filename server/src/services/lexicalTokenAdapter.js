@@ -154,7 +154,7 @@ function adaptTokens(rawTokens, text, engine) {
   return rawTokens.map((raw) => adaptToken(raw || {}, engine));
 }
 
-// Minimal foundation classifier for P12-B: ALL TOKENS vs LIKELY VOCABULARY
+// Minimal foundation classifier for P12-B: ALL TOKENS vs POTENTIAL VOCABULARY
 // CANDIDATES. Conservative: particles, auxiliaries, copulas, symbols,
 // affixes, numerals, proper nouns, and unknowns are visible tokens but never
 // candidates. No phrase composition here (deferred spans stay visible with

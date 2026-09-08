@@ -1,4 +1,5 @@
 import { apiRequest, queryString } from '../api';
+import { enableVocabularyAutofill } from '../vocabularyAutofill.js';
 import { buildKanjiImportPayload, getContextKanji, getReadingContext, formatKanjiContextEntry, VOCAB_READING_NOTICE } from '../vocabularyReading.js';
 import { applyPristineKanjiAutofill, changedKanjiReferenceFields, enableRomajiConversion, existingKanjiFromDuplicateError, isSingleHanCodePoint, transliteratedValue } from '../kanjiReference';
 import {
@@ -660,6 +661,9 @@ export function renderEntityPage(container, config) {
       duplicateNotice.classList.remove('hidden');
     };
     enableRomajiConversion(content, config, apiRequest);
+    if (config === ENTITY_CONFIGS.vocabulary && !record[config.idKey]) {
+      enableVocabularyAutofill(content);
+    }
     if (config === ENTITY_CONFIGS.kanji && !record[config.idKey]) {
       content.unshift(duplicateNotice);
       enableKanjiReferenceAutofill(content);

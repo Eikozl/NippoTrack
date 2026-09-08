@@ -158,6 +158,46 @@ function validateStandardRecordPayload(body, {
   validateAllowedValues(body.status, STATUSES, 'status');
 }
 
+// VAF-B additive validators (existing validators untouched).
+function validateAutofillPayload(body) {
+  const source = body && typeof body === 'object' ? body : {};
+  const word = normalizeText(source.word, 100, 'word');
+  if (!word) throw new ValidationError('word is required.');
+  let includeOwnership = true;
+  if (source.includeOwnership !== undefined) {
+    if (typeof source.includeOwnership !== 'boolean') {
+      throw new ValidationError('includeOwnership must be a boolean.');
+    }
+    includeOwnership = source.includeOwnership;
+  }
+  return { word, includeOwnership };
+}
+
+function toPositiveSafeInteger(value, fieldName) {
+  const num = typeof value === 'string' && value.trim() !== '' ? Number(value.trim()) : value;
+  if (!Number.isSafeInteger(num) || num <= 0) {
+    throw new ValidationError(`${fieldName} must be a positive integer.`);
+  }
+  return num;
+}
+
+function validateAutofillEntryPayload(body) {
+  const source = body && typeof body === 'object' ? body : {};
+  const sourceId = toPositiveSafeInteger(source.sourceId, 'sourceId');
+  const entryId = toPositiveSafeInteger(source.entryId, 'entryId');
+  let senseCursor = 0;
+  if (source.senseCursor !== undefined) {
+    const raw = typeof source.senseCursor === 'string' && source.senseCursor.trim() !== ''
+      ? Number(source.senseCursor.trim())
+      : source.senseCursor;
+    if (!Number.isInteger(raw) || raw < 0 || raw > 64) {
+      throw new ValidationError('senseCursor must be an integer between 0 and 64.');
+    }
+    senseCursor = raw;
+  }
+  return { sourceId, entryId, senseCursor };
+}
+
 module.exports = {
   isValidDateString,
   normalizeText,
@@ -165,5 +205,7 @@ module.exports = {
   validateAllowedValues,
   validateStandardRecordPayload,
   validateStudySessionPayload,
-  validateWriteFields
+  validateWriteFields,
+  validateAutofillPayload,
+  validateAutofillEntryPayload
 };
