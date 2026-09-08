@@ -1,11 +1,204 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
-import { counterValue } from '../src/landing/interactions.js';
+import {
+  HERO_ERASE_MS_PER_CHAR,
+  HERO_HEADLINES,
+  HERO_HOLDS_IN_ORDER,
+  HERO_HOLD_ALT_ONE,
+  HERO_HOLD_ALT_TWO,
+  HERO_HOLD_MAIN,
+  HERO_HOLD_MAIN_FIRST,
+  HERO_TYPE_MS_PER_CHAR,
+  counterValue,
+  heroHoldForLine,
+  initHeroTyping,
+} from '../src/landing/interactions.js';
+
+const sectionsSource = readFileSync(new URL('../src/landing/sections.js', import.meta.url), 'utf8');
+const interactionsSource = readFileSync(new URL('../src/landing/interactions.js', import.meta.url), 'utf8');
+const cssSource = readFileSync(new URL('../src/landing/landing.css', import.meta.url), 'utf8');
 
 test('progress counters interpolate deterministically and finish exactly', () => {
   assert.equal(counterValue(312, 0, 1600), 0);
   assert.equal(counterValue(312, 800, 1600), 156);
   assert.equal(counterValue(312, 1600, 1600), 312);
   assert.equal(counterValue(312, 2400, 1600), 312);
+});
+
+test('hero typing uses the approved timing constants', () => {
+  assert.equal(HERO_TYPE_MS_PER_CHAR, 28);
+  assert.equal(HERO_ERASE_MS_PER_CHAR, 9);
+  assert.equal(HERO_HOLD_MAIN_FIRST, 2200);
+  assert.equal(HERO_HOLD_ALT_ONE, 1650);
+  assert.equal(HERO_HOLD_ALT_TWO, 1750);
+  assert.equal(HERO_HOLD_MAIN, 5000);
+  assert.deepEqual(HERO_HOLDS_IN_ORDER, [2200, 1650, 1750, 5000]);
+});
+
+test('hero headlines keep canonical order with main-dominated holds', () => {
+  assert.deepEqual(HERO_HEADLINES, [
+    'Bring your Japanese learning together.',
+    'Learn everywhere. Keep it connected.',
+    'Understand what you encounter. Track what matters.',
+  ]);
+  assert.ok(HERO_HOLD_MAIN > HERO_HOLD_ALT_ONE);
+  assert.ok(HERO_HOLD_MAIN > HERO_HOLD_ALT_TWO);
+  assert.ok(HERO_HOLD_MAIN > HERO_HOLD_MAIN_FIRST);
+  assert.ok(HERO_HOLD_MAIN_FIRST > HERO_HOLD_ALT_ONE);
+  assert.ok(HERO_HOLD_MAIN_FIRST > HERO_HOLD_ALT_TWO);
+  assert.equal(heroHoldForLine(0, true), 2200);
+  assert.equal(heroHoldForLine(0, false), 5000);
+  assert.equal(heroHoldForLine(1), 1650);
+  assert.equal(heroHoldForLine(2), 1750);
+  const first = sectionsSource.indexOf('Bring your Japanese learning together.');
+  const second = sectionsSource.indexOf('Learn everywhere. Keep it connected.');
+  const third = sectionsSource.indexOf('Understand what you encounter. Track what matters.');
+  assert.ok(first > -1 && second > first && third > second);
+});
+
+test('canonical H1 stays single with an aria-hidden visual layer and no live region', () => {
+  const h1Count = (sectionsSource.match(/<h1 id="hero-title">/g) || []).length;
+  assert.equal(h1Count, 1);
+  assert.ok(sectionsSource.includes('aria-labelledby="hero-title"'));
+  assert.ok(sectionsSource.includes('data-hero-title-stack'));
+  assert.ok(sectionsSource.includes('data-hero-typing'));
+  assert.ok(sectionsSource.includes('aria-hidden="true" data-hero-typing'));
+  assert.ok(sectionsSource.includes('data-hero-line'));
+  const heroBlock = sectionsSource.slice(sectionsSource.indexOf('landing-hero'), sectionsSource.indexOf('landing-lede'));
+  assert.ok(!heroBlock.includes('aria-live'));
+  assert.ok(!sectionsSource.includes('aria-live'));
+});
+
+test('hero typing reserves layout with zero CLS and cleans up timers', () => {
+  assert.ok(cssSource.includes('.hero-title-stack'));
+  assert.ok(cssSource.includes('grid-area: 1 / 1'));
+  assert.ok(cssSource.includes('.hero-typing-line'));
+  assert.ok(cssSource.includes('visibility: hidden'));
+  assert.ok(cssSource.includes('.landing-js .hero-title-stack.is-typing > h1'));
+  assert.ok(cssSource.includes('.landing-js .hero-title-stack.is-typing > .hero-typing'));
+  assert.ok(interactionsSource.includes('pagehide'));
+  assert.ok(interactionsSource.includes('clearTimeout'));
+  assert.ok(typeof initHeroTyping === 'function');
+  assert.ok(interactionsSource.includes("matchMedia('(prefers-reduced-motion: reduce)')"));
+});
+
+test('reduced motion keeps a static canonical H1', () => {
+  assert.ok(cssSource.includes('@media (prefers-reduced-motion: reduce)'));
+  assert.ok(cssSource.includes('.hero-title-stack > h1'));
+  assert.ok(cssSource.includes('visibility: visible !important'));
+  assert.ok(interactionsSource.includes('if (reducedMotion) return noop'));
+});
+
+test('how-it-works reuses the one-shot observer with restrained connectors', () => {
+  assert.ok(sectionsSource.includes('id="how-it-works"'));
+  assert.ok(sectionsSource.includes('data-demo="flow"'));
+  assert.ok(sectionsSource.includes('--step-delay:100ms'));
+  assert.ok(sectionsSource.includes('--step-delay:700ms'));
+  assert.ok(sectionsSource.includes('--step-delay:1350ms'));
+  assert.ok(sectionsSource.includes('flow-connector'));
+  assert.ok(cssSource.includes('.flow-connector'));
+  assert.ok(cssSource.includes('scaleX(0)'));
+  assert.ok(cssSource.includes('scaleX(1)'));
+  assert.ok(cssSource.includes('scaleY(0)'));
+  assert.ok(cssSource.includes('scaleY(1)'));
+  assert.ok(interactionsSource.includes("querySelectorAll('[data-demo]"));
+  assert.ok(!interactionsSource.includes("remove('is-playing')"));
+  // Existing 300ms enter wait is kept.
+  assert.ok(interactionsSource.includes('setTimeout'));
+  assert.ok(interactionsSource.includes('300'));
+  // One-shot final state persists (no removal, forwards fill).
+  assert.ok(cssSource.includes('forwards'));
+});
+
+test('how-it-works 料理 flow stages content with internal stagger', () => {
+  // Coherent single-word loop with the approved reading and gloss.
+  assert.ok(sectionsSource.includes('lang="ja">料理'));
+  assert.ok(sectionsSource.includes('lang="ja">りょうり'));
+  assert.ok(sectionsSource.includes('cooking · cuisine'));
+  // Capture keeps the tracked word plus the four capture chips.
+  assert.ok(sectionsSource.includes('flow-tracked'));
+  assert.ok(sectionsSource.includes('--step-delay:500ms'));
+  assert.ok(sectionsSource.includes('Vocabulary</li>'));
+  assert.ok(sectionsSource.includes('Kanji</li>'));
+  assert.ok(sectionsSource.includes('Grammar</li>'));
+  assert.ok(sectionsSource.includes('Study session</li>'));
+  // Understand wraps the in-sentence word for the highlight beat.
+  assert.ok(sectionsSource.includes('flow-sentence-hit'));
+  assert.ok(sectionsSource.includes('--step-delay:1000ms'));
+  assert.ok(sectionsSource.includes('昨日、日本'));
+  assert.ok(sectionsSource.includes('<b lang="ja">昨日、日本料理を作った。</b>'));
+  // Internal stagger: gloss then context, then review answer then rating.
+  assert.ok(sectionsSource.includes('--step-delay:1250ms'));
+  assert.ok(sectionsSource.includes('--step-delay:1500ms'));
+  assert.ok(sectionsSource.includes('flow-reveal'));
+  assert.ok(sectionsSource.includes('--step-delay:1750ms'));
+  assert.ok(sectionsSource.includes('--step-delay:2000ms'));
+  assert.ok(sectionsSource.includes('flow-good'));
+  assert.ok(sectionsSource.includes('--step-delay:2200ms'));
+  // Total sequence stays restrained: final beat ~2.2s + ~0.5s duration.
+  assert.ok(cssSource.includes('flowWordBeat'));
+  assert.ok(cssSource.includes('flowHitBeat'));
+  assert.ok(cssSource.includes('flowGoodBeat'));
+  assert.ok(cssSource.includes('var(--step-delay'));
+  // Allowed motion only: opacity/translate/connector draw/highlight/stagger.
+  assert.ok(!cssSource.includes('flowWordBeat') || !cssSource.match(/flowWordBeat[^}]*bounce/));
+  for (const forbidden of ['@keyframes bounce', 'parallax']) {
+    assert.ok(!cssSource.toLowerCase().includes(forbidden), 'forbidden motion: ' + forbidden);
+  }
+  assert.ok(!sectionsSource.includes('fake-cursor'));
+  assert.ok(!sectionsSource.includes('cursor-dot'));
+});
+
+test('mobile hero constellation is static while headline typing is untouched', () => {
+  const start = cssSource.indexOf('@media (max-width: 640px)');
+  assert.ok(start > -1);
+  const next = cssSource.indexOf('@media', start + 1);
+  const mobile = cssSource.slice(start, next === -1 ? undefined : next);
+  // Every hero card is static at mobile widths — no ambient drift.
+  assert.ok(mobile.includes('.hero-card'));
+  assert.ok(mobile.includes('animation: none'));
+  // Constellation posture (not a plain stack): vocabulary spans the full
+  // row while satellites pair around it, and the narrow breakpoint keeps
+  // the layered 2-col grid instead of collapsing to one column.
+  assert.ok(mobile.includes('grid-column: 1 / -1'));
+  // Asymmetric tuck contract: review near-touch peripheral, streak behind
+  // vocab with its value exposed; vocab highest, satellites layered below.
+  assert.ok(mobile.includes('margin-top: -4px'));
+  assert.ok(mobile.includes('margin-left: -4px'));
+  assert.ok(mobile.includes('margin-left: -6px'));
+  assert.ok(mobile.includes('z-index: 3'));
+  assert.ok(mobile.includes('z-index: 2'));
+  assert.ok(mobile.includes('z-index: 1'));
+  assert.ok(sectionsSource.includes('<strong>12</strong>'));
+  const narrowStart = cssSource.indexOf('@media (max-width: 380px)');
+  const narrowNext = cssSource.indexOf('@media', narrowStart + 1);
+  const narrow = cssSource.slice(narrowStart, narrowNext === -1 ? undefined : narrowNext);
+  assert.ok(narrow.includes('grid-template-columns: 1fr 1fr'));
+  assert.ok(!/grid-template-columns:\s*1fr\s*;/.test(narrow));
+  // Desktop float and the typing chain are untouched by the mobile freeze.
+  for (const keyframes of ['heroDriftOne', 'heroDriftTwo', 'heroDriftThree', 'heroDriftFour', 'heroDriftFive']) {
+    assert.ok(cssSource.includes('@keyframes ' + keyframes));
+  }
+  assert.ok(interactionsSource.includes('initHeroTyping'));
+  assert.ok(sectionsSource.includes('data-hero-typing'));
+  // Reduced motion still resolves the hero to a readable final state.
+  const reduced = cssSource.slice(cssSource.indexOf('@media (prefers-reduced-motion: reduce)'));
+  assert.ok(reduced.includes('.hero-card'));
+  assert.ok(reduced.includes('animation: none'));
+  assert.ok(reduced.includes('.hero-title-stack > h1'));
+  assert.ok(reduced.includes('visibility: visible !important'));
+});
+
+test('how-it-works reduced-motion and no-JS complete to a readable final state', () => {
+  assert.ok(cssSource.includes('@media (prefers-reduced-motion: reduce)'));
+  assert.ok(cssSource.includes('[data-demo="flow"] .flow-tracked'));
+  assert.ok(cssSource.includes('[data-demo="flow"] .flow-sentence-hit'));
+  assert.ok(cssSource.includes('[data-demo="flow"] .flow-good'));
+  // Animation enhancement only: initial-hidden is gated behind .landing-js.
+  assert.ok(cssSource.includes('.landing-js .landing-page .demo-step'));
+  assert.ok(cssSource.includes('.landing-js .flow-connector'));
+  assert.ok(!cssSource.includes('.flow-sentence-hit {opacity: 0'));
+  assert.ok(interactionsSource.includes('prefers-reduced-motion'));
 });

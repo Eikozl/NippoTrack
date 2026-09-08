@@ -1,9 +1,19 @@
-function navbar(wordmarkUrl) {
+function themeToggle() {
+  return `
+    <button class="landing-theme-toggle" type="button" data-landing-theme-toggle aria-label="Switch to dark mode">
+      <svg data-theme-icon="sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" hidden><circle cx="12" cy="12" r="4.2"></circle><path d="M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M5 5l1.7 1.7M17.3 17.3 19 19M19 5l-1.7 1.7M6.7 17.3 5 19"></path></svg>
+      <svg data-theme-icon="moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.4 13.2A8.4 8.4 0 0 1 10.8 3.6a8.4 8.4 0 1 0 9.6 9.6Z"></path></svg>
+    </button>`;
+}
+
+function navbar(wordmarkUrl, themeAssets = {}) {
+  const lightSrc = themeAssets.lightSrc || wordmarkUrl;
+  const darkSrc = themeAssets.darkSrc || wordmarkUrl;
   return `
     <header class="landing-header" data-landing-header>
       <div class="landing-container landing-nav">
         <a class="landing-brand" href="/" aria-label="NippoTrack home">
-          <img src="${wordmarkUrl}" alt="NippoTrack" width="260" height="88">
+          <img src="${wordmarkUrl}" data-landing-wordmark data-light-src="${lightSrc}" data-dark-src="${darkSrc}" alt="NippoTrack" width="260" height="88" fetchpriority="high">
         </a>
         <nav class="landing-desktop-nav" aria-label="Main navigation">
           <a href="#features">Features</a>
@@ -14,9 +24,12 @@ function navbar(wordmarkUrl) {
           <a class="landing-text-link" href="/app?auth=sign-in">Log in</a>
           <a class="landing-button landing-button-primary landing-nav-cta" href="/app?auth=sign-up">Get started</a>
         </div>
-        <button class="landing-menu-button" type="button" aria-label="Open menu" aria-controls="landing-mobile-menu" aria-expanded="false" data-menu-button>
-          <span></span><span></span>
-        </button>
+        <div class="landing-nav-tools">
+          ${themeToggle()}
+          <button class="landing-menu-button" type="button" aria-label="Open menu" aria-controls="landing-mobile-menu" aria-expanded="false" data-menu-button>
+            <span></span><span></span>
+          </button>
+        </div>
       </div>
       <nav class="landing-mobile-menu" id="landing-mobile-menu" aria-label="Mobile navigation" hidden data-mobile-menu>
         <a href="#features">Features</a>
@@ -28,12 +41,23 @@ function navbar(wordmarkUrl) {
     </header>`;
 }
 
+export const HERO_HEADLINE_MAIN = 'Bring your Japanese learning together.';
+export const HERO_HEADLINE_ALT_ONE = 'Learn everywhere. Keep it connected.';
+export const HERO_HEADLINE_ALT_TWO = 'Understand what you encounter. Track what matters.';
+
 function hero() {
   return `
-    <section class="landing-hero" aria-labelledby="hero-title">
+    <section class="landing-hero tone-hero" aria-labelledby="hero-title">
       <div class="landing-container landing-hero-grid">
         <div class="landing-hero-copy">
-          <h1 id="hero-title">Bring your Japanese learning together.</h1>
+          <div class="hero-title-stack" data-hero-title-stack>
+            <h1 id="hero-title">${HERO_HEADLINE_MAIN}</h1>
+            <p class="hero-typing" aria-hidden="true" data-hero-typing>
+              <span class="hero-typing-line is-active" data-hero-line>${HERO_HEADLINE_MAIN}</span>
+              <span class="hero-typing-line" data-hero-line>${HERO_HEADLINE_ALT_ONE}</span>
+              <span class="hero-typing-line" data-hero-line>${HERO_HEADLINE_ALT_TWO}</span>
+            </p>
+          </div>
           <p class="landing-lede">Organize what you learn, understand Japanese in context, and keep a clear view of your progress.</p>
           <div class="landing-hero-actions">
             <a class="landing-button landing-button-primary" href="/app?auth=sign-up">Start free</a>
@@ -44,10 +68,10 @@ function hero() {
         <div class="hero-ecosystem" aria-hidden="true">
           <article class="hero-card hero-vocabulary" data-float="one">
             <span class="demo-label">Vocabulary</span>
-            <p class="hero-japanese" lang="ja">学校</p>
-            <p class="hero-reading" lang="ja">がっこう</p>
-            <p class="hero-meaning">school</p>
-            <div class="hero-context"><span>Context</span><b lang="ja">学校に行った。</b></div>
+            <p class="hero-japanese" lang="ja">旅行</p>
+            <p class="hero-reading" lang="ja">りょこう</p>
+            <p class="hero-meaning">travel</p>
+            <div class="hero-context"><span>Context</span><b lang="ja">来年、日本へ旅行します。</b></div>
           </article>
           <article class="hero-card hero-kanji" data-float="two">
             <span class="demo-label">Kanji</span>
@@ -64,7 +88,7 @@ function hero() {
           </article>
           <article class="hero-card hero-review" data-float="five">
             <span class="demo-label">Ready to review</span>
-            <p lang="ja">学校 <span>がっこう</span></p>
+            <p lang="ja">約束 <span lang="ja">やくそく</span></p>
             <small>Your collection, in motion</small>
           </article>
         </div>
@@ -74,7 +98,7 @@ function hero() {
 
 function studySources() {
   return `
-    <section class="landing-section editorial-section" aria-labelledby="sources-title">
+    <section class="landing-section editorial-section tone-ivory" aria-labelledby="sources-title">
       <div class="landing-container editorial-content">
         <h2 id="sources-title">Your Japanese study is already everywhere.</h2>
         <p class="source-words" data-reveal-group><span>Textbooks.</span><span>Anime.</span><span>Manga.</span><span>YouTube.</span><span>Classes.</span><span>Flashcards.</span><span>Conversations.</span></p>
@@ -86,15 +110,47 @@ function studySources() {
 
 function coreFlow() {
   return `
-    <section class="landing-section flow-section" id="how-it-works" aria-labelledby="flow-title">
+    <section class="landing-section flow-section tone-muted" id="how-it-works" aria-labelledby="flow-title" data-demo="flow">
       <div class="landing-container">
-        <h2 class="visually-hidden" id="flow-title">How NippoTrack works</h2>
+        <div class="flow-heading">
+          <h2 id="flow-title">A simple loop for the way you already learn.</h2>
+          <p class="flow-sub">Capture what you encounter, understand it in context, then review what you chose to keep.</p>
+        </div>
         <div class="core-flow">
-          <article><span class="flow-number">01</span><h3>Capture</h3><p>Vocabulary<br>Kanji<br>Grammar<br>Sessions</p></article>
-          <span class="flow-arrow" aria-hidden="true">→</span>
-          <article><span class="flow-number">02</span><h3>Understand</h3><p>Context<br>Readings<br>Meanings<br>Real Japanese</p></article>
-          <span class="flow-arrow" aria-hidden="true">→</span>
-          <article><span class="flow-number">03</span><h3>Review</h3><p>What you've actually collected and studied</p></article>
+          <article class="flow-stage demo-step" style="--step-delay:100ms">
+            <span class="flow-number">01</span>
+            <h3>Capture</h3>
+            <div class="flow-card">
+              <strong class="flow-word flow-tracked" style="--step-delay:500ms" lang="ja">料理</strong>
+              <ul class="flow-chips" aria-hidden="true">
+                <li>Vocabulary</li>
+                <li>Kanji</li>
+                <li>Grammar</li>
+                <li>Study session</li>
+              </ul>
+            </div>
+          </article>
+          <span class="flow-connector" aria-hidden="true" style="--step-delay:450ms"></span>
+          <article class="flow-stage demo-step" style="--step-delay:700ms">
+            <span class="flow-number">02</span>
+            <h3>Understand</h3>
+            <div class="flow-card">
+              <p class="flow-sentence" lang="ja">昨日、日本<span class="flow-sentence-hit" style="--step-delay:1000ms" lang="ja">料理</span>を作った。</p>
+              <p class="flow-gloss demo-step" style="--step-delay:1250ms"><strong lang="ja">料理</strong><span lang="ja">りょうり</span><span>cooking · cuisine</span></p>
+              <p class="flow-context demo-step" style="--step-delay:1500ms"><span>Context</span><b lang="ja">昨日、日本料理を作った。</b></p>
+            </div>
+          </article>
+          <span class="flow-connector" aria-hidden="true" style="--step-delay:1050ms"></span>
+          <article class="flow-stage demo-step" style="--step-delay:1350ms">
+            <span class="flow-number">03</span>
+            <h3>Review</h3>
+            <div class="flow-card">
+              <strong class="flow-word" lang="ja">料理</strong>
+              <p class="flow-reveal"><span>Reveal</span></p>
+              <p class="flow-gloss demo-step" style="--step-delay:1750ms"><strong lang="ja">料理</strong><span lang="ja">りょうり</span><span>cooking · cuisine</span></p>
+              <p class="flow-rating demo-step" style="--step-delay:2000ms" aria-hidden="true"><span>Again</span><span>Hard</span><span class="rating-good flow-good" style="--step-delay:2200ms">Good</span></p>
+            </div>
+          </article>
         </div>
       </div>
     </section>`;
@@ -102,15 +158,15 @@ function coreFlow() {
 
 function analyzerShowcase() {
   return `
-    <section class="landing-section showcase-section showcase-demo-first" id="features" aria-labelledby="analyzer-title" data-demo="analyzer">
+    <section class="landing-section showcase-section showcase-demo-first tone-canvas tone-analyzer" id="features" aria-labelledby="analyzer-title" data-demo="analyzer">
       <div class="landing-container showcase-grid">
         <div class="showcase-copy"><span class="landing-eyebrow">Analyzer</span><h2 id="analyzer-title">Understand the Japanese you actually encounter.</h2><p>Analyze real Japanese text, inspect vocabulary in context, and decide what is worth keeping.</p></div>
         <div class="showcase-panel analyzer-demo" aria-hidden="true">
           <div class="demo-window-bar"><span></span><span></span><span></span><b>Text Analyzer</b></div>
-          <p class="analyzer-sentence" lang="ja">学校に行った。</p>
+          <p class="analyzer-sentence" lang="ja">雨が降っている。</p>
           <p class="demo-status demo-step" style="--step-delay:500ms">Analyzing…</p>
-          <div class="candidate-row demo-step" style="--step-delay:1200ms"><span class="candidate-active" lang="ja">学校</span><span lang="ja">行った</span></div>
-          <div class="analyzer-result demo-step" style="--step-delay:2500ms"><div><strong lang="ja">学校</strong><span lang="ja">がっこう</span><span>school</span></div><div><small>Context</small><b lang="ja">学校に行った。</b></div></div>
+          <div class="candidate-row demo-step" style="--step-delay:1200ms"><span class="candidate-active" lang="ja">雨</span><span lang="ja">降っている</span></div>
+          <div class="analyzer-result demo-step" style="--step-delay:2500ms"><div><strong lang="ja">雨</strong><span lang="ja">あめ</span><span>rain</span></div><div><small>Context</small><b lang="ja">雨が降っている。</b></div></div>
           <span class="demo-action demo-step" style="--step-delay:3200ms">Add to Vocabulary</span>
         </div>
       </div>
@@ -119,16 +175,16 @@ function analyzerShowcase() {
 
 function vocabularyShowcase() {
   return `
-    <section class="landing-section showcase-section" aria-labelledby="vocabulary-title" data-demo="vocabulary">
+    <section class="landing-section showcase-section tone-ivory" aria-labelledby="vocabulary-title" data-demo="vocabulary">
       <div class="landing-container showcase-grid">
         <div class="showcase-copy"><span class="landing-eyebrow">Vocabulary Auto-Fill</span><h2 id="vocabulary-title">Less typing. More intentional tracking.</h2><p>NippoTrack can suggest readings and dictionary meanings while leaving the final decision to you.</p></div>
         <div class="showcase-panel vocabulary-demo" aria-hidden="true">
           <div class="demo-window-bar"><span></span><span></span><span></span><b>New vocabulary</b></div>
-          <label class="demo-field"><span>Word</span><strong class="typing-word" lang="ja">学校</strong></label>
+          <label class="demo-field"><span>Word</span><strong class="typing-word" lang="ja">図書館</strong></label>
           <p class="lookup-status demo-step" style="--step-delay:950ms">Looking up dictionary…</p>
           <div class="demo-fields">
-            <label class="demo-field demo-step" style="--step-delay:1750ms"><span>Reading</span><strong lang="ja">がっこう</strong></label>
-            <label class="demo-field demo-step" style="--step-delay:2200ms"><span>Meaning</span><strong>school</strong></label>
+            <label class="demo-field demo-step" style="--step-delay:1750ms"><span>Reading</span><strong lang="ja">としょかん</strong></label>
+            <label class="demo-field demo-step" style="--step-delay:2200ms"><span>Meaning</span><strong>library</strong></label>
           </div>
           <div class="demo-provenance demo-step" style="--step-delay:2700ms"><span>JMdict</span><small>Dictionary suggestion · you decide what to keep</small></div>
           <p class="demo-ready demo-step" style="--step-delay:3100ms"><span aria-hidden="true">✓</span> Ready to add</p>
@@ -139,7 +195,7 @@ function vocabularyShowcase() {
 
 function kanjiShowcase() {
   return `
-    <section class="landing-section showcase-section showcase-demo-first" aria-labelledby="kanji-title" data-demo="kanji">
+    <section class="landing-section showcase-section showcase-demo-first tone-canvas" aria-labelledby="kanji-title" data-demo="kanji">
       <div class="landing-container showcase-grid">
         <div class="showcase-copy"><span class="landing-eyebrow">Kanji</span><h2 id="kanji-title">Keep kanji connected to what you're learning.</h2><p>See meanings, readings and study information together without separating kanji from the rest of your Japanese journey.</p></div>
         <div class="showcase-panel kanji-demo" aria-hidden="true">
@@ -156,14 +212,14 @@ function kanjiShowcase() {
 
 function reviewShowcase() {
   return `
-    <section class="landing-section showcase-section" aria-labelledby="review-title" data-demo="review">
+    <section class="landing-section showcase-section tone-muted" aria-labelledby="review-title" data-demo="review">
       <div class="landing-container showcase-grid">
         <div class="showcase-copy"><span class="landing-eyebrow">Review</span><h2 id="review-title">Review what you've actually collected.</h2><p>Your review flow grows from your own vocabulary and study activity—not from a generic course.</p></div>
         <div class="showcase-panel review-demo" aria-hidden="true">
           <span class="demo-label">Your vocabulary · 18 due</span>
-          <p class="review-word" lang="ja">学校</p>
+          <p class="review-word" lang="ja">約束</p>
           <span class="review-reveal">Reveal answer</span>
-          <div class="review-answer demo-step" style="--step-delay:900ms"><strong lang="ja">がっこう</strong><span>school</span></div>
+          <div class="review-answer demo-step" style="--step-delay:900ms"><strong lang="ja">やくそく</strong><span>promise</span></div>
           <div class="review-rating demo-step" style="--step-delay:1500ms"><span>Again</span><span>Hard</span><span class="rating-good">Good</span></div>
         </div>
       </div>
@@ -172,7 +228,7 @@ function reviewShowcase() {
 
 function progressShowcase() {
   return `
-    <section class="landing-section progress-section" aria-labelledby="progress-title" data-demo="progress">
+    <section class="landing-section progress-section tone-mist" aria-labelledby="progress-title" data-demo="progress">
       <div class="landing-container">
         <div class="showcase-copy progress-copy"><span class="landing-eyebrow">Progress</span><h2 id="progress-title">See your learning take shape.</h2><p>Progress isn't just a number. NippoTrack helps you see what you've collected, reviewed and actually spent time studying.</p></div>
         <div class="showcase-panel progress-demo">
@@ -193,7 +249,7 @@ function progressShowcase() {
 
 function onboardingShowcase() {
   return `
-    <section class="landing-section showcase-section" aria-labelledby="onboarding-title" data-demo="onboarding">
+    <section class="landing-section showcase-section tone-ivory" aria-labelledby="onboarding-title" data-demo="onboarding">
       <div class="landing-container showcase-grid">
         <div class="showcase-copy"><span class="landing-eyebrow">Quick placement</span><h2 id="onboarding-title">Start from where you are.</h2><p>A short, optional placement can help NippoTrack tailor your starting experience.</p></div>
         <div class="showcase-panel onboarding-demo" aria-hidden="true">
@@ -207,7 +263,7 @@ function onboardingShowcase() {
 
 function firstUseDashboard() {
   return `
-    <section class="landing-section showcase-section showcase-demo-first" aria-labelledby="first-use-title" data-demo="first-use">
+    <section class="landing-section showcase-section showcase-demo-first tone-canvas" aria-labelledby="first-use-title" data-demo="first-use">
       <div class="landing-container showcase-grid">
         <div class="showcase-copy"><span class="landing-eyebrow">Your first steps</span><h2 id="first-use-title">Know what to do next.</h2><p>NippoTrack guides your first steps, then gradually gets out of the way as your own study data takes over.</p></div>
         <div class="showcase-panel first-use-demo" aria-hidden="true">
@@ -220,10 +276,10 @@ function firstUseDashboard() {
 
 function existingTools() {
   return `
-    <section class="landing-section tools-section" aria-labelledby="tools-title">
+    <section class="landing-section tools-section tone-canvas" aria-labelledby="tools-title">
       <div class="landing-container">
-        <div class="tools-heading"><h2 id="tools-title">Keep the tools you already love.</h2><p>NippoTrack is the layer that helps you organize what comes out of them.</p></div>
-        <ul class="tools-list" role="list"><li>Genki</li><li>Anki</li><li>Bunpro</li><li>YouTube</li><li>Anime</li><li>Manga</li><li>Classes</li><li>Your own notes</li></ul>
+        <div class="tools-heading"><h2 id="tools-title">Keep the tools you already love.</h2><p>NippoTrack is the layer that helps you organize what comes out of them</p><br></div>
+        <ul class="tools-list" role="list"><li>Genki</li><li>Anki</li><li>Bunpro</li><li>Duolingo</li><li>Anime</li><li>Manga</li><li>Classes</li><li>Your own notes</li></ul>
       </div>
     </section>`;
 }
@@ -242,11 +298,13 @@ function finalCta() {
     </section>`;
 }
 
-function footer(wordmarkUrl) {
+function footer(wordmarkUrl, themeAssets = {}) {
+  const lightSrc = themeAssets.lightSrc || wordmarkUrl;
+  const darkSrc = themeAssets.darkSrc || wordmarkUrl;
   return `
-    <footer class="landing-footer" id="faq">
+    <footer class="landing-footer tone-canvas" id="faq">
       <div class="landing-container footer-grid">
-        <div class="footer-brand"><img src="${wordmarkUrl}" alt="NippoTrack" width="260" height="88"></div>
+        <div class="footer-brand"><img src="${wordmarkUrl}" data-landing-wordmark data-light-src="${lightSrc}" data-dark-src="${darkSrc}" alt="NippoTrack" width="260" height="88" loading="lazy"></div>
         <div><h2>Product</h2><a href="#features">Features</a><a href="#how-it-works">How it works</a></div>
         <div><h2>Resources</h2><span>About the data</span><span>Third-party notices</span></div>
         <div><h2>Legal</h2><span>Privacy</span><span>Terms</span></div>
@@ -255,11 +313,15 @@ function footer(wordmarkUrl) {
     </footer>`;
 }
 
-export function createLandingMarkup(wordmarkUrl) {
+export function createLandingMarkup(wordmarkUrl, themeAssets = {}) {
+  const lightSrc = themeAssets.lightSrc || wordmarkUrl;
+  const darkSrc = themeAssets.darkSrc || wordmarkUrl;
+  const resolved = { lightSrc, darkSrc };
+  const initialSrc = wordmarkUrl || lightSrc;
   return `
     <a class="landing-skip-link" href="#landing-main">Skip to main content</a>
     <div class="landing-page">
-      ${navbar(wordmarkUrl)}
+      ${navbar(initialSrc, resolved)}
       <main id="landing-main" tabindex="-1">
         ${hero()}
         ${studySources()}
@@ -275,6 +337,6 @@ export function createLandingMarkup(wordmarkUrl) {
         ${emotionalMoment()}
         ${finalCta()}
       </main>
-      ${footer(wordmarkUrl)}
+      ${footer(initialSrc, resolved)}
     </div>`;
 }
