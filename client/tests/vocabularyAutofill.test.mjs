@@ -16,11 +16,11 @@ function loadVaf() {
   code = code.replace(/export\s+(?=const\s|let\s|var\s|function\s|async\s+function|class\s)/g, '');
   code += `\nreturn {
     VAF_DEBOUNCE_MS, VAF_MEANING_MAX_LENGTH, VAF_EXAMPLE_PREFILL_MAX_LENGTH,
-    VAF_EXAMPLE_SERVER_MAX_LENGTH, VAF_PROVENANCE, provenanceLabel,
+    VAF_EXAMPLE_SERVER_MAX_LENGTH, VAF_PROVENANCE, VAF_STALE_MESSAGE, provenanceLabel,
     composeSenseMeaningMirror, glossCountNote, createAutofillState,
     markUserEdited, markSystemPrefilled, markSystemSuggested,
     shouldClearSystemField, planWordChange, shouldDiscardResponse,
-    isStaleAutofillResult, ownershipBannerModel, normalizeReadingHint,
+    isStaleAutofillResult, autofillMatchStatuses, ownershipBannerModel, normalizeReadingHint,
     normalizeMeaningHint, sensePickRows, entryPickRows, countTerminalMarks,
     evaluateExampleOffer, analyzerPrefillFromContext, lookupVocabularyAutofill,
     fetchAutofillEntry
@@ -189,6 +189,49 @@ test('stale-snapshot detection keeps data and requires explicit refresh', () => 
   assert.equal(vaf.isStaleAutofillResult(null), false);
 });
 
+// ---------------------------------------------------------------- nested statuses (fix 1)
+test('autofillMatchStatuses reads nested backend statuses, never bare strings', () => {
+  assert.deepEqual(
+    vaf.autofillMatchStatuses({
+      dictionaryMatch: { status: 'UNIQUE' },
+      interpretation: { status: 'COMPATIBLE' }
+    }),
+    { dictionaryMatch: 'UNIQUE', interpretation: 'COMPATIBLE' }
+  );
+  assert.deepEqual(
+    vaf.autofillMatchStatuses({
+      dictionaryMatch: { status: 'NO_MATCH' },
+      interpretation: { status: 'NOT_APPLICABLE' }
+    }),
+    { dictionaryMatch: 'NO_MATCH', interpretation: 'NOT_APPLICABLE' }
+  );
+  assert.deepEqual(
+    vaf.autofillMatchStatuses({
+      dictionaryMatch: { status: 'UNAVAILABLE', reason: 'reference-query-failed' },
+      interpretation: { status: 'UNAVAILABLE' }
+    }),
+    { dictionaryMatch: 'UNAVAILABLE', interpretation: 'UNAVAILABLE' }
+  );
+});
+
+test('autofillMatchStatuses degrades missing shapes to manual without crashing', () => {
+  assert.deepEqual(vaf.autofillMatchStatuses(null), { dictionaryMatch: null, interpretation: null });
+  assert.deepEqual(vaf.autofillMatchStatuses({}), { dictionaryMatch: null, interpretation: null });
+  assert.deepEqual(
+    vaf.autofillMatchStatuses({ dictionaryMatch: null, interpretation: null }),
+    { dictionaryMatch: null, interpretation: null }
+  );
+  assert.deepEqual(
+    vaf.autofillMatchStatuses({ dictionaryMatch: { status: 42 }, interpretation: {} }),
+    { dictionaryMatch: null, interpretation: null }
+  );
+  // Legacy bare strings are NOT a backend shape: they degrade to manual.
+  assert.deepEqual(
+    vaf.autofillMatchStatuses({ dictionaryMatch: 'NO_MATCH', interpretation: 'UNAVAILABLE' }),
+    { dictionaryMatch: null, interpretation: null }
+  );
+});
+
 // ---------------------------------------------------------------- ownership
 test('ownership existing banner is advisory, never blocking', () => {
   const model = vaf.ownershipBannerModel({ state: 'existing', matches: [{ word: '学校' }] });
@@ -221,6 +264,31 @@ test('prefill reading hint normalizes with JMdict provenance', () => {
 test('choose reading hint carries choices', () => {
   const hint = vaf.normalizeReadingHint({ action: 'choose', value: '', choices: ['いく', 'ゆく'], provenance: 'JMdict' });
   assert.deepEqual(hint.choices, ['いく', 'ゆく']);
+});
+
+test('overflow reading choices consume {reading, provenance} objects exactly', () => {
+  const hint = vaf.normalizeReadingHint({
+    action: 'choose',
+    value: '',
+    choices: [
+      { reading: 'はし', provenance: 'dictionary' },
+      { reading: 'ハシ', provenance: 'dictionary' },
+      'いく',
+      null,
+      { reading: '', provenance: 'dictionary' }
+    ],
+    provenance: 'dictionary'
+  });
+  assert.equal(hint.action, 'choose');
+  assert.deepEqual(hint.choices, ['はし', 'ハシ', 'いく']);
+  assert.equal(hint.provenance, 'JMdict');
+});
+
+test('overflow reading prefill carries the backend value verbatim', () => {
+  const hint = vaf.normalizeReadingHint({ action: 'prefill', value: 'はし', choices: [], provenance: 'dictionary' });
+  assert.equal(hint.action, 'prefill');
+  assert.equal(hint.value, 'はし');
+  assert.equal(hint.provenance, 'JMdict');
 });
 
 test('prefill meaning hint carries counts for the gloss note', () => {
@@ -257,6 +325,19 @@ test('entry rows tolerate sparse shapes without crashing', () => {
 test('manual fallback: blank hints degrade without certainty', () => {
   assert.deepEqual(vaf.normalizeReadingHint(null).action, 'blank');
   assert.deepEqual(vaf.normalizeMeaningHint({ action: 'bogus' }).action, 'blank');
+});
+
+test('canonical MULTIPLE hint passes entryChoices through untouched', () => {
+  const entryChoices = [
+    { entryId: '3000001', kanji: ['橋'], kana: ['はし'], glossPreview: 'bridge', pos: ['n'] },
+    { entryId: '3000002', kanji: ['箸'], kana: ['はし'], glossPreview: 'chopsticks', pos: ['n'] }
+  ];
+  const hint = vaf.normalizeMeaningHint({
+    action: 'choose-entry-then-sense', value: '', glossCount: 0, remainingCount: 0,
+    entryId: null, senseId: null, provenance: null, senseChoices: null, entryChoices
+  });
+  assert.equal(hint.action, 'choose-entry-then-sense');
+  assert.deepEqual(hint.entryChoices, entryChoices);
 });
 
 // ---------------------------------------------------------------- fetch wrappers

@@ -14,8 +14,12 @@
 //      pin|null, item|null, fieldHints:{reading, meaning}, ownership|null,
 //      hint|null}
 //   POST /api/vocabulary/autofill/entry {sourceId,entryId,senseCursor?}
-//     -> 200 {status:'ok',pin,entry,senses,nextCursor,truncated}
-//      | 200 {status:'unavailable',reason:'snapshot-unavailable',...}
+//     -> 200 {status:'ok',pin,entry,senses,nextCursor,truncated,reading?}
+//      | 200 {status:'unavailable',reason,snapshot|transient,retryable,...}
+//   Entry failures branch on reason: 'snapshot-unavailable' needs a NEW word
+//   lookup (Refresh); retryable transient reasons repeat the same expansion
+//   (Retry). Overflow reading (when present) is consumed exactly — prefill,
+//   explicit choices, or blank — and never overwrites a user-edited reading.
 
 import { apiRequest } from './api.js';
 import { element } from './ui.js';
@@ -150,6 +154,23 @@ export function isStaleAutofillResult(result) {
   return false;
 }
 
+// Backend match/interpretation statuses are NESTED objects
+// (dictionaryMatch.status, interpretation.status) — never bare strings.
+// Missing or malformed shapes degrade to null (manual entry) and never crash.
+export function autofillMatchStatuses(result) {
+  if (!result || typeof result !== 'object') return { dictionaryMatch: null, interpretation: null };
+  const dm = result.dictionaryMatch;
+  const interp = result.interpretation;
+  return {
+    dictionaryMatch: dm && typeof dm === 'object' && typeof dm.status === 'string' ? dm.status : null,
+    interpretation: interp && typeof interp === 'object' && typeof interp.status === 'string' ? interp.status : null
+  };
+}
+
+// Stale-snapshot notice: the pinned dictionary data changed, so only a NEW
+// word lookup helps (never a same-pin retry). User-entered values are kept.
+export const VAF_STALE_MESSAGE = 'Dictionary data changed since this lookup. Your entries are kept — refresh the lookup to continue.';
+
 // Ownership is advisory only — never blocking.
 export function ownershipBannerModel(ownership) {
   if (!ownership || typeof ownership !== 'object') return { kind: null, text: null };
@@ -183,7 +204,16 @@ export function normalizeReadingHint(hint) {
   if (!hint || typeof hint !== 'object') return { action: 'blank', value: '', choices: [], provenance: null };
   const action = hint.action === 'prefill' || hint.action === 'choose' ? hint.action : 'blank';
   const value = typeof hint.value === 'string' ? hint.value : '';
-  const choices = Array.isArray(hint.choices) ? hint.choices.filter((c) => typeof c === 'string' && c) : [];
+  // Choices are consumed exactly as the backend supplies them: plain strings
+  // (lookup hints) or {reading, provenance} objects (entry overflow). Only
+  // the backend-provided reading text is used — never reconstructed from
+  // entry forms, kana lists, or kanji data client-side.
+  const rawChoices = Array.isArray(hint.choices) ? hint.choices : [];
+  const choices = [];
+  for (const choice of rawChoices) {
+    if (typeof choice === 'string' && choice) choices.push(choice);
+    else if (choice && typeof choice === 'object' && typeof choice.reading === 'string' && choice.reading) choices.push(choice.reading);
+  }
   return { action, value, choices, provenance: provenanceLabel(hint.provenance) || (action === 'blank' ? null : VAF_PROVENANCE.JMDICT) };
 }
 
@@ -621,7 +651,7 @@ export function enableVocabularyAutofill(content, { request = apiRequest, deboun
         group.appendChild(button);
       }
       if ((Number(hint.remainingCount) || 0) > 0) {
-        group.appendChild(helperNote(`+${hint.remainingCount} more — choose the closest match.`));
+        group.appendChild(helperNote(`+${hint.remainingCount} more dictionary meanings. Choose the meaning that matches what you intend.`));
       }
       meaningHelper.replaceChildren(group);
       show(meaningHelper);
@@ -675,7 +705,7 @@ export function enableVocabularyAutofill(content, { request = apiRequest, deboun
       const data = await fetchAutofillEntry({ sourceId, entryId }, { request });
       if (expandSeq !== seq || destroyed) return;
       if (!data || data.status === 'unavailable') {
-        renderStaleRefresh('Dictionary data changed. Your entries are kept — refresh the lookup to continue.');
+        renderExpandFailure(data, () => expandEntry(sourceId, entryId));
         return;
       }
       const senses = Array.isArray(data.senses) ? data.senses : [];
@@ -686,6 +716,13 @@ export function enableVocabularyAutofill(content, { request = apiRequest, deboun
         return;
       }
       if (data.pin) state.pin = data.pin;
+      // Overflow reading: consumed exactly as supplied (prefill value,
+      // explicit choices, or blank) — never alternatives[0], never per-kanji
+      // inference. A user-edited reading is skipped entirely; meaning choices
+      // below still update.
+      if (data.reading && state.fieldStates.reading !== 'user-edited') {
+        renderReadingHint(normalizeReadingHint(data.reading));
+      }
       const group = build('div', {
         className: 'grid gap-2',
         attrs: { role: 'group', 'aria-label': 'Entry meanings — choose one' }
@@ -743,7 +780,7 @@ export function enableVocabularyAutofill(content, { request = apiRequest, deboun
 
   function renderStaleRefresh(message) {
     state.stale = true;
-    const box = build('div', { className: 'grid gap-2' }, [helperNote(message)]);
+    const box = build('div', { className: 'grid gap-2' }, [helperNote(message || VAF_STALE_MESSAGE)]);
     const refresh = build('button', {
       className: 'button-secondary min-h-9 justify-self-start px-3 py-1.5 text-xs',
       text: 'Refresh dictionary lookup',
@@ -756,11 +793,48 @@ export function enableVocabularyAutofill(content, { request = apiRequest, deboun
     show(meaningHelper);
   }
 
+  // Entry-expansion failures branch on the backend reason — never blind:
+  // stale snapshots need a NEW word lookup (Refresh), transient failures may
+  // still succeed on the same pin (Retry repeats the same expansion),
+  // anything else degrades to manual. User-entered values are never touched.
+  function renderExpandFailure(data, retryExpand) {
+    const reason = data && typeof data === 'object' ? data.reason : null;
+    const retryable = !data || (data && typeof data === 'object' && data.retryable === true);
+    if (reason === 'snapshot-unavailable') {
+      renderStaleRefresh(VAF_STALE_MESSAGE);
+      return;
+    }
+    if (retryable) {
+      renderExpandRetry(retryExpand);
+      return;
+    }
+    meaningHelper.replaceChildren(helperNote('Could not load dictionary entry. Enter the meaning manually.'));
+    show(meaningHelper);
+  }
+
+  function renderExpandRetry(retryExpand) {
+    const box = build('div', { className: 'grid gap-2' }, [
+      helperNote('Could not load dictionary entry. Your entries are kept — try again.')
+    ]);
+    const retry = build('button', {
+      className: 'button-secondary min-h-9 justify-self-start px-3 py-1.5 text-xs',
+      text: 'Retry',
+      attrs: { type: 'button', 'aria-label': 'Retry loading this dictionary entry' }
+    });
+    retry.addEventListener('click', () => retryExpand());
+    box.appendChild(retry);
+    // Replace the loading note (field inputs live outside this helper, so
+    // user-entered values are kept); replacing also prevents stacked Retry
+    // boxes across repeated failures.
+    meaningHelper.replaceChildren(box);
+    show(meaningHelper);
+  }
+
   function applyResult(result, word) {
     if (!result || typeof result !== 'object') return;
     if (isStaleAutofillResult(result)) {
       if (result.pin) state.pin = result.pin;
-      renderStaleRefresh('Dictionary data changed. Your entries are kept — refresh the lookup to continue.');
+      renderStaleRefresh(VAF_STALE_MESSAGE);
       return;
     }
     state.stale = false;
@@ -784,11 +858,14 @@ export function enableVocabularyAutofill(content, { request = apiRequest, deboun
     // replace meaning helpers (user-edited values themselves are preserved).
     void hadMeaningContent;
     renderMeaningHint(meaningHint, result);
-    if (result.dictionaryMatch === 'NO_MATCH' && typeof result.hint === 'string' && result.hint.trim()
+    // Backend statuses are nested objects — normalized via the safe helper
+    // (missing shapes degrade to manual, never crash).
+    const { dictionaryMatch: matchStatus, interpretation: interpStatus } = autofillMatchStatuses(result);
+    if (matchStatus === 'NO_MATCH' && typeof result.hint === 'string' && result.hint.trim()
       && meaningHint.action === 'blank') {
       renderHintText(result.hint);
     }
-    if (result.dictionaryMatch === 'UNAVAILABLE' || result.interpretation === 'UNAVAILABLE') {
+    if (matchStatus === 'UNAVAILABLE' || interpStatus === 'UNAVAILABLE') {
       // Show the unavailable note only when there is nothing more specific.
       if (meaningHint.action === 'blank' && !(typeof result.hint === 'string' && result.hint.trim())) {
         renderUnavailable(result);

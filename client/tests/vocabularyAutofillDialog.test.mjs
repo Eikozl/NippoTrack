@@ -28,8 +28,9 @@ function loadVaf({ apiRequestImpl, elementImpl, doc }) {
   let code = src.replace(/import\s*\{[^}]+\}\s*from\s*['"][^'"]+['"];?/g, '');
   code = code.replace(/export\s+(?=const\s|let\s|var\s|function\s|async\s+function|class\s)/g, '');
   code += `\nreturn {
-    VAF_DEBOUNCE_MS, VAF_PROVENANCE, provenanceLabel, composeSenseMeaningMirror,
+    VAF_DEBOUNCE_MS, VAF_PROVENANCE, VAF_STALE_MESSAGE, provenanceLabel, composeSenseMeaningMirror,
     createAutofillState, markUserEdited, planWordChange, isStaleAutofillResult,
+    autofillMatchStatuses, normalizeReadingHint, normalizeMeaningHint,
     ownershipBannerModel, analyzerPrefillFromContext, evaluateExampleOffer,
     lookupVocabularyAutofill, fetchAutofillEntry, enableVocabularyAutofill
   };`;
@@ -183,26 +184,189 @@ function makeDialogContent(doc, element) {
   return { content: [word.label, reading.label, meaning.label, notes.label, status.label], word: word.input, reading: reading.input, meaning: meaning.input };
 }
 
-function autofillOk(overrides = {}) {  return {
-    word: '学校',
-    dictionaryMatch: 'UNIQUE',
-    interpretation: 'COMPATIBLE',
+function testPin() {
+  return { sourceId: 's1', sourceName: 'JMdict', converter: 'test', converterVersion: '1', fileDate: '2026-01-01', sha256Verified: true };
+}
+
+function blankHints() {
+  return {
+    reading: { action: 'blank', value: null, choices: [], provenance: null },
+    meaning: {
+      action: 'blank', value: '', glossesUsed: [], glossCount: 0, remainingCount: 0,
+      entryId: null, senseId: null, provenance: null, senseChoices: null, entryChoices: null
+    }
+  };
+}
+
+// Backend-realistic serialized payloads: dictionaryMatch/interpretation are
+// ALWAYS nested {status,...} objects, never bare strings. Any test feeding a
+// bare string here is asserting against a shape the backend never emits.
+function realisticAutofillResponse(kind, overrides = {}) {
+  const base = {
     reason: null,
     retryable: false,
-    pin: { sourceId: 's1' },
+    pin: testPin(),
     item: null,
-    fieldHints: {
-      reading: { action: 'prefill', value: 'がっこう', choices: [], provenance: 'JMdict' },
-      meaning: {
-        action: 'prefill', value: 'school', glossesUsed: ['school'], glossCount: 1,
-        remainingCount: 2, entryId: '1000001', senseId: 1, provenance: 'JMdict',
-        senseChoices: [], entryChoices: []
-      }
-    },
     ownership: null,
-    hint: null,
+    hint: null
+  };
+  if (kind === 'unique-compatible') {
+    return {
+      ...base,
+      word: '学校',
+      dictionaryMatch: {
+        status: 'UNIQUE', identityStrategy: 'exact', lookupTruncated: false,
+        entries: [{ entryId: '1000001', kanji: ['学校'], kana: ['がっこう'] }],
+        entryCount: 1, selectedEntryId: '1000001',
+        readings: { suggested: 'がっこう', alternatives: ['がっこう'], provenance: 'dictionary' }
+      },
+      interpretation: {
+        status: 'COMPATIBLE', evaluationTruncated: false,
+        selectedSense: { entryId: '1000001', senseId: 1, glosses: ['school'], pos: ['n'] },
+        compatibleSenses: [{ entryId: '1000001', senseId: 1, glosses: ['school'], pos: ['n'] }],
+        remainingCount: 2
+      },
+      fieldHints: {
+        reading: { action: 'prefill', value: 'がっこう', choices: [], provenance: 'dictionary' },
+        meaning: {
+          action: 'prefill', value: 'school', glossesUsed: ['school'], glossCount: 1,
+          remainingCount: 2, entryId: '1000001', senseId: 1, provenance: 'dictionary',
+          senseChoices: null, entryChoices: null
+        }
+      },
+      ...overrides
+    };
+  }
+  if (kind === 'no-match') {
+    return {
+      ...base,
+      word: 'zzz',
+      dictionaryMatch: {
+        status: 'NO_MATCH', identityStrategy: 'exact', lookupTruncated: false,
+        entries: [], entryCount: 0, selectedEntryId: null,
+        readings: { suggested: null, alternatives: [], provenance: null }, reason: 'no-match'
+      },
+      interpretation: {
+        status: 'NOT_APPLICABLE', evaluationTruncated: false, selectedSense: null,
+        compatibleSenses: [], remainingCount: 0, reason: 'nothing-to-interpret'
+      },
+      reason: 'no-match',
+      fieldHints: blankHints(),
+      hint: 'No JMdict entry matches this exact text. You can still add it manually. Tip: type the dictionary form (e.g. 行く instead of 行った).',
+      ...overrides
+    };
+  }
+  if (kind === 'unavailable-retryable') {
+    return {
+      ...base,
+      word: 'みず',
+      dictionaryMatch: {
+        status: 'UNAVAILABLE', identityStrategy: 'exact', lookupTruncated: false,
+        entries: [], entryCount: 0, selectedEntryId: null,
+        readings: { suggested: null, alternatives: [], provenance: null }, reason: 'reference-query-failed'
+      },
+      interpretation: {
+        status: 'NOT_APPLICABLE', evaluationTruncated: false, selectedSense: null,
+        compatibleSenses: [], remainingCount: 0, reason: 'reference-unavailable'
+      },
+      reason: 'reference-query-failed',
+      retryable: true,
+      pin: null,
+      fieldHints: blankHints(),
+      ...overrides
+    };
+  }
+  if (kind === 'unavailable-final') {
+    return {
+      ...base,
+      word: 'みず',
+      dictionaryMatch: {
+        status: 'UNAVAILABLE', identityStrategy: 'exact', lookupTruncated: false,
+        entries: [], entryCount: 0, selectedEntryId: null,
+        readings: { suggested: null, alternatives: [], provenance: null }, reason: 'version-absent'
+      },
+      interpretation: {
+        status: 'NOT_APPLICABLE', evaluationTruncated: false, selectedSense: null,
+        compatibleSenses: [], remainingCount: 0, reason: 'reference-unavailable'
+      },
+      reason: 'version-absent',
+      retryable: false,
+      pin: null,
+      fieldHints: blankHints(),
+      ...overrides
+    };
+  }
+  if (kind === 'multiple-hashi') {
+    return {
+      ...base,
+      word: 'はし',
+      dictionaryMatch: {
+        status: 'MULTIPLE', identityStrategy: 'exact', lookupTruncated: false,
+        entries: [
+          { entryId: '3000001', kanji: ['橋'], kana: ['はし'] },
+          { entryId: '3000002', kanji: ['箸'], kana: ['はし'] }
+        ],
+        entryCount: 2, selectedEntryId: null,
+        readings: { suggested: null, alternatives: [], provenance: null }
+      },
+      interpretation: {
+        status: 'AMBIGUOUS', evaluationTruncated: false, selectedSense: null,
+        compatibleSenses: [
+          { entryId: '3000001', senseId: 1, glosses: ['bridge'], pos: ['n'] },
+          { entryId: '3000002', senseId: 1, glosses: ['chopsticks'], pos: ['n'] }
+        ],
+        remainingCount: 0
+      },
+      reason: 'multiple-entries',
+      fieldHints: {
+        reading: { action: 'blank', value: null, choices: [], provenance: null },
+        meaning: {
+          action: 'choose-entry-then-sense', value: '', glossesUsed: [], glossCount: 0,
+          remainingCount: 0, entryId: null, senseId: null, provenance: null,
+          senseChoices: null,
+          entryChoices: [
+            { entryId: '3000001', kanji: ['橋'], kana: ['はし'], glossPreview: 'bridge', pos: ['n'] },
+            { entryId: '3000002', kanji: ['箸'], kana: ['はし'], glossPreview: 'chopsticks', pos: ['n'] }
+          ]
+        }
+      },
+      ...overrides
+    };
+  }
+  throw new Error(`unknown realistic kind: ${kind}`);
+}
+
+function autofillOk(overrides = {}) {
+  return { ...realisticAutofillResponse('unique-compatible'), ...overrides };
+}
+
+function entryOk(overrides = {}) {
+  return {
+    status: 'ok',
+    pin: testPin(),
+    entry: { entryId: '3000002', kanji: ['箸'], kana: ['はし'] },
+    senses: [{ senseId: 1, glosses: ['chopsticks'], glossCount: 1, pos: ['n'], stagk: [], stagr: [] }],
+    senseCursor: 0,
+    nextCursor: null,
+    truncated: false,
+    totalSenses: 1,
     ...overrides
   };
+}
+
+function findButtons(nodes, needle, { exact = false } = {}) {
+  const out = [];
+  const queue = [...(Array.isArray(nodes) ? nodes : [nodes])];
+  while (queue.length) {
+    const node = queue.shift();
+    if (!node) continue;
+    if (node.tagName === 'BUTTON') {
+      const label = String(node.textContent || '');
+      if (exact ? label === needle : label.includes(needle)) out.push(node);
+    }
+    if (Array.isArray(node.children) && node.children.length) queue.push(...node.children);
+  }
+  return out;
 }
 
 // ------------------------------------------------- static wiring assertions
@@ -268,6 +432,28 @@ test('analyzer keeps dirtyFields/syncStaleSuggestions semantics and extends them
   assert.ok(source.includes("dirtyFields.add('example_sentence')"), 'example edits participate without weakening');
   assert.ok(source.includes('composeSenseMeaningMirror'), 'full same-sense composition, not primaryGloss-only');
   assert.ok(!source.includes('primaryGloss || choice.label'), 'primaryGloss-only fill removed from the Add dialog');
+});
+
+test('analyzer expansion branches overflow failures and guards overflow reading', () => {
+  const source = readSource('src/pages/analyzer.js');
+  assert.ok(source.includes("reason === 'snapshot-unavailable'"), 'stale snapshots branch to a refresh toast');
+  assert.ok(source.includes('Dictionary data changed since this lookup.'), 'stale toast names the lookup change');
+  assert.ok(source.includes('Could not load dictionary entry.'), 'transient toast names the entry failure');
+  assert.ok(source.includes('normalizeReadingHint'), 'overflow reading consumed through the shared normalizer');
+  assert.ok(source.includes("!dirtyFields.has('reading')"), 'user-edited analyzer readings are never overwritten');
+  assert.ok(source.includes('Dictionary readings — choose one'), 'overflow reading choices render explicit buttons');
+  assert.ok(!source.includes('alternatives[0]'), 'never falls back to the first alternative');
+});
+
+test('VAF gloss-note wording matches the language review', () => {
+  assert.ok(
+    readSource('src/vocabularyAutofill.js').includes('+${hint.remainingCount} more dictionary meanings. Choose the meaning that matches what you intend.'),
+    'standalone remaining-count note uses the reviewed wording'
+  );
+  assert.ok(
+    readSource('src/pages/analyzer.js').includes('+${prefill.glossMeta.remainingCount} more dictionary meanings. Additional dictionary glosses exist. Dictionary meaning — editable.'),
+    'analyzer remaining-count note uses the reviewed wording'
+  );
 });
 
 test('responsive posture stays compact with no fixed-width pickers', () => {
@@ -444,13 +630,13 @@ test('stale snapshots keep visible data with an explicit refresh action', async 
 });
 
 test('unavailable shows manual fallback with retry only when retryable', async () => {
-  for (const retryable of [true, false]) {
+  for (const [kind, retryable] of [['unavailable-retryable', true], ['unavailable-final', false]]) {
     const doc = new FakeDocument();
     const element = makeElement(doc);
     const vaf = loadVaf({ apiRequestImpl: async () => autofillOk(), elementImpl: element, doc });
     const { content, word } = makeDialogContent(doc, element);
     const handle = vaf.enableVocabularyAutofill(content, {
-      request: async () => ({ word: 'x', dictionaryMatch: 'UNAVAILABLE', interpretation: 'UNAVAILABLE', reason: 'reference-query-failed', retryable, pin: null, fieldHints: { reading: { action: 'blank' }, meaning: { action: 'blank' } }, ownership: null, hint: null }),
+      request: async () => realisticAutofillResponse(kind),
       debounceMs: 5
     });
     word.value = 'みず';
@@ -458,6 +644,281 @@ test('unavailable shows manual fallback with retry only when retryable', async (
     await waitFor(() => collectAllText(content).includes('manually'));
     const allText = collectAllText(content);
     assert.equal(allText.includes('Retry dictionary lookup'), retryable, `retry only when retryable=${retryable}`);
+    handle.destroy();
+  }
+});
+
+// ------------------------------------------------- VAF-B.1 real-shape coverage
+test('nested NO_MATCH renders the neutral dictionary-form hint (string compares would miss it)', async () => {
+  const doc = new FakeDocument();
+  const element = makeElement(doc);
+  const vaf = loadVaf({ apiRequestImpl: async () => autofillOk(), elementImpl: element, doc });
+  const { content, word, reading, meaning } = makeDialogContent(doc, element);
+  const handle = vaf.enableVocabularyAutofill(content, {
+    request: async () => realisticAutofillResponse('no-match'),
+    debounceMs: 5
+  });
+  word.value = 'zzz';
+  word.dispatch('input');
+  await waitFor(() => collectAllText(content).includes('No JMdict entry matches'));
+  assert.ok(collectAllText(content).includes('dictionary form'), 'hint points at the dictionary form');
+  assert.equal(reading.value, '', 'reading degrades to manual');
+  assert.equal(meaning.value, '', 'meaning degrades to manual');
+  handle.destroy();
+});
+
+test('nested UNAVAILABLE (final) falls back to manual with no Retry', async () => {
+  const doc = new FakeDocument();
+  const element = makeElement(doc);
+  const vaf = loadVaf({ apiRequestImpl: async () => autofillOk(), elementImpl: element, doc });
+  const { content, word } = makeDialogContent(doc, element);
+  const handle = vaf.enableVocabularyAutofill(content, {
+    request: async () => realisticAutofillResponse('unavailable-final'),
+    debounceMs: 5
+  });
+  word.value = 'みず';
+  word.dispatch('input');
+  await waitFor(() => collectAllText(content).includes('Dictionary lookup is unavailable'));
+  assert.equal(findButtons(content, 'Retry').length, 0, 'no Retry when retryable is false');
+  handle.destroy();
+});
+
+test('nested UNAVAILABLE (retryable) falls back to manual with a Retry control', async () => {
+  const doc = new FakeDocument();
+  const element = makeElement(doc);
+  const vaf = loadVaf({ apiRequestImpl: async () => autofillOk(), elementImpl: element, doc });
+  const { content, word } = makeDialogContent(doc, element);
+  let calls = 0;
+  const handle = vaf.enableVocabularyAutofill(content, {
+    request: async () => { calls += 1; return realisticAutofillResponse('unavailable-retryable'); },
+    debounceMs: 5
+  });
+  word.value = 'みず';
+  word.dispatch('input');
+  await waitFor(() => collectAllText(content).includes('Dictionary lookup is unavailable'));
+  const retry = findButtons(content, 'Retry dictionary lookup');
+  assert.equal(retry.length, 1, 'retryable UNAVAILABLE shows Retry');
+  const before = calls;
+  retry[0].click();
+  await waitFor(() => calls > before, { timeout: 3000 });
+  handle.destroy();
+});
+
+test('MULTIPLE はし renders the canonical entry picker with no auto-selection', async () => {
+  const doc = new FakeDocument();
+  const element = makeElement(doc);
+  const vaf = loadVaf({ apiRequestImpl: async () => autofillOk(), elementImpl: element, doc });
+  const { content, word, reading, meaning } = makeDialogContent(doc, element);
+  const handle = vaf.enableVocabularyAutofill(content, {
+    request: async () => realisticAutofillResponse('multiple-hashi'),
+    debounceMs: 5
+  });
+  word.value = 'はし';
+  word.dispatch('input');
+  await waitFor(() => collectAllText(content).includes('Multiple dictionary entries'));
+  const text = collectAllText(content);
+  assert.ok(text.includes('橋'), 'bridge entry choice visible');
+  assert.ok(text.includes('箸'), 'chopsticks entry choice visible');
+  assert.equal(reading.value, '', 'reading stays blank — never alternatives[0]');
+  assert.equal(meaning.value, '', 'meaning stays blank until an explicit pick');
+  handle.destroy();
+});
+
+test('stale entry expansion offers Refresh (new lookup); transient offers Retry (same pin)', async () => {
+  for (const [entryPayload, wantRefresh, wantRetry] of [
+    [{ status: 'unavailable', reason: 'snapshot-unavailable', retryable: false, pin: null }, true, false],
+    [{ status: 'unavailable', reason: 'reference-query-failed', retryable: true, pin: testPin() }, false, true]
+  ]) {
+    const doc = new FakeDocument();
+    const element = makeElement(doc);
+    const vaf = loadVaf({ apiRequestImpl: async () => autofillOk(), elementImpl: element, doc });
+    const { content, word, reading } = makeDialogContent(doc, element);
+    let lookups = 0;
+    let expansions = 0;
+    const handle = vaf.enableVocabularyAutofill(content, {
+      request: async (path) => {
+        await sleep(2);
+        if (String(path).endsWith('/entry')) { expansions += 1; return entryPayload; }
+        lookups += 1;
+        return realisticAutofillResponse('multiple-hashi');
+      },
+      debounceMs: 5
+    });
+    reading.value = 'typed';
+    reading.dispatch('input');
+    word.value = 'はし';
+    word.dispatch('input');
+    await waitFor(() => collectAllText(content).includes('Multiple dictionary entries'));
+    findButtons(content, '箸')[0].click();
+    if (wantRefresh) {
+      await waitFor(() => collectAllText(content).includes('Refresh dictionary lookup'));
+      assert.ok(collectAllText(content).includes('Dictionary data changed since this lookup.'), 'stale notice shown');
+      assert.equal(findButtons(content, 'Retry', { exact: true }).length, 0, 'stale offers Refresh, NOT retry');
+      assert.equal(reading.value, 'typed', 'user-entered data untouched');
+      const before = lookups;
+      findButtons(content, 'Refresh dictionary lookup')[0].click();
+      await waitFor(() => lookups > before, { timeout: 3000 });
+    } else {
+      await waitFor(() => collectAllText(content).includes('Could not load dictionary entry.'));
+      assert.equal(findButtons(content, 'Refresh dictionary lookup').length, 0, 'transient offers Retry, NOT refresh');
+      const retry = findButtons(content, 'Retry', { exact: true });
+      assert.equal(retry.length, 1, 'transient failure shows Retry');
+      assert.equal(reading.value, 'typed', 'user-entered data untouched');
+      const before = expansions;
+      retry[0].click();
+      await waitFor(() => expansions > before, { timeout: 3000 });
+      assert.equal(lookups, 1, 'retry repeats the same expansion, not a new lookup');
+    }
+    handle.destroy();
+  }
+});
+
+test('entry expansion prefills overflow reading with JMdict provenance (はし→箸)', async () => {
+  const doc = new FakeDocument();
+  const element = makeElement(doc);
+  const vaf = loadVaf({ apiRequestImpl: async () => autofillOk(), elementImpl: element, doc });
+  const { content, word, reading } = makeDialogContent(doc, element);
+  const handle = vaf.enableVocabularyAutofill(content, {
+    request: async (path) => {
+      await sleep(2);
+      if (String(path).endsWith('/entry')) {
+        return entryOk({ reading: { action: 'prefill', value: 'はし', choices: [], provenance: 'dictionary' } });
+      }
+      return realisticAutofillResponse('multiple-hashi');
+    },
+    debounceMs: 5
+  });
+  word.value = 'はし';
+  word.dispatch('input');
+  await waitFor(() => collectAllText(content).includes('Multiple dictionary entries'));
+  findButtons(content, '箸')[0].click();
+  await waitFor(() => reading.value === 'はし');
+  assert.ok(collectAllText(content).includes('JMdict'), 'JMdict provenance shown for the overflow reading');
+  assert.ok(collectAllText(content).includes('chopsticks'), 'meaning choices still update');
+  handle.destroy();
+});
+
+test('entry expansion with reading choices renders explicit buttons, never auto-fills', async () => {
+  const doc = new FakeDocument();
+  const element = makeElement(doc);
+  const vaf = loadVaf({ apiRequestImpl: async () => autofillOk(), elementImpl: element, doc });
+  const { content, word, reading } = makeDialogContent(doc, element);
+  const handle = vaf.enableVocabularyAutofill(content, {
+    request: async (path) => {
+      await sleep(2);
+      if (String(path).endsWith('/entry')) {
+        return entryOk({
+          reading: {
+            action: 'choose', value: null, provenance: 'dictionary',
+            choices: [
+              { reading: 'はし', provenance: 'dictionary' },
+              { reading: 'ハシ', provenance: 'dictionary' }
+            ]
+          }
+        });
+      }
+      return realisticAutofillResponse('multiple-hashi');
+    },
+    debounceMs: 5
+  });
+  word.value = 'はし';
+  word.dispatch('input');
+  await waitFor(() => collectAllText(content).includes('Multiple dictionary entries'));
+  findButtons(content, '箸')[0].click();
+  await waitFor(() => collectAllText(content).includes('Dictionary readings — choose one'));
+  assert.equal(reading.value, '', 'no auto-selection — never alternatives[0]');
+  findButtons(content, 'はし', { exact: true })[0].click();
+  assert.equal(reading.value, 'はし', 'explicit reading pick applies');
+  handle.destroy();
+});
+
+test('HASHI-MANUAL: user-edited reading survives entry expansion', async () => {
+  const doc = new FakeDocument();
+  const element = makeElement(doc);
+  const vaf = loadVaf({ apiRequestImpl: async () => autofillOk(), elementImpl: element, doc });
+  const { content, word, reading } = makeDialogContent(doc, element);
+  const handle = vaf.enableVocabularyAutofill(content, {
+    request: async (path) => {
+      await sleep(2);
+      if (String(path).endsWith('/entry')) {
+        return entryOk({ reading: { action: 'prefill', value: 'はし', choices: [], provenance: 'dictionary' } });
+      }
+      return realisticAutofillResponse('multiple-hashi');
+    },
+    debounceMs: 5
+  });
+  word.value = 'はし';
+  word.dispatch('input');
+  await waitFor(() => collectAllText(content).includes('Multiple dictionary entries'));
+  reading.value = 'HASHI-MANUAL';
+  reading.dispatch('input');
+  findButtons(content, '箸')[0].click();
+  await waitFor(() => collectAllText(content).includes('chopsticks'));
+  assert.equal(reading.value, 'HASHI-MANUAL', 'overflow reading never overwrites a user-edited value');
+  handle.destroy();
+});
+
+test('VAF UI strings avoid certainty language (closest/best/likely/recommended/confidence)', () => {
+  for (const path of ['src/vocabularyAutofill.js', 'src/pages/analyzer.js']) {
+    const source = readSource(path);
+    // `.closest(` is a DOM traversal call, not user-facing copy.
+    const copy = source.split('.closest').join('');
+    for (const banned of ['closest', 'best', 'likely', 'recommended', 'confidence']) {
+      assert.ok(!new RegExp(banned, 'i').test(copy), `${path} has no user-facing "${banned}"`);
+    }
+  }
+});
+
+test('backend-realistic payloads drive the client render path (§11 contract)', async () => {
+  // Every payload below carries nested dictionaryMatch.status /
+  // interpretation.status exactly as the backend serializes them.
+  for (const kind of ['unique-compatible', 'no-match', 'unavailable-retryable', 'multiple-hashi']) {
+    const shape = realisticAutofillResponse(kind);
+    assert.equal(typeof shape.dictionaryMatch?.status, 'string', `${kind} carries nested dictionaryMatch.status`);
+    assert.equal(typeof shape.interpretation?.status, 'string', `${kind} carries nested interpretation.status`);
+  }
+  const banned = [/closest/i, /\blikely\b/i, /\bbest\b/i, /recommended/i, /confidence/i];
+  const scenarios = [
+    {
+      kind: 'unique-compatible', word: '学校',
+      waitFor: 'Dictionary reading',
+      assertText: (text) => assert.ok(text.includes('JMdict'), 'UNIQUE+COMPATIBLE shows JMdict provenance')
+    },
+    {
+      kind: 'no-match', word: 'zzz',
+      waitFor: 'No JMdict entry matches',
+      assertText: (text) => assert.ok(text.includes('dictionary form'), 'NO_MATCH shows the dictionary-form hint')
+    },
+    {
+      kind: 'unavailable-retryable', word: 'みず',
+      waitFor: 'Dictionary lookup is unavailable',
+      assertText: (text) => assert.ok(text.includes('Retry dictionary lookup'), 'retryable UNAVAILABLE shows Retry')
+    },
+    {
+      kind: 'multiple-hashi', word: 'はし',
+      waitFor: 'Multiple dictionary entries',
+      assertText: (text) => {
+        assert.ok(text.includes('橋') && text.includes('箸'), 'MULTIPLE shows 橋/箸 entry choices');
+      }
+    }
+  ];
+  for (const scenario of scenarios) {
+    const doc = new FakeDocument();
+    const element = makeElement(doc);
+    const vaf = loadVaf({ apiRequestImpl: async () => autofillOk(), elementImpl: element, doc });
+    const { content, word } = makeDialogContent(doc, element);
+    const handle = vaf.enableVocabularyAutofill(content, {
+      request: async () => realisticAutofillResponse(scenario.kind),
+      debounceMs: 5
+    });
+    word.value = scenario.word;
+    word.dispatch('input');
+    await waitFor(() => collectAllText(content).includes(scenario.waitFor));
+    const text = collectAllText(content);
+    scenario.assertText(text);
+    for (const pattern of banned) {
+      assert.ok(!pattern.test(text), `${scenario.kind} renders no certainty language (${pattern})`);
+    }
     handle.destroy();
   }
 });
@@ -491,7 +952,11 @@ test('explicit sense pick that cannot fit leaves meaning blank with a manual not
   const { content, word, meaning } = makeDialogContent(doc, element);
   const handle = vaf.enableVocabularyAutofill(content, {
     request: async () => autofillOk({
-      interpretation: 'AMBIGUOUS',
+      interpretation: {
+        status: 'AMBIGUOUS', evaluationTruncated: false, selectedSense: null,
+        compatibleSenses: [{ entryId: '1', senseId: 1, glosses: [longGloss], pos: [] }],
+        remainingCount: 0
+      },
       fieldHints: {
         reading: { action: 'blank' },
         meaning: {
@@ -535,7 +1000,7 @@ test('responsive smoke: VAF dialog fits 320/375/768/1280 where a browser exists'
         window.fetch = async (path, options = {}) => {
           let data = {};
           if (String(path).startsWith('/api/vocabulary/autofill')) {
-            data = { word: '学校', dictionaryMatch: 'UNIQUE', interpretation: 'COMPATIBLE', reason: null, retryable: false,
+            data = { word: '学校', dictionaryMatch: { status: 'UNIQUE', readings: { suggested: 'がっこう', alternatives: [], provenance: 'dictionary' } }, interpretation: { status: 'COMPATIBLE', selectedSense: { entryId: '1', senseId: 1, glosses: ['school'], pos: ['n'] }, remainingCount: 1 }, reason: null, retryable: false,
               pin: { sourceId: 's1' }, item: null,
               fieldHints: {
                 reading: { action: 'prefill', value: 'がっこう', choices: [], provenance: 'JMdict' },

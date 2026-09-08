@@ -44,7 +44,8 @@ import {
   composeSenseMeaningMirror,
   evaluateExampleOffer,
   fetchAutofillEntry,
-  glossCountNote
+  glossCountNote,
+  normalizeReadingHint
 } from '../vocabularyAutofill.js';
 
 function statePill(formatted) {
@@ -456,7 +457,7 @@ export async function renderAnalyzer(container) {
       if (prefill.moreMeanings && suggestedMeaning && prefill.glossMeta && (prefill.glossMeta.remainingCount || 0) > 0) {
         dialogContent.push(element('p', {
           className: 'break-words text-xs leading-5 text-muted sm:col-span-2',
-          text: `+${prefill.glossMeta.remainingCount} more — the closest match is prefilled.`
+          text: `+${prefill.glossMeta.remainingCount} more dictionary meanings. Additional dictionary glosses exist. Dictionary meaning — editable.`
         }));
       }
       // Example offer row: explicit "Use analyzed text" action unless the
@@ -565,13 +566,64 @@ export async function renderAnalyzer(container) {
             try {
               const data = await fetchAutofillEntry({ sourceId: prefill.pin.sourceId, entryId: row.entryId }, {});
               if (!data || data.status !== 'ok') {
-                showToast('Entry meanings are unavailable. Enter the meaning manually.', 'error');
+                // Branch on the backend reason (same contract as standalone):
+                // stale snapshots need a fresh analysis, transient failures
+                // can retry this expansion (the button re-enables below).
+                // Manual fields stay usable either way.
+                const reason = data && typeof data === 'object' ? data.reason : null;
+                const retryable = data && typeof data === 'object' && data.retryable === true;
+                if (reason === 'snapshot-unavailable') {
+                  showToast('Dictionary data changed since this lookup. Re-run the analysis to refresh the dictionary data.', 'error');
+                } else if (retryable) {
+                  showToast('Could not load dictionary entry. Try expanding the entry again.', 'error');
+                } else {
+                  showToast('Entry meanings are unavailable. Enter the meaning manually.', 'error');
+                }
                 return;
               }
               const senses = Array.isArray(data.senses) ? data.senses : [];
               const wordInput = inputFor(dialogContent, 'word');
               const intact = wordInput && wordInput.value.trim() === identityWord;
               if (!intact) return;
+              // Overflow reading: backend-authoritative only — never the first
+              // alternative, never per-kanji inference. A user-edited
+              // reading (dirtyFields) is never overwritten.
+              const readingInput = inputFor(dialogContent, 'reading');
+              const overflowReading = normalizeReadingHint(data.reading);
+              if (readingInput && !dirtyFields.has('reading')) {
+                if (overflowReading.action === 'prefill' && overflowReading.value) {
+                  readingInput.value = overflowReading.value;
+                  entriesBox.append(element('p', {
+                    className: 'text-xs leading-5 text-muted',
+                    text: `Dictionary reading: ${overflowReading.value} (JMdict) — editable.`
+                  }));
+                } else if (overflowReading.action === 'choose' && overflowReading.choices.length) {
+                  const readingGroup = element('div', {
+                    className: 'grid gap-2',
+                    attrs: { role: 'group', 'aria-label': 'Dictionary readings — choose one' }
+                  }, [
+                    element('p', { className: 'text-xs font-semibold text-ink', text: 'Dictionary readings — choose one:' })
+                  ]);
+                  for (const choice of overflowReading.choices.slice(0, 6)) {
+                    const useReading = element('button', {
+                      className: 'button-secondary min-h-9 justify-start px-3 py-1.5 text-left text-xs',
+                      text: choice,
+                      attrs: { type: 'button', 'aria-label': `Use reading ${choice}` }
+                    });
+                    useReading.addEventListener('click', () => {
+                      const target = inputFor(dialogContent, 'reading');
+                      if (target) {
+                        target.value = choice;
+                        dirtyFields.add('reading');
+                        target.focus();
+                      }
+                    });
+                    readingGroup.append(useReading);
+                  }
+                  entriesBox.append(readingGroup);
+                }
+                // blank → leave the reading field unchanged.
+              }
               let overflowManualNote = null;
               for (const sense of senses.slice(0, 8)) {
                 const glosses = Array.isArray(sense?.glosses) ? sense.glosses : [];

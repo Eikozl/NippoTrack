@@ -30,7 +30,8 @@ const {
   MATCH,
   INTERP,
   evaluateSenses,
-  finalizeCandidate
+  finalizeCandidate,
+  resolveReadings
 } = require('./contextFilters');
 const {
   buildItem,
@@ -228,7 +229,7 @@ function buildFieldHints(finalized) {
     return {
       reading: blankReading(),
       meaning: {
-        action: 'choose',
+        action: 'choose-entry-then-sense',
         value: '',
         glossesUsed: [],
         glossCount: 0,
@@ -573,6 +574,65 @@ async function resolveAutofill({ pool, word, userId, includeOwnership = true } =
   };
 }
 
+// Entry-drill reading hint: backend is the semantic authority over
+// whole-word readings for the pinned entry, derived via the frozen
+// resolveReadings over the already-fetched Q2 form inventory. Synthetic
+// identity is built from the entry's own keb inventory (ORTHOGRAPHIC); for
+// kana-only entries (no keb) a READING_FALLBACK identity over the entry's
+// reb inventory is used. Exactly-one applicable whole-word reading ->
+// prefill; multiple -> choose with explicit choices; none -> blank. Same
+// shape as fieldHints.reading. Never alternatives[0] as value, never
+// per-kanji inference.
+function buildEntryReading(allForms) {
+  try {
+    const forms = Array.isArray(allForms) ? allForms : [];
+    const kebSurfaces = [...new Set(
+      forms
+        .filter((f) => f && f.kind === 'keb' && typeof f.surface === 'string' && f.surface !== '')
+        .map((f) => f.surface)
+    )];
+    let resolved = null;
+    if (kebSurfaces.length) {
+      const identity = {
+        strategy: 'ORTHOGRAPHIC',
+        kind: 'keb',
+        keys: kebSurfaces.map((value) => ({ value })),
+        lemmaReading: null
+      };
+      resolved = resolveReadings(identity, forms, []);
+    } else {
+      const rebSurfaces = [...new Set(
+        forms
+          .filter((f) => f && f.kind === 'reb' && typeof f.surface === 'string' && f.surface !== '')
+          .map((f) => f.surface)
+      )];
+      if (!rebSurfaces.length) return blankReading();
+      const identity = {
+        strategy: 'READING_FALLBACK',
+        kind: 'reb',
+        keys: rebSurfaces.map((value) => ({ value })),
+        lemmaReading: null
+      };
+      const matchedRows = forms
+        .filter((f) => f && f.kind === 'reb' && typeof f.surface === 'string' && f.surface !== '')
+        .map((f) => ({ kind: 'reb', surface: f.surface }));
+      resolved = resolveReadings(identity, forms, matchedRows);
+    }
+    const alternatives = resolved && Array.isArray(resolved.alternatives)
+      ? resolved.alternatives.slice(0, 5)
+      : [];
+    if (resolved && typeof resolved.suggested === 'string' && resolved.suggested !== '') {
+      return { action: 'prefill', value: resolved.suggested, choices: alternatives, provenance: 'dictionary' };
+    }
+    if (alternatives.length) {
+      return { action: 'choose', value: null, choices: alternatives, provenance: 'dictionary' };
+    }
+  } catch (_) {
+    // fall through to blank
+  }
+  return blankReading();
+}
+
 // POST /api/vocabulary/autofill/entry: drill into one pinned entry.
 // Pinned equality: the supplied sourceId IS the pin (explicit sourceId to
 // Q2, never re-reads the active pointer, never allocate/activate/prune).
@@ -590,10 +650,10 @@ async function resolveAutofillEntry({ pool, sourceId, entryId, senseCursor = 0 }
     );
     sourceRow = rows && rows[0] ? rows[0] : null;
   } catch (_) {
-    // Transient source verification failure degrades like a reference
-    // failure at the controller layer; here treat as snapshot-unavailable
-    // only when deterministic, else rethrow for 503.
-    return { status: 'unavailable', reason: 'snapshot-unavailable', retryable: false, pin: null };
+    // Transient source-verification failure: reference query failed,
+    // retryable. Deterministic stale (absent / not-ready) is handled below
+    // and stays snapshot-unavailable.
+    return { status: 'unavailable', reason: 'reference-query-failed', retryable: true, pin: null };
   }
 
   const status = sourceRow ? sourceRow.status : null;
@@ -619,7 +679,7 @@ async function resolveAutofillEntry({ pool, sourceId, entryId, senseCursor = 0 }
   try {
     ({ sensesByEntry, formsByEntry } = await runQ2(pool, sid, [eid]));
   } catch (_) {
-    return { status: 'unavailable', reason: 'snapshot-unavailable', retryable: false, pin: null };
+    return { status: 'unavailable', reason: 'reference-query-failed', retryable: true, pin: null };
   }
 
   const sensesBucket = sensesByEntry.get(eid);
@@ -657,11 +717,13 @@ async function resolveAutofillEntry({ pool, sourceId, entryId, senseCursor = 0 }
   const start = Math.min(Math.max(cursor, 0), Math.max(full.length, 0));
   const page = full.slice(start, start + ENTRY_SENSE_PAGE_SIZE);
   const nextCursor = start + ENTRY_SENSE_PAGE_SIZE < full.length ? start + ENTRY_SENSE_PAGE_SIZE : null;
+  const reading = buildEntryReading(allForms);
 
   return {
     status: 'ok',
     pin,
     entry,
+    reading,
     senses: page,
     senseCursor: start,
     nextCursor,

@@ -66,6 +66,22 @@ const ENTRIES = {
       { surface: 'たなか', normalized: 'たなか', kind: 'reb', restr: [], is_common: 0, nokanji: 0 }
     ],
     senses: [{ sense_no: 1, pos: ['pn'], gloss_en: ['Tanaka (surname)'], stagk: [], stagr: [] }]
+  },
+  '5000001': {
+    posSummary: ['n'], isCommon: 0,
+    forms: [
+      { surface: '明日', normalized: '明日', kind: 'keb', restr: [], is_common: 0, nokanji: 0 },
+      { surface: 'あした', normalized: 'あした', kind: 'reb', restr: [], is_common: 0, nokanji: 0 },
+      { surface: 'あす', normalized: 'あす', kind: 'reb', restr: [], is_common: 0, nokanji: 0 }
+    ],
+    senses: [{ sense_no: 1, pos: ['n'], gloss_en: ['tomorrow'], stagk: [], stagr: [] }]
+  },
+  '5000002': {
+    posSummary: ['n'], isCommon: 0,
+    forms: [
+      { surface: '峠', normalized: '峠', kind: 'keb', restr: [], is_common: 0, nokanji: 0 }
+    ],
+    senses: [{ sense_no: 1, pos: ['n'], gloss_en: ['mountain pass'], stagk: [], stagr: [] }]
   }
 };
 
@@ -93,7 +109,7 @@ function q1Rows(params) {
   return rows;
 }
 
-function installStub({ vocabularyFixture = {}, throwVocabulary = false, pin = 'ok' } = {}) {
+function installStub({ vocabularyFixture = {}, throwVocabulary = false, pin = 'ok', sourceStatus = 'ready', sourceVerifyFail = false } = {}) {
   const pool = require('../src/config/db');
   const originalExecute = pool.execute;
   const originalGetConnection = pool.getConnection;
@@ -114,6 +130,7 @@ function installStub({ vocabularyFixture = {}, throwVocabulary = false, pin = 'o
     if (/FROM jmdict_sources/i.test(sql)) {
       // Entry verification carries status; pin-meta is sha256 only.
       if (/status/i.test(sql)) {
+        if (sourceVerifyFail) throw new Error('source verification down');
         const wanted = String(params[0]);
         if (wanted !== PIN.source_id) return [[]];
         return [[{
@@ -123,7 +140,7 @@ function installStub({ vocabularyFixture = {}, throwVocabulary = false, pin = 'o
           converter_version: PIN.converter_version,
           file_date: PIN.file_date,
           sha256_verified: 1,
-          status: 'ready'
+          status: sourceStatus
         }]];
       }
       return [[{ sha256_verified: 1 }]];
@@ -264,10 +281,31 @@ test('はし MULTIPLE blanks reading and offers bounded entryChoices, never alte
       assert.equal(body.dictionaryMatch.selectedEntryId, null);
       assert.equal(body.fieldHints.reading.action, 'blank');
       assert.equal(body.fieldHints.reading.value, null);
-      assert.equal(body.fieldHints.meaning.action, 'choose');
+      assert.equal(body.fieldHints.meaning.action, 'choose-entry-then-sense');
       assert.equal(body.fieldHints.meaning.value, '');
       assert.ok(Array.isArray(body.fieldHints.meaning.entryChoices));
       assert.equal(body.fieldHints.meaning.entryChoices.length, 3);
+    });
+  } finally {
+    stub.restore();
+  }
+});
+
+test('はし MULTIPLE emits choose-entry-then-sense with entryChoices and blank reading', async () => {
+  const stub = installStub();
+  try {
+    await withServer(async (base) => {
+      const { status, body } = await postAutofill(base, { word: 'はし' });
+      assert.equal(status, 200);
+      assert.equal(body.fieldHints.meaning.action, 'choose-entry-then-sense');
+      assert.ok(Array.isArray(body.fieldHints.meaning.entryChoices));
+      assert.ok(body.fieldHints.meaning.entryChoices.length > 1);
+      assert.equal(body.fieldHints.reading.action, 'blank');
+      assert.equal(body.fieldHints.reading.value, null);
+      assert.deepEqual(body.fieldHints.reading.choices, []);
+      assert.equal(body.fieldHints.meaning.senseChoices, null);
+      assert.equal(body.fieldHints.meaning.entryId, null);
+      assert.equal(body.fieldHints.meaning.senseId, null);
     });
   } finally {
     stub.restore();
@@ -435,11 +473,73 @@ test('entry drill returns ok with diet entry and full glosses under pin', async 
       assert.deepEqual(body.senses[0].glosses, ['school']);
       assert.equal(body.nextCursor, null);
       assert.equal(body.truncated, false);
+      assert.equal(body.reading.action, 'prefill');
+      assert.equal(body.reading.value, 'がっこう');
+      assert.equal(body.reading.provenance, 'dictionary');
+      assert.ok(Array.isArray(body.reading.choices));
       assert.equal(stub.getConnectionCalls(), 0);
       for (const q of stub.seen) {
         assert.ok(!/\b(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|GRANT|TRUNCATE)\b/i.test(q.sql), 'SELECT-only');
       }
       assert.equal(stub.seen.filter((e) => /jmdict_active_snapshot/i.test(e.sql)).length, 0, 'entry never re-reads the active pointer');
+    });
+  } finally {
+    stub.restore();
+  }
+});
+
+test('entry reading hint single applicable reading prefills whole-word value (はし→箸)', async () => {
+  const stub = installStub();
+  try {
+    await withServer(async (base) => {
+      const { status, body } = await postEntry(base, { sourceId: 7, entryId: 3000002 });
+      assert.equal(status, 200);
+      assert.equal(body.status, 'ok');
+      assert.equal(body.entry.entryId, '3000002');
+      assert.equal(body.reading.action, 'prefill');
+      assert.equal(body.reading.value, 'はし');
+      assert.equal(body.reading.provenance, 'dictionary');
+      assert.ok(Array.isArray(body.reading.choices));
+      assert.ok(body.reading.choices.includes('はし'));
+    });
+  } finally {
+    stub.restore();
+  }
+});
+
+test('entry reading hint multiple readings offers choose with explicit choices', async () => {
+  const stub = installStub();
+  try {
+    await withServer(async (base) => {
+      const { status, body } = await postEntry(base, { sourceId: 7, entryId: 5000001 });
+      assert.equal(status, 200);
+      assert.equal(body.status, 'ok');
+      assert.equal(body.entry.entryId, '5000001');
+      assert.equal(body.reading.action, 'choose');
+      assert.equal(body.reading.value, null);
+      assert.equal(body.reading.provenance, 'dictionary');
+      assert.ok(Array.isArray(body.reading.choices));
+      assert.equal(body.reading.choices.length, 2);
+      assert.ok(body.reading.choices.includes('あした'));
+      assert.ok(body.reading.choices.includes('あす'));
+    });
+  } finally {
+    stub.restore();
+  }
+});
+
+test('entry reading hint with no applicable reading returns blank', async () => {
+  const stub = installStub();
+  try {
+    await withServer(async (base) => {
+      const { status, body } = await postEntry(base, { sourceId: 7, entryId: 5000002 });
+      assert.equal(status, 200);
+      assert.equal(body.status, 'ok');
+      assert.equal(body.entry.entryId, '5000002');
+      assert.equal(body.reading.action, 'blank');
+      assert.equal(body.reading.value, null);
+      assert.deepEqual(body.reading.choices, []);
+      assert.equal(body.reading.provenance, null);
     });
   } finally {
     stub.restore();
@@ -455,6 +555,68 @@ test('entry overflow snapshot-unavailable returns 200 unavailable payload', asyn
       assert.equal(body.status, 'unavailable');
       assert.equal(body.reason, 'snapshot-unavailable');
       assert.equal(body.retryable, false);
+    });
+  } finally {
+    stub.restore();
+  }
+});
+
+test('entry missing source returns snapshot-unavailable without oracle', async () => {
+  const stub = installStub();
+  try {
+    await withServer(async (base) => {
+      const { status, body } = await postEntry(base, { sourceId: 9999, entryId: 1000001 });
+      assert.equal(status, 200);
+      assert.equal(body.status, 'unavailable');
+      assert.equal(body.reason, 'snapshot-unavailable');
+      assert.equal(body.retryable, false);
+      assert.equal(body.pin, null);
+    });
+  } finally {
+    stub.restore();
+  }
+});
+
+test('entry not-ready source returns snapshot-unavailable without oracle', async () => {
+  const stub = installStub({ sourceStatus: 'importing' });
+  try {
+    await withServer(async (base) => {
+      const { status, body } = await postEntry(base, { sourceId: 7, entryId: 1000001 });
+      assert.equal(status, 200);
+      assert.equal(body.status, 'unavailable');
+      assert.equal(body.reason, 'snapshot-unavailable');
+      assert.equal(body.retryable, false);
+      assert.equal(body.pin, null);
+    });
+  } finally {
+    stub.restore();
+  }
+});
+
+test('entry transient source-verification failure returns reference-query-failed retryable', async () => {
+  const stub = installStub({ sourceVerifyFail: true });
+  try {
+    await withServer(async (base) => {
+      const { status, body } = await postEntry(base, { sourceId: 7, entryId: 1000001 });
+      assert.equal(status, 200);
+      assert.equal(body.status, 'unavailable');
+      assert.equal(body.reason, 'reference-query-failed');
+      assert.equal(body.retryable, true);
+    });
+  } finally {
+    stub.restore();
+  }
+});
+
+test('entry transient Q2 failure returns reference-query-failed retryable', async () => {
+  const stub = installStub({ pin: 'q2fail' });
+  try {
+    await withServer(async (base) => {
+      const { status, body } = await postEntry(base, { sourceId: 7, entryId: 1000001 });
+      assert.equal(status, 200);
+      assert.equal(body.status, 'unavailable');
+      assert.equal(body.reason, 'reference-query-failed');
+      assert.equal(body.retryable, true);
     });
   } finally {
     stub.restore();

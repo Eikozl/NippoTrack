@@ -196,7 +196,7 @@ test('hint MULTIPLE blanks reading (never alternatives[0]) and offers entryChoic
   assert.equal(reading.action, 'blank');
   assert.equal(reading.value, null);
   assert.deepEqual(reading.choices, []);
-  assert.equal(meaning.action, 'choose');
+  assert.equal(meaning.action, 'choose-entry-then-sense');
   assert.equal(meaning.value, '');
   assert.ok(Array.isArray(meaning.entryChoices));
   assert.equal(meaning.entryChoices.length, 2);
