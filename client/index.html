@@ -3,14 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#eef1f7" id="theme-color" />
+    <meta name="theme-color" content="#F5F0E8" id="theme-color" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="description" content="A focused personal tracker for Japanese study sessions and learning material." />
-    <title>Japanese Learning Tracker</title>
-    <link rel="icon" href="/src/assets/JLT-Favicon.png" type="image/png">
+    <meta name="description" content="Organize what you learn, understand Japanese in context, and keep a clear view of your progress with NippoTrack." />
+    <title>NippoTrack — Bring your Japanese learning together</title>
+    <link rel="icon" href="/src/assets/favicon.png" type="image/png">
     <script src="/theme-init.js"></script>
   </head>
   <body>
+    <div id="landing-root"></div>
     <a href="#app-content" class="skip-link"><span data-i18n="Skip to main content">Skip to main content</span></a>
     <div id="auth-root"></div>
     <div id="app-shell" class="min-h-screen lg:grid lg:grid-cols-[17rem_1fr]" hidden>
@@ -91,6 +92,6 @@
 
     <div id="toast-region" class="pointer-events-none fixed bottom-5 right-5 z-50 grid w-[min(24rem,calc(100vw-2.5rem))] gap-3" aria-live="polite"></div>
     <div id="modal-root"></div>
-    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/entry.js"></script>
   </body>
 </html>

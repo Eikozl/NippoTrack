@@ -384,7 +384,7 @@ test('Helmet CSP permits only external theme and frontend scripts without unsafe
 
     assert.equal(pageResponse.status, 200);
     assert.match(html, /<script src="\/theme-init\.js"><\/script>/);
-    assert.match(html, /<script type="module" src="\/src\/main\.js"><\/script>/);
+    assert.match(html, /<script type="module" src="\/src\/entry\.js"><\/script>/);
     assert.doesNotMatch(html, /<script>(?![^>]*\bsrc=)(?![^>]*\btype="module")[\s\S]*?<\/script>/);
     assert.match(scriptDirective || '', /'self'/);
     assert.doesNotMatch(scriptDirective || '', /'unsafe-inline'/);

@@ -9,10 +9,12 @@ import { confirmDialog, element, openDialog, showToast } from './ui';
 import { createLevelEstimateControl } from './levelEstimateControl';
 import { authConfigured, localAuthBypass, localAuthBypassEmail, supabase } from './authClient';
 import { getLocale, setLocale, t, translateDocument } from './i18n';
+import { authViewFromSearch } from './landing/routing';
 
 const content = document.getElementById('app-content');
 const authRoot = document.getElementById('auth-root');
 const appShell = document.getElementById('app-shell');
+const initialAuthView = authViewFromSearch(window.location.search);
 const sidebar = document.getElementById('sidebar');
 const backdrop = document.getElementById('mobile-backdrop');
 const navigationButtons = Array.from(document.querySelectorAll('[data-page]'));
@@ -183,7 +185,7 @@ function linkButton(text, action) { const button = element('button', { className
 
 async function bootstrapApp() {
   // Never leave the document blank while a stored session is checked remotely.
-  renderAuthGate();
+  renderAuthGate('', initialAuthView);
   try {
     if (!localAuthBypass) {
       const { data } = await supabase.auth.getSession();
