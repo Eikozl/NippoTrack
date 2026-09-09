@@ -537,3 +537,16 @@ nav .nav-group-label:first-child { margin-top: 0; }
 .header-locale-menu[hidden] { display: none; }
 .header-locale-option { padding: 0.55rem 0.7rem; border-radius: 9px; color: var(--jlt-ink); font-size: 0.8rem; text-align: left; }
 .header-locale-option:hover, .header-locale-option[aria-checked="true"] { background: color-mix(in srgb, var(--jlt-primary-soft) 65%, transparent); color: var(--jlt-primary); }
+
+/* v5.1-A.2 first-experience onboarding — calm editorial transitions.
+   Additive only: motion + easing reuse the frozen --nt-* transition
+   tokens. No palette, no layout overrides; the panel itself uses shared
+   classes (surface, button-*, eyebrow, status-pill) so dark/light follow
+   automatically. */
+.first-exp-screen { animation: first-exp-enter 160ms ease; }
+@keyframes first-exp-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.first-exp-option { transition: background-color var(--nt-transition-base), color var(--nt-transition-base), border-color var(--nt-transition-base); }
+@media (prefers-reduced-motion: reduce) {
+  .first-exp-screen { animation: none; }
+  .first-exp-option { transition: none; }
+}

@@ -204,6 +204,11 @@ function renderAuthGate(message = '', view = 'sign-in') {
 
 function linkButton(text, action) { const button = element('button', { className: 'underline underline-offset-4', text, attrs: { type: 'button' } }); button.addEventListener('click', action); return button; }
 
+// v5.1-A.2 first-experience session: set during the post-auth boot gate
+// below, cleared when setup completes. Declared here (ahead of navigate)
+// so the guard above and the boot path share one binding.
+let firstExperienceSession = null;
+
 async function bootstrapApp() {
   // Never leave the document blank while a stored session is checked remotely.
   renderAuthGate('', initialAuthView);
@@ -217,6 +222,30 @@ async function bootstrapApp() {
     authRoot.replaceChildren();
     appShell.hidden = false;
     levelEstimateControl.load();
+    // v5.1-A.2 first-experience gate: an incomplete server-side onboarding
+    // state swaps the normal workflow for the focused setup shell (rendered
+    // into the normal content area, app chrome reused). FAIL-OPEN: any
+    // fetch failure falls through to the normal app — setup must never
+    // trap the user. notifyAuth is off here because the session was just
+    // verified above; a 401/404 from this endpoint (e.g. backend not yet
+    // deployed) must not log anyone out.
+    try {
+      const firstExperience = await apiRequest('/api/first-experience', { notifyAuth: false });
+      if (firstExperience?.onboarding?.completed === false) {
+        const module = await import('./firstExperience.js');
+        firstExperienceSession = module.renderFirstExperience(content, {
+          el: element,
+          api: apiRequest,
+          navigate,
+          notify: (message, type) => showToast(message, type),
+          onComplete: () => { firstExperienceSession?.finish(); navigate('dashboard'); },
+          onEnterPlacement: () => { firstExperienceSession?.finish(); module.enterPlacement({ navigate }); }
+        });
+        return;
+      }
+    } catch {
+      // Fail open to the normal app.
+    }
     await navigate(window.location.hash.slice(1) || 'dashboard', { updateHash: false });
   } catch {
     renderAuthGate('Authentication service is unavailable.');
@@ -581,6 +610,10 @@ if (typeof drawerMedia.addEventListener === 'function') drawerMedia.addEventList
 syncDrawerState();
 
 async function navigate(pageName, { updateHash = true } = {}) {
+  // v5.1-A.2 first-experience gate: while focused setup is active the full
+  // workflow stays hidden — sidebar clicks, hash changes, and back/forward
+  // re-show the current setup screen instead of rendering a page.
+  if (firstExperienceSession?.active) { firstExperienceSession.reshow(); return; }
   const referenceCharacter = parseKanjiReferenceRoute(pageName);
   const page = referenceCharacter ? pageName : (pages[pageName] ? pageName : 'dashboard');
   destroyCharts();
