@@ -1,6 +1,5 @@
 // Navigation IA cleanup — Tags hidden, grouped destinations, skip link,
-// mobile search entry. Static source assertions (same readSource pattern as
-// levelEstimateControl.test.mjs); no DOM or servers required.
+// mobile search entry, and Settings moved behind the account menu.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -29,8 +28,7 @@ test('navigation renders grouped destinations in the approved order', () => {
   assert.deepEqual(pages, [
     'dashboard', 'review', 'sessions', 'goals',
     'vocabulary', 'kanji', 'grammar', 'notes', 'content',
-    'analyzer', 'statistics',
-    'settings'
+    'analyzer', 'statistics'
   ]);
   for (const group of ['Study', 'Library', 'Tools', 'System']) {
     assert.ok(source.includes(`data-i18n="${group}"`), `group label ${group} present`);
@@ -85,4 +83,13 @@ test('desktop sidebar branding remains', () => {
   assert.ok(!source.includes('data-i18n="NippoTrack"'), 'no duplicated brand text beside the wordmark');
   assert.ok(!source.includes('JLT_logo-png.png'), 'legacy JLT mark removed from shell');
   assert.ok(source.includes('Logo_Modo_Claro_App.png'), 'normalized light wordmark wired');
+});
+
+test('Settings is reachable from the existing account trigger, not the sidebar', () => {
+  const source = html();
+  assert.doesNotMatch(source, /data-page="settings"/, 'standalone sidebar Settings removed');
+  const main = readSource('src/main.js');
+  assert.ok(main.includes("navigate('settings')"), 'account menu navigates to Settings');
+  assert.ok(source.includes('id="account-button"') && source.includes('id="mobile-account-button"'), 'existing account triggers remain');
+  assert.doesNotMatch(source, /sidebar[\s\S]{0,200}Account|Account[\s\S]{0,200}sidebar/i, 'no sidebar identity block added');
 });

@@ -221,6 +221,28 @@ const translations = {
   }
 };
 
+Object.assign(translations.es, {
+  Profile: 'Perfil',
+  Learning: 'Aprendizaje',
+  Account: 'Cuenta',
+  'How you appear inside NippoTrack.': 'Cómo apareces dentro de NippoTrack.',
+  'Display name': 'Nombre para mostrar',
+  'Save changes': 'Guardar cambios',
+  'Edit profile': 'Editar perfil',
+  'Unsaved changes': 'Cambios sin guardar',
+  'Loading profile…': 'Cargando perfil…',
+  'Could not save your display name. Please try again.': 'No se pudo guardar tu nombre para mostrar. Inténtalo de nuevo.',
+  'Profile could not be loaded. You can still try saving a display name.': 'No se pudo cargar el perfil. Aún puedes intentar guardar un nombre para mostrar.',
+  'Keep your study target and historical Japanese starting point together.': 'Mantén juntos tu objetivo de estudio y tu punto de partida histórico de japonés.',
+  'Your study goal — not your current level.': 'Tu objetivo de estudio; no tu nivel actual.',
+  'Loading learning preferences…': 'Cargando preferencias de aprendizaje…',
+  'Target level is unavailable right now.': 'El objetivo de nivel no está disponible ahora.',
+  'Could not save the target level. Please try again.': 'No se pudo guardar el objetivo de nivel. Inténtalo de nuevo.',
+  'Choose the existing light or dark surface for NippoTrack.': 'Elige la superficie clara u oscura existente de NippoTrack.',
+  'Account identity and existing data actions.': 'Identidad de la cuenta y acciones de datos existentes.',
+  'Email unavailable': 'Correo no disponible'
+});
+
 export function getLocale() {
   return localStorage.getItem('jlt-locale') === 'es' ? 'es' : 'en';
 }

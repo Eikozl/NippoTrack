@@ -1,6 +1,5 @@
-// Authenticated-shell language control: desktop header button plus the
-// account dialog section, both on the existing locale mechanism.
-// Static source assertions; no DOM, servers, or browsers required.
+// v5.1-C moves the sole authenticated-shell language control into the
+// existing account menu while keeping the current setLocale mechanism.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -10,50 +9,45 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readSource = (path) => readFileSync(join(root, path), 'utf8');
 
-test('desktop header exposes a compact language control', () => {
+test('language exists only in the account menu on the authenticated shell', () => {
   const source = readSource('src/main.js');
-  assert.ok(source.includes('header-locale-wrap'), 'locale control wrapper');
-  assert.ok(source.includes('themeToggle?.before(localeWrap)'), 'mounted between Estimate and Theme');
-  assert.ok(source.includes("role: 'menu'"), 'menu semantics');
-  assert.ok(source.includes("role: 'menuitemradio'"), 'options are radio items');
-  assert.ok(source.includes("aria-checked"), 'current locale indicated');
+  assert.ok(source.includes('user-menu-language'), 'account menu owns language');
+  assert.ok(source.includes("setLocale(value)"), 'existing locale mechanism reused');
+  assert.ok(source.includes("getLocale()"), 'selected locale read from existing mechanism');
+  assert.ok(source.includes("role: 'menuitemradio'"), 'language choices expose radio-item semantics');
+  assert.ok(source.includes("aria-checked"), 'current locale is perceivable without color');
+  const executable = source.replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!executable.includes('themeToggle?.before(localeWrap)'), 'old desktop language mount removed');
+  assert.ok(!executable.includes('openAccountDialog'), 'old account dialog removed');
 });
 
-test('language switching reuses the existing locale mechanism', () => {
+test('language menu closes/reflects selection through the existing event flow', () => {
   const source = readSource('src/main.js');
-  assert.ok(source.includes('setLocale(value)'), 'persists through setLocale');
-  assert.ok(source.includes('getLocale()'), 'reads through getLocale');
-  assert.ok(source.includes("window.addEventListener('jlt-locale-change', () => syncLocaleControl())"), 'control follows locale changes');
-  assert.ok(!source.includes("setItem('jlt-locale'"), 'no second preference system');
+  assert.ok(source.includes('syncUserMenus()'), 'locale changes refresh the menu');
+  assert.ok(source.includes("window.addEventListener('jlt-locale-change'"), 'existing locale event preserved');
+  assert.ok(source.includes("event.key === 'Escape'"), 'Escape behavior remains available');
+  assert.ok(source.includes('document.addEventListener(\'click\''), 'outside click closes account menu');
 });
 
-test('locale menu follows dialog/menu conventions', () => {
-  const source = readSource('src/main.js');
-  assert.ok(source.includes("event.key === 'Escape'"), 'Escape closes the menu');
-  assert.ok(source.includes('closeLocaleMenu(true)'), 'focus returns to the trigger');
-  assert.ok(source.includes('localeWrap.contains(event.target)'), 'outside click closes');
-});
-
-test('compact mobile header gains no permanent language control', () => {
+test('compact mobile header has no duplicate permanent language control', () => {
   const source = readSource('index.html');
   const mobileHeader = source.slice(source.indexOf('<header class="sticky top-0'), source.indexOf('id="app-content"'));
-  assert.ok(!mobileHeader.includes('locale'), 'no locale button in the mobile topbar');
-  assert.ok(!mobileHeader.includes('Japanese Learning Tracker'), 'brand text stays absent');
+  assert.doesNotMatch(mobileHeader, /locale|language/i);
 });
 
-test('account dialog exposes language choice with sign out preserved', () => {
+test('account menu keeps only the frozen quick actions', () => {
   const source = readSource('src/main.js');
-  const dialogBlock = source.slice(source.indexOf('async function openAccountDialog'), source.indexOf('accountButtons.forEach'));
-  assert.ok(dialogBlock.includes("text: 'Language'"), 'language section present');
-  assert.ok(dialogBlock.includes("'English'") && dialogBlock.includes("'Spanish'"), 'both locales offered');
-  assert.ok(dialogBlock.includes("aria-pressed"), 'current locale visibly identifiable');
-  assert.ok(dialogBlock.includes("text: 'Sign out'"), 'sign out preserved');
-  assert.ok(!dialogBlock.includes('avatar') && !dialogBlock.includes('OAuth') && !dialogBlock.includes('username'), 'no v5.1 profile work');
+  const menuBlock = source.slice(source.indexOf('function createUserMenu'), source.indexOf('function syncUserMenus'));
+  for (const marker of ['Language', 'Settings', 'Sign out']) assert.ok(menuBlock.includes(marker), `${marker} action present`);
+  for (const forbidden of ['Theme', 'JLPT target', 'Starting Point', 'Export backup', 'avatar', 'OAuth']) {
+    assert.doesNotMatch(menuBlock, new RegExp(forbidden, 'i'), `${forbidden} stays out of menu`);
+  }
 });
 
-test('locale styles exist without duplicating dictionaries', () => {
-  const css = readSource('src/styles.css');
-  assert.ok(css.includes('.header-locale-wrap'), 'control positioned');
-  assert.ok(css.includes('.header-locale-menu'), 'menu card styled');
-  assert.ok(css.includes('.header-locale-option'), 'options styled');
+test('account trigger remains the existing accessible icon control', () => {
+  const source = readSource('index.html');
+  for (const id of ['account-button', 'mobile-account-button']) {
+    assert.match(source, new RegExp(`id="${id}"[^>]*aria-haspopup="menu"`));
+    assert.match(source, new RegExp(`id="${id}"[^>]*aria-expanded="false"`));
+  }
 });

@@ -529,14 +529,40 @@ nav .nav-group-label:first-child { margin-top: 0; }
 /* Reference Kanji Progress explanation: native disclosure, no animation. */
 .jlpt-progress-details { margin-top: 1rem; }
 .jlpt-progress-details > summary { cursor: pointer; font-size: 0.875rem; font-weight: 600; color: var(--jlt-ink); }
-/* Header language control (desktop header only): compact locale button +
-   dropdown menu in the auth-gate visual language. */
-.header-locale-wrap { position: relative; display: inline-flex; flex: none; }
-.header-locale-button { font-size: 0.8rem; font-weight: 700; letter-spacing: 0.04em; }
-.header-locale-menu { position: absolute; top: calc(100% + 0.5rem); right: 0; z-index: 60; display: grid; min-width: 9rem; gap: 0.25rem; padding: 0.4rem; border-radius: 14px; background: var(--jlt-surface); box-shadow: var(--shadow-raised-md); }
-.header-locale-menu[hidden] { display: none; }
-.header-locale-option { padding: 0.55rem 0.7rem; border-radius: 9px; color: var(--jlt-ink); font-size: 0.8rem; text-align: left; }
-.header-locale-option:hover, .header-locale-option[aria-checked="true"] { background: color-mix(in srgb, var(--jlt-primary-soft) 65%, transparent); color: var(--jlt-primary); }
+/* v5.1-C account surface: the existing app user icon anchors this one
+   responsive menu. Identity is text/initials only; no avatar media surface. */
+.account-menu-anchor { position: relative; display: inline-flex; flex: none; }
+.user-menu { position: absolute; top: calc(100% + .55rem); right: 0; z-index: 60; display: grid; width: min(19rem, calc(100vw - 2rem)); gap: .2rem; padding: .45rem; border: 1px solid var(--nt-border-subtle); border-radius: 16px; background: var(--jlt-surface); box-shadow: var(--shadow-raised-md); opacity: 0; transform: translateY(-.35rem); transition: opacity 170ms ease, transform 170ms ease; }
+.user-menu[hidden] { display: none; }
+.user-menu.is-open { opacity: 1; transform: translateY(0); }
+.user-menu-identity { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: .7rem; padding: .7rem; }
+.account-initials { display: inline-grid; flex: none; width: 2rem; height: 2rem; place-items: center; border-radius: 999px; background: var(--jlt-primary-soft); color: var(--jlt-primary-strong); font-size: .75rem; font-weight: 700; letter-spacing: .03em; }
+.account-initials--large { width: 2.75rem; height: 2.75rem; font-size: .85rem; }
+.user-menu-divider { height: 1px; margin: .35rem .4rem; background: var(--nt-border-subtle); }
+.user-menu-item { display: flex; min-height: 2.65rem; width: 100%; align-items: center; justify-content: space-between; gap: .7rem; border-radius: 11px; padding: .55rem .7rem; color: var(--jlt-ink); font-size: .875rem; text-align: left; transition: background-color 160ms ease, color 160ms ease; }
+.user-menu-item:hover, .user-menu-item:focus-visible { background: var(--jlt-primary-soft); color: var(--jlt-primary-strong); }
+.user-menu-language { display: grid; gap: .2rem; }
+.user-menu-language-panel { display: grid; gap: .15rem; padding: 0 .3rem .25rem 1rem; }
+.user-menu-language-panel[hidden] { display: none; }
+.user-menu-option { display: flex; min-height: 2.35rem; width: 100%; align-items: center; gap: .45rem; border-radius: 9px; padding: .45rem .6rem; color: var(--jlt-muted); font-size: .8rem; text-align: left; }
+.user-menu-option:hover, .user-menu-option[aria-checked="true"] { background: var(--jlt-primary-soft); color: var(--jlt-primary-strong); }
+.user-menu-signout { color: var(--jlt-danger); }
+.settings-layout { display: grid; gap: 1.25rem; align-items: start; }
+.settings-section-nav { display: flex; flex-wrap: wrap; gap: .3rem; }
+.settings-section-tab { min-height: 2.7rem; border-radius: 10px; padding: .55rem .8rem; color: var(--jlt-muted); font-size: .875rem; font-weight: 600; text-align: left; transition: background-color 160ms ease, color 160ms ease; }
+.settings-section-tab:hover, .settings-section-tab:focus-visible, .settings-section-tab.is-active { background: var(--jlt-primary-soft); color: var(--jlt-ink); }
+.settings-section-tab.is-active { box-shadow: var(--shadow-raised-sm); }
+.settings-panel { min-width: 0; }
+.settings-panel:focus { outline: none; }
+.settings-section { min-width: 0; }
+@media (min-width: 1024px) {
+  .settings-layout { grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr); }
+  .settings-section-nav { position: sticky; top: 1.5rem; display: grid; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .user-menu, .user-menu-item, .settings-section-tab { transition: none; }
+  .user-menu { transform: none; }
+}
 
 /* v5.1-A.2 first-experience onboarding — calm editorial transitions.
    Additive only: motion + easing reuse the frozen --nt-* transition

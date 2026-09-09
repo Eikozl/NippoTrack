@@ -44,7 +44,6 @@
           <button class="nav-item" type="button" data-page="analyzer"><span class="nav-icon" data-jlt-icon="analyzer" aria-hidden="true"></span><span data-i18n="Text Analyzer">Text Analyzer</span></button>
           <button class="nav-item" type="button" data-page="statistics"><span class="nav-icon" data-jlt-icon="statistics" aria-hidden="true"></span><span data-i18n="Statistics">Statistics</span></button>
           <p class="nav-group-label" aria-hidden="true"><span data-i18n="System">System</span></p>
-          <button class="nav-item" type="button" data-page="settings"><span class="nav-icon" data-jlt-icon="settings" aria-hidden="true"></span><span data-i18n="Settings">Settings</span></button>
         </nav>
 
         <div class="mt-6 shrink-0 rounded-[22px] border border-stone bg-paper p-4" aria-live="polite">
@@ -66,7 +65,7 @@
           </div>
           <div class="ml-5 flex shrink-0 gap-2">
             <button id="theme-toggle" class="icon-button" type="button" aria-label="Switch to dark mode" title="Switch to dark mode" aria-pressed="false"><span id="theme-toggle-icon" aria-hidden="true"></span></button>
-            <button id="account-button" class="icon-button" type="button" aria-label="Manage account" title="Manage account"><span data-jlt-icon="user" aria-hidden="true"></span></button>
+            <div class="account-menu-anchor"><button id="account-button" class="icon-button" type="button" aria-label="Manage account" title="Manage account" aria-haspopup="menu" aria-expanded="false"><span data-jlt-icon="user" aria-hidden="true"></span></button></div>
           </div>
         </header>
         <header class="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-stone bg-canvas/90 px-4 backdrop-blur-md sm:px-7 lg:hidden">
@@ -74,7 +73,7 @@
           <div class="flex gap-2">
             <button id="mobile-search-button" class="icon-button" type="button" aria-label="Open search" aria-expanded="false" aria-controls="mobile-search-bar"><span data-jlt-icon="search" aria-hidden="true"></span></button>
             <button id="mobile-theme-toggle" class="icon-button" type="button" aria-label="Switch to dark mode" title="Switch to dark mode" aria-pressed="false"><span id="mobile-theme-toggle-icon" aria-hidden="true"></span></button>
-            <button id="mobile-account-button" class="icon-button" type="button" aria-label="Manage account" title="Manage account"><span data-jlt-icon="user" aria-hidden="true"></span></button>
+            <div class="account-menu-anchor"><button id="mobile-account-button" class="icon-button" type="button" aria-label="Manage account" title="Manage account" aria-haspopup="menu" aria-expanded="false"><span data-jlt-icon="user" aria-hidden="true"></span></button></div>
           </div>
         </header>
         <div id="mobile-search-bar" class="border-b border-stone bg-canvas/95 px-4 pb-3 pt-1 lg:hidden" hidden>

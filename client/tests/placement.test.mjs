@@ -557,13 +557,11 @@ test('settings starting-point block: restrained take-vs-result states, no re-ent
   assert.ok(!source.match(/retake/i), 'no re-entry wording');
   assert.ok(!source.match(/reset/i), 'no reset wording');
   assert.ok(!source.match(/repeat/i), 'no repeat wording');
-  // Restrained addition: the existing settings structure is untouched.
-  for (const marker of ['Appearance', 'Language', 'Study loop', 'Data sources', 'Keyboard shortcuts']) {
-    assert.ok(source.includes(marker), `existing section intact: ${marker}`);
+  for (const marker of ['Profile', 'Learning', 'Appearance', 'Account']) {
+    assert.ok(source.includes(marker), `Settings section present: ${marker}`);
   }
-  assert.ok(source.lastIndexOf('startingPointBlock()') > source.indexOf("text: 'Language'"), 'block added, nothing reorganized');
   assert.ok(source.includes('notifyAuth: false'), 'stored read without auth side effects');
-  assert.ok(source.includes('block.remove()'), 'fetch failure fails open to plain settings');
+  assert.ok(source.includes('Starting point is unavailable right now.'), 'fetch failure keeps Settings usable');
 });
 
 test('result diagram forbids verdict language, percentages, and invented data', () => {

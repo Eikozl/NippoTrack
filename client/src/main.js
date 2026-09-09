@@ -6,9 +6,10 @@ import { destroyCharts, refreshChartTheme } from './chartRegistry';
 import { apiRequest } from './api';
 import { kanjiReferenceRoute, parseKanjiReferenceRoute } from './kanjiReference';
 import { icon, moduleIconMap } from './icons';
-import { confirmDialog, element, openDialog, showToast } from './ui';
+import { confirmDialog, element, showToast } from './ui';
 import { createLevelEstimateControl } from './levelEstimateControl';
 import { authConfigured, localAuthBypass, localAuthBypassEmail, supabase } from './authClient';
+import { profileStore } from './accountProfile.js';
 import { getLocale, setLocale, t, translateDocument } from './i18n';
 import { authViewFromSearch } from './landing/routing';
 
@@ -133,6 +134,7 @@ window.addEventListener('jlt-theme-change', (event) => {
 
 let authMessage = '';
 let authView = 'sign-in';
+let currentAuthEmail = localAuthBypassEmail || null;
 function renderAuthGate(message = '', view = 'sign-in') {
   authMessage = message;
   authView = view;
@@ -219,8 +221,14 @@ async function bootstrapApp() {
     }
     const session = await apiRequest('/api/auth/session', { notifyAuth: false });
     if (!session.authenticated) return;
+    currentAuthEmail = session.user?.email || localAuthBypassEmail || null;
+    profileStore.setEmail(currentAuthEmail);
     authRoot.replaceChildren();
     appShell.hidden = false;
+    // Profile identity is presentation-only and never blocks the shell. The
+    // cached store is shared by the user menu and Settings so opening the menu
+    // does not create a request per interaction.
+    profileStore.load().then(() => syncUserMenus()).catch(() => syncUserMenus());
     levelEstimateControl.load();
     // v5.1-A.2 first-experience gate: an incomplete server-side onboarding
     // state swaps the normal workflow for the focused setup shell (rendered
@@ -255,7 +263,7 @@ async function bootstrapApp() {
 window.addEventListener('jlt-auth-required', (event) => { levelEstimateControl.reset(); renderAuthGate(event.detail?.code === 'EMAIL_UNVERIFIED' ? 'Please verify your email before continuing.' : 'Your session has ended. Please sign in again.'); });
 
 async function signOut() {
-  try { await supabase.auth.signOut(); await apiRequest('/api/auth/logout', { method: 'POST', notifyAuth: false }); } finally { renderAuthGate(); }
+  try { await supabase.auth.signOut(); await apiRequest('/api/auth/logout', { method: 'POST', notifyAuth: false }); } finally { profileStore.reset(); currentAuthEmail = null; closeUserMenu(); renderAuthGate(); }
 }
 
 function confirmSignOut() {
@@ -267,62 +275,98 @@ function confirmSignOut() {
   });
 }
 
-async function openAccountDialog() {
-  let email = localAuthBypassEmail;
-  if (!localAuthBypass) {
-    const { data, error } = await supabase.auth.getUser();
-    if (error || !data.user?.email) throw error || new Error('Unable to load your account.');
-    email = data.user.email;
-  }
-  let closeDialog = () => {};
-  const signOutButton = element('button', { className: 'button-danger w-full sm:w-auto', text: 'Sign out', attrs: { type: 'button' } });
-  signOutButton.addEventListener('click', () => {
-    closeDialog();
-    confirmSignOut();
-  });
-  // Account language section (mobile entry point; desktop has the permanent
-  // header control too). Same setLocale mechanism — switching language only
-  // re-renders content, never touches the session.
-  const accountLocaleButtons = new Map();
-  const accountLocaleRow = element('div', { className: 'flex flex-wrap gap-2' });
-  for (const [value, label] of [['en', 'English'], ['es', 'Spanish']]) {
-    const button = element('button', { className: 'button-secondary', text: label, attrs: { type: 'button', 'aria-pressed': 'false' } });
-    button.addEventListener('click', () => { setLocale(value); syncAccountLocale(); });
-    accountLocaleButtons.set(value, { button, label });
-    accountLocaleRow.appendChild(button);
-  }
-  function syncAccountLocale() {
-    const current = getLocale();
-    for (const [value, { button, label }] of accountLocaleButtons) {
-      const active = value === current;
-      button.className = active ? 'button-primary' : 'button-secondary';
-      button.setAttribute('aria-pressed', String(active));
-      button.textContent = t(label);
-    }
-  }
-  syncAccountLocale();
-  closeDialog = openDialog({
-    title: 'Your account',
-    submitLabel: null,
-    showFooter: false,
-    showCloseButton: false,
-    content: [element('section', { className: 'sm:col-span-2 grid gap-5' }, [
-      element('div', { className: 'grid gap-1.5' }, [
-        element('p', { className: 'text-sm font-semibold text-ink', text: 'Signed in as' }),
-        element('p', { className: 'break-all text-sm text-muted', text: email })
-      ]),
-      element('div', { className: 'grid gap-1.5' }, [
-        element('p', { className: 'text-sm font-semibold text-ink', text: 'Language' }),
-        accountLocaleRow
-      ]),
-      element('div', { className: 'flex flex-col gap-3 sm:flex-row sm:items-center' }, [signOutButton])
-    ])]
-  });
+let openUserMenu = null;
+const userMenus = [];
+
+function rawAccountText(node, value) {
+  node.textContent = value == null ? '' : String(value);
 }
 
-accountButtons.forEach((button) => button?.addEventListener('click', () => {
-  openAccountDialog().catch((error) => showToast(error.message || 'Unable to load your account.', 'error'));
-}));
+function createUserMenu(trigger, index) {
+  if (!trigger?.parentElement) return null;
+  const menuId = `account-menu-${index}`;
+  const languagePanelId = `${menuId}-language`;
+  const menu = element('div', { className: 'user-menu', attrs: { id: menuId, role: 'menu', hidden: '' } });
+  const mark = element('span', { className: 'account-initials', attrs: { 'aria-hidden': 'true' } });
+  const name = element('p', { className: 'truncate text-sm font-semibold text-ink' });
+  const email = element('p', { className: 'truncate text-xs text-muted' });
+  const identity = element('div', { className: 'user-menu-identity' }, [mark, element('div', { className: 'min-w-0' }, [name, email])]);
+  const languageButton = element('button', { className: 'user-menu-item', attrs: { type: 'button', role: 'menuitem', 'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-controls': languagePanelId } }, [element('span', { text: 'Language' }), element('span', { text: '›', attrs: { 'aria-hidden': 'true' } })]);
+  const languagePanel = element('div', { className: 'user-menu-language-panel', attrs: { id: languagePanelId, role: 'group', 'aria-label': 'Language options', hidden: '' } });
+  const settingsButton = element('button', { className: 'user-menu-item', text: 'Settings', attrs: { type: 'button', role: 'menuitem' } });
+  const signOutButton = element('button', { className: 'user-menu-item user-menu-signout', text: 'Sign out', attrs: { type: 'button', role: 'menuitem' } });
+  menu.append(identity, element('div', { className: 'user-menu-divider', attrs: { 'aria-hidden': 'true' } }), element('div', { className: 'user-menu-language' }, [languageButton, languagePanel]), settingsButton, signOutButton);
+  trigger.setAttribute('aria-controls', menuId);
+  trigger.parentElement.appendChild(menu);
+
+  function syncLanguage() {
+    languagePanel.replaceChildren(...[['en', 'English'], ['es', 'Spanish']].map(([value, label]) => {
+      const active = getLocale() === value;
+      const option = element('button', { className: 'user-menu-option', attrs: { type: 'button', role: 'menuitemradio', 'aria-checked': String(active) } });
+      option.textContent = `${active ? '✓ ' : ''}${t(label)}`;
+      option.addEventListener('click', () => { setLocale(value); syncUserMenus(); });
+      return option;
+    }));
+  }
+  function setOpen(open) {
+    if (open) {
+      if (openUserMenu && openUserMenu !== menu) openUserMenu.close();
+      openUserMenu = menu;
+      menu.hidden = false;
+      menu.classList.add('is-open');
+      trigger.setAttribute('aria-expanded', 'true');
+      syncLanguage();
+    } else {
+      menu.classList.remove('is-open');
+      menu.hidden = true;
+      trigger.setAttribute('aria-expanded', 'false');
+      languagePanel.hidden = true;
+      languageButton.setAttribute('aria-expanded', 'false');
+      if (openUserMenu === menu) openUserMenu = null;
+    }
+  }
+  const close = (refocus = false) => { setOpen(false); if (refocus) trigger.focus(); };
+  const toggle = (event) => { event?.stopPropagation?.(); setOpen(openUserMenu !== menu); };
+  trigger.addEventListener('click', toggle);
+  trigger.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowDown') { event.preventDefault(); setOpen(true); settingsButton.focus(); }
+  });
+  menu.addEventListener('click', (event) => event.stopPropagation());
+  menu.addEventListener('keydown', (event) => { if (event.key === 'Escape') { event.preventDefault(); close(true); } });
+  languageButton.addEventListener('click', () => {
+    const open = languagePanel.hidden;
+    languagePanel.hidden = !open;
+    languageButton.setAttribute('aria-expanded', String(open));
+    if (open) languagePanel.querySelector('button')?.focus();
+  });
+  settingsButton.addEventListener('click', () => { close(); navigate('settings'); });
+  signOutButton.addEventListener('click', () => { close(); confirmSignOut(); });
+  const update = () => {
+    const profile = profileStore.get();
+    const initials = profile?.initials || '';
+    mark.replaceChildren();
+    if (initials) rawAccountText(mark, initials);
+    else mark.appendChild(icon('user', { size: 18 }));
+    rawAccountText(name, profile?.displayName || t('Account'));
+    rawAccountText(email, profile?.email || currentAuthEmail || '');
+    rawAccountText(languageButton.firstElementChild, t('Language'));
+    rawAccountText(settingsButton, t('Settings'));
+    rawAccountText(signOutButton, t('Sign out'));
+    trigger.setAttribute('aria-label', t('Manage account'));
+    trigger.setAttribute('title', t('Manage account'));
+    syncLanguage();
+  };
+  const api = { menu, close, update };
+  userMenus.push(api);
+  update();
+  return api;
+}
+
+function syncUserMenus() { userMenus.forEach(({ update }) => update()); }
+function closeUserMenu(refocus = false) { openUserMenu?.close(refocus); }
+
+accountButtons.forEach((button, index) => createUserMenu(button, index));
+document.addEventListener('click', () => closeUserMenu());
 
 // Phase 9 refinement — single header level-estimate control. One controller
 // manages both the desktop and mobile header morphs (only one header is
@@ -347,6 +391,7 @@ if (mobileThemeToggle?.parentElement) levelEstimateControl.mount(mobileThemeTogg
 // gains no permanent button). Same locale mechanism as the auth gate and
 // Settings: setLocale persists to localStorage and dispatches
 // jlt-locale-change; switching language never touches the session.
+/* Legacy standalone header language control removed in v5.1-C.
 const localeWrap = element('span', { className: 'header-locale-wrap' });
 const localeButton = element('button', { className: 'icon-button header-locale-button', text: 'EN', attrs: { type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': t('Language'), title: t('Language') } });
 const localeOptions = [['en', 'English'], ['es', 'Spanish']].map(([value, label]) => {
@@ -390,9 +435,11 @@ document.addEventListener('click', (event) => {
 themeToggle?.before(localeWrap);
 syncLocaleControl();
 window.addEventListener('jlt-locale-change', () => syncLocaleControl());
+*/
 window.addEventListener('jlt-review-complete', () => levelEstimateControl.refresh());
 window.addEventListener('jlt-locale-change', () => {
   translateDocument();
+  syncUserMenus();
   accountButtons.forEach((button) => {
     button?.setAttribute('aria-label', t('Manage account'));
     button?.setAttribute('title', t('Manage account'));
