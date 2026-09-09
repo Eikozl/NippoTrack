@@ -550,3 +550,16 @@ nav .nav-group-label:first-child { margin-top: 0; }
   .first-exp-screen { animation: none; }
   .first-exp-option { transition: none; }
 }
+
+/* v5.1-A.4 first-use dashboard — calm initial reveal with a tiny stagger
+   on the three action cards only. Additive only: the layout itself uses
+   shared classes (surface, button-*, text-muted) so dark/light follow
+   automatically. No loops, no confetti, no new palette. */
+.first-use-screen { animation: first-use-enter 200ms ease-out; }
+.first-use-card { animation: first-use-enter 220ms ease-out backwards; }
+.first-use-cards > .first-use-card:nth-child(2) { animation-delay: 70ms; }
+.first-use-cards > .first-use-card:nth-child(3) { animation-delay: 140ms; }
+@keyframes first-use-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .first-use-screen, .first-use-card { animation: none; }
+}

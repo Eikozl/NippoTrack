@@ -64,6 +64,17 @@ function goalsPreview(items, showAll) {
   ]);
 }
 
+function isEmptyDashboardSnapshot(data) {
+  // v5.1-A.4 first-use pre-check (mirrors shouldShowFirstUseDashboard's
+  // durable-data half): one cheap decision so an active learner never pays
+  // for the extra first-experience fetch below.
+  if (!data || typeof data !== 'object') return false;
+  if (Number(data.vocabularyCount) !== 0) return false;
+  if (Number(data.kanjiCount) !== 0) return false;
+  if (Number(data.grammarCount) !== 0) return false;
+  return Array.isArray(data.recentSessions) && data.recentSessions.length === 0;
+}
+
 export async function renderDashboard(container) {
   destroyCharts();
   const content = element('div', { className: 'dashboard-frame' });
@@ -85,6 +96,29 @@ export async function renderDashboard(container) {
         // here skips the preview without failing the dashboard.
         apiRequest('/api/goals?active=1&limit=10').catch(() => null)
       ]);
+      // v5.1-A.4 first-use state (DERIVED, no new flag): an onboarded
+      // learner with zero durable data sees a calm starting state instead
+      // of the normal snapshot. ANY durable data — or any fetch trouble —
+      // falls through to the normal dashboard below, byte-identical.
+      if (isEmptyDashboardSnapshot(data)) {
+        try {
+          const firstExperience = await apiRequest('/api/first-experience', { notifyAuth: false });
+          const firstUse = await import('../firstUseDashboard.js');
+          if (firstUse.shouldShowFirstUseDashboard({ firstExperience, dashboard: data })) {
+            destroyCharts();
+            window.dispatchEvent(new CustomEvent('jlt-sidebar-activity', { detail: activity }));
+            firstUse.renderFirstUseDashboard(content, {
+              el: element,
+              navigate: (page) => { window.location.hash = `#${page}`; },
+              firstExperience,
+              dashboard: data
+            });
+            return;
+          }
+        } catch {
+          // Fail open to the normal dashboard.
+        }
+      }
       destroyCharts();
       window.dispatchEvent(new CustomEvent('jlt-sidebar-activity', { detail: activity }));
       const goalItems = Array.isArray(goalsData?.items) ? goalsData.items : [];
