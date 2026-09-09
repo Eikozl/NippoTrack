@@ -279,6 +279,35 @@ test('only approved Japanese examples appear and keep lang="ja"', () => {
   // second-pass examples listed above.
 });
 
+test('large-screen containment reuses the 1100 band with no mobile changes', () => {
+  const band1100 = mediaBlock('@media (max-width: 1100px)');
+  assert.ok(band1100.includes('.hero-ecosystem'), 'hero stays inside its column');
+  assert.ok(band1100.includes('width: min(100%, 520px)'), 'ecosystem narrows before the stack');
+  assert.ok(band1100.includes('right: 8px'), 'streak keeps container clearance');
+  assert.ok(band1100.includes('right: 22px'), 'kanji keeps container clearance');
+  assert.ok(band1100.includes('.core-flow article'), 'flow columns breathe at tablet');
+  assert.ok(band1100.includes('padding: 0 28px'), 'flow rhythm eases without new breakpoints');
+  assert.ok(band1100.includes('.analyzer-result'), 'dense panel eases at tablet');
+  assert.ok(cssSource.includes('min-height: 440px'), 'onboarding panel holds absolute cards');
+  assert.ok(cssSource.includes('.placement-preparing'), 'preparing beat hooks exist');
+  // No new breakpoints were introduced for this pass.
+  const breakpoints = [...cssSource.matchAll(/@media\s*\(max-width:\s*(\d+)px\)/g)].map((m) => m[1]);
+  assert.deepEqual([...new Set(breakpoints)].sort(), ['1100', '380', '479', '640', '767', '900']);
+  // Mobile bands stay untouched: no large-screen fixes leak below 768px.
+  for (const marker of ['@media (max-width: 767px)', '@media (max-width: 640px)', '@media (max-width: 479px)', '@media (max-width: 380px)']) {
+    const mobile = mediaBlock(marker);
+    assert.ok(!mobile.includes('width: min(100%, 520px)'), 'mobile keeps its constellation: ' + marker);
+    assert.ok(!mobile.includes('.estimate-value'), 'rotation lock stays global: ' + marker);
+    assert.ok(!mobile.includes('placementPreparing'), 'staging stays desktop: ' + marker);
+    assert.ok(!mobile.includes('padding: 0 28px'), 'flow easing stays tablet: ' + marker);
+  }
+  // Rotating estimates never shift layout and never spam screen readers.
+  assert.ok(source.includes('data-estimate-value'), 'rotation hooks present');
+  assert.ok(source.includes('aria-hidden="true"'), 'rotating text hides from AT');
+  assert.ok(source.includes('Starting estimate, for example N4 range'), 'static sr-only example present');
+  assert.ok(source.includes('not an official JLPT assessment'), 'diagnosis disclaimer preserved');
+});
+
 test('landing stays keyboard, focus, and landmark safe', () => {
   assert.ok(source.includes('landing-skip-link'));
   assert.ok(source.includes('href="#landing-main"'));

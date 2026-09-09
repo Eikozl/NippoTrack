@@ -544,6 +544,19 @@
   text-transform: uppercase;
 }
 
+/* Starting-estimate rotation stays width-locked so cycling N5–N1 never
+   shifts layout; only a subtle fade settles each example swap. */
+.estimate-value {
+  display: inline-block;
+  min-width: 2.2ch;
+  font-variant-numeric: tabular-nums;
+  transition: opacity 240ms ease;
+}
+
+.estimate-value.is-switching {
+  opacity: 0;
+}
+
 .hero-japanese {
   margin-top: 11px !important;
   font-size: 42px;
@@ -737,6 +750,10 @@
   color: var(--landing-text-secondary);
   font-size: 18px;
   line-height: 1.65;
+}
+
+.flow-more {
+  margin-top: 28px !important;
 }
 
 .core-flow {
@@ -1470,7 +1487,7 @@
 }
 
 .onboarding-demo {
-  min-height: 420px;
+  min-height: 440px;
   padding: 31px;
 }
 
@@ -1488,8 +1505,19 @@
 }
 
 .placement-welcome,
-.placement-question {
+.placement-question,
+.placement-preparing {
   display: none;
+}
+
+.placement-preparing {
+  align-content: center;
+  justify-items: center;
+  margin: 0;
+  color: var(--landing-accent);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
 }
 
 .placement-card h3 {
@@ -1817,19 +1845,25 @@
 }
 
 @keyframes placementWelcome {
-  0%, 22% { opacity: 1; transform: translateY(0); }
-  31%, 100% { opacity: 0; transform: translateY(-8px); visibility: hidden; }
+  0%, 18% { opacity: 1; transform: translateY(0); }
+  26%, 100% { opacity: 0; transform: translateY(-8px); visibility: hidden; }
 }
 
 @keyframes placementQuestion {
-  0%, 23% { opacity: 0; transform: translateY(8px); }
-  33%, 60% { opacity: 1; transform: translateY(0); }
-  70%, 100% { opacity: 0; transform: translateY(-8px); visibility: hidden; }
+  0%, 22% { opacity: 0; transform: translateY(8px); }
+  30%, 52% { opacity: 1; transform: translateY(0); }
+  60%, 100% { opacity: 0; transform: translateY(-8px); visibility: hidden; }
+}
+
+@keyframes placementPreparing {
+  0%, 58% { opacity: 0; transform: translateY(8px); visibility: hidden; }
+  64%, 70% { opacity: 1; transform: translateY(0); visibility: visible; }
+  76%, 100% { opacity: 0; transform: translateY(-8px); visibility: hidden; }
 }
 
 @keyframes placementResult {
-  0%, 64% { opacity: 0; transform: translateY(8px); }
-  76%, 100% { opacity: 1; transform: translateY(0); }
+  0%, 74% { opacity: 0; transform: translateY(8px); }
+  84%, 100% { opacity: 1; transform: translateY(0); }
 }
 
 .landing-js .landing-page .demo-step {
@@ -1894,8 +1928,16 @@
   margin: 0;
 }
 
+.landing-js .landing-page .onboarding-demo .placement-preparing {
+  position: absolute;
+  inset: 31px;
+  width: auto;
+  margin: 0;
+}
+
 .landing-js .landing-page .placement-welcome,
-.landing-js .landing-page .placement-question {
+.landing-js .landing-page .placement-question,
+.landing-js .landing-page .placement-preparing {
   display: grid;
 }
 
@@ -1904,15 +1946,19 @@
 }
 
 .landing-js .landing-page [data-demo="onboarding"].is-playing .placement-welcome {
-  animation: placementWelcome 4s ease-in-out forwards;
+  animation: placementWelcome 5.5s ease-in-out forwards;
 }
 
 .landing-js .landing-page [data-demo="onboarding"].is-playing .placement-question {
-  animation: placementQuestion 4s ease-in-out forwards;
+  animation: placementQuestion 5.5s ease-in-out forwards;
+}
+
+.landing-js .landing-page [data-demo="onboarding"].is-playing .placement-preparing {
+  animation: placementPreparing 5.5s ease-in-out forwards;
 }
 
 .landing-js .landing-page [data-demo="onboarding"].is-playing .placement-result {
-  animation: placementResult 4s ease-in-out forwards;
+  animation: placementResult 5.5s ease-in-out forwards;
 }
 
 @media (max-width: 1100px) {
@@ -1931,14 +1977,36 @@
   }
 
   .hero-ecosystem {
+    width: min(100%, 520px);
     transform: scale(0.88);
     transform-origin: center right;
+  }
+
+  .hero-kanji {
+    right: 22px;
+  }
+
+  .hero-streak {
+    right: 8px;
   }
 
   .showcase-grid,
   .progress-copy,
   .tools-heading {
     gap: 48px;
+  }
+
+  .core-flow article {
+    padding: 0 28px;
+  }
+
+  .core-flow article:first-child {
+    padding-left: 0;
+  }
+
+  .analyzer-result {
+    gap: 14px;
+    padding: 16px;
   }
 }
 
@@ -2693,8 +2761,17 @@
   }
 
   .landing-js .landing-page .placement-welcome,
-  .landing-js .landing-page .placement-question {
+  .landing-js .landing-page .placement-question,
+  .landing-js .landing-page .placement-preparing {
     display: none;
+  }
+
+  .landing-page .estimate-value {
+    transition: none;
+  }
+
+  .landing-page .estimate-value.is-switching {
+    opacity: 1;
   }
 
   /* New motion renders its final state immediately under reduced motion. */

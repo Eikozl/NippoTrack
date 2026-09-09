@@ -11,6 +11,11 @@ if (experience === 'app') {
     'A focused personal tracker for Japanese study sessions and learning material.'
   );
   import('./main.js');
+} else if (experience === 'how-it-works') {
+  document.getElementById('auth-root')?.setAttribute('hidden', '');
+  document.getElementById('app-shell')?.setAttribute('hidden', '');
+  document.querySelector('.skip-link')?.setAttribute('hidden', '');
+  import('./landing/howItWorks.js');
 } else {
   document.getElementById('auth-root')?.setAttribute('hidden', '');
   document.getElementById('app-shell')?.setAttribute('hidden', '');

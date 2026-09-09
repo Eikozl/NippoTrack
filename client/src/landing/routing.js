@@ -10,6 +10,7 @@ export function authViewFromSearch(search = '') {
 export function resolveExperience({ pathname = '/', hash = '' } = {}) {
   const normalizedPath = pathname.replace(/\/+$/, '') || '/';
   if (normalizedPath === '/app') return 'app';
+  if (normalizedPath === '/how-it-works') return 'how-it-works';
 
   const legacyRoute = hash.replace(/^#/, '').split('?')[0];
   if (LEGACY_APP_ROUTES.has(legacyRoute) || legacyRoute.startsWith('kanji-reference/')) return 'app';

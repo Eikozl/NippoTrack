@@ -2,7 +2,7 @@ import './landing.css';
 import wordmarkLight from '../assets/Logo_Modo_Claro.png';
 import wordmarkDark from '../assets/Logo_Modo_Oscuro.png';
 import { createLandingMarkup } from './sections.js';
-import { initLandingInteractions } from './interactions.js';
+import { initEstimateRotation, initLandingInteractions } from './interactions.js';
 import {
   applyLandingTheme,
   persistLandingTheme,
@@ -52,6 +52,7 @@ if (root) {
     applyLandingTheme(systemTheme, themeAssets);
   });
   initLandingInteractions(root);
+  initEstimateRotation(root);
   const anchor = window.location.hash.slice(1);
   if (['features', 'how-it-works', 'final-cta', 'faq'].includes(anchor)) {
     requestAnimationFrame(() => document.getElementById(anchor)?.scrollIntoView());

@@ -6,9 +6,17 @@ function themeToggle() {
     </button>`;
 }
 
-function navbar(wordmarkUrl, themeAssets = {}) {
+export function navbar(wordmarkUrl, themeAssets = {}, options = {}) {
   const lightSrc = themeAssets.lightSrc || wordmarkUrl;
   const darkSrc = themeAssets.darkSrc || wordmarkUrl;
+  // The dedicated /how-it-works page reuses this navbar with
+  // { variant: 'how-it-works' }: Features points back to the landing anchor
+  // and the current page is marked with aria-current. Landing keeps its
+  // same-page Features anchor; both link How it works to /how-it-works.
+  const isHowItWorks = options.variant === 'how-it-works';
+  const featuresHref = isHowItWorks ? '/#features' : '#features';
+  const howItWorksHref = '/how-it-works';
+  const howItWorksCurrent = isHowItWorks ? ' aria-current="page"' : '';
   return `
     <header class="landing-header" data-landing-header>
       <div class="landing-container landing-nav">
@@ -16,8 +24,8 @@ function navbar(wordmarkUrl, themeAssets = {}) {
           <img src="${wordmarkUrl}" data-landing-wordmark data-light-src="${lightSrc}" data-dark-src="${darkSrc}" alt="NippoTrack" width="260" height="88" fetchpriority="high">
         </a>
         <nav class="landing-desktop-nav" aria-label="Main navigation">
-          <a href="#features">Features</a>
-          <a href="#how-it-works">How it works</a>
+          <a href="${featuresHref}">Features</a>
+          <a href="${howItWorksHref}"${howItWorksCurrent}>How it works</a>
           <a href="#faq">FAQ</a>
         </nav>
         <div class="landing-nav-actions">
@@ -32,8 +40,8 @@ function navbar(wordmarkUrl, themeAssets = {}) {
         </div>
       </div>
       <nav class="landing-mobile-menu" id="landing-mobile-menu" aria-label="Mobile navigation" hidden data-mobile-menu>
-        <a href="#features">Features</a>
-        <a href="#how-it-works">How it works</a>
+        <a href="${featuresHref}">Features</a>
+        <a href="${howItWorksHref}"${howItWorksCurrent}>How it works</a>
         <a href="#faq">FAQ</a>
         <a href="/app?auth=sign-in">Log in</a>
         <a class="landing-button landing-button-primary" href="/app?auth=sign-up">Get started</a>
@@ -61,7 +69,7 @@ function hero() {
           <p class="landing-lede">Organize what you learn, understand Japanese in context, and keep a clear view of your progress.</p>
           <div class="landing-hero-actions">
             <a class="landing-button landing-button-primary" href="/app?auth=sign-up">Start free</a>
-            <a class="landing-text-link landing-arrow-link" href="#how-it-works">See how it works <span aria-hidden="true">→</span></a>
+            <a class="landing-text-link landing-arrow-link" href="/how-it-works">See how it works <span aria-hidden="true">→</span></a>
           </div>
           <p class="landing-supporting">Built for the way you already study Japanese.</p>
         </div>
@@ -80,7 +88,7 @@ function hero() {
           </article>
           <article class="hero-card hero-level" data-float="three">
             <span class="demo-label">Starting estimate</span>
-            <strong>N4</strong><span> range</span>
+            <strong class="estimate-value" data-estimate-value data-estimate-delay="0" aria-hidden="true">N4</strong><span aria-hidden="true"> range</span><span class="visually-hidden">Starting estimate, for example N4 range</span>
           </article>
           <article class="hero-card hero-streak" data-float="four">
             <span class="demo-label">Study streak</span>
@@ -152,6 +160,7 @@ function coreFlow() {
             </div>
           </article>
         </div>
+        <p class="flow-more"><a class="landing-text-link landing-arrow-link" href="/how-it-works">See the full flow <span aria-hidden="true">→</span></a></p>
       </div>
     </section>`;
 }
@@ -255,7 +264,8 @@ function onboardingShowcase() {
         <div class="showcase-panel onboarding-demo" aria-hidden="true">
           <div class="placement-card placement-welcome"><span class="demo-label">Welcome</span><h3>Want to estimate your starting point?</h3><p>About 2 minutes</p><span class="demo-action">Start quick placement</span><span class="placement-skip">Skip for now</span></div>
           <div class="placement-card placement-question demo-step" style="--step-delay:1200ms"><span class="demo-label">Quick placement · 3 of 5</span><p lang="ja">毎朝、新聞を＿＿。</p><div><span>読みます</span><span>読んだ</span></div></div>
-          <div class="placement-card placement-result demo-step" style="--step-delay:2800ms"><span class="demo-label">Starting estimate</span><strong>N4 <small>range</small></strong><p>This is a starting estimate, not an official JLPT assessment.</p></div>
+          <p class="placement-preparing demo-step" style="--step-delay:3800ms">Preparing your estimate…</p>
+          <div class="placement-card placement-result demo-step" style="--step-delay:4600ms"><span class="demo-label">Starting estimate</span><strong aria-hidden="true"><span class="estimate-value" data-estimate-value data-estimate-delay="4800" aria-hidden="true">N4</span> <small>range</small></strong><span class="visually-hidden">Starting estimate, for example N4 range</span><p>This is a starting estimate, not an official JLPT assessment.</p></div>
         </div>
       </div>
     </section>`;
@@ -267,7 +277,7 @@ function firstUseDashboard() {
       <div class="landing-container showcase-grid">
         <div class="showcase-copy"><span class="landing-eyebrow">Your first steps</span><h2 id="first-use-title">Know what to do next.</h2><p>NippoTrack guides your first steps, then gradually gets out of the way as your own study data takes over.</p></div>
         <div class="showcase-panel first-use-demo" aria-hidden="true">
-          <div class="first-use-heading demo-step" style="--step-delay:0ms"><div><span class="demo-label">Dashboard</span><h3>Welcome <span>👋</span></h3></div><p><small>Starting estimate</small><strong>N4 range</strong></p></div>
+          <div class="first-use-heading demo-step" style="--step-delay:0ms"><div><span class="demo-label">Dashboard</span><h3>Welcome <span>👋</span></h3></div><p><small>Starting estimate</small><strong aria-hidden="true"><span class="estimate-value" data-estimate-value data-estimate-delay="800" aria-hidden="true">N4</span> range</strong><span class="visually-hidden">Starting estimate, for example N4 range</span></p></div>
           <div class="first-steps demo-step" style="--step-delay:300ms"><h4>Your first steps</h4><ul><li class="is-complete"><span>✓</span> Complete your placement</li><li><span>○</span> Add your first vocabulary</li><li><span>○</span> Analyze your first Japanese sentence</li><li><span>○</span> Log your first study session</li></ul></div>
         </div>
       </div>
@@ -298,14 +308,20 @@ function finalCta() {
     </section>`;
 }
 
-function footer(wordmarkUrl, themeAssets = {}) {
+export function footer(wordmarkUrl, themeAssets = {}, options = {}) {
   const lightSrc = themeAssets.lightSrc || wordmarkUrl;
   const darkSrc = themeAssets.darkSrc || wordmarkUrl;
+  // Same variant contract as navbar(): the dedicated /how-it-works page
+  // reuses this footer with { variant: 'how-it-works' } so Product links
+  // resolve cross-page. Landing defaults stay byte-identical.
+  const isHowItWorks = options.variant === 'how-it-works';
+  const featuresHref = isHowItWorks ? '/#features' : '#features';
+  const howItWorksHref = isHowItWorks ? '/how-it-works' : '#how-it-works';
   return `
     <footer class="landing-footer tone-canvas" id="faq">
       <div class="landing-container footer-grid">
         <div class="footer-brand"><img src="${wordmarkUrl}" data-landing-wordmark data-light-src="${lightSrc}" data-dark-src="${darkSrc}" alt="NippoTrack" width="260" height="88" loading="lazy"></div>
-        <div><h2>Product</h2><a href="#features">Features</a><a href="#how-it-works">How it works</a></div>
+        <div><h2>Product</h2><a href="${featuresHref}">Features</a><a href="${howItWorksHref}">How it works</a></div>
         <div><h2>Resources</h2><span>About the data</span><span>Third-party notices</span></div>
         <div><h2>Legal</h2><span>Privacy</span><span>Terms</span></div>
       </div>

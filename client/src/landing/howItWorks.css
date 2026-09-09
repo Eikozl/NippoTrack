@@ -1,0 +1,1448 @@
+/* NippoTrack /how-it-works page styles.
+   Static foundation only: layout, rhythm, and readable fallbacks.
+   - Colors, shadows, and focus come from landing.css tokens consumed here
+     exclusively via var(--landing-*). No one-off color values.
+   - Type inherits the landing stack (Plus Jakarta Sans / Inter /
+     Noto Sans JP for [lang="ja"]); no new families are introduced.
+   - Chapter visuals and motion scope any initial-hidden state under
+     html.hiw-js so the no-JS final state below always stays readable. */
+
+.hiw-page {
+  color: var(--landing-text);
+  background: var(--landing-canvas);
+}
+
+/* Chapter rhythm placeholders: generous editorial spacing that the
+   visuals/motion pass can hook into without restructuring markup. */
+.hiw-section {
+  padding-block: 128px;
+}
+
+.hiw-narrow {
+  max-width: 860px;
+}
+
+.hiw-wide {
+  max-width: 1120px;
+}
+
+.hiw-center {
+  text-align: center;
+}
+
+.hiw-center .hiw-lede {
+  margin-inline: auto;
+}
+
+.hiw-hero {
+  padding: 72px 0 88px;
+}
+
+.hiw-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  align-items: center;
+  gap: 64px;
+}
+
+.hiw-hero-copy .landing-eyebrow {
+  display: block;
+}
+
+.hiw-page h1 {
+  margin-top: 19px;
+  font-size: clamp(42px, 4.6vw, 60px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.06;
+  text-wrap: balance;
+}
+
+.hiw-page h2 {
+  margin-top: 19px;
+  font-size: clamp(32px, 3.6vw, 44px);
+  font-weight: 650;
+  letter-spacing: -0.025em;
+  line-height: 1.12;
+  text-wrap: balance;
+}
+
+.hiw-lede {
+  max-width: 620px;
+  margin-top: 24px;
+  color: var(--landing-text-secondary);
+  font-size: 18px;
+  line-height: 1.65;
+}
+
+.hiw-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 18px 26px;
+  margin-top: 32px;
+}
+
+.hiw-hero-card {
+  min-width: 0;
+  padding: 28px 30px;
+  border: 1px solid var(--landing-border);
+  border-radius: 24px;
+  background: var(--landing-surface);
+  box-shadow: var(--landing-shadow-large);
+}
+
+.hiw-hero-word {
+  margin-top: 11px;
+  font-size: 42px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+/* Demo mount points: calm placeholder panels. Static fallback copy lives
+   inside each mount; the motion pass layers visuals around it. */
+.hiw-demo {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  max-width: 100%;
+  margin-top: 36px;
+  padding: 26px 28px;
+  border: 1px solid var(--landing-border);
+  border-radius: 20px;
+  background: var(--landing-surface);
+  box-shadow: var(--landing-shadow);
+  overflow-wrap: break-word;
+}
+
+.hiw-sentence {
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.45;
+  overflow-wrap: break-word;
+}
+
+.hiw-gloss {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-top: 12px;
+  color: var(--landing-text-secondary);
+  font-size: 14px;
+}
+
+.hiw-gloss strong {
+  color: var(--landing-text);
+  font-size: 18px;
+}
+
+.hiw-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding-block: 10px;
+  border-top: 1px solid var(--landing-border-subtle);
+  font-size: 15px;
+}
+
+.hiw-field:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.hiw-field span {
+  color: var(--landing-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hiw-field strong {
+  color: var(--landing-text);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.hiw-note {
+  margin-top: 14px;
+  color: var(--landing-text-secondary);
+  font-size: 14px;
+}
+
+.hiw-truth-note {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--landing-border-subtle);
+  color: var(--landing-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.hiw-source-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  margin-top: 28px;
+  padding: 0;
+  list-style: none;
+}
+
+.hiw-source-list li {
+  padding: 6px 12px;
+  border: 1px solid var(--landing-border);
+  border-radius: 999px;
+  color: var(--landing-text-secondary);
+  background: var(--landing-surface);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.hiw-session {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.hiw-session > div {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 14px;
+  padding-block: 10px;
+  border-top: 1px solid var(--landing-border-subtle);
+}
+
+.hiw-session > div:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.hiw-session > div:last-child {
+  padding-bottom: 0;
+}
+
+.hiw-session dt {
+  color: var(--landing-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hiw-session dd {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.hiw-review-word {
+  font-size: 48px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.hiw-truth {
+  margin-top: 28px;
+  color: var(--landing-text);
+  font-size: clamp(22px, 2.6vw, 30px);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.hiw-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hiw-metrics li {
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  min-height: 102px;
+  padding: 14px 16px;
+  border: 1px solid var(--landing-border-subtle);
+  border-radius: 14px;
+  background: var(--landing-surface-muted);
+}
+
+.hiw-metrics span {
+  color: var(--landing-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.hiw-metrics strong {
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.hiw-estimate {
+  margin-top: 12px;
+  color: var(--landing-text-secondary);
+  font-size: 14px;
+}
+
+.hiw-philosophy {
+  padding-block: 120px;
+}
+
+.hiw-statement {
+  font-size: clamp(26px, 3vw, 36px);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.35;
+  text-wrap: balance;
+}
+
+/* Vertical journey thread mount: in-flow editorial companion to the chapters.
+   Scrolls with the page (never fixed/sticky); hidden from assistive tech with
+   a screen-reader text equivalent rendered alongside it in markup. */
+.hiw-thread {
+  position: relative;
+  z-index: 1;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 28px 20px 8px;
+}
+
+.hiw-thread ol {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hiw-thread li {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.hiw-thread span {
+  padding: 4px 10px;
+  border: 1px solid var(--landing-border);
+  border-radius: 999px;
+  color: var(--landing-text-muted);
+  background: var(--landing-surface);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* No-JS final state: every mount renders its fallback copy without
+   JavaScript-driven motion. Any future initial-hidden styling must be
+   scoped under html.hiw-js so this baseline never goes blank. */
+[data-hiw-hero-journey],
+[data-hiw-demo],
+[data-hiw-truth] {
+  opacity: 1;
+}
+
+/* ---- Visual chapters + scripted motion (tokens only) ---- */
+
+html.hiw-js .hiw-step {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+html.hiw-js .is-playing .hiw-step {
+  animation: hiwStepReveal 440ms ease-out var(--step-delay, 0ms) forwards;
+}
+
+html.hiw-js .hiw-paused .hiw-step,
+html.hiw-js .hiw-paused .hiw-jmark {
+  animation-play-state: paused;
+}
+
+@keyframes hiwStepReveal {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Hero journey: compact linear strip, own identity apart from the landing
+   constellation. Fragments settle once (~3s); only the progress mark keeps
+   a very subtle ambient pulse. */
+.hiw-journey {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.hiw-jstep {
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 88px;
+  padding: 10px 12px;
+  border: 1px solid var(--landing-border-subtle);
+  border-radius: 12px;
+  background: var(--landing-surface-muted);
+  font-size: 13px;
+  margin-top: 12px;
+}
+
+.hiw-jstep strong {
+  font-size: 18px;
+}
+
+.hiw-jlabel {
+  color: var(--landing-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hiw-jarrow {
+  align-self: center;
+  color: var(--landing-text-muted);
+  font-size: 14px;
+}
+
+.hiw-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding-inline: 10px;
+  border: 1px solid var(--landing-border);
+  border-radius: 8px;
+  color: var(--landing-text-secondary);
+  background: var(--landing-surface);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.hiw-chip-good {
+  border-color: var(--landing-accent);
+  color: var(--landing-accent-hover);
+  background: var(--landing-accent-soft);
+}
+
+.hiw-jmark {
+  border-color: var(--landing-accent);
+}
+
+html.hiw-js .is-playing .hiw-jmark {
+  animation:
+    hiwStepReveal 440ms ease-out var(--step-delay, 2600ms) forwards,
+    hiwMarkPulse 4.6s ease-in-out 3.4s infinite;
+}
+
+@keyframes hiwMarkPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.92;
+  }
+}
+
+.hiw-journey-caption {
+  margin-top: 12px;
+  color: var(--landing-text-muted);
+  font-size: 13px;
+}
+
+/* Ch1 placement: centered stage card. */
+.hiw-demo-stage {
+  text-align: left;
+}
+
+.hiw-placement {
+  display: grid;
+  gap: 14px;
+  max-width: 520px;
+  margin-inline: auto;
+}
+
+.hiw-p-card,
+.hiw-p-q,
+.hiw-p-result {
+  padding: 18px;
+  border: 1px solid var(--landing-border-subtle);
+  border-radius: 14px;
+  background: var(--landing-surface-muted);
+}
+
+.hiw-p-title {
+  margin-top: 8px;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.hiw-p-qs {
+  display: grid;
+  gap: 10px;
+}
+
+.hiw-p-prompt {
+  margin-top: 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.hiw-p-opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.hiw-p-opts span {
+  padding: 6px 12px;
+  border: 1px solid var(--landing-border);
+  border-radius: 8px;
+  color: var(--landing-text-secondary);
+  background: var(--landing-surface);
+  font-size: 14px;
+}
+
+.hiw-p-processing {
+  color: var(--landing-accent);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.hiw-p-result {
+  text-align: center;
+}
+
+.hiw-p-result strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 44px;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.hiw-p-result small {
+  color: var(--landing-text-secondary);
+  font-size: 16px;
+  font-weight: 500;
+}
+
+/* Ch2 encounter: editorial panel, brought-in token (no drag implication). */
+.hiw-demo-editorial {
+  margin-top: 28px;
+  padding: 30px;
+}
+
+.hiw-hit {
+  margin-inline: -2px;
+  padding-inline: 2px;
+  border-radius: 4px;
+  background-color: transparent;
+}
+
+html.hiw-js .is-playing .hiw-hit {
+  animation: hiwHitBeat 600ms ease-out var(--step-delay, 1800ms) forwards;
+}
+
+@keyframes hiwHitBeat {
+  0% {
+    background-color: transparent;
+  }
+  35% {
+    background-color: var(--landing-accent-soft);
+  }
+  100% {
+    background-color: var(--landing-accent-soft);
+  }
+}
+
+.hiw-capture {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--landing-border-subtle);
+}
+
+.hiw-capture-token {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 8px 14px;
+  border: 1px solid var(--landing-accent);
+  border-radius: 10px;
+  background: var(--landing-accent-soft);
+}
+
+.hiw-capture-token strong {
+  color: var(--landing-text);
+  font-size: 18px;
+}
+
+.hiw-capture-note {
+  color: var(--landing-text-secondary);
+  font-size: 13px;
+}
+
+/* Ch3 analyzer: wide workspace, larger than the landing panel. */
+.hiw-demo-workspace {
+  padding: 0 30px 26px;
+}
+
+.hiw-ws-bar {
+  display: flex;
+  height: 54px;
+  align-items: center;
+  gap: 7px;
+  margin-inline: -30px;
+  padding: 0 23px;
+  border-bottom: 1px solid var(--landing-border-subtle);
+  color: var(--landing-text-muted);
+}
+
+.hiw-ws-bar > span {
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--landing-border);
+  border-radius: 999px;
+}
+
+.hiw-ws-bar b {
+  margin-left: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hiw-demo-workspace .hiw-sentence {
+  margin-top: 22px;
+}
+
+.hiw-analyzing {
+  margin-top: 6px;
+  color: var(--landing-accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+html.hiw-js .is-playing .hiw-analyzing {
+  animation: hiwAnalyzeSettle 2100ms ease-out 500ms forwards;
+}
+
+@keyframes hiwAnalyzeSettle {
+  0% {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  18%,
+  70% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+
+.hiw-cands {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.hiw-cand {
+  padding: 6px 12px;
+  border: 1px solid var(--landing-border);
+  border-radius: 8px;
+  color: var(--landing-text-secondary);
+  background: var(--landing-surface-muted);
+  font-size: 14px;
+}
+
+.hiw-cand-active {
+  border-color: var(--landing-accent);
+  color: var(--landing-accent-hover);
+  background: var(--landing-accent-soft);
+}
+
+.hiw-result {
+  display: grid;
+  grid-template-columns: 0.9fr 1.1fr;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 16px 18px;
+  border: 1px solid var(--landing-border-subtle);
+  border-radius: 14px;
+  background: var(--landing-surface-muted);
+}
+
+.hiw-result > div {
+  display: grid;
+  align-content: start;
+}
+
+.hiw-result strong {
+  font-size: 23px;
+}
+
+.hiw-result span,
+.hiw-result small {
+  color: var(--landing-text-muted);
+  font-size: 12px;
+}
+
+.hiw-result b {
+  margin-top: 6px;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.hiw-actionrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 22px;
+  margin-bottom: 6px;
+}
+
+.hiw-action {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  padding-inline: 16px;
+  border-radius: 10px;
+  color: var(--landing-surface);
+  background: var(--landing-accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Ch4 autofill: narrow focused form. */
+.hiw-demo-form {
+  padding: 24px;
+}
+
+.hiw-form-card {
+  display: grid;
+  max-width: 520px;
+  margin-inline: auto;
+  text-align: left;
+}
+
+.hiw-lookup {
+  margin-top: 6px;
+  color: var(--landing-accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.hiw-prov {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.hiw-prov-tag {
+  padding: 3px 8px;
+  border: 1px solid var(--landing-border);
+  border-radius: 7px;
+  color: var(--landing-accent-hover);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.hiw-prov small {
+  color: var(--landing-text-muted);
+  font-size: 11px;
+}
+
+.hiw-ready {
+  margin-top: 18px;
+  color: var(--landing-success);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.hiw-confirm {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 10px 12px;
+  border: 1px dashed var(--landing-border);
+  border-radius: 10px;
+  color: var(--landing-text-secondary);
+  font-size: 13px;
+}
+
+.hiw-form-card > .hiw-note {
+  margin-top: 18px;
+}
+
+.hiw-confirm-box {
+  position: relative;
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--landing-accent);
+  border-radius: 6px;
+  background: var(--landing-accent-soft);
+}
+
+.hiw-confirm-box::after {
+  content: "✓";
+  color: var(--landing-accent-hover);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  opacity: 0;
+  transform: scale(0.6);
+}
+
+html.hiw-js .is-playing .hiw-confirm-box::after {
+  animation: hiwCheckSettle 420ms ease-out var(--step-delay, 3000ms) forwards;
+}
+
+@keyframes hiwCheckSettle {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Ch5 connections: wide relationship diagram, most distinctive chapter. */
+.hiw-demo-connect {
+  padding: 30px;
+}
+
+.hiw-connect-diagram {
+  display: grid;
+  grid-template-columns: 1fr minmax(48px, 90px) 1fr minmax(48px, 90px) 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.hiw-node {
+  display: grid;
+  gap: 4px;
+  padding: 16px;
+  border: 1px solid var(--landing-border-subtle);
+  border-radius: 14px;
+  background: var(--landing-surface-muted);
+  text-align: center;
+}
+
+.hiw-node strong {
+  font-size: 30px;
+}
+
+.hiw-node span {
+  color: var(--landing-text-secondary);
+  font-size: 13px;
+}
+
+.hiw-node-center {
+  border-color: var(--landing-accent);
+}
+
+.hiw-node-center strong {
+  font-size: 44px;
+}
+
+.hiw-link {
+  display: block;
+  width: 100%;
+  height: 24px;
+  overflow: visible;
+}
+
+.hiw-link line {
+  stroke: var(--landing-border);
+  stroke-width: 1.5;
+}
+
+html.hiw-js .hiw-link line {
+  stroke-dasharray: 200;
+  stroke-dashoffset: 200;
+}
+
+html.hiw-js .is-playing .hiw-link-one line {
+  animation: hiwDrawLine 600ms ease-out 600ms forwards;
+}
+
+html.hiw-js .is-playing .hiw-link-two line {
+  animation: hiwDrawLine 600ms ease-out 1500ms forwards;
+}
+
+@keyframes hiwDrawLine {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.hiw-node-readings {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 18px;
+  margin-top: 6px;
+  color: var(--landing-text-secondary);
+  font-size: 14px;
+}
+
+.hiw-node-readings b {
+  color: var(--landing-text);
+}
+
+.hiw-connect-list {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--landing-border-subtle);
+}
+
+/* Ch6 session: session card plus activity timeline. */
+.hiw-demo-session {
+  display: grid;
+  gap: 14px;
+}
+
+.hiw-duration dd {
+  color: var(--landing-accent-hover);
+}
+
+.hiw-logged {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--landing-success);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.hiw-timeline {
+  display: flex;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--landing-border-subtle);
+  border-radius: 12px;
+  background: var(--landing-surface-muted);
+}
+
+.hiw-timeline span {
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--landing-border);
+  border-radius: 999px;
+  background: var(--landing-surface);
+}
+
+.hiw-timeline .hiw-tick-new {
+  border-color: var(--landing-accent);
+  background: var(--landing-accent);
+}
+
+/* Ch7 review: centered focused stage, darker via surface-muted tokens. */
+.hiw-demo-review {
+  padding: 26px;
+}
+
+.hiw-review-stage {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  max-width: 460px;
+  margin-inline: auto;
+  padding: 30px 26px;
+  border: 1px solid var(--landing-border);
+  border-radius: 18px;
+  background: var(--landing-surface-muted);
+  text-align: center;
+}
+
+.hiw-reveal {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  margin-top: 14px;
+  padding-inline: 16px;
+  border: 1px solid var(--landing-border);
+  border-radius: 10px;
+  color: var(--landing-text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--landing-surface);
+}
+
+.hiw-answer {
+  justify-content: center;
+  margin-top: 14px;
+}
+
+.hiw-rating {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  width: min(100%, 340px);
+  margin-top: 16px;
+}
+
+.hiw-rating span {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border: 1px solid var(--landing-border);
+  border-radius: 9px;
+  color: var(--landing-text-secondary);
+  background: var(--landing-surface);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.hiw-rating .hiw-good {
+  border-color: var(--landing-accent);
+  color: var(--landing-accent-hover);
+  background: var(--landing-accent-soft);
+}
+
+html.hiw-js .is-playing .hiw-good {
+  animation: hiwGoodBeat 500ms ease-out var(--step-delay, 2300ms) forwards;
+}
+
+@keyframes hiwGoodBeat {
+  0% {
+    box-shadow: 0 0 0 0 var(--landing-accent-soft);
+  }
+  35% {
+    box-shadow: 0 0 0 3px var(--landing-accent-soft);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+/* Ch8 progress: full-width panel, larger than the landing demo. */
+.hiw-demo-progress {
+  padding: 30px;
+}
+
+.hiw-chart {
+  margin-top: 18px;
+  padding: 18px 18px 8px;
+  border: 1px solid var(--landing-border-subtle);
+  border-radius: 14px;
+  background: var(--landing-surface);
+}
+
+.hiw-chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--landing-text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.hiw-chart-head small {
+  color: var(--landing-text-muted);
+  font-weight: 500;
+}
+
+.hiw-chart svg {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: 180px;
+  margin-top: 8px;
+  overflow: visible;
+}
+
+.hiw-grid {
+  fill: none;
+  stroke: var(--landing-border-subtle);
+  stroke-width: 1;
+}
+
+.hiw-area {
+  fill: var(--landing-accent-soft);
+  stroke: none;
+}
+
+.hiw-line {
+  fill: none;
+  stroke: var(--landing-accent);
+  stroke-linecap: round;
+  stroke-width: 3;
+}
+
+html.hiw-js .hiw-line {
+  stroke-dasharray: 1100;
+  stroke-dashoffset: 1100;
+}
+
+html.hiw-js .hiw-area {
+  opacity: 0;
+}
+
+html.hiw-js .is-playing .hiw-line {
+  animation: hiwDrawLine 1.9s ease-out 900ms forwards;
+}
+
+html.hiw-js .is-playing .hiw-area {
+  opacity: 1;
+  transition: opacity 900ms ease-out 1600ms;
+}
+
+/* Journey thread: thin in-flow editorial line, nodes activate once per chapter.
+   The 1px line is absolutely positioned inside the relatively-positioned
+   in-flow thread block, so it scrolls with the page between chapters. */
+.hiw-thread-line {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 50%;
+  width: 1px;
+  margin-left: -0.5px;
+  background: var(--landing-border);
+}
+
+.hiw-thread ol {
+  position: relative;
+}
+
+.hiw-thread li:nth-child(odd) {
+  transform: translateX(2px);
+}
+
+.hiw-thread li:nth-child(even) {
+  transform: translateX(-2px);
+}
+
+.hiw-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  padding: 0;
+  border: 1px solid var(--landing-border);
+  border-radius: 999px;
+  background: var(--landing-surface);
+}
+
+.hiw-thread li.is-active .hiw-dot {
+  border-color: var(--landing-accent);
+  background: var(--landing-accent);
+}
+
+.hiw-thread li.is-active span:last-child {
+  border-color: var(--landing-accent);
+  color: var(--landing-accent-hover);
+}
+
+@media (max-width: 1100px) {
+  .hiw-hero-grid {
+    gap: 44px;
+  }
+
+  .hiw-demo-connect {
+    padding: 26px;
+  }
+
+  .hiw-connect-diagram {
+    grid-template-columns: 1fr minmax(40px, 64px) 1fr minmax(40px, 64px) 1fr;
+    gap: 6px;
+  }
+
+  .hiw-demo-workspace {
+    padding: 0 26px 24px;
+  }
+
+  .hiw-demo-workspace .hiw-ws-bar {
+    margin-inline: -26px;
+  }
+
+  .hiw-thread {
+    max-width: 720px;
+    padding: 20px 16px 4px;
+  }
+
+  .hiw-thread ol {
+    gap: 8px;
+  }
+}
+
+@media (max-width: 900px) {
+  .hiw-hero-grid {
+    grid-template-columns: 1fr;
+    gap: 36px;
+  }
+
+  .hiw-section {
+    padding-block: 96px;
+  }
+
+  .hiw-philosophy {
+    padding-block: 96px;
+  }
+
+  .hiw-metrics {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .hiw-connect-diagram {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .hiw-link {
+    width: 1px;
+    height: 28px;
+    margin-inline: auto;
+  }
+
+  .hiw-result {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .hiw-demo-workspace {
+    padding-inline: 23px;
+  }
+
+  .hiw-demo-workspace .hiw-ws-bar {
+    margin-inline: -23px;
+  }
+}
+
+@media (max-width: 767px) {
+  .hiw-hero {
+    padding: 58px 0 64px;
+  }
+
+  .hiw-page h1 {
+    font-size: 38px;
+    line-height: 1.1;
+  }
+
+  .hiw-page h2 {
+    font-size: 30px;
+    line-height: 1.15;
+  }
+
+  .hiw-lede {
+    font-size: 17px;
+  }
+
+  .hiw-section {
+    padding-block: 72px;
+  }
+
+  .hiw-demo {
+    padding: 20px;
+  }
+
+  .hiw-demo-editorial,
+  .hiw-demo-connect,
+  .hiw-demo-progress {
+    padding: 20px;
+  }
+
+  .hiw-demo-workspace {
+    padding: 0 20px 20px;
+  }
+
+  .hiw-demo-workspace .hiw-ws-bar {
+    margin-inline: -20px;
+  }
+
+  .hiw-sentence {
+    font-size: 22px;
+  }
+
+  .hiw-review-word {
+    font-size: 40px;
+  }
+
+  .hiw-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .hiw-metrics li {
+    min-height: 86px;
+  }
+
+  .hiw-philosophy {
+    padding-block: 88px;
+  }
+
+  .hiw-statement {
+    font-size: 26px;
+  }
+
+  .hiw-journey {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .hiw-jarrow {
+    justify-self: center;
+    transform: rotate(90deg);
+  }
+
+  .hiw-session > div {
+    grid-template-columns: 96px 1fr;
+  }
+
+  .hiw-review-stage {
+    padding: 24px 18px;
+  }
+
+  .hiw-chart svg {
+    height: 150px;
+  }
+
+  .hiw-p-result strong {
+    font-size: 38px;
+  }
+
+  .hiw-thread {
+    max-width: 100%;
+    padding: 16px 12px 4px;
+  }
+
+  .hiw-thread ol {
+    gap: 6px;
+  }
+
+  .hiw-thread li:nth-child(odd),
+  .hiw-thread li:nth-child(even) {
+    transform: none;
+  }
+
+  .hiw-thread li span:last-child {
+    padding: 3px 8px;
+    font-size: 10px;
+  }
+
+  .hiw-dot {
+    width: 6px;
+    height: 6px;
+  }
+}
+
+@media (max-width: 479px) {
+  .hiw-connect-diagram {
+    gap: 8px;
+  }
+
+  .hiw-node strong {
+    font-size: 26px;
+  }
+
+  .hiw-node-center strong {
+    font-size: 38px;
+  }
+
+  .hiw-rating {
+    gap: 7px;
+  }
+
+  .hiw-rating span {
+    min-width: 0;
+  }
+
+  .hiw-action {
+    min-height: 44px;
+  }
+
+  .hiw-p-card,
+  .hiw-p-q,
+  .hiw-p-result {
+    padding: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Static foundation ships no motion; this guard pins the final state
+     for anything the later visuals/motion pass introduces. */
+  .hiw-page *,
+  .hiw-page *::before,
+  .hiw-page *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  [data-hiw-hero-journey],
+  [data-hiw-demo],
+  [data-hiw-thread],
+  [data-hiw-truth] {
+    opacity: 1;
+  }
+
+  html.hiw-js .hiw-step {
+    opacity: 1;
+    transform: none;
+  }
+
+  html.hiw-js .hiw-hit {
+    background-color: var(--landing-accent-soft);
+  }
+
+  html.hiw-js .hiw-line {
+    stroke-dashoffset: 0;
+  }
+
+  html.hiw-js .hiw-area {
+    opacity: 1;
+  }
+
+  html.hiw-js .hiw-link line {
+    stroke-dashoffset: 0;
+  }
+
+  html.hiw-js .hiw-analyzing {
+    opacity: 0;
+  }
+
+  html.hiw-js .hiw-good {
+    box-shadow: none;
+  }
+
+  html.hiw-js .hiw-jmark {
+    animation: none;
+  }
+
+  html.hiw-js .hiw-confirm-box::after {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}

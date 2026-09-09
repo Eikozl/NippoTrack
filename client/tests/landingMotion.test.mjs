@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import {
+  ESTIMATE_LEVELS,
+  ESTIMATE_ROTATE_MS,
   HERO_ERASE_MS_PER_CHAR,
   HERO_HEADLINES,
   HERO_HOLDS_IN_ORDER,
@@ -11,9 +13,12 @@ import {
   HERO_HOLD_MAIN,
   HERO_HOLD_MAIN_FIRST,
   HERO_TYPE_MS_PER_CHAR,
+  ONBOARDING_STAGED_TOTAL_MS,
   counterValue,
   heroHoldForLine,
+  initEstimateRotation,
   initHeroTyping,
+  shuffledEstimateLevels,
 } from '../src/landing/interactions.js';
 
 const sectionsSource = readFileSync(new URL('../src/landing/sections.js', import.meta.url), 'utf8');
@@ -201,4 +206,52 @@ test('how-it-works reduced-motion and no-JS complete to a readable final state',
   assert.ok(cssSource.includes('.landing-js .flow-connector'));
   assert.ok(!cssSource.includes('.flow-sentence-hit {opacity: 0'));
   assert.ok(interactionsSource.includes('prefers-reduced-motion'));
+});
+
+test('starting-estimate rotation shuffles without repeats on a restrained interval', () => {
+  assert.deepEqual([...ESTIMATE_LEVELS].sort(), ['N1', 'N2', 'N3', 'N4', 'N5']);
+  assert.ok(ESTIMATE_ROTATE_MS >= 1000 && ESTIMATE_ROTATE_MS <= 2000, 'interval stays ~1-2s');
+  for (let round = 0; round < 25; round++) {
+    const order = shuffledEstimateLevels(round === 0 ? undefined : 'N4');
+    assert.equal(order.length, 5);
+    assert.deepEqual([...order].sort(), ['N1', 'N2', 'N3', 'N4', 'N5']);
+    if (round > 0) assert.notEqual(order[0], 'N4', 'no immediate repeat across rounds');
+  }
+  let last = 'N4';
+  for (let round = 0; round < 10; round++) {
+    const order = shuffledEstimateLevels(last);
+    assert.notEqual(order[0], last);
+    last = order[order.length - 1];
+  }
+  assert.equal(typeof initEstimateRotation, 'function');
+  assert.ok(interactionsSource.includes('IntersectionObserver'), 'offscreen gating present');
+  assert.ok(interactionsSource.includes('visibilitychange'), 'hidden-tab gating present');
+  assert.ok(interactionsSource.includes("matchMedia('(prefers-reduced-motion: reduce)')"), 'reduced-motion fallback present');
+  // Width-lock + fade only (no slot-machine motion).
+  assert.ok(cssSource.includes('.estimate-value'));
+  assert.ok(cssSource.includes('min-width: 2.2ch'));
+  assert.ok(cssSource.includes('tabular-nums'));
+  assert.ok(cssSource.includes('.estimate-value.is-switching'));
+  assert.ok(!cssSource.toLowerCase().includes('slot-machine'));
+});
+
+test('quick assessment stages to ~5.5s with a preparing beat and untouched neighbors', () => {
+  assert.ok(ONBOARDING_STAGED_TOTAL_MS >= 4500 && ONBOARDING_STAGED_TOTAL_MS <= 6000, 'total stays 4.5-6s');
+  assert.ok(sectionsSource.includes('placement-preparing'), 'preparing state hook present');
+  assert.ok(sectionsSource.includes('Preparing your estimate'), 'preparing beat copy present');
+  assert.ok(sectionsSource.includes('--step-delay:3800ms'), 'preparing stages before the reveal');
+  assert.ok(sectionsSource.includes('--step-delay:4600ms'), 'estimate reveal lands with the longer arc');
+  assert.ok(cssSource.includes('@keyframes placementPreparing'), 'preparing keyframes present');
+  assert.ok(cssSource.includes('placementWelcome 5.5s'), 'welcome stretches with the arc');
+  assert.ok(cssSource.includes('placementQuestion 5.5s'), 'question stretches with the arc');
+  assert.ok(cssSource.includes('placementResult 5.5s'), 'result reveals at the longer total');
+  assert.ok(sectionsSource.includes('Starting estimate, for example N4 range'), 'sr-only example label present');
+  assert.ok(sectionsSource.includes('not an official JLPT assessment'), 'disclaimer preserved');
+  assert.ok(!sectionsSource.toLowerCase().includes('confidence'), 'no confidence language');
+  // Other demos keep their restrained timings.
+  assert.ok(cssSource.includes('analyzeThenSettle 2100ms'), 'analyzer timing untouched');
+  assert.ok(cssSource.includes('typeWord 550ms'), 'vocabulary timing untouched');
+  const reduced = cssSource.slice(cssSource.indexOf('@media (prefers-reduced-motion: reduce)'));
+  assert.ok(reduced.includes('.placement-preparing'), 'reduced-motion resolves the new beat');
+  assert.ok(reduced.includes('.estimate-value.is-switching'), 'reduced-motion holds the estimate static');
 });

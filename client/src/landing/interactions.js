@@ -27,6 +27,197 @@ export function heroHoldForLine(lineIndex, isFirstMain = false) {
   return HERO_HOLD_ALT_TWO;
 }
 
+// Starting-estimate rotation (landing + how-it-works share this helper).
+// Presentation-only: cycles example levels, never a diagnosis. The visible
+// value stays aria-hidden with a static sr-only example label in markup;
+// width-lock + fade live in landing.css (.estimate-value).
+export const ESTIMATE_LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1'];
+export const ESTIMATE_ROTATE_MS = 1600;
+export const ESTIMATE_FADE_MS = 240;
+export const ONBOARDING_STAGED_TOTAL_MS = 5500;
+
+export function shuffledEstimateLevels(excludeFirst) {
+  const pool = [...ESTIMATE_LEVELS];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  if (excludeFirst != null && pool[0] === excludeFirst && pool.length > 1) {
+    const k = 1 + Math.floor(Math.random() * (pool.length - 1));
+    [pool[0], pool[k]] = [pool[k], pool[0]];
+  }
+  return pool;
+}
+
+export function initEstimateRotation(scope, options = {}) {
+  const noop = () => {};
+  if (!scope || typeof scope.querySelectorAll !== 'function') return noop;
+  try {
+    const prefersReduced =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (options.reducedMotion ?? prefersReduced) return noop;
+  } catch {
+    return noop;
+  }
+  if (typeof window === 'undefined' || !('IntersectionObserver' in window)) return noop;
+  const nodes = [...scope.querySelectorAll('[data-estimate-value]')];
+  if (nodes.length === 0) return noop;
+  const cleanups = [];
+  let visible = true;
+  try {
+    visible = typeof document === 'undefined' ? true : !document.hidden;
+  } catch {
+    visible = true;
+  }
+  const onVisibility = () => {
+    try {
+      visible = !document.hidden;
+    } catch {
+      visible = true;
+    }
+  };
+  try {
+    document.addEventListener('visibilitychange', onVisibility);
+  } catch {
+    // Gating is progressive enhancement.
+  }
+  cleanups.push(() => {
+    try {
+      document.removeEventListener('visibilitychange', onVisibility);
+    } catch {
+      // Removal is careful.
+    }
+  });
+  nodes.forEach((node) => {
+    let order = shuffledEstimateLevels((node.textContent || '').trim() || undefined);
+    let index = 0;
+    let timer = 0;
+    let delayTimer = 0;
+    let started = false;
+    let intersecting = false;
+    const step = () => {
+      if (!visible || !intersecting) return;
+      try {
+        if (typeof document !== 'undefined' && document.hidden) return;
+      } catch {
+        // Visibility guard is progressive enhancement.
+      }
+      try {
+        node.classList.add('is-switching');
+      } catch {
+        // Class toggle is enhancement.
+      }
+      window.setTimeout(() => {
+        if (!visible) {
+          try {
+            node.classList.remove('is-switching');
+          } catch {
+            // Cleanup is careful.
+          }
+          return;
+        }
+        const next = order[index % order.length];
+        index += 1;
+        if (index % order.length === 0) order = shuffledEstimateLevels(next);
+        try {
+          node.textContent = next;
+        } catch {
+          // Text swap is careful.
+        }
+        try {
+          if (typeof window.requestAnimationFrame === 'function') {
+            window.requestAnimationFrame(() => {
+              try {
+                node.classList.remove('is-switching');
+              } catch {
+                // Cleanup is careful.
+              }
+            });
+          } else {
+            node.classList.remove('is-switching');
+          }
+        } catch {
+          // Cleanup is careful.
+        }
+      }, ESTIMATE_FADE_MS);
+    };
+    const begin = () => {
+      if (started) return;
+      started = true;
+      timer = window.setInterval(step, ESTIMATE_ROTATE_MS);
+      cleanups.push(() => {
+        try {
+          window.clearInterval(timer);
+        } catch {
+          // Clear is careful.
+        }
+      });
+    };
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          intersecting = !!entry.isIntersecting;
+          if (!intersecting) return;
+          const delay = Number(node.getAttribute('data-estimate-delay') || '0') || 0;
+          if (delay > 0 && !started) {
+            delayTimer = window.setTimeout(begin, delay);
+            cleanups.push(() => {
+              try {
+                window.clearTimeout(delayTimer);
+              } catch {
+                // Clear is careful.
+              }
+            });
+          } else {
+            begin();
+          }
+        });
+      },
+      { threshold: 0.35 }
+    );
+    try {
+      observer.observe(node);
+    } catch {
+      // Observe is enhancement.
+    }
+    cleanups.push(() => {
+      try {
+        observer.disconnect();
+      } catch {
+        // Disconnect is careful.
+      }
+    });
+  });
+  try {
+    window.addEventListener(
+      'pagehide',
+      () => {
+        cleanups.forEach((fn) => {
+          try {
+            fn();
+          } catch {
+            // Cleanup is careful.
+          }
+        });
+      },
+      { once: true }
+    );
+  } catch {
+    // pagehide guard is progressive enhancement.
+  }
+  return () => {
+    cleanups.forEach((fn) => {
+      try {
+        fn();
+      } catch {
+        // Cleanup is careful.
+      }
+    });
+  };
+}
+
 export function initHeroTyping(root) {
   const noop = () => {};
   try {
