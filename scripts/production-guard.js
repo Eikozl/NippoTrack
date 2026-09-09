@@ -196,6 +196,27 @@ function assertSafeDbTarget({ host, user, source = 'explicit target' } = {}) {
   return { host: host === undefined ? null : String(host), user: user === undefined ? null : String(user), source };
 }
 
+// Optional stricter guard for one-off administrative work. When an expected
+// project ref is supplied, at least one non-secret identity field must resolve
+// to it and no resolvable field may point elsewhere. This is intentionally
+// opt-in so ordinary local development keeps its existing safe-local support.
+function assertExpectedDbTarget({ host, user, expectedRef = process.env.JLT_EXPECTED_SUPABASE_PROJECT_REF, source = 'explicit target' } = {}) {
+  const safe = assertSafeDbTarget({ host, user, source });
+  if (expectedRef === undefined || expectedRef === null || String(expectedRef).trim() === '') {
+    return { ...safe, expectedRef: null, resolvedRef: null };
+  }
+  const expected = String(expectedRef).trim().toLowerCase();
+  if (!/^[a-z0-9]{20}$/.test(expected)) throw new Error('Expected Supabase project ref must be a 20-character lowercase identifier.');
+  const resolved = [...new Set([extractSupabaseRef(host), extractSupabaseRef(user)].filter(Boolean))];
+  if (!resolved.length) {
+    throw new Error(`Refusing database command: could not resolve the expected Supabase project ref '${expected}' from ${source}; refusing before any database connection.`);
+  }
+  if (resolved.length !== 1 || resolved[0] !== expected) {
+    throw new Error(`Refusing database command: expected Supabase project ref '${expected}' but resolved '${resolved.join(',')}' from ${source}; refusing before any database connection.`);
+  }
+  return { ...safe, expectedRef: expected, resolvedRef: resolved[0] };
+}
+
 module.exports = {
   PRODUCTION_PROJECT_REF,
   REFUSAL_MESSAGE,
@@ -207,6 +228,7 @@ module.exports = {
   resolveDevelopmentIdentity,
   assertSafeDevelopmentEnvironment,
   assertSafeDbTarget,
+  assertExpectedDbTarget,
   resolveClientSupabaseUrl,
   assertSafeClientEnvironment,
   assertAlignedEnvironments

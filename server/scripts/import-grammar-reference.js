@@ -1,7 +1,9 @@
 const pool = require('../src/config/postgres');
+const { assertExpectedDbTarget } = require('../../scripts/production-guard');
 const { importGrammarReferences } = require('../src/services/grammarReferenceStore');
 
 async function main() {
+  assertExpectedDbTarget({ host: process.env.POSTGRES_HOST, user: process.env.POSTGRES_USER, source: process.env.POSTGRES_ENV_FILE || '.env.postgres' });
   const client = await pool.connect();
   try { await client.query('BEGIN'); console.log(JSON.stringify(await importGrammarReferences(client))); await client.query('COMMIT'); }
   catch (error) { await client.query('ROLLBACK').catch(() => undefined); throw error; }

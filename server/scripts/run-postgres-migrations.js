@@ -2,10 +2,12 @@ const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const pool = require('../src/config/postgres');
+const { assertExpectedDbTarget } = require('../../scripts/production-guard');
 const migrationsDirectory = path.join(__dirname, '../db/migrations-postgres');
 const migrationPattern = /^\d{3}_[a-z0-9_]+\.sql$/;
 
 async function main() {
+  assertExpectedDbTarget({ host: process.env.POSTGRES_HOST, user: process.env.POSTGRES_USER, source: process.env.POSTGRES_ENV_FILE || '.env.postgres' });
   const target = process.argv[2] || process.env.POSTGRES_MIGRATION_TO;
   if (target && !migrationPattern.test(target)) throw new Error('Migration target must be a valid migration filename.');
   const available = (await fs.readdir(migrationsDirectory)).filter((name) => migrationPattern.test(name)).sort();

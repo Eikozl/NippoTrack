@@ -1,4 +1,5 @@
 const pool = require('../src/config/postgres');
+const { assertExpectedDbTarget } = require('../../scripts/production-guard');
 
 const applicationTables = `
   SELECT c.oid, c.relname, c.relrowsecurity AS rls_enabled, c.relforcerowsecurity AS rls_forced,
@@ -63,6 +64,7 @@ function expectedRuntimePrivileges(tableName) {
 
 async function main() {
   try {
+    assertExpectedDbTarget({ host: process.env.POSTGRES_HOST, user: process.env.POSTGRES_USER, source: process.env.POSTGRES_ENV_FILE || '.env.postgres' });
     const [roleResult, tablesResult, ownershipResult, policiesResult, apiTablePrivileges, apiSequencePrivileges, publicPrivileges, functionsResult, triggerFunctions, defaultPrivileges, schemaPrivileges, migrationPrivileges, runtimeTablePrivileges, runtimeSequencePrivileges] = await Promise.all([
       pool.query(`SELECT rolname, rolcanlogin, rolsuper, rolcreaterole, rolcreatedb, rolreplication, rolbypassrls, rolinherit FROM pg_roles WHERE rolname = 'jlt_runtime'`),
       pool.query(applicationTables),

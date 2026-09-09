@@ -261,3 +261,27 @@ test('direct DB target: integration and loopback targets are allowed', () => {
   const localhost = guard.assertSafeDbTarget({ host: 'localhost', user: 'postgres', source: 'local test' });
   assert.equal(localhost.host, 'localhost');
 });
+
+test('exact DB target guard requires one resolvable identity equal to the declared ref', () => {
+  const verified = guard.assertExpectedDbTarget({
+    host: 'aws-0-us-west-2.pooler.supabase.com',
+    user: `postgres.${SAFE}`,
+    expectedRef: SAFE,
+    source: 'integration admin config'
+  });
+  assert.equal(verified.resolvedRef, SAFE);
+  assert.equal(verified.expectedRef, SAFE);
+
+  assert.throws(
+    () => guard.assertExpectedDbTarget({ host: 'aws-0-us-west-2.pooler.supabase.com', user: 'postgres', expectedRef: SAFE, source: 'integration admin config' }),
+    /could not resolve the expected Supabase project ref/
+  );
+  assert.throws(
+    () => guard.assertExpectedDbTarget({ host: 'aws-0-us-west-2.pooler.supabase.com', user: 'postgres.abcdefghijklmnopqrst', expectedRef: SAFE, source: 'integration admin config' }),
+    /expected Supabase project ref/
+  );
+  assert.throws(
+    () => guard.assertExpectedDbTarget({ host: 'aws-0-us-west-2.pooler.supabase.com', user: `postgres.${PROD}`, expectedRef: SAFE, source: 'integration admin config' }),
+    /Production project ref/
+  );
+});
