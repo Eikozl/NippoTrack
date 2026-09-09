@@ -101,6 +101,10 @@ export const ENTITY_CONFIGS = {
           ...(example.translation ? [element('p', { className: 'mt-2 text-sm text-muted', text: example.translation })] : []),
           element('button', { className: 'button-secondary mt-3 min-h-9 px-3 py-1.5', text: 'Edit example', attrs: { type: 'button', 'data-example-action': 'edit', 'data-example-id': example.id_usage_example } })
         ]))) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No examples recorded yet.' })
+      ]),
+      element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'data-grammar-example-context': 'true' } }, [
+        element('h3', { className: 'font-semibold text-ink', text: 'Grammar in your examples' }),
+        element('p', { className: 'mt-2 text-sm text-muted', text: 'Loading grammar detected in saved examples…' })
       ])
     ])},
     fields: [
@@ -272,7 +276,11 @@ renderDetail: (item) => {
       ]),
       ...(item.structure ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Structure' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: item.structure })])] : []),
       ...(item.example ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Example' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: item.example })])] : []),
-      ...(item.notes ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Notes' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: item.notes })])] : [])
+      ...(item.notes ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Notes' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: item.notes })])] : []),
+      element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'data-vocabulary-example-context': 'true' } }, [
+        element('h3', { className: 'font-semibold text-ink', text: 'Vocabulary in this example' }),
+        element('p', { className: 'mt-2 text-sm text-muted', text: 'Loading vocabulary found in this saved example…' })
+      ])
     ]),
     fields: [
       { name: 'grammar_point', label: 'Grammar point', required: true, maxLength: 100 },
@@ -743,6 +751,67 @@ export function renderEntityPage(container, config) {
         });
       }
       openDialog({ title: `${config.title} detail`, content: [content], submitLabel: 'Close', ...(config === ENTITY_CONFIGS.kanji ? { panelClass: 'dialog-panel--kanji-detail' } : {}), onSubmit: async (form, close) => close() });
+      const grammarSlot = content.querySelector('[data-grammar-example-context]');
+      if (grammarSlot && config === ENTITY_CONFIGS.vocabulary) {
+        const openGrammarReferenceDialog = (reference) => {
+          const structure = (reference.structures || []).map((item) => typeof item === 'string' ? item : (item.pattern || item.structure || '')).filter(Boolean).join('\n');
+          openDialog({
+            title: `Add ${reference.grammarPoint} to Grammar`,
+            content: [
+              field({ name: 'grammar_point', label: 'Grammar point', required: true, maxLength: 100, value: reference.grammarPoint }),
+              field({ name: 'meaning', label: 'Meaning', required: true, maxLength: 255, value: reference.meaning }),
+              field({ name: 'structure', label: 'Structure', type: 'textarea', maxLength: 2000, value: structure, wide: true }),
+              field({ name: 'example', label: 'Example', type: 'textarea', maxLength: 2000, value: reference.examples?.[0]?.japanese || reference.examples?.[0]?.sentence || '', wide: true }),
+              field({ name: 'jlpt_level', label: 'JLPT tag', options: JLPT_OPTIONS, value: reference.jlptLevel || '' })
+            ],
+            submitLabel: 'Add to Grammar',
+            onSubmit: async (form, close) => {
+              const data = new FormData(form);
+              await apiRequest('/api/grammar', {
+                method: 'POST',
+                body: {
+                  grammar_point: data.get('grammar_point'),
+                  meaning: data.get('meaning'),
+                  structure: data.get('structure'),
+                  example: data.get('example'),
+                  jlpt_level: data.get('jlpt_level'),
+                  reference_id: reference.referenceId
+                }
+              });
+              close();
+              showToast(`${reference.grammarPoint} added to your Grammar collection.`);
+              await viewRecord(record);
+            }
+          });
+        };
+        apiRequest(`/api/vocabulary/${record.id_vocabulary}/grammar-context`).then((data) => {
+          const examples = data.examples || [];
+          grammarSlot.replaceChildren(element('h3', { className: 'font-semibold text-ink', text: 'Grammar in your examples' }));
+          if (!examples.length) grammarSlot.append(element('p', { className: 'mt-2 text-sm text-muted', text: 'No saved examples to analyze.' }));
+          examples.forEach((example) => {
+            const matches = example.matches || [];
+            if (!matches.length) return;
+            grammarSlot.append(element('p', { className: 'mt-3 font-jp text-sm text-ink', text: `Seen in: ${example.sentence}`, attrs: { lang: 'ja' } }));
+            matches.forEach((match) => (match.status === 'AMBIGUOUS' ? (match.references || []) : [match.reference]).filter(Boolean).forEach((reference) => {
+              if (!match.collection?.inGrammar) {
+                const addButton = element('button', { className: 'button-secondary mt-2 min-h-9 px-3 py-1.5', text: 'Add to Grammar', attrs: { type: 'button' } });
+                addButton.addEventListener('click', () => openGrammarReferenceDialog(reference));
+                grammarSlot.append(addButton);
+              }
+              grammarSlot.append(element('p', { className: 'mt-1 text-sm text-muted', text: `${reference.grammarPoint} · ${reference.meaning}${match.collection?.inGrammar ? ' · In your Grammar collection' : ''}` }));
+            }));
+          });
+          if (data.truncated) grammarSlot.append(element('p', { className: 'mt-2 text-xs text-muted', text: 'Only the first bounded set of saved examples was analyzed.' }));
+        }).catch(() => grammarSlot.replaceChildren(element('h3', { className: 'font-semibold text-ink', text: 'Grammar in your examples' }), element('p', { className: 'mt-2 text-sm text-muted', text: 'Grammar analysis is unavailable.' })));
+      }
+      const vocabularySlot = content.querySelector('[data-vocabulary-example-context]');
+      if (vocabularySlot && config === ENTITY_CONFIGS.grammar) {
+        apiRequest(`/api/grammar/${record.id_grammar}/vocabulary-context`).then((data) => {
+          vocabularySlot.replaceChildren(element('h3', { className: 'font-semibold text-ink', text: 'Vocabulary in this example' }));
+          const items = data.items || [];
+          vocabularySlot.append(items.length ? element('div', { className: 'mt-2 grid gap-2' }, items.map((item) => element('p', { className: 'text-sm text-ink', text: `${item.canonical} · ${item.inVocabulary ? 'In Vocabulary' : 'Not in Vocabulary'}` }))) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No vocabulary candidates found in this saved example.' }));
+        }).catch(() => vocabularySlot.replaceChildren(element('h3', { className: 'font-semibold text-ink', text: 'Vocabulary in this example' }), element('p', { className: 'mt-2 text-sm text-muted', text: 'Vocabulary context is unavailable.' })));
+      }
       if (config === ENTITY_CONFIGS.kanji) {
         // B.2 stroke-order overlay: lazy + fail-open — the owned detail
         // never depends on it. Same shared module as the reference page.

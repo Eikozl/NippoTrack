@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const {
   EXPECTED_LEVEL_COUNTS,
@@ -33,4 +35,10 @@ test('catalog records are normalized into NippoTrack-owned reference fields', ()
     meaning: 'x', summary: null, structures: [], pitfalls: [], examples: [], jlptLevel: 'N5',
     source: 'nihongo-mono', sourceSlug: 'x', sourceCommit: 'ec0ba4a0ce1611c568b0e4f8a223eb8029249a25'
   });
+});
+
+test('runtime security verifier recognizes grammar_reference as read-only after migration 019', () => {
+  const verifier = fs.readFileSync(path.join(__dirname, '../scripts/verify-postgres-runtime-security.js'), 'utf8');
+  assert.match(verifier, /'grammar_reference'/);
+  assert.match(verifier, /tables\.length !== 37/);
 });

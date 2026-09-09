@@ -14,6 +14,7 @@ const {
 const { fetchEntityById } = require('./helpers');
 const { executePaginatedList } = require('./listHelpers');
 const { findGrammarReferenceId, getGrammarReferenceById, searchGrammarReferences } = require('../services/grammarReferenceStore');
+const { analyzeVocabularyInGrammarExample } = require('../services/grammarExampleContext');
 
 async function listGrammar(req, res) {
   try {
@@ -210,6 +211,15 @@ async function listGrammarReferences(req, res) {
   }
 }
 
+async function getGrammarVocabularyContext(req, res) {
+  try {
+    const id = parseIdParam(req, 'grammar point');
+    const entry = await fetchEntityById('grammar', id, req.user.id);
+    if (!entry) return res.status(404).json({ error: 'grammar point not found' });
+    return res.json(await analyzeVocabularyInGrammarExample({ userId: req.user.id, sentence: entry.example, pool }));
+  } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to analyze vocabulary in grammar example.' }); }
+}
+
 async function deleteGrammar(req, res) {
   try {
     const id = parseIdParam(req, 'grammar point');
@@ -221,4 +231,4 @@ async function deleteGrammar(req, res) {
   }
 }
 
-module.exports = { createGrammar, deleteGrammar, getGrammar, listGrammar, listGrammarOptions, listGrammarReferences, updateGrammar };
+module.exports = { createGrammar, deleteGrammar, getGrammar, getGrammarVocabularyContext, listGrammar, listGrammarOptions, listGrammarReferences, updateGrammar };

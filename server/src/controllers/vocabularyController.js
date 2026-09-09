@@ -16,6 +16,7 @@ const { executePaginatedList } = require('./listHelpers');
 const { extractUniqueKanji, syncVocabularyKanjiLinks } = require('../services/kanjiVocabularyLinks');
 const { buildFullVocabularyReadingContext } = require('../services/vocabularyReading');
 const { ENCOUNTER_SOURCE_TYPES, recordKanjiEncounters } = require('../services/kanjiEncounters');
+const { analyzeGrammarExamples } = require('../services/grammarExampleContext');
 
 async function listVocabulary(req, res) {
   try {
@@ -265,6 +266,17 @@ async function updateVocabulary(req, res) {
   }
 }
 
+async function getVocabularyGrammarContext(req, res) {
+  try {
+    const id = parseIdParam(req, 'vocabulary entry');
+    if (!await fetchEntityById('vocabulary', id, req.user.id)) {
+      return res.status(404).json({ error: 'vocabulary entry not found' });
+    }
+    const [rows] = await pool.execute('SELECT id_usage_example, sentence FROM usage_examples WHERE id_vocabulary = ? ORDER BY id_usage_example DESC', [id]);
+    return res.json(await analyzeGrammarExamples({ userId: req.user.id, examples: rows }));
+  } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to analyze grammar in vocabulary examples.' }); }
+}
+
 async function deleteVocabulary(req, res) {
   try {
     const id = parseIdParam(req, 'vocabulary entry');
@@ -331,6 +343,7 @@ module.exports = {
   createVocabulary,
   deleteVocabulary,
   getVocabulary,
+  getVocabularyGrammarContext,
   createVocabularyExample,
   updateVocabularyExample,
   deleteVocabularyExample,
