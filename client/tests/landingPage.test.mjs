@@ -37,7 +37,7 @@ test('landing demos remain presentation-only and make no application requests', 
 });
 
 test('Japanese examples declare their language', () => {
-  for (const text of ['旅行', 'りょこう', '殻', '約束', 'やくそく', '雨', 'あめ', '降っている', '図書館', 'としょかん', 'カク', 'から', '料理', 'りょうり']) {
+  for (const text of ['旅行', 'りょこう', '殻', '約束', 'やくそく', '雨', 'あめ', '降っている', '図書館', 'としょかん', '日', '空', '深', 'ニチ・ジツ', 'ひ・か', 'クウ', 'そら・あく', 'シン', 'ふか・い', '料理', 'りょうり']) {
     assert.ok(source.includes('lang="ja">' + text), 'missing lang=ja for ' + text);
   }
   assert.ok(source.includes('<b lang="ja">来年、日本へ旅行します。</b>'), 'hero context keeps lang=ja');
@@ -102,11 +102,11 @@ test('per-section curated examples stay exact and word-level', () => {
   assert.ok(source.includes('<strong>library</strong>'));
   assert.ok(source.includes('JMdict'));
   assert.ok(source.includes('Ready to add'));
-  // KANJI showcase is unchanged.
-  assert.ok(source.includes('<div class="kanji-focus" lang="ja">殻</div>'));
-  assert.ok(source.includes('shell · husk'));
-  assert.ok(source.includes('<dd lang="ja">カク</dd>'));
-  assert.ok(source.includes('<dd lang="ja">から</dd>'));
+  // KANJI showcase is the scripted 3-kanji stroke sequence (日 → 空 → 深).
+  assert.ok(source.includes('data-kanji-sequence'), 'kanji stroke-sequence hook present');
+  assert.ok(source.includes('sun/day') && source.includes('sky/empty') && source.includes('deep'), 'sequence meanings present');
+  assert.ok(source.includes('ニチ・ジツ / ひ・か') && source.includes('クウ / そら・あく') && source.includes('シン / ふか・い'), 'sequence readings present');
+  assert.ok(source.includes('reference N5 range') && source.includes('reference N4 range') && source.includes('reference N3 range'), 'honest reference level captions');
   // REVIEW showcase keeps Reveal → answer → Again/Hard/Good.
   assert.ok(source.includes('<p class="review-word" lang="ja">約束</p>'));
   assert.ok(source.includes('<strong lang="ja">やくそく</strong>'));
@@ -270,7 +270,7 @@ test('dark theme remaps land on tokens with no pure black or pure-white text', (
 
 test('only approved Japanese examples appear and keep lang="ja"', () => {
   const runs = source.match(/[\u3040-\u30ff\u4e00-\u9faf]+/g) || [];
-  const allowed = new Set(['旅行', 'りょこう', '来年', '日本へ旅行します', '殻', '約束', 'やくそく', '料理', '昨日', '日本', 'を作った', 'りょうり', '日本料理を作った', '雨が降っている', '雨', '降っている', 'あめ', '図書館', 'としょかん', 'カク', 'から', '毎朝', '新聞を', '読みます', '読んだ']);
+  const allowed = new Set(['旅行', 'りょこう', '来年', '日本へ旅行します', '殻', '約束', 'やくそく', '料理', '昨日', '日本', 'を作った', 'りょうり', '日本料理を作った', '雨が降っている', '雨', '降っている', 'あめ', '図書館', 'としょかん', '日', '空', '深', 'ニチ・ジツ', 'ひ・か', 'クウ', 'そら・あく', 'シン', 'ふか・い', '毎朝', '新聞を', '読みます', '読んだ']);
   for (const run of runs) {
     assert.ok(allowed.has(run), 'unexpected Japanese: ' + run);
   }

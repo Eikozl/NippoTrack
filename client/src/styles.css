@@ -604,20 +604,25 @@ nav .nav-group-label:first-child { margin-top: 0; }
   .dialog-panel--kanji-detail { max-width: 56rem; }
 }
 
-/* v5.1-B.2 Stroke-order overlay — additive only, token surfaces/borders so
+/* v5.1-B.2 Stroke-order autoplay — additive only, token surfaces/borders so
    dark theme follows automatically. The populated slot is absolutely
    positioned over the square panel (removed from flow, zero footprint on
-   the square); the empty B.1 slot keeps `display: contents`. The trigger is
-   one restrained pill in the panel corner (always visible, never
-   hover-revealed); the animated view covers the panel while open and the
-   static font glyph underneath is untouched, restored via Close. Motion is
-   JS-driven per-stroke drawing with a reduced-motion instant-final path —
-   this block declares no keyframes of its own. */
+   the square); the empty B.1 slot keeps `display: contents`. Fetch starts
+   on mount and the sequence auto-plays — no trigger button is ever
+   rendered. The animated view covers the panel while open; the static font
+   glyph hides the moment the SVG takes over (see `hideGlyph` in
+   strokeOrder.js) and stays hidden after completion, so the finished
+   stroke SVG is the single clean final rendering — never a double-render,
+   dim duplicate, or overlay artifact. Replay appears only after the first
+   completion. Motion is JS-driven per-stroke drawing with a reduced-motion
+   instant-final path — this block declares no keyframes of its own. */
 .kanji-identity-glyph { position: relative; }
 .kanji-stroke-slot:not([aria-hidden="true"]) { position: absolute; inset: 0; z-index: 1; display: block; overflow: hidden; border-radius: inherit; pointer-events: none; }
-.stroke-trigger { position: absolute; right: var(--nt-space-2); bottom: var(--nt-space-2); z-index: 2; min-height: 2.5rem; padding-left: var(--nt-space-3); padding-right: var(--nt-space-3); border-radius: 999px; font-size: 0.8125rem; pointer-events: auto; }
 .stroke-view { position: absolute; inset: 0; z-index: 1; display: grid; align-content: center; justify-items: center; gap: var(--nt-space-2); padding: var(--nt-space-3); border-radius: inherit; pointer-events: auto; background: color-mix(in srgb, var(--jlt-surface) 88%, var(--jlt-primary-soft)); color: var(--jlt-ink); }
 .stroke-svg { width: min(70%, 10.5rem); height: auto; aspect-ratio: 1 / 1; }
 .stroke-controls { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--nt-space-2); }
 .stroke-replay { min-height: 2.5rem; padding-left: var(--nt-space-3); padding-right: var(--nt-space-3); border-radius: 999px; font-size: 0.8125rem; }
+.stroke-replay[hidden] { display: none; }
+.stroke-replay:focus-visible { outline: 2px solid var(--jlt-primary); outline-offset: 2px; }
+.kanji-glyph-large[hidden] { display: none; }
 .stroke-note { position: absolute; right: var(--nt-space-2); bottom: var(--nt-space-2); margin: 0; font-size: 0.75rem; color: var(--jlt-muted); pointer-events: none; }

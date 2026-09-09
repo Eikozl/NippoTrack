@@ -416,3 +416,343 @@ export function initLandingInteractions(root) {
   }, { threshold: 0.4 });
   animated.forEach((section) => observer.observe(section));
 }
+
+// Kanji stroke-sequence showcase (landing only, presentational).
+// Scripted progression 日 → 空 → 深 with reference readings and honest
+// community-level captions ("reference N5/N4/N3 range" plus a "levels
+// approximate, not official" note — never an official claim, matching the
+// "Starting estimate … range" + disclaimer pattern elsewhere).
+// Bounded by construction: exactly these three local SVGs are ever
+// fetched (never the 2136 set). Parsing reuses the app-safe path via a
+// dynamic import of `../strokeOrder.js`, so the landing initial bundle
+// never absorbs the app stroke code or its eligibility table. Rendering
+// is createElementNS with `d`-only paths (no innerHTML). The panel stays
+// aria-hidden presentational; there is deliberately NO replay affordance
+// (no other landing showcase has one). Plays once, then rests.
+export const KANJI_SEQUENCE = [
+  { character: '日', strokes: 4, level: 'N5' },
+  { character: '空', strokes: 8, level: 'N4' },
+  { character: '深', strokes: 11, level: 'N3' },
+];
+// Demo pacing is landing-specific and faster than the app's calm ~400ms
+// study pacing: the full A→B→C arc lands around ~5.5s, matching the
+// placement showcase arc. Reduced-motion skips drawing entirely.
+export const KANJI_SEQ_DRAW_MS = 150;
+export const KANJI_SEQ_PAUSE_MS = 60;
+export const KANJI_SEQ_SETTLE_MS = 500;
+export const KANJI_SEQ_SVG_NS = 'http://www.w3.org/2000/svg';
+export const KANJI_SEQ_VIEWBOX = '0 0 109 109';
+
+function defaultKanjiSeqReducedMotion() {
+  try {
+    return typeof window !== 'undefined'
+      && typeof window.matchMedia === 'function'
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
+}
+
+// Dynamic import on purpose: the landing chunk must not statically absorb
+// the app stroke module (eligibility table + animation stay out of the
+// initial landing JS; the full asset set stays out of ALL JS).
+function defaultKanjiSeqLoadPaths(character, { signal } = {}) {
+  return import('../strokeOrder.js').then((module) => module.loadStrokePaths(character, { signal }));
+}
+
+function measureSeqPath(path, fallback = 300) {
+  try {
+    const measured = path.getTotalLength?.();
+    if (Number.isFinite(measured) && measured > 0) return measured;
+  } catch {
+    // Detached or fake DOM — fall back to a nominal length.
+  }
+  return fallback;
+}
+
+function setSeqDrawn(path, length, drawn) {
+  path.style.strokeDasharray = String(length);
+  path.style.strokeDashoffset = drawn ? '0' : String(length);
+}
+
+function buildKanjiSeqSvg(doc, pathData) {
+  const svg = doc.createElementNS(KANJI_SEQ_SVG_NS, 'svg');
+  svg.setAttribute('viewBox', KANJI_SEQ_VIEWBOX);
+  svg.setAttribute('class', 'kanji-seq-svg');
+  // Presentation attributes are OURS — only `d` is copied from the asset.
+  const paths = pathData.map((d) => {
+    const path = doc.createElementNS(KANJI_SEQ_SVG_NS, 'path');
+    path.setAttribute('d', d);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '4.5');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(path);
+    return path;
+  });
+  return { svg, paths };
+}
+
+function drawStrokesSequential(paths, { drawMs, pauseMs, raf } = {}) {
+  const lengths = paths.map((path) => measureSeqPath(path));
+  paths.forEach((path, index) => setSeqDrawn(path, lengths[index], false));
+  if (typeof raf !== 'function') {
+    paths.forEach((path, index) => setSeqDrawn(path, lengths[index], true));
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const slotMs = drawMs + pauseMs;
+    const totalMs = paths.length * slotMs - pauseMs;
+    let startTime = 0;
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      paths.forEach((path, index) => setSeqDrawn(path, lengths[index], true));
+      resolve();
+    };
+    const frame = (timestamp) => {
+      const now = Number.isFinite(timestamp) ? timestamp : 0;
+      if (!startTime) startTime = now;
+      const elapsed = now - startTime;
+      if (elapsed >= totalMs) {
+        finish();
+        return;
+      }
+      const active = Math.min(paths.length - 1, Math.floor(elapsed / slotMs));
+      for (let index = 0; index < active; index += 1) setSeqDrawn(paths[index], lengths[index], true);
+      const within = Math.min(1, (elapsed - active * slotMs) / drawMs);
+      if (within >= 1) setSeqDrawn(paths[active], lengths[active], true);
+      else {
+        paths[active].style.strokeDasharray = String(lengths[active]);
+        paths[active].style.strokeDashoffset = String(lengths[active] * (1 - within));
+      }
+      raf(frame);
+    };
+    raf(frame);
+  });
+}
+
+function addSeqClass(node, cls) {
+  if (!node) return;
+  try {
+    if (typeof node.classList?.add === 'function') {
+      node.classList.add(cls);
+      return;
+    }
+    const current = typeof node.getAttribute === 'function' ? node.getAttribute('class') : '';
+    const parts = String(current || '').split(/\s+/).filter(Boolean);
+    if (!parts.includes(cls)) {
+      parts.push(cls);
+      node.setAttribute?.('class', parts.join(' '));
+    }
+  } catch {
+    // State classes are enhancement only.
+  }
+}
+
+function seqCardForSlot(slot) {
+  try {
+    let node = slot?.parentElement ?? slot?.parentNode ?? null;
+    while (node) {
+      let isCard = false;
+      try {
+        if (typeof node.classList?.contains === 'function') isCard = node.classList.contains('kanji-seq-card');
+        else {
+          const cls = typeof node.getAttribute === 'function' ? node.getAttribute('class') : '';
+          isCard = String(cls || '').split(/\s+/).includes('kanji-seq-card');
+        }
+      } catch {
+        isCard = false;
+      }
+      if (isCard) return node;
+      node = node.parentElement ?? node.parentNode ?? null;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+// Runs the scripted sequence inside a `[data-kanji-sequence]` container.
+// Once-only: a second call returns `{ status: 'skipped' }` without any
+// fetch. Fail-open per card: an unresolvable SVG keeps its static glyph.
+export async function playKanjiSequence(container, options = {}) {
+  if (!container || container.dataset?.kanjiPlayed === 'true') return { status: 'skipped', settled: [] };
+  try {
+    container.dataset.kanjiPlayed = 'true';
+  } catch {
+    // Dataset guard is best-effort.
+  }
+  const doc = options.doc ?? container.ownerDocument ?? (typeof document !== 'undefined' ? document : null);
+  const loadPaths = options.loadPaths ?? defaultKanjiSeqLoadPaths;
+  const prefersReducedMotion = options.prefersReducedMotion ?? defaultKanjiSeqReducedMotion;
+  const raf = options.raf ?? (typeof globalThis.requestAnimationFrame === 'function'
+    ? globalThis.requestAnimationFrame.bind(globalThis)
+    : undefined);
+  const drawMs = options.drawMs ?? KANJI_SEQ_DRAW_MS;
+  const pauseMs = options.pauseMs ?? KANJI_SEQ_PAUSE_MS;
+  const settleMs = options.settleMs ?? KANJI_SEQ_SETTLE_MS;
+  const wait = options.wait ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const signal = options.signal ?? null;
+  let reduced = false;
+  try {
+    reduced = prefersReducedMotion() === true;
+  } catch {
+    reduced = false;
+  }
+
+  // All three fetches fire in parallel up front: the ceiling is three
+  // requests, in 日 → 空 → 深 order, with no retries.
+  const loaded = await Promise.all(
+    KANJI_SEQUENCE.map((entry) => Promise.resolve()
+      .then(() => loadPaths(entry.character, { signal }))
+      .then((paths) => ({ entry, paths: Array.isArray(paths) ? paths : null }))
+      .catch(() => ({ entry, paths: null })))
+  );
+  const cards = [];
+  for (const { entry, paths } of loaded) {
+    let slot = null;
+    try {
+      slot = container.querySelector?.(`[data-kanji-seq-glyph="${entry.character}"]`) ?? null;
+    } catch {
+      slot = null;
+    }
+    if (!slot || !doc || !paths?.length) continue;
+    const { svg, paths: built } = buildKanjiSeqSvg(doc, paths);
+    try {
+      slot.replaceChildren(svg);
+      slot.textContent = '';
+    } catch {
+      continue;
+    }
+    cards.push({ entry, slot, paths: built });
+  }
+  if (reduced) {
+    for (const card of cards) {
+      const lengths = card.paths.map((path) => measureSeqPath(path));
+      card.paths.forEach((path, index) => setSeqDrawn(path, lengths[index], true));
+      addSeqClass(seqCardForSlot(card.slot), 'is-settled');
+    }
+    addSeqClass(container, 'is-complete');
+    return { status: 'final', settled: cards.map((card) => card.entry.character) };
+  }
+  for (let index = 0; index < cards.length; index += 1) {
+    const card = cards[index];
+    await drawStrokesSequential(card.paths, { drawMs, pauseMs, raf });
+    addSeqClass(seqCardForSlot(card.slot), 'is-settled');
+    if (index < cards.length - 1 && settleMs > 0) {
+      try {
+        await wait(settleMs);
+      } catch {
+        // Settle pauses are pacing only.
+      }
+    }
+  }
+  addSeqClass(container, 'is-complete');
+  return { status: 'played', settled: cards.map((card) => card.entry.character) };
+}
+
+// One-shot viewport wiring for the kanji sequence: plays once when the
+// kanji section enters the viewport (same 0.4 threshold + 300ms enter
+// wait as the shared demo observer), then disconnects. Reduced-motion or
+// no-IntersectionObserver renders the final resting state immediately.
+export function initKanjiSequence(root, options = {}) {
+  const noop = () => {};
+  const container = root?.querySelector?.('[data-kanji-sequence]') ?? null;
+  if (!container) return noop;
+  let reduced = false;
+  try {
+    reduced = (options.reducedMotion ?? defaultKanjiSeqReducedMotion()) === true;
+  } catch {
+    reduced = false;
+  }
+  const run = () => {
+    try {
+      const result = playKanjiSequence(container, {
+        ...options,
+        prefersReducedMotion: () => (options.reducedMotion ?? defaultKanjiSeqReducedMotion()) === true
+      });
+      if (result?.catch) result.catch(() => {});
+    } catch {
+      // Presentational and fail-open.
+    }
+  };
+  if (reduced) {
+    run();
+    return noop;
+  }
+  const Observer = options.observerClass
+    ?? (typeof window !== 'undefined' ? window.IntersectionObserver : undefined)
+    ?? globalThis.IntersectionObserver;
+  if (typeof Observer !== 'function') {
+    run();
+    return noop;
+  }
+  let section = null;
+  try {
+    let node = container.parentElement ?? container.parentNode ?? null;
+    while (node) {
+      let isKanjiDemo = false;
+      try {
+        if (typeof node.matches === 'function') isKanjiDemo = node.matches('[data-demo="kanji"]');
+        else if (typeof node.matchesSelector === 'function') isKanjiDemo = node.matchesSelector('[data-demo="kanji"]');
+      } catch {
+        isKanjiDemo = false;
+      }
+      if (isKanjiDemo) {
+        section = node;
+        break;
+      }
+      node = node.parentElement ?? node.parentNode ?? null;
+    }
+  } catch {
+    section = null;
+  }
+  const target = section ?? container;
+  let observer = null;
+  try {
+    observer = new Observer((entries) => {
+      for (const entry of entries ?? []) {
+        if (!entry?.isIntersecting) continue;
+        try {
+          observer?.unobserve?.(target);
+        } catch {
+          // Unobserve is best-effort.
+        }
+        try {
+          observer?.disconnect?.();
+        } catch {
+          // Disconnect is best-effort.
+        }
+        const delay = options.enterDelayMs ?? 300;
+        if (delay > 0 && typeof setTimeout === 'function') setTimeout(run, delay);
+        else run();
+        break;
+      }
+    }, { threshold: 0.4 });
+  } catch {
+    run();
+    return noop;
+  }
+  try {
+    observer.observe(target);
+  } catch {
+    run();
+    return noop;
+  }
+  const cleanup = () => {
+    try {
+      observer?.disconnect?.();
+    } catch {
+      // Cleanup is best-effort.
+    }
+  };
+  try {
+    window.addEventListener('pagehide', cleanup, { once: true });
+  } catch {
+    // pagehide guard is progressive enhancement.
+  }
+  return cleanup;
+}

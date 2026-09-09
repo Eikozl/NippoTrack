@@ -5,6 +5,13 @@
 // (the ONLY importer of that module — main paths must never import it
 // directly, so this module stays a lazy chunk).
 //
+// Autoplay by design: a Jōyō mount fetches immediately and draws without
+// any trigger gesture (no trigger button, no Close, Escape does nothing —
+// the animation is persistent, not an overlay to dismiss). ONE Replay
+// button appears only after the first completion. While the animated SVG
+// is present the static font glyph hides, so the finished stroke SVG is
+// the single clean final rendering (no ghost, no double-render).
+//
 // Security core: the fetched SVG is NEVER injected via innerHTML. The text
 // is parsed with DOMParser and ONLY `<path>` `d` attributes (document
 // order) are re-created programmatically via createElementNS — ids,
@@ -19,7 +26,51 @@ export const STROKE_DRAW_MS = 400;
 export const STROKE_PAUSE_MS = 90;
 export const STROKE_SLOT_SELECTOR = '[data-kanji-stroke-slot]';
 
-let mountCounter = 0;
+// Ghost discipline: the animated SVG and the static font glyph must never
+// paint together. While the stroke view is present the sibling
+// `.kanji-glyph-large` hides (attribute + property so real DOM and test
+// doubles stay in sync); failures and cleanups restore it so the static
+// glyph always stands alone outside the animation.
+function glyphForSlot(slot) {
+  try {
+    const parent = slot?.parentElement ?? slot?.parentNode ?? null;
+    return parent?.querySelector?.('.kanji-glyph-large') ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function hideGlyph(slot) {
+  const glyph = glyphForSlot(slot);
+  if (!glyph) return;
+  try {
+    glyph.setAttribute?.('hidden', '');
+    glyph.setAttribute?.('aria-hidden', 'true');
+  } catch {
+    // Presentational hiding must never throw.
+  }
+  try {
+    glyph.hidden = true;
+  } catch {
+    // Test-double safety.
+  }
+}
+
+function restoreGlyph(slot) {
+  const glyph = glyphForSlot(slot);
+  if (!glyph) return;
+  try {
+    glyph.removeAttribute?.('hidden');
+    glyph.removeAttribute?.('aria-hidden');
+  } catch {
+    // Presentational restore must never throw.
+  }
+  try {
+    glyph.hidden = false;
+  } catch {
+    // Test-double safety.
+  }
+}
 
 // KanjiVG file naming: lowercase hex of the code point, left-padded to at
 // least 5 digits (`05b66.svg` = 学 U+5B66, `20b9f.svg` = 𠮟 U+20B9F).
@@ -65,9 +116,9 @@ function hasParserError(svgDocument) {
   return false;
 }
 
-// Lazy by design: called ONLY on activation, never at mount. Rejects on
-// fetch failure, parse failure, or zero extracted paths → caller degrades
-// to the static fallback.
+// Autoplay by design: called immediately on mount, never on a gesture.
+// Rejects on fetch failure, parse failure, or zero extracted paths →
+// caller degrades to the static fallback.
 export async function loadStrokePaths(character, options = {}) {
   const { fetchFn = globalThis.fetch, parseFn = null, signal = null } = options;
   const url = strokeAssetUrl(character);
@@ -192,11 +243,22 @@ function playSequential(paths, options = {}) {
   };
 }
 
-// Mounts the stroke affordance into a B.1 `.kanji-stroke-slot`.
-// - Non-Jōyō: slot left empty/static (no control), aria-hidden restored.
-// - Jōyō: ONE restrained button; fetch happens ONLY on activation.
-// Returns a cleanup (abort fetch, cancel animation, remove listeners) that
-// is also stored on the slot so remounts never accumulate.
+// Mounts the stroke autoplay into a B.1 `.kanji-stroke-slot`.
+// - Non-Jōyō: slot left empty/static (no control, no fetch), aria-hidden
+//   restored — zero visual trace, the static font glyph stands alone.
+// - Jōyō: fetch starts immediately on mount and the sequence auto-plays
+//   (no trigger button is ever rendered, no Close, Escape does nothing —
+//   the animation is persistent, not an overlay to dismiss). ONE Replay
+//   button appears only after the first completion and replays on demand.
+// Ghost discipline: the static font glyph stays visible only while
+// loading; once the animated SVG opens, the glyph hides so the SVG is the
+// SOLE rendering during the draw and remains the single clean final image
+// after completion (no swap-back, no dim duplicate, no overlay artifacts).
+// Autoplay never moves focus; Replay is a plain keyboard-reachable button
+// with a visible focus ring and a self-explanatory aria-label.
+// Returns a cleanup (abort fetch, cancel animation, remove listeners,
+// restore the glyph) that is also stored on the slot so remounts never
+// accumulate.
 export function mountStrokeOrder(slot, options = {}) {
   if (slot?.__strokeCleanup) {
     try {
@@ -217,6 +279,7 @@ export function mountStrokeOrder(slot, options = {}) {
       slot.setAttribute?.('aria-hidden', 'true');
       slot.removeAttribute?.('data-stroke-state');
     }
+    restoreGlyph(slot);
     return () => {};
   }
 
@@ -228,12 +291,11 @@ export function mountStrokeOrder(slot, options = {}) {
   const drawMs = options.drawMs ?? STROKE_DRAW_MS;
   const pauseMs = options.pauseMs ?? STROKE_PAUSE_MS;
 
-  const viewId = `stroke-view-${(mountCounter += 1)}`;
   let disposed = false;
   let runToken = 0;
   let aborter = null;
   let cancelPlay = null;
-  let state = 'idle'; // idle | loading | open | failed
+  let state = 'loading'; // loading | playing | done | failed
   let strokePaths = [];
   let replayButton = null;
   let view = null;
@@ -242,43 +304,11 @@ export function mountStrokeOrder(slot, options = {}) {
   // next boundary instead of leaking into a new kanji.
   const isAlive = () => !disposed && slot.isConnected !== false;
 
-  const trigger = doc.createElement('button');
-  trigger.setAttribute('type', 'button');
-  trigger.setAttribute('class', 'button-secondary stroke-trigger');
-  trigger.setAttribute('aria-expanded', 'false');
-  trigger.setAttribute('aria-controls', viewId);
-  const idleLabel = 'Stroke order';
-  const setTrigger = ({ label, ariaLabel, disabled, expanded }) => {
-    trigger.textContent = label;
-    trigger.setAttribute('aria-label', ariaLabel);
-    trigger.disabled = Boolean(disabled);
-    trigger.setAttribute('aria-expanded', String(expanded));
-  };
-  const showIdle = () => {
-    state = 'idle';
-    slot.setAttribute?.('data-stroke-state', 'idle');
-    setTrigger({ label: idleLabel, ariaLabel: `Show stroke order for ${character}`, disabled: false, expanded: false });
-  };
-
-  const closeView = ({ refocus = true } = {}) => {
-    runToken += 1;
-    cancelPlay?.();
-    cancelPlay = null;
-    aborter?.abort?.();
-    aborter = null;
-    view?.remove?.();
-    view = null;
-    strokePaths = [];
-    replayButton = null;
-    if (!isAlive()) return;
-    showIdle();
-    if (refocus && typeof trigger.focus === 'function') trigger.focus();
-  };
-
-  const failGracefully = () => {
+  const showFailure = () => {
     if (!isAlive()) return;
     state = 'failed';
     slot.setAttribute?.('data-stroke-state', 'failed');
+    restoreGlyph(slot);
     const note = doc.createElement('p');
     note.setAttribute('class', 'stroke-note');
     note.setAttribute('role', 'status');
@@ -286,21 +316,55 @@ export function mountStrokeOrder(slot, options = {}) {
     slot.replaceChildren(note);
   };
 
+  const showReplay = () => {
+    if (!replayButton) return;
+    replayButton.disabled = false;
+    try {
+      replayButton.removeAttribute?.('hidden');
+    } catch {
+      // Visibility restore must never throw.
+    }
+    try {
+      replayButton.hidden = false;
+    } catch {
+      // Test-double safety.
+    }
+  };
+
+  const hideReplay = () => {
+    if (!replayButton) return;
+    replayButton.disabled = true;
+    try {
+      replayButton.setAttribute?.('hidden', '');
+    } catch {
+      // Visibility hiding must never throw.
+    }
+    try {
+      replayButton.hidden = true;
+    } catch {
+      // Test-double safety.
+    }
+  };
+
   const renderFinal = () => {
     strokePaths.forEach((path) => setDrawn(path, pathLength(path), true));
-    if (replayButton) replayButton.disabled = false;
+    state = 'done';
+    slot.setAttribute?.('data-stroke-state', 'done');
+    showReplay();
   };
 
   const replay = () => {
-    if (state !== 'open' || !strokePaths.length || !isAlive()) return;
+    if ((state !== 'playing' && state !== 'done') || !strokePaths.length || !isAlive()) return;
     const run = runToken;
     cancelPlay?.();
     cancelPlay = null;
-    if (replayButton) replayButton.disabled = true;
+    hideReplay();
     if (prefersReducedMotion()) {
       renderFinal();
       return;
     }
+    state = 'playing';
+    slot.setAttribute?.('data-stroke-state', 'playing');
     cancelPlay = playSequential(strokePaths, {
       drawMs,
       pauseMs,
@@ -308,20 +372,15 @@ export function mountStrokeOrder(slot, options = {}) {
       caf,
       onDone: () => {
         if (run !== runToken || !isAlive()) return;
-        if (replayButton) replayButton.disabled = false;
+        renderFinal();
       }
     });
   };
 
   const openView = (pathData, run) => {
     if (run !== runToken || !isAlive()) return;
-    state = 'open';
-    slot.setAttribute?.('data-stroke-state', 'open');
-    setTrigger({ label: 'Close', ariaLabel: `Hide stroke order for ${character}`, disabled: false, expanded: true });
-
     view = doc.createElement('div');
     view.setAttribute('class', 'stroke-view');
-    view.setAttribute('id', viewId);
     const { svg, paths } = buildAnimatedSvg(doc, pathData, character);
     strokePaths = paths;
 
@@ -330,33 +389,30 @@ export function mountStrokeOrder(slot, options = {}) {
     replayButton.setAttribute('class', 'button-secondary stroke-replay');
     replayButton.setAttribute('aria-label', `Replay stroke order for ${character}`);
     replayButton.textContent = 'Replay';
-    replayButton.disabled = true;
     const controls = doc.createElement('div');
     controls.setAttribute('class', 'stroke-controls');
     controls.appendChild(replayButton);
     view.appendChild(svg);
     view.appendChild(controls);
-    slot.appendChild(view);
+    slot.replaceChildren(view);
+    // Ghost fix: the static font glyph hides the moment the animated SVG
+    // takes over, so only the strokes ever paint. It stays hidden after
+    // completion — the finished SVG is the single final rendering.
+    hideGlyph(slot);
+    hideReplay();
 
     const onReplayClick = () => replay();
-    const onKeyDown = (event) => {
-      if (event?.key === 'Escape' && state === 'open') {
-        event.stopPropagation?.();
-        closeView();
-      }
-    };
     replayButton.addEventListener('click', onReplayClick);
-    // Escape bubbles from the trigger ("Close") and the view alike.
-    slot.addEventListener('keydown', onKeyDown);
-    listeners.push(
-      () => replayButton?.removeEventListener?.('click', onReplayClick),
-      () => slot?.removeEventListener?.('keydown', onKeyDown)
-    );
+    listeners.push(() => replayButton?.removeEventListener?.('click', onReplayClick));
+    // Intentionally no Escape handling and no focus moves: autoplay is
+    // persistent (nothing to dismiss) and must never steal focus.
 
     if (prefersReducedMotion()) {
       renderFinal();
       return;
     }
+    state = 'playing';
+    slot.setAttribute?.('data-stroke-state', 'playing');
     cancelPlay = playSequential(strokePaths, {
       drawMs,
       pauseMs,
@@ -364,39 +420,37 @@ export function mountStrokeOrder(slot, options = {}) {
       caf,
       onDone: () => {
         if (run !== runToken || !isAlive()) return;
-        if (replayButton) replayButton.disabled = false;
+        renderFinal();
       }
     });
   };
 
   const listeners = [];
-  const onTriggerClick = () => {
-    if (state === 'loading') return;
-    if (state === 'open') {
-      closeView({ refocus: false });
-      return;
-    }
-    const run = (runToken += 1);
-    state = 'loading';
-    slot.setAttribute?.('data-stroke-state', 'loading');
-    setTrigger({ label: 'Loading…', ariaLabel: `Loading stroke order for ${character}`, disabled: true, expanded: false });
-    if (typeof AbortController !== 'undefined') {
-      aborter = new AbortController();
-    }
-    Promise.resolve()
-      .then(() => loadStrokePaths(character, { fetchFn, parseFn, signal: aborter?.signal ?? null }))
-      .then((pathData) => openView(pathData, run))
-      .catch(() => {
-        if (run !== runToken || !isAlive()) return;
-        failGracefully();
-      });
-  };
-  trigger.addEventListener('click', onTriggerClick);
-  listeners.push(() => trigger.removeEventListener?.('click', onTriggerClick));
-
-  slot.replaceChildren(trigger);
+  // Autoplay on mount: fetch immediately (no trigger button, no user
+  // gesture, no focus change). A polite loading note holds the slot while
+  // the static font glyph stays visible underneath.
+  state = 'loading';
+  slot.setAttribute?.('data-stroke-state', 'loading');
   slot.removeAttribute?.('aria-hidden');
-  showIdle();
+  const loadingNote = doc.createElement('p');
+  loadingNote.setAttribute('class', 'stroke-note');
+  loadingNote.setAttribute('role', 'status');
+  loadingNote.textContent = 'Loading stroke order…';
+  slot.replaceChildren(loadingNote);
+  const run = (runToken += 1);
+  if (typeof AbortController !== 'undefined') {
+    aborter = new AbortController();
+  }
+  // Captured synchronously: a remount in the same tick still hands the
+  // request the (then-aborted) signal instead of a nulled one.
+  const mountSignal = aborter?.signal ?? null;
+  Promise.resolve()
+    .then(() => loadStrokePaths(character, { fetchFn, parseFn, signal: mountSignal }))
+    .then((pathData) => openView(pathData, run))
+    .catch(() => {
+      if (run !== runToken || !isAlive()) return;
+      showFailure();
+    });
 
   const cleanup = () => {
     disposed = true;
@@ -413,6 +467,7 @@ export function mountStrokeOrder(slot, options = {}) {
       }
     });
     listeners.length = 0;
+    restoreGlyph(slot);
   };
   slot.__strokeCleanup = cleanup;
   return cleanup;

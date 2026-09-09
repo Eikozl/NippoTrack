@@ -1,9 +1,11 @@
-// v5.1-B.2 Jōyō stroke-order animation — contract tests.
-// Covers: eligibility, file naming/URLs, lazy fetch (no fetch at mount, no
-// autoplay), safe parsing (paths-only via DOMParser + createElementNS, never
-// innerHTML), sequential draw → Replay, reduced-motion instant-final,
-// failure fallback, cross-kanji no-leak, both-surface wiring, and the
-// strokeJoyo import discipline (tiny table imported ONLY by strokeOrder).
+// v5.1-B.2 Jōyō stroke-order autoplay — contract tests.
+// Covers: eligibility, file naming/URLs, fetch-on-mount autoplay (no
+// trigger/Close in DOM, Escape does nothing), safe parsing (paths-only
+// via DOMParser + createElementNS, never innerHTML), sequential draw →
+// Replay hidden-until-done, ghost discipline (single rendering per phase),
+// reduced-motion instant-final, no focus theft, failure fallback,
+// cross-kanji no-leak, both-surface wiring, and the strokeJoyo import
+// discipline (tiny table imported ONLY by strokeOrder).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -26,6 +28,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readSource = (path) => readFileSync(join(root, path), 'utf8');
 const readAsset = (file) => readFileSync(join(root, 'public', 'stroke', 'kanji', file), 'utf8');
 const sleep = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
+const settle = async () => { await sleep(); await sleep(); await sleep(); };
 
 // --- minimal DOM doubles ----------------------------------------------------
 // Just enough for the stroke module: namespaced creation, attributes,
@@ -191,6 +194,10 @@ function deferredFetch() {
   return { fn, calls, pending };
 }
 
+function okResponse(text) {
+  return { ok: true, status: 200, text: () => Promise.resolve(text) };
+}
+
 function makeRaf() {
   const queue = [];
   let now = 0;
@@ -239,11 +246,21 @@ function makePanel(doc, character) {
 }
 
 function buttonsIn(slot) { return slot.querySelectorAll('button'); }
-function triggerIn(slot) { return slot.querySelector('button.stroke-trigger'); }
+function replayIn(slot) { return slot.querySelector('button.stroke-replay'); }
 function viewIn(slot) { return slot.querySelector('div.stroke-view'); }
+function svgsIn(slot) { return slot.querySelectorAll('svg'); }
+function loadingNoteIn(slot) { return slot.querySelector('p.stroke-note'); }
 function svgPathsIn(slot) {
   const svg = slot.querySelector('svg');
   return svg ? svg.children.filter((child) => child.tagName === 'PATH') : [];
+}
+function glyphHidden(glyph) {
+  return glyph.hidden === true || glyph.getAttribute('hidden') !== null;
+}
+function collectFocused(node, out = []) {
+  if (node.focused) out.push(node);
+  for (const child of node.children || []) collectFocused(child, out);
+  return out;
 }
 
 // --- eligibility ------------------------------------------------------------
@@ -260,13 +277,14 @@ test('eligibility: Jōyō representatives pass, non-Jōyō and non-chars fail', 
   assert.equal(isJoyoKanji(undefined), false, 'undefined is not eligible');
 });
 
-test('mount renders a control exactly when the mask says Jōyō (喰 follows the mask)', () => {
+test('mount autoplays exactly when the mask says Jōyō (喰 follows the mask)', async () => {
   const doc = new FakeDoc();
   for (const char of ['日', '学', '喰', '屁', '々']) {
     const slot = makeSlot(doc, char);
-    const { fn } = fetchOf(syntheticSvg);
-    mountStrokeOrder(slot, { character: char, doc, fetchFn: fn });
-    assert.equal(buttonsIn(slot).length, isJoyoKanji(char) ? 1 : 0, `${char || '(empty)'} control matches eligibility`);
+    const { fn, calls } = fetchOf(syntheticSvg);
+    mountStrokeOrder(slot, { character: char, doc, fetchFn: fn, parseFn: miniParseSvg });
+    await settle();
+    assert.equal(calls.length, isJoyoKanji(char) ? 1 : 0, `${char || '(empty)'} fetch matches eligibility`);
   }
 });
 
@@ -338,63 +356,72 @@ test('extractor drops empty d values and ignores non-path documents', () => {
 
 // --- mount: non-Jōyō leaves the slot empty -------------------------------------
 
-test('non-Jōyō mount leaves the slot empty/static with zero network', async () => {
+test('non-Jōyō mount leaves the slot empty/static with zero network and zero trace', async () => {
   const doc = new FakeDoc();
   for (const char of ['屁', '々', '']) {
-    const slot = makeSlot(doc, char);
+    const panel = makePanel(doc, char);
+    const slot = panel.querySelector('div');
+    const glyph = panel.querySelector('span');
     const { fn, calls } = fetchOf(syntheticSvg);
     const cleanup = mountStrokeOrder(slot, { character: char, doc, fetchFn: fn });
     assert.equal(typeof cleanup, 'function', 'cleanup returned');
-    await sleep();
+    await settle();
     assert.equal(calls.length, 0, 'no fetch for non-Jōyō');
     assert.equal(buttonsIn(slot).length, 0, 'no control rendered');
+    assert.equal(svgsIn(slot).length, 0, 'no SVG rendered');
     assert.equal(slot.getAttribute('aria-hidden'), 'true', 'empty slot stays hidden');
     assert.equal(slot.children.length, 0, 'slot stays empty');
+    assert.equal(glyphHidden(glyph), false, 'static glyph stands alone, never hidden');
+    assert.equal(glyph.textContent, char, 'static glyph untouched');
   }
 });
 
-// --- mount: Jōyō renders ONE lazy button ---------------------------------------
+// --- mount: Jōyō autoplays on mount, no trigger/Close ---------------------------
 
-test('Jōyō mount renders one reachable button and fetches nothing until activation', async () => {
+test('Jōyō mount fetches on mount with a polite loading note and no trigger button', async () => {
   const doc = new FakeDoc();
-  const slot = makeSlot(doc, '日');
-  const { fn, calls } = fetchOf(syntheticSvg);
+  const panel = makePanel(doc, '日');
+  const slot = panel.querySelector('div');
+  const glyph = panel.querySelector('span');
+  const pending = deferredFetch();
   const { raf, queue } = makeRaf();
-  mountStrokeOrder(slot, { character: '日', doc, fetchFn: fn, raf });
+  mountStrokeOrder(slot, {
+    character: '日', doc, fetchFn: pending.fn, raf, parseFn: miniParseSvg,
+    prefersReducedMotion: () => false
+  });
   await sleep();
-  await sleep();
-  assert.equal(calls.length, 0, 'lazy: no fetch at mount');
-  assert.equal(queue.length, 0, 'no autoplay: no animation scheduled at mount');
-  const triggers = buttonsIn(slot);
-  assert.equal(triggers.length, 1, 'exactly one affordance');
-  const trigger = triggers[0];
-  assert.equal(trigger.getAttribute('type'), 'button', 'real button');
-  assert.equal(trigger.textContent, 'Stroke order', 'restrained label');
-  assert.ok((trigger.getAttribute('aria-label') || '').includes('日'), 'accessible label names the kanji');
-  assert.equal(trigger.getAttribute('aria-expanded'), 'false', 'collapsed initially');
+  assert.equal(pending.calls.length, 1, 'autoplay: fetch fired on mount, no gesture needed');
+  assert.ok(pending.calls[0].url.endsWith('stroke/kanji/065e5.svg'), `fetched 日 asset (${pending.calls[0].url})`);
+  assert.equal(slot.querySelector('button.stroke-trigger'), null, 'no trigger button rendered');
+  assert.equal(buttonsIn(slot).length, 0, 'no buttons at all while loading');
+  assert.equal(slot.getAttribute('data-stroke-state'), 'loading', 'loading state hook');
   assert.equal(slot.getAttribute('aria-hidden'), null, 'populated slot exposed to assistive tech');
-  assert.equal(slot.getAttribute('data-stroke-state'), 'idle', 'idle state hook');
+  const note = loadingNoteIn(slot);
+  assert.ok(note, 'loading note holds the slot');
+  assert.equal(note.getAttribute('role'), 'status', 'loading note announced politely');
+  assert.equal(queue.length, 0, 'no animation scheduled before the asset arrives');
+  assert.equal(glyphHidden(glyph), false, 'static glyph stays visible while loading (no blank panel)');
+  assert.equal(svgsIn(slot).length, 0, 'loading phase: glyph only, zero SVG');
 });
 
-// --- activation: fetch → safe build → sequential draw → Replay ------------------
+// --- autoplay: fetch → safe build → sequential draw → Replay ---------------------
 
-test('activation fetches the kanji asset, builds SVG safely, and draws sequentially to Replay', async () => {
+test('autoplay builds SVG safely, draws sequentially, and ends in one clean rendering', async () => {
   const doc = new FakeDoc();
-  const slot = makeSlot(doc, '日');
+  const panel = makePanel(doc, '日');
+  const slot = panel.querySelector('div');
+  const glyph = panel.querySelector('span');
   const { fn, calls } = fetchOf(syntheticSvg);
   const { raf, caf, tick, drain, queue } = makeRaf();
   mountStrokeOrder(slot, {
     character: '日', doc, fetchFn: fn, raf, caf,
     parseFn: miniParseSvg, drawMs: 100, pauseMs: 20, prefersReducedMotion: () => false
   });
-  triggerIn(slot).click();
-  assert.equal(triggerIn(slot).textContent, 'Loading…', 'loading state');
-  assert.equal(triggerIn(slot).disabled, true, 'loading button disabled (no double activation)');
-  assert.equal(slot.getAttribute('data-stroke-state'), 'loading', 'loading state hook');
-  await sleep();
-  assert.equal(calls.length, 1, 'fetch fired once, on activation');
-  assert.ok(calls[0].url.endsWith('stroke/kanji/065e5.svg'), `fetched 日 asset (${calls[0].url})`);
+  await settle();
+  assert.equal(calls.length, 1, 'exactly one fetch, fired on mount');
+  assert.equal(slot.getAttribute('data-stroke-state'), 'playing', 'playing state hook');
   const paths = svgPathsIn(slot);
+  assert.equal(svgsIn(slot).length, 1, 'single SVG rendering (no duplicate)');
   assert.equal(paths.length, 3, 'nested group path included, document order kept');
   for (const path of paths) {
     assert.equal(path.namespaceURI, 'http://www.w3.org/2000/svg', 'programmatic SVG namespace');
@@ -406,6 +433,8 @@ test('activation fetches the kanji asset, builds SVG safely, and draws sequentia
   const svg = slot.querySelector('svg');
   assert.equal(svg.getAttribute('viewBox'), '0 0 109 109', 'KanjiVG coordinate space');
   assert.ok((svg.getAttribute('aria-label') || '').includes('3 strokes'), 'stroke count exposed');
+  // Ghost fix: the static glyph hides the moment the SVG takes over.
+  assert.equal(glyphHidden(glyph), true, 'static glyph hidden during the draw (no ghost)');
   // Sequential: after a partial advance the first stroke is done while the
   // last is still hidden.
   tick(50); tick(50); tick(50);
@@ -413,18 +442,25 @@ test('activation fetches the kanji asset, builds SVG safely, and draws sequentia
   assert.equal(mid[0], '0', 'first stroke completes first');
   assert.equal(mid[2], '120', 'last stroke still hidden mid-animation');
   assert.ok(queue.length > 0, 'animation progresses via scheduled frames');
+  // Replay stays hidden until the first completion.
+  assert.equal(replayIn(slot)?.hidden, true, 'Replay hidden while playing');
   drain();
+  assert.equal(slot.getAttribute('data-stroke-state'), 'done', 'done state hook');
   const done = svgPathsIn(slot).map((path) => path.style.strokeDashoffset);
   assert.deepEqual(done, ['0', '0', '0'], 'completed strokes stay visible');
-  const replay = slot.querySelector('button.stroke-replay');
+  assert.equal(svgsIn(slot).length, 1, 'final phase: still exactly one SVG (no double-render)');
+  assert.equal(glyphHidden(glyph), true, 'final phase: glyph stays hidden (SVG is the single final image)');
+  const replay = replayIn(slot);
   assert.ok(replay, 'Replay appears on completion');
+  assert.equal(replay.hidden, false, 'Replay revealed when done');
   assert.equal(replay.disabled, false, 'Replay enabled when done');
   assert.equal(replay.getAttribute('type'), 'button', 'Replay is a real button');
+  assert.ok((replay.getAttribute('aria-label') || '').includes('日'), 'Replay label names the kanji');
 });
 
 // --- Replay ---------------------------------------------------------------------
 
-test('Replay restarts the sequence and disables itself while playing', async () => {
+test('Replay is hidden until done, then replays on demand', async () => {
   const doc = new FakeDoc();
   const slot = makeSlot(doc, '花');
   const { fn } = fetchOf(syntheticSvg);
@@ -433,64 +469,92 @@ test('Replay restarts the sequence and disables itself while playing', async () 
     character: '花', doc, fetchFn: fn, raf, caf,
     parseFn: miniParseSvg, drawMs: 100, pauseMs: 20, prefersReducedMotion: () => false
   });
-  triggerIn(slot).click();
-  await sleep();
+  await settle();
   drain();
-  const replay = slot.querySelector('button.stroke-replay');
+  const replay = replayIn(slot);
+  assert.ok(replay && replay.hidden === false, 'Replay visible after first completion');
   replay.click();
   assert.equal(replay.disabled, true, 'Replay disabled while replaying');
+  assert.equal(replay.hidden, true, 'Replay hidden while replaying');
   assert.ok(queue.length > 0, 'replay schedules fresh frames');
   drain();
+  assert.equal(replay.hidden, false, 'Replay revealed after the second run');
   assert.equal(replay.disabled, false, 'Replay re-enabled after the second run');
   assert.deepEqual(svgPathsIn(slot).map((p) => p.style.strokeDashoffset), ['0', '0', '0'], 'final state again');
+  assert.equal(svgsIn(slot).length, 1, 'replay never duplicates the SVG');
 });
 
 // --- reduced motion ---------------------------------------------------------------
 
 test('prefers-reduced-motion renders the final state instantly with no animation frames', async () => {
   const doc = new FakeDoc();
-  const slot = makeSlot(doc, '鳥');
+  const panel = makePanel(doc, '鳥');
+  const slot = panel.querySelector('div');
+  const glyph = panel.querySelector('span');
   const { fn } = fetchOf(syntheticSvg);
   const { raf, caf, queue } = makeRaf();
   mountStrokeOrder(slot, {
     character: '鳥', doc, fetchFn: fn, raf, caf,
     parseFn: miniParseSvg, prefersReducedMotion: () => true
   });
-  triggerIn(slot).click();
-  await sleep();
+  await settle();
   assert.equal(queue.length, 0, 'zero animation frames scheduled');
+  assert.equal(svgsIn(slot).length, 1, 'single SVG rendering, no ghost');
   assert.deepEqual(svgPathsIn(slot).map((p) => p.style.strokeDashoffset), ['0', '0', '0'], 'all strokes visible immediately');
-  const replay = slot.querySelector('button.stroke-replay');
-  assert.ok(replay && replay.disabled === false, 'Replay available (instant final again)');
+  assert.equal(glyphHidden(glyph), true, 'glyph hidden: finished SVG is the single final image');
+  const replay = replayIn(slot);
+  assert.ok(replay && replay.hidden === false && replay.disabled === false, 'Replay available (instant final again)');
+  replay.click();
+  await settle();
+  assert.equal(queue.length, 0, 'Replay never auto-draws under reduced motion');
+  assert.deepEqual(svgPathsIn(slot).map((p) => p.style.strokeDashoffset), ['0', '0', '0'], 'Replay restores the instant final');
 });
 
-// --- way back to the static glyph ----------------------------------------------------
+// --- no trigger / no Close / Escape does nothing -------------------------------------
 
-test('Close restores the static glyph; Escape does the same', async () => {
+test('no trigger or Close button exists at any phase; Escape does nothing', async () => {
   const doc = new FakeDoc();
-  for (const closeVia of ['button', 'escape']) {
-    const panel = makePanel(doc, '学');
-    const slot = panel.querySelector('div');
-    const glyph = panel.querySelector('span');
-    const { fn } = fetchOf(syntheticSvg);
-    const { raf, caf, drain } = makeRaf();
-    mountStrokeOrder(slot, {
-      character: '学', doc, fetchFn: fn, raf, caf,
-      parseFn: miniParseSvg, drawMs: 60, pauseMs: 10, prefersReducedMotion: () => false
-    });
-    triggerIn(slot).click();
-    await sleep();
-    drain();
-    assert.ok(viewIn(slot), 'overlay open');
-    if (closeVia === 'button') triggerIn(slot).click();
-    else slot.keydown('Escape');
-    assert.equal(viewIn(slot), null, `overlay removed via ${closeVia}`);
-    assert.equal(triggerIn(slot).textContent, 'Stroke order', 'trigger back to idle');
-    assert.equal(triggerIn(slot).getAttribute('aria-expanded'), 'false', 'collapsed again');
-    assert.equal(glyph.textContent, '学', 'static glyph node untouched');
-    assert.equal(glyph.parentNode, panel, 'glyph still in the panel');
-    assert.equal(triggerIn(slot).focused, true, 'focus returns to the trigger');
+  const slot = makeSlot(doc, '日');
+  const { fn } = fetchOf(syntheticSvg);
+  const { raf, caf, drain } = makeRaf();
+  mountStrokeOrder(slot, {
+    character: '日', doc, fetchFn: fn, raf, caf,
+    parseFn: miniParseSvg, drawMs: 60, pauseMs: 10, prefersReducedMotion: () => false
+  });
+  await settle();
+  for (const button of buttonsIn(slot)) {
+    assert.ok(!['Stroke order', 'Close', 'Loading…'].includes(button.textContent), `no legacy control ("${button.textContent}")`);
   }
+  drain();
+  assert.ok(viewIn(slot), 'autoplay view present');
+  assert.equal(slot.querySelector('button.stroke-trigger'), null, 'no trigger after completion');
+  assert.equal(buttonsIn(slot).length, 1, 'exactly ONE button: Replay');
+  slot.keydown('Escape');
+  assert.ok(viewIn(slot), 'Escape leaves the persistent view intact');
+  assert.equal(slot.getAttribute('data-stroke-state'), 'done', 'Escape changes no state');
+  assert.ok(replayIn(slot) && replayIn(slot).hidden === false, 'Replay still available after Escape');
+  assert.equal(svgsIn(slot).length, 1, 'Escape duplicates nothing');
+});
+
+// --- no focus theft -------------------------------------------------------------------
+
+test('autoplay never moves focus; Replay stays keyboard-reachable with a sane label', async () => {
+  const doc = new FakeDoc();
+  const panel = makePanel(doc, '学');
+  const slot = panel.querySelector('div');
+  const { fn } = fetchOf(syntheticSvg);
+  const { raf, caf, drain } = makeRaf();
+  mountStrokeOrder(slot, {
+    character: '学', doc, fetchFn: fn, raf, caf,
+    parseFn: miniParseSvg, drawMs: 60, pauseMs: 10, prefersReducedMotion: () => false
+  });
+  await settle();
+  drain();
+  assert.deepEqual(collectFocused(panel), [], 'mount + autoplay + completion focus nothing');
+  const replay = replayIn(slot);
+  assert.ok(replay, 'Replay rendered');
+  assert.equal(replay.getAttribute('type'), 'button', 'Replay is a native button (Tab-reachable, no hover-only)');
+  assert.ok((replay.getAttribute('aria-label') || '').includes('学'), 'Replay label understandable by screen readers');
 });
 
 // --- failure paths ---------------------------------------------------------------------
@@ -499,19 +563,20 @@ test('fetch failure degrades to a calm note; static glyph remains, nothing spins
   const doc = new FakeDoc();
   const panel = makePanel(doc, '鬱');
   const slot = panel.querySelector('div');
+  const glyph = panel.querySelector('span');
   const failing = () => Promise.reject(new Error('offline'));
   const clock = makeRaf();
   mountStrokeOrder(slot, { character: '鬱', doc, fetchFn: failing, raf: clock.raf, parseFn: miniParseSvg });
-  triggerIn(slot).click();
-  await sleep();
-  await sleep();
+  await settle();
   assert.equal(slot.getAttribute('data-stroke-state'), 'failed', 'failure state hook');
   assert.equal(buttonsIn(slot).length, 0, 'no stranded control');
-  const note = slot.querySelector('p.stroke-note');
+  assert.equal(svgsIn(slot).length, 0, 'no SVG on failure');
+  const note = loadingNoteIn(slot);
   assert.ok(note, 'calm note shown');
   assert.equal(note.getAttribute('role'), 'status', 'note announced politely');
   assert.equal(note.textContent, 'Stroke order unavailable', 'no technical jargon');
-  assert.equal(panel.querySelector('span').textContent, '鬱', 'static glyph remains');
+  assert.equal(glyph.textContent, '鬱', 'static glyph remains');
+  assert.equal(glyphHidden(glyph), false, 'glyph restored (no ghost, no blank panel)');
   assert.equal(clock.queue.length, 0, 'nothing scheduled after failure');
 });
 
@@ -523,15 +588,16 @@ test('corrupt assets (zero paths, unparseable) take the same failure path', asyn
     ['not svg', 'oops not xml {{{']
   ];
   for (const [label, body] of cases) {
-    const slot = makeSlot(doc, '日');
+    const panel = makePanel(doc, '日');
+    const slot = panel.querySelector('div');
+    const glyph = panel.querySelector('span');
     const { fn } = fetchOf(body);
     const { raf } = makeRaf();
     mountStrokeOrder(slot, { character: '日', doc, fetchFn: fn, raf, parseFn: miniParseSvg });
-    triggerIn(slot).click();
-    await sleep();
-    await sleep();
+    await settle();
     assert.equal(slot.getAttribute('data-stroke-state'), 'failed', `${label} → failed`);
-    assert.ok(slot.querySelector('p.stroke-note'), `${label} → calm note`);
+    assert.ok(loadingNoteIn(slot), `${label} → calm note`);
+    assert.equal(glyphHidden(glyph), false, `${label} → glyph restored`);
   }
   // A throwing parser is also a calm failure, never a crash.
   const slot = makeSlot(doc, '日');
@@ -540,9 +606,7 @@ test('corrupt assets (zero paths, unparseable) take the same failure path', asyn
     character: '日', doc, fetchFn: fn, raf: makeRaf().raf,
     parseFn: () => { throw new Error('boom'); }
   });
-  triggerIn(slot).click();
-  await sleep();
-  await sleep();
+  await settle();
   assert.equal(slot.getAttribute('data-stroke-state'), 'failed', 'throwing parser → failed');
 });
 
@@ -564,7 +628,15 @@ test('implementation parses with DOMParser and builds with createElementNS — n
   assert.ok(!/import\s+[^;]*\.svg/.test(source), 'no SVG imports (assets never bundled)');
 });
 
-test('activation works against nodes whose innerHTML setter throws', async () => {
+test('persistent autoplay exposes no trigger/Close/Escape affordance in code', () => {
+  const source = readSource('src/strokeOrder.js');
+  const codeOnly = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\s)\/\/.*$/gm, '$1');
+  assert.ok(!codeOnly.includes('stroke-trigger'), 'no trigger class in executable code');
+  assert.ok(!codeOnly.includes('aria-expanded'), 'no expand/collapse affordance in executable code');
+  assert.ok(!codeOnly.includes('Escape'), 'no Escape handling in executable code');
+});
+
+test('autoplay works against nodes whose innerHTML setter throws', async () => {
   const doc = new FakeDoc();
   const slot = makeSlot(doc, '日');
   const { fn } = fetchOf(syntheticSvg);
@@ -573,8 +645,7 @@ test('activation works against nodes whose innerHTML setter throws', async () =>
     character: '日', doc, fetchFn: fn, raf, caf,
     parseFn: miniParseSvg, drawMs: 60, pauseMs: 10, prefersReducedMotion: () => false
   });
-  triggerIn(slot).click();
-  await sleep();
+  await settle();
   drain();
   assert.equal(svgPathsIn(slot).length, 3, 'rendered without touching innerHTML');
 });
@@ -583,16 +654,16 @@ test('activation works against nodes whose innerHTML setter throws', async () =>
 
 test('cross-kanji remount never leaks: stale fetch ignored, prior work aborted', async () => {
   const doc = new FakeDoc();
-  const slot = makeSlot(doc, '日');
+  const panel = makePanel(doc, '日');
+  const slot = panel.querySelector('div');
   const nichi = deferredFetch();
   const { raf, caf, drain } = makeRaf();
   mountStrokeOrder(slot, {
     character: '日', doc, fetchFn: nichi.fn, raf, caf,
     parseFn: miniParseSvg, drawMs: 60, pauseMs: 10, prefersReducedMotion: () => false
   });
-  triggerIn(slot).click();
   await sleep();
-  assert.equal(nichi.calls.length, 1, '日 fetch in flight');
+  assert.equal(nichi.calls.length, 1, '日 autoplay fetch in flight');
   // Navigate to another kanji reusing the same slot node.
   slot.setAttribute('data-kanji-stroke-slot', '学');
   const gaku = deferredFetch();
@@ -600,23 +671,23 @@ test('cross-kanji remount never leaks: stale fetch ignored, prior work aborted',
     character: '学', doc, fetchFn: gaku.fn, raf, caf,
     parseFn: miniParseSvg, drawMs: 60, pauseMs: 10, prefersReducedMotion: () => false
   });
+  await sleep();
   assert.equal(nichi.calls[0].signal?.aborted, true, 'stale fetch aborted');
-  nichi.pending[0].resolve({ ok: true, status: 200, text: () => Promise.resolve(syntheticSvg) });
-  await sleep();
-  await sleep();
+  assert.equal(gaku.calls.length, 1, '学 autoplay fetch started on remount');
+  nichi.pending[0].resolve(okResponse(syntheticSvg));
+  await settle();
   assert.equal(viewIn(slot), null, 'stale 日 response ignored');
-  assert.equal(triggerIn(slot).textContent, 'Stroke order', 'slot idle for 学, no leak');
-  triggerIn(slot).click();
-  await sleep();
+  assert.equal(slot.getAttribute('data-stroke-state'), 'loading', 'slot loading for 学, no leak');
   assert.ok(gaku.calls[0].url.endsWith('stroke/kanji/05b66.svg'), '学 fetch uses the 学 asset');
-  gaku.pending[0].resolve({ ok: true, status: 200, text: () => Promise.resolve(syntheticSvg) });
-  await sleep();
+  gaku.pending[0].resolve(okResponse(syntheticSvg));
+  await settle();
   drain();
   const svg = slot.querySelector('svg');
   assert.ok((svg.getAttribute('aria-label') || '').includes('学'), 'only the current kanji renders');
+  assert.equal(svgsIn(slot).length, 1, 'single rendering after remount');
 });
 
-test('cleanup aborts loading and repeated cycles do not accumulate listeners', async () => {
+test('cleanup aborts loading and repeated mounts do not accumulate controls', async () => {
   const doc = new FakeDoc();
   const slot = makeSlot(doc, '日');
   const pending = deferredFetch();
@@ -625,52 +696,62 @@ test('cleanup aborts loading and repeated cycles do not accumulate listeners', a
     character: '日', doc, fetchFn: pending.fn, raf, caf,
     parseFn: miniParseSvg, prefersReducedMotion: () => false
   });
-  triggerIn(slot).click();
   await sleep();
   cleanup();
   assert.equal(pending.calls[0].signal?.aborted, true, 'cleanup aborts the in-flight fetch');
-  assert.equal(triggerIn(slot).listenerCount('click'), 0, 'trigger listener removed');
-  pending.pending[0].resolve({ ok: true, status: 200, text: () => Promise.resolve(syntheticSvg) });
-  await sleep();
-  await sleep();
+  pending.pending[0].resolve(okResponse(syntheticSvg));
+  await settle();
   assert.equal(viewIn(slot), null, 'late response after cleanup ignored');
 
-  // Repeated open cycles on a fresh mount: one click → exactly one fetch.
+  // Repeated mounts on the same node: the stale autoplay is disposed, the
+  // fresh one renders exactly one view with one Replay.
   const slot2 = makeSlot(doc, '日');
-  const { fn, calls } = fetchOf(syntheticSvg);
+  const first = deferredFetch();
+  const second = deferredFetch();
   const clock = makeRaf();
-  mountStrokeOrder(slot2, {
-    character: '日', doc, fetchFn: fn, raf: clock.raf, caf: clock.caf,
+  const mountOptions = {
+    character: '日', doc, raf: clock.raf, caf: clock.caf,
     parseFn: miniParseSvg, drawMs: 60, pauseMs: 10, prefersReducedMotion: () => false
-  });
-  mountStrokeOrder(slot2, {
-    character: '日', doc, fetchFn: fn, raf: clock.raf, caf: clock.caf,
-    parseFn: miniParseSvg, drawMs: 60, pauseMs: 10, prefersReducedMotion: () => false
-  });
-  triggerIn(slot2).click();
+  };
+  mountStrokeOrder(slot2, { ...mountOptions, fetchFn: first.fn });
+  mountStrokeOrder(slot2, { ...mountOptions, fetchFn: second.fn });
   await sleep();
-  assert.equal(calls.length, 1, 'remount disposed the stale trigger (single activation)');
+  assert.equal(first.calls.length, 1, 'stale autoplay still fired its (aborted) fetch');
+  assert.equal(first.calls[0].signal?.aborted, true, 'remount disposed the stale autoplay');
+  assert.equal(second.calls.length, 1, 'fresh autoplay fetched once');
+  first.pending[0].resolve(okResponse(syntheticSvg));
+  await settle();
+  assert.equal(viewIn(slot2), null, 'stale first response ignored');
+  second.pending[0].resolve(okResponse(syntheticSvg));
+  await settle();
+  clock.drain();
+  assert.equal(slot2.querySelectorAll('div.stroke-view').length, 1, 'exactly one view');
+  assert.equal(buttonsIn(slot2).length, 1, 'exactly one Replay (no listener/control accumulation)');
+  assert.equal(replayIn(slot2).listenerCount('click'), 1, 'single Replay listener');
 });
 
 // --- shared mounting across both surfaces -------------------------------------------------
 
-test('mountStrokeSlots mounts Jōyō slots only, lazily', async () => {
+test('mountStrokeSlots autoplays Jōyō slots only', async () => {
   const doc = new FakeDoc();
   const rootNode = doc.createElement('div');
   rootNode.appendChild(makePanel(doc, '日'));
   rootNode.appendChild(makePanel(doc, '屁'));
   const { fn, calls } = fetchOf(syntheticSvg);
-  const { raf } = makeRaf();
-  const cleanups = mountStrokeSlots(rootNode, { doc, fetchFn: fn, raf, parseFn: miniParseSvg });
+  const { raf, caf, drain } = makeRaf();
+  const cleanups = mountStrokeSlots(rootNode, { doc, fetchFn: fn, raf, caf, parseFn: miniParseSvg });
   assert.equal(cleanups.length, 2, 'one cleanup per slot');
+  await settle();
+  assert.equal(calls.length, 1, 'autoplay fetch for the Jōyō slot only');
+  assert.ok(calls[0].url.endsWith('stroke/kanji/065e5.svg'), 'fetched 日 asset');
+  drain();
   const slots = rootNode.querySelectorAll('[data-kanji-stroke-slot]');
-  assert.equal(buttonsIn(slots[0]).length, 1, '日 slot gets the control');
+  assert.ok(replayIn(slots[0]), '日 slot completes to Replay');
   assert.equal(buttonsIn(slots[1]).length, 0, '屁 slot stays empty');
-  await sleep();
-  assert.equal(calls.length, 0, 'mounting never prefetches');
+  assert.equal(svgsIn(slots[1]).length, 0, '屁 slot renders nothing');
 });
 
-test('both surfaces share the lazy stroke module; builder stays presentational', () => {
+test('both surfaces share the autoplay stroke module; builder stays presentational', () => {
   const entity = readSource('src/pages/entityPage.js');
   const reference = readSource('src/pages/kanjiReference.js');
   const builder = readSource('src/kanjiDetail.js');
@@ -699,11 +780,11 @@ test('strokeJoyo is imported ONLY by the stroke module (tiny table never leaks i
 
 // --- pacing + restraint ----------------------------------------------------------------------
 
-test('pacing is calm with no autoplay, quizzes, or speed controls', () => {
+test('pacing is calm with autoplay-by-design and no quizzes or speed controls', () => {
   assert.ok(STROKE_DRAW_MS >= 300 && STROKE_DRAW_MS <= 500, `~${STROKE_DRAW_MS}ms per stroke`);
   assert.ok(STROKE_PAUSE_MS > 0 && STROKE_PAUSE_MS <= 200, `small ${STROKE_PAUSE_MS}ms pause`);
   const source = readSource('src/strokeOrder.js');
-  assert.ok(!/autoplay/i.test(source), 'no autoplay');
+  assert.ok(/autoplay/i.test(source), 'autoplay-on-mount is the documented design');
   assert.ok(!/quiz|game|score/i.test(source), 'no quizzes or games');
   assert.ok(!/speed/i.test(source), 'no speed controls');
 });

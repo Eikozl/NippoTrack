@@ -1299,6 +1299,78 @@
   font-weight: 600;
 }
 
+/* Kanji stroke-sequence showcase: three reference cards (日 → 空 → 深)
+   drawn once when the section enters the viewport (see
+   initKanjiSequence). Token-only surfaces/borders so the dark theme
+   follows automatically; cards stagger via the shared .demo-step reveal
+   and strokes draw via JS with a reduced-motion instant-final path — no
+   new motion system, no new breakpoints. */
+.showcase-panel.kanji-demo {
+  grid-template-columns: 1fr;
+  align-content: center;
+  gap: 0;
+}
+
+.kanji-sequence {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  align-content: center;
+}
+
+.kanji-seq-card {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 18px 10px 14px;
+  border: 1px solid var(--landing-border-subtle);
+  border-radius: 14px;
+  background: var(--landing-surface);
+}
+
+.kanji-seq-glyph {
+  display: grid;
+  place-items: center;
+  min-height: 76px;
+  font-size: 56px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.kanji-seq-glyph svg {
+  width: 64px;
+  height: 64px;
+}
+
+.kanji-seq-caption {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  margin: 0;
+  text-align: center;
+}
+
+.kanji-seq-caption strong {
+  font-size: 15px;
+}
+
+.kanji-seq-caption span {
+  color: var(--landing-text-secondary);
+  font-size: 12px;
+}
+
+.kanji-seq-caption small {
+  color: var(--landing-text-muted);
+  font-size: 11px;
+}
+
+.kanji-seq-note {
+  margin: 14px 0 0 !important;
+  color: var(--landing-text-muted);
+  font-size: 11px;
+  text-align: center;
+}
+
 .review-demo {
   display: grid;
   min-height: 410px;
@@ -2086,6 +2158,20 @@
   .kanji-details {
     padding-left: 24px;
   }
+
+  .kanji-sequence {
+    gap: 10px;
+  }
+
+  .kanji-seq-glyph {
+    min-height: 64px;
+    font-size: 48px;
+  }
+
+  .kanji-seq-glyph svg {
+    width: 54px;
+    height: 54px;
+  }
 }
 
 @media (max-width: 767px) {
@@ -2679,6 +2765,28 @@
     padding-left: 18px;
   }
 
+  .showcase-panel.kanji-demo {
+    grid-template-columns: 1fr;
+  }
+
+  .kanji-sequence {
+    gap: 8px;
+  }
+
+  .kanji-seq-card {
+    padding: 14px 6px 12px;
+  }
+
+  .kanji-seq-glyph {
+    min-height: 56px;
+    font-size: 42px;
+  }
+
+  .kanji-seq-glyph svg {
+    width: 48px;
+    height: 48px;
+  }
+
   .review-rating {
     gap: 7px;
   }
@@ -2754,6 +2862,12 @@
 
   .landing-js .landing-page [data-demo="vocabulary"] .typing-word {
     clip-path: none;
+  }
+
+  /* Kanji sequence renders its final resting state immediately under
+     reduced motion (JS instant-final); strokes never transition. */
+  .landing-js .landing-page [data-demo="kanji"] .kanji-seq-glyph svg path {
+    transition: none;
   }
 
   .landing-js .landing-page [data-demo="progress"] .chart-line {
