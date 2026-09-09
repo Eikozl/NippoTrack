@@ -15,6 +15,7 @@ const reviewRoutes = require('./routes/review');
 const analyzeRoutes = require('./routes/analyze');
 const levelRoutes = require('./routes/level');
 const firstExperienceRoutes = require('./routes/firstExperience');
+const profileRoutes = require('./routes/profile');
 const authRoutes = require('./routes/auth');
 const { requireAuthentication } = require('./middleware/authentication');
 const { createRateLimiter } = require('./middleware/rateLimit');
@@ -63,7 +64,9 @@ app.get('/api', (req, res) => {
       'PUT /api/first-experience/onboarding',
       'GET /api/first-experience/placement/questions',
       'POST /api/first-experience/placement/submit',
-      'POST /api/first-experience/placement/skip'
+      'POST /api/first-experience/placement/skip',
+      'GET /api/profile',
+      'PUT /api/profile'
     ]
   });
 });
@@ -80,6 +83,7 @@ app.use('/api/review', reviewRoutes);
 app.use('/api/analyze', analyzeRoutes);
 app.use('/api/level', levelRoutes);
 app.use('/api/first-experience', firstExperienceRoutes);
+app.use('/api/profile', profileRoutes);
 
 app.use(express.static(path.join(__dirname, '../../client/dist')));
 app.use(errorHandler);
