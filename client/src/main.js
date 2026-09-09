@@ -331,6 +331,10 @@ accountButtons.forEach((button) => button?.addEventListener('click', () => {
 // cannot change the estimate, so nothing subscribes to them.
 const levelEstimateControl = createLevelEstimateControl({
   fetchEstimate: () => apiRequest('/api/level/estimate'),
+  // Starting-level fallback while evidence is insufficient (presentation
+  // only — the estimator still wins whenever it has evidence). Fail-open:
+  // a first-experience fetch failure simply means no fallback.
+  fetchStartingPoint: () => apiRequest('/api/first-experience', { notifyAuth: false }).catch(() => null),
   createElement: element,
   doc: document,
   win: window

@@ -60,7 +60,10 @@ app.get('/api', (req, res) => {
       'GET /api/level/target',
       'PUT /api/level/target',
       'GET /api/first-experience',
-      'PUT /api/first-experience/onboarding'
+      'PUT /api/first-experience/onboarding',
+      'GET /api/first-experience/placement/questions',
+      'POST /api/first-experience/placement/submit',
+      'POST /api/first-experience/placement/skip'
     ]
   });
 });

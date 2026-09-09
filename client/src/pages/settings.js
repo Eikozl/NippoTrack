@@ -2,6 +2,63 @@ import { apiRequest } from '../api';
 import { element, pageHeader, showToast, withPendingAction } from '../ui';
 import { getLocale, setLocale } from '../i18n';
 import { applyAppThemeAttributes, isAllowedAppTheme, persistAppTheme } from '../appTheme';
+import { enterPlacement, placementResultFromState, placementResultNode, selfReportResultNode } from '../firstExperience.js';
+
+// Restrained "Japanese starting point" block (additive only — the existing
+// settings structure above is untouched). One-time starting point,
+// presented from stored server state: not_started/skipped get the Take CTA
+// on the same placement flow (so existing accounts that never saw the
+// first-use dashboard can still start); a completed quiz renders the shared
+// read-only diagram with its "Completed: <date>" line; a completed
+// self-report renders the chosen level with its Self-reported line. No
+// action of any kind once completed, whichever the source.
+function startingPointBlock() {
+  const block = element('article', { className: 'surface mt-5 max-w-5xl p-6' }, [
+    element('h2', { className: 'text-lg font-semibold text-ink', text: 'Japanese starting point' }),
+    element('div', { className: 'starting-point-body mt-2' }, [
+      element('p', { className: 'text-sm leading-6 text-muted', text: 'Loading your starting point…' })
+    ])
+  ]);
+  const body = block.querySelector('.starting-point-body');
+  apiRequest('/api/first-experience', { notifyAuth: false }).then((firstExperience) => {
+    if (!body.isConnected) return;
+    const stored = placementResultFromState(firstExperience);
+    if (!stored) {
+      body.replaceChildren(
+        element('p', { className: 'text-sm leading-6 text-muted', text: 'Answer 10 short Japanese questions to establish a starting reference.' }),
+        element('p', { className: 'mt-2 text-xs leading-5 text-muted', text: 'This is a starting estimate, not an official JLPT assessment.' }),
+        (() => {
+          const take = element('button', { className: 'button-secondary mt-4', text: 'Take quick placement', attrs: { type: 'button' } });
+          take.addEventListener('click', () => {
+            enterPlacement({ navigate: (page) => { window.location.hash = `#${page}`; } });
+          });
+          return take;
+        })()
+      );
+      return;
+    }
+    if (stored.source === 'self_reported') {
+      body.replaceChildren(selfReportResultNode(element, {
+        estimate: stored.estimate,
+        completedAt: stored.completedAt,
+        titleTag: 'h3',
+        titleClassName: 'font-display mt-2 text-xl font-semibold tracking-tight text-ink'
+      }));
+      return;
+    }
+    body.replaceChildren(placementResultNode(element, {
+      estimate: stored.estimate,
+      result: stored.result,
+      completedAt: stored.completedAt,
+      titleTag: 'h3',
+      titleClassName: 'font-display mt-2 text-xl font-semibold tracking-tight text-ink'
+    }));
+  }).catch(() => {
+    // Fail open: settings stays fully usable without the starting point.
+    if (body.isConnected) block.remove();
+  });
+  return block;
+}
 
 export async function renderSettings(container) {
   const current = document.documentElement.dataset.theme || 'light';
@@ -44,6 +101,7 @@ export async function renderSettings(container) {
       element('p', { className: 'mt-2 text-sm leading-6 text-muted', text: 'Choose the interface language. Study content, Japanese text, and your own entries are never translated.' }),
       element('div', { className: 'mt-5 flex flex-wrap gap-3' }, [english, spanish])
     ]),
+    startingPointBlock(),
     element('article', { className: 'surface mt-5 max-w-5xl p-6' }, [
       element('h2', { className: 'text-lg font-semibold text-ink', text: 'Study loop' }),
       element('p', { className: 'mt-2 text-sm leading-6 text-muted', text: 'A simple cycle for building consistent study habits: study, record what you learned, review it later, and measure your progress over time.' }),

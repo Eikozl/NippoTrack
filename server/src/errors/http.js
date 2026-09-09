@@ -1,5 +1,17 @@
 class ValidationError extends Error {}
 
+// One-time Quick Placement guard: a second submit (or re-serving questions)
+// after completion is a 409, never a 400 or 500. Follows the ValidationError
+// pattern (dedicated class + semantic code); the code travels in the JSON
+// body so clients can branch without parsing messages.
+class PlacementAlreadyCompletedError extends Error {
+  constructor(message = 'Quick placement has already been completed.') {
+    super(message);
+    this.name = 'PlacementAlreadyCompletedError';
+    this.code = 'PLACEMENT_ALREADY_COMPLETED';
+  }
+}
+
 function sendRouteError(res, error, {
   defaultStatus = 500,
   defaultMessage = 'Unable to complete the request.',
@@ -7,6 +19,13 @@ function sendRouteError(res, error, {
 } = {}) {
   if (error instanceof ValidationError) {
     return res.status(400).json({ error: error.message });
+  }
+
+  if (error instanceof PlacementAlreadyCompletedError || error?.code === 'PLACEMENT_ALREADY_COMPLETED') {
+    return res.status(409).json({
+      error: error.message || 'Quick placement has already been completed.',
+      code: 'PLACEMENT_ALREADY_COMPLETED'
+    });
   }
 
   if (error?.code === 'ER_DUP_ENTRY' || error?.code === '23505') {
@@ -41,6 +60,7 @@ function errorHandler(error, req, res, next) {
 }
 
 module.exports = {
+  PlacementAlreadyCompletedError,
   ValidationError,
   sendRouteError,
   errorHandler

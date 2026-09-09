@@ -4,6 +4,14 @@
 // GET /api/level/estimate payload (via levelEstimateModel) as ONE surface
 // in the application header that morphs between compact and expanded.
 //
+// Starting-level fallback (presentation only): while the estimator reports
+// insufficient evidence AND a completed first-experience starting point
+// exists (optional fetchStartingPoint, usually GET /api/first-experience),
+// the face presents the starting level — "Starting level" title with the
+// bare level value (quiz and self-reported alike) — and the detail mirrors
+// the per-source result wording. A real evidence estimate always wins;
+// disagreement is never reconciled. Estimator logic is never touched.
+//
 // Interaction principle (not visual copy): the collapsed pill — whose only
 // visual identity is the level itself (N5…N1, or — when there is not enough
 // evidence; no decorative icon) — smoothly grows into the detail surface
@@ -36,22 +44,66 @@
 //   makes state changes instant without breaking functionality.
 
 import { levelEstimateModel } from './levelEstimate.js';
+import {
+  PLACEMENT_COPY,
+  isValidPlacementEstimate,
+  normalizePlacementSource,
+  placementResultFromState
+} from './firstExperience.js';
 
 export const LEVEL_ESTIMATE_MORPH_CLASS = 'level-estimate-morph';
 
-export function levelControlLabel(model) {
-  if (!model) return 'JLT estimated study level';
-  if (model.status === 'estimated' && model.level) return `JLT estimated study level: ${model.level}`;
-  return 'JLT estimated study level: not enough evidence yet';
+// Starting-level fallback labels. Shown ONLY while the evidence estimator
+// reports insufficient evidence and a completed starting point exists —
+// never beside (or instead of) a real evidence estimate, and never under
+// the "Estimated study level" name.
+export const STARTING_LEVEL_TITLE = 'Starting level';
+
+export function startingPointLabel(starting) {
+  if (!starting || !isValidPlacementEstimate(starting.estimate)) return null;
+  return starting.source === 'self_reported'
+    ? `Starting level: ${starting.estimate}, self-reported`
+    : `Starting level: ${starting.estimate} range, Quick Placement`;
 }
 
-export function levelControlShortText(model) {
+export function startingPointShortText(starting) {
+  if (!starting || !isValidPlacementEstimate(starting.estimate)) return null;
+  // Compact face shows the level only (N5…N1) for both quiz and
+  // self-reported starting points. The "range" wording lives in the
+  // accessible label and expanded detail, never on the compact badge.
+  return starting.estimate;
+}
+
+export function levelControlLabel(model, starting = null) {
+  if (!model) return 'JLT estimated study level';
+  if (model.status === 'estimated' && model.level) return `JLT estimated study level: ${model.level}`;
+  return startingPointLabel(starting) || 'JLT estimated study level: not enough evidence yet';
+}
+
+export function levelControlShortText(model, starting = null) {
   if (model && model.status === 'estimated' && model.level) return model.level;
-  return '—';
+  return startingPointShortText(starting) || '—';
 }
 
 function bulletList(h, items) {
   return h('ul', { className: 'level-estimate-list' }, items.map((text) => h('li', { text })));
+}
+
+// Starting-level fallback detail: presentation only, fed by the stored
+// first-experience starting point. Mirrors the per-source result wording
+// (quiz range + Quick Placement, or JLPT level + Self-reported) with the
+// honest notes — and deliberately never the evidence-estimate wording.
+export function renderStartingLevelDetail(h, starting) {
+  const quiz = starting.source !== 'self_reported';
+  return [
+    h('p', { className: 'level-estimate-subline', text: 'Not enough review evidence yet — showing your starting level.' }),
+    h('p', { className: 'level-estimate-confidence', text: quiz
+      ? `${starting.estimate} range · ${PLACEMENT_COPY.quizSourceLabel}`
+      : `JLPT ${starting.estimate} · ${PLACEMENT_COPY.selfResultPill}` }),
+    h('p', { className: 'level-estimate-disclaimer', text: quiz
+      ? PLACEMENT_COPY.breakdownNote
+      : PLACEMENT_COPY.selfResultBody })
+  ];
 }
 
 // Renders the expandable detail body from the cached model. Pure w.r.t.
@@ -85,10 +137,11 @@ export function renderLevelDetail(h, model) {
 
 let detailIdCounter = 0;
 
-export function createLevelEstimateControl({ fetchEstimate, createElement, doc, win }) {
+export function createLevelEstimateControl({ fetchEstimate, fetchStartingPoint = null, createElement, doc, win }) {
   const h = createElement;
   const state = {
     model: null,
+    starting: null,
     loaded: false,
     loading: false,
     stale: false,
@@ -97,6 +150,19 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
     hosts: [],
     partsByHost: new Map()
   };
+
+  // Evidence wins whenever it exists: the fallback is valid only while the
+  // estimator reports insufficient evidence AND a completed starting point
+  // is stored. Disagreement between the two is expected and never
+  // reconciled — the starting level is presentation only.
+  function fallbackStarting() {
+    if (!state.model || state.model.status !== 'insufficient_evidence') return null;
+    if (!state.starting || !isValidPlacementEstimate(state.starting.estimate)) return null;
+    return {
+      estimate: state.starting.estimate,
+      source: normalizePlacementSource(state.starting.source)
+    };
+  }
 
   function prefersReducedMotion() {
     return Boolean(win) && typeof win.matchMedia === 'function' && win.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -138,9 +204,12 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
   }
 
   function syncFaces() {
+    const fallback = fallbackStarting();
     for (const [host, parts] of state.partsByHost.entries()) {
-      if (parts.valueNode) parts.valueNode.textContent = levelControlShortText(state.model);
-      parts.face.setAttribute('aria-label', levelControlLabel(state.model));
+      if (parts.valueNode) parts.valueNode.textContent = levelControlShortText(state.model, fallback);
+      if (parts.titleNode) parts.titleNode.textContent = fallback ? STARTING_LEVEL_TITLE : 'Estimated study level';
+      if (parts.detail) parts.detail.setAttribute('aria-label', fallback ? 'Starting level details' : 'Estimated study level details');
+      parts.face.setAttribute('aria-label', levelControlLabel(state.model, fallback));
       parts.face.setAttribute('aria-expanded', String(state.openHost === host));
     }
   }
@@ -173,7 +242,11 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
 
   function renderOpenContent() {
     const parts = state.openHost ? state.partsByHost.get(state.openHost) : null;
-    if (parts && state.model) parts.detailInner.replaceChildren(...renderLevelDetail(h, state.model));
+    if (!parts || !state.model) return;
+    const fallback = fallbackStarting();
+    parts.detailInner.replaceChildren(
+      ...(fallback ? renderStartingLevelDetail(h, fallback) : renderLevelDetail(h, state.model))
+    );
   }
 
   function open(host) {
@@ -235,6 +308,19 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
     try {
       const payload = await fetchEstimate();
       state.model = levelEstimateModel(payload);
+      // Starting-level fallback: fetched only while evidence is
+      // insufficient (the only state where it can surface), and only when
+      // a fetcher was wired — header-less tests keep the legacy behavior.
+      // Failures degrade to no fallback, never to a guessed level.
+      if (state.model && state.model.status === 'insufficient_evidence' && typeof fetchStartingPoint === 'function') {
+        try {
+          state.starting = placementResultFromState(await fetchStartingPoint());
+        } catch {
+          state.starting = null;
+        }
+      } else {
+        state.starting = null;
+      }
       state.loaded = true;
       // Fetch failure degrades to hidden: never show a stale or
       // placeholder estimate in the header.
@@ -244,6 +330,7 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
       syncFaces();
     } catch {
       state.model = null;
+      state.starting = null;
       setHostsVisible(false);
       if (state.openHost) close();
     } finally {
@@ -281,6 +368,7 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
       face,
       detail,
       detailInner,
+      titleNode: face.querySelector('.level-estimate-title'),
       valueNode: face.querySelector('[data-level-text]')
     });
     return wrapper;
@@ -289,6 +377,7 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
   function reset() {
     close();
     state.model = null;
+    state.starting = null;
     state.loaded = false;
     setHostsVisible(false);
     syncFaces();
@@ -313,11 +402,20 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
     if (state.loaded) load();
   }
 
+  // A completed starting point is not review evidence, so it never changes
+  // the estimate — but while evidence is insufficient the header falls back
+  // to presenting it. Refresh then (and only then); an estimated header is
+  // untouched by starting-point changes.
+  function onStartingPointChange() {
+    if (!state.model || state.model.status !== 'estimated') load();
+  }
+
   // Freshness contract: initial load + review evidence only. Deliberately
   // NOT subscribed to analyzer/import/session events — those cannot change
   // the estimate (unreviewed kanji are not evidence).
   if (win && typeof win.addEventListener === 'function') {
     win.addEventListener('jlt-review-complete', onReviewComplete);
+    win.addEventListener('jlt-starting-point-change', onStartingPointChange);
   }
 
   return {
@@ -331,6 +429,7 @@ export function createLevelEstimateControl({ fetchEstimate, createElement, doc, 
     destroy,
     isOpen: () => state.openHost !== null,
     getModel: () => state.model,
+    getStarting: () => state.starting,
     isLoaded: () => state.loaded
   };
 }

@@ -64,32 +64,80 @@ function normalizeOnboardingPlacementStatus(value) {
   return value;
 }
 
+// Coerces a stored SMALLINT count (pg int2 arrives as a JS number) to an
+// integer, else null. Any NULL count column means "completed before
+// breakdowns" (migration 015: raw answers were never stored, so A.3-era rows
+// cannot be backfilled) and the whole result degrades to null.
+function toCountOrNull(value) {
+  if (typeof value === 'number' && Number.isInteger(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '' && Number.isInteger(Number(value))) return Number(value);
+  return null;
+}
+
+// Builds result:{totalCorrect,byBand:{N5,N4,N3}} when the quiz breakdown is
+// fully present (total + N5/N4/N3 all non-null), else null. Null covers: not
+// completed, self_reported completions (counts are always NULL — no quiz data
+// fabricated), and pre-breakdown quiz rows (migration 015 NULLs, backfill
+// impossible). Legacy N2/N1 count columns, when present on old rows, are
+// ignored: they are not part of the fixed contract and never affect presence.
+function toPlacementResult(row) {
+  if (!row) return null;
+  const totalCorrect = toCountOrNull(row.placement_total_correct);
+  const byBand = {
+    N5: toCountOrNull(row.placement_correct_n5),
+    N4: toCountOrNull(row.placement_correct_n4),
+    N3: toCountOrNull(row.placement_correct_n3)
+  };
+  if (totalCorrect === null || Object.values(byBand).some((value) => value === null)) return null;
+  return { totalCorrect, byBand };
+}
+
+const PLACEMENT_SOURCES = ['quiz', 'self_reported'];
+
+function toPlacementSource(row, status) {
+  if (!row || status !== 'completed') return null;
+  return PLACEMENT_SOURCES.includes(row.placement_source) ? row.placement_source : null;
+}
+
 function toFirstExperienceShape(row, targetLevel) {
   if (!row) {
     return {
       onboarding: { completed: false, studySources: [] },
-      placement: { status: 'not_started', estimate: null },
+      placement: { status: 'not_started', estimate: null, source: null, completedAt: null, result: null },
       targetLevel
     };
   }
+  const status = PLACEMENT_STATUSES.includes(row.placement_status) ? row.placement_status : 'not_started';
   return {
     onboarding: {
       completed: row.onboarding_completed_at !== null && row.onboarding_completed_at !== undefined,
       studySources: Array.isArray(row.study_sources) ? [...row.study_sources] : []
     },
     placement: {
-      status: PLACEMENT_STATUSES.includes(row.placement_status) ? row.placement_status : 'not_started',
-      estimate: PLACEMENT_ESTIMATES.includes(row.placement_estimate) ? row.placement_estimate : null
+      status,
+      estimate: PLACEMENT_ESTIMATES.includes(row.placement_estimate) ? row.placement_estimate : null,
+      // source is only meaningful for completed rows (pre-source completions
+      // read as null; skipped/not_started always read as null so a stale
+      // value can never leak).
+      source: toPlacementSource(row, status),
+      // completedAt is only meaningful for completed rows (a stale timestamp
+      // on a skipped row would mislead); result is null unless completed with
+      // a full quiz breakdown present (self_reported => null by construction).
+      completedAt: status === 'completed' ? (row.placement_completed_at ?? null) : null,
+      result: status === 'completed' ? toPlacementResult(row) : null
     },
     targetLevel
   };
 }
 
 // Read-only: one bounded SELECT on user_first_experience + the target lookup.
-// Never invents sources/estimates — absent row yields the never-onboarded shape.
+// Never invents sources/estimates/counts — absent row yields the never-onboarded shape.
+// placement_source (migration 016) rides along; pre-source rows read as NULL.
 async function getFirstExperience(database, userId) {
   const [rows] = await database.execute(
-    'SELECT onboarding_completed_at, study_sources, placement_status, placement_estimate FROM user_first_experience WHERE user_id = ?',
+    'SELECT onboarding_completed_at, study_sources, placement_status, placement_estimate, placement_source, placement_completed_at, ' +
+    'placement_total_correct, placement_correct_n5, placement_correct_n4, placement_correct_n3, ' +
+    'placement_correct_n2, placement_correct_n1 FROM user_first_experience WHERE user_id = ?',
     [userId]
   );
   const targetLevel = await getJlptTarget(database, userId);
@@ -119,11 +167,16 @@ async function completeOnboarding(pool, userId, body) {
     await connection.beginTransaction();
     await setJlptTarget(connection, userId, targetLevel);
     if (placementStatus === ONBOARDING_PLACEMENT_STATUS) {
+      // Single-statement guard: a completed placement is NEVER downgraded to
+      // skipped by a late onboarding PUT (one-time quiz). Non-completed rows
+      // behave exactly as in A.2.
       await connection.execute(
         'INSERT INTO user_first_experience (user_id, study_sources, onboarding_completed_at, placement_status, updated_at) ' +
         "VALUES (?, ?, CURRENT_TIMESTAMP, 'skipped', CURRENT_TIMESTAMP) " +
         'ON CONFLICT (user_id) DO UPDATE SET study_sources = EXCLUDED.study_sources, ' +
-        "onboarding_completed_at = CURRENT_TIMESTAMP, placement_status = 'skipped', updated_at = CURRENT_TIMESTAMP",
+        'onboarding_completed_at = CURRENT_TIMESTAMP, ' +
+        "placement_status = CASE WHEN user_first_experience.placement_status = 'completed' THEN 'completed' ELSE 'skipped' END, " +
+        'updated_at = CURRENT_TIMESTAMP',
         [userId, studySources]
       );
     } else {

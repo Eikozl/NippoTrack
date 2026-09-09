@@ -421,7 +421,7 @@ test('Header morph: review completion refreshes, unrelated events do not', async
   win.dispatchEvent({ type: 'jlt-analyzer-change' });
   await sleep(10);
   assert.equal(fetchCalls(), 1);
-  assert.deepEqual(win.listenerTypes().sort(), ['jlt-review-complete']);
+  assert.deepEqual(win.listenerTypes().sort(), ['jlt-review-complete', 'jlt-starting-point-change']);
   // A completed review creates review evidence: refetch and update the pill.
   level = 'N4';
   win.dispatchEvent({ type: 'jlt-review-complete' });

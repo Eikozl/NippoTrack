@@ -59,13 +59,24 @@ function installFirstExperienceStub(state) {
         if (state.failFirstExperienceWrite) {
           throw new Error('simulated first-experience write failure');
         }
+        // A.2 onboarding upserts mirror the real SQL: the CASE guard preserves
+        // a completed placement, and all other placement columns survive.
         const userId = params[0];
         const existing = state.firstExp[userId];
+        const priorStatus = existing ? existing.placement_status : 'not_started';
         state.firstExp[userId] = {
+          ...(existing || {}),
           onboarding_completed_at: '2026-09-09T00:00:00.000Z',
           study_sources: [...params[1]],
-          placement_status: /'skipped'/i.test(sql) ? 'skipped' : (existing ? existing.placement_status : 'not_started'),
-          placement_estimate: existing ? existing.placement_estimate : null
+          placement_status: /'skipped'/i.test(sql) && priorStatus !== 'completed' ? 'skipped' : priorStatus,
+          placement_estimate: existing ? existing.placement_estimate : null,
+          placement_completed_at: existing ? (existing.placement_completed_at ?? null) : null,
+          placement_total_correct: existing ? (existing.placement_total_correct ?? null) : null,
+          placement_correct_n5: existing ? (existing.placement_correct_n5 ?? null) : null,
+          placement_correct_n4: existing ? (existing.placement_correct_n4 ?? null) : null,
+          placement_correct_n3: existing ? (existing.placement_correct_n3 ?? null) : null,
+          placement_correct_n2: existing ? (existing.placement_correct_n2 ?? null) : null,
+          placement_correct_n1: existing ? (existing.placement_correct_n1 ?? null) : null
         };
         return [{ affectedRows: 1 }];
       }
@@ -136,7 +147,7 @@ async function requestJson(base, path, { method = 'GET', body, user = TEST_USER 
 
 const NEVER_ONBOARDED = {
   onboarding: { completed: false, studySources: [] },
-  placement: { status: 'not_started', estimate: null },
+  placement: { status: 'not_started', estimate: null, source: null, completedAt: null, result: null },
   targetLevel: null
 };
 
@@ -177,7 +188,7 @@ test('A.2: existing placement state is surfaced read-only', async () => {
       assert.equal(status, 200);
       assert.deepEqual(body, {
         onboarding: { completed: true, studySources: ['manga'] },
-        placement: { status: 'completed', estimate: 'N2' },
+        placement: { status: 'completed', estimate: 'N2', source: null, completedAt: null, result: null },
         targetLevel: 'N2'
       });
     });
@@ -260,7 +271,7 @@ test('A.2: body user ids are ignored; rows are isolated per user', async () => {
       assert.equal(put.status, 200);
       assert.deepEqual(put.body, {
         onboarding: { completed: true, studySources: ['apps'] },
-        placement: { status: 'not_started', estimate: null },
+        placement: { status: 'not_started', estimate: null, source: null, completedAt: null, result: null },
         targetLevel: 'N4'
       });
       const other = await requestJson(base, '/api/first-experience', { user: OTHER_USER });
@@ -298,7 +309,7 @@ test('A.2: invalid sources leave target and row unchanged', async () => {
       const got = await requestJson(base, '/api/first-experience');
       assert.deepEqual(got.body, {
         onboarding: { completed: true, studySources: ['manga'] },
-        placement: { status: 'not_started', estimate: null },
+        placement: { status: 'not_started', estimate: null, source: null, completedAt: null, result: null },
         targetLevel: 'N2'
       });
     });
@@ -325,7 +336,7 @@ test('A.2: mid-transaction write failure rolls back the target write', async () 
       const got = await requestJson(base, '/api/first-experience');
       assert.deepEqual(got.body, {
         onboarding: { completed: true, studySources: ['manga'] },
-        placement: { status: 'not_started', estimate: null },
+        placement: { status: 'not_started', estimate: null, source: null, completedAt: null, result: null },
         targetLevel: 'N2'
       });
     });
@@ -345,7 +356,7 @@ test('A.2: skip-setup completes onboarding with skipped placement and invents no
       assert.equal(status, 200);
       assert.deepEqual(body, {
         onboarding: { completed: true, studySources: [] },
-        placement: { status: 'skipped', estimate: null },
+        placement: { status: 'skipped', estimate: null, source: null, completedAt: null, result: null },
         targetLevel: null
       });
       const got = await requestJson(base, '/api/first-experience');
@@ -380,7 +391,7 @@ test('A.2: completed onboarding persists across reloads', async () => {
   const stub = installFirstExperienceStub(freshState());
   const expected = {
     onboarding: { completed: true, studySources: ['textbooks', 'apps'] },
-    placement: { status: 'not_started', estimate: null },
+    placement: { status: 'not_started', estimate: null, source: null, completedAt: null, result: null },
     targetLevel: 'N4'
   };
   try {
@@ -416,6 +427,113 @@ test('A.2: existing target endpoint is untouched', async () => {
     const writes = stub.seen.filter((entry) => /INSERT|UPDATE|DELETE/i.test(entry.sql));
     assert.ok(writes.length > 0, 'expected target writes to be recorded');
     assert.ok(writes.every((entry) => /user_jlpt_target/i.test(entry.sql)), 'target writes must stay inside user_jlpt_target');
+  } finally {
+    stub.restore();
+  }
+});
+
+test('GET placement surfaces the persisted breakdown when present', async () => {
+  const stub = installFirstExperienceStub(freshState({
+    firstExp: {
+      [TEST_USER]: seedRow({
+        placement_status: 'completed',
+        placement_estimate: 'N2',
+        placement_completed_at: '2026-09-02T00:00:00.000Z',
+        placement_total_correct: 7,
+        placement_correct_n5: 2,
+        placement_correct_n4: 2,
+        placement_correct_n3: 2,
+        placement_correct_n2: 1,
+        placement_correct_n1: 0
+      })
+    },
+    targets: { [TEST_USER]: 'N2' }
+  }));
+  try {
+    await withServer(async (base) => {
+      const { status, body } = await requestJson(base, '/api/first-experience');
+      assert.equal(status, 200);
+      assert.deepEqual(body, {
+        onboarding: { completed: true, studySources: ['manga'] },
+        placement: {
+          status: 'completed',
+          estimate: 'N2',
+          source: null,
+          completedAt: '2026-09-02T00:00:00.000Z',
+          // Legacy 5-band row: the fixed contract surfaces only N5/N4/N3.
+          result: { totalCorrect: 7, byBand: { N5: 2, N4: 2, N3: 2 } }
+        },
+        targetLevel: 'N2'
+      });
+    });
+    assert.ok(!stub.seen.some((entry) => /INSERT|UPDATE|DELETE/i.test(entry.sql)), 'GET must be read-only');
+  } finally {
+    stub.restore();
+  }
+});
+
+test('GET placement returns result:null for pre-breakdown completed rows (015 NULLs)', async () => {
+  const stub = installFirstExperienceStub(freshState({
+    firstExp: {
+      [TEST_USER]: seedRow({
+        placement_status: 'completed',
+        placement_estimate: 'N3',
+        placement_completed_at: '2026-09-02T00:00:00.000Z'
+      })
+    }
+  }));
+  try {
+    await withServer(async (base) => {
+      const { status, body } = await requestJson(base, '/api/first-experience');
+      assert.equal(status, 200);
+      assert.deepEqual(body.placement, {
+        status: 'completed',
+        estimate: 'N3',
+        source: null,
+        completedAt: '2026-09-02T00:00:00.000Z',
+        result: null
+      });
+    });
+  } finally {
+    stub.restore();
+  }
+});
+
+test('Onboarding PUT skip after completion never downgrades to skipped', async () => {
+  const stub = installFirstExperienceStub(freshState({
+    firstExp: {
+      [TEST_USER]: seedRow({
+        placement_status: 'completed',
+        placement_estimate: 'N5',
+        placement_completed_at: '2026-09-02T00:00:00.000Z',
+        placement_total_correct: 0,
+        placement_correct_n5: 0,
+        placement_correct_n4: 0,
+        placement_correct_n3: 0,
+        placement_correct_n2: 0,
+        placement_correct_n1: 0
+      })
+    }
+  }));
+  try {
+    await withServer(async (base) => {
+      const { status, body } = await requestJson(base, '/api/first-experience/onboarding', {
+        method: 'PUT',
+        body: { targetLevel: 'N5', studySources: ['apps'], placementStatus: 'skipped' }
+      });
+      assert.equal(status, 200);
+      assert.deepEqual(body, {
+        onboarding: { completed: true, studySources: ['apps'] },
+        placement: {
+          status: 'completed',
+          estimate: 'N5',
+          source: null,
+          completedAt: '2026-09-02T00:00:00.000Z',
+          result: { totalCorrect: 0, byBand: { N5: 0, N4: 0, N3: 0 } }
+        },
+        targetLevel: 'N5'
+      });
+    });
   } finally {
     stub.restore();
   }

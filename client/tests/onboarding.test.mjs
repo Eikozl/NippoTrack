@@ -387,12 +387,19 @@ test('frozen foundation: no new palette in the module or its styles', () => {
 
 // --- A.3 hook + bundle hygiene -----------------------------------------------------
 
-test('enterPlacement hook defaults to dashboard until A.3 wires placement', () => {
+test('enterPlacement (A.3): fails open to dashboard without a DOM container', () => {
   const calls = [];
-  enterPlacement({ navigate: (page) => calls.push(page) });
+  const session = enterPlacement({ navigate: (page) => calls.push(page) });
   assert.deepEqual(calls, ['dashboard']);
+  assert.equal(session.active, false);
+});
+
+test('enterPlacement (A.3): placement flow wired to the fixed contract', () => {
   const source = readSource('src/firstExperience.js');
-  assert.ok(source.includes('TODO(A.3)'), 'handoff marker present for the placement agent');
+  assert.ok(source.includes('/api/first-experience/placement/questions'), 'questions endpoint wired');
+  assert.ok(source.includes('/api/first-experience/placement/submit'), 'submit endpoint wired');
+  assert.ok(source.includes('/api/first-experience/placement/skip'), 'skip endpoint wired');
+  assert.ok(!source.includes('TODO(A.3)'), 'handoff implemented, marker retired');
 });
 
 test('no public-bundle import of the onboarding module', () => {
