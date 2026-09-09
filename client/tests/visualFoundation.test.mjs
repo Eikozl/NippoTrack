@@ -165,8 +165,12 @@ test('Part B pages: shared primitives only, kanji detail token-only, settings in
   assert.ok(analyzer.includes('filter-pill'), 'analyzer filters use the token pill');
   assert.ok(analyzer.includes('min-h-10 px-4 py-2'), 'per-card Add touch target untouched');
   const kanji = readSource('src/pages/entityPage.js');
-  assert.ok(kanji.includes('kanji-glyph-panel-large'), 'kanji detail structure untouched (v5.1-B owns redesign)');
-  assert.ok(kanji.includes('font-jp'), 'Japanese paths use font-jp');
+  // B.1: the owned surface consumes the shared identity builder — the glyph
+  // panel treatment lives in src/kanjiDetail.js, not inline in entityPage.
+  assert.ok(kanji.includes('kanjiDetail.js'), 'owned kanji detail uses the shared identity builder');
+  const sharedKanji = readSource('src/kanjiDetail.js');
+  assert.ok(sharedKanji.includes('kanji-glyph-panel-large'), 'shared identity keeps the restrained glyph panel treatment');
+  assert.ok(sharedKanji.includes('font-jp'), 'Japanese paths use font-jp');
   const settings = readSource('src/pages/settings.js');
   assert.ok(settings.includes('max-w-5xl'), 'settings cards keep desktop canvas');
   assert.ok(settings.includes('persistAppTheme') && settings.includes('jlt-theme-change'), 'settings theme semantics intact');
@@ -180,7 +184,10 @@ test('Part B icons/Japanese/dark/responsive stay token-driven', () => {
   assert.match(css(), /\.jlt-icon \{[^}]*stroke:\s*currentColor/);
   assert.ok(css().includes('.icon-tile .jlt-icon'), 'containers normalize alignment via CSS only');
   assert.ok(css().includes('#app-content [lang="ja"]'), 'Japanese default intact');
-  assert.ok(readSource('src/pages/kanjiReference.js').includes('font-jp'), 'kanji paths extended');
+  // B.1: readings render from the shared builder; the reference page consumes
+  // it via import (same endpoint, no duplicated data flow).
+  assert.ok(readSource('src/kanjiDetail.js').includes('font-jp'), 'kanji paths extended');
+  assert.ok(readSource('src/pages/kanjiReference.js').includes('kanjiDetail.js'), 'reference page uses the shared identity builder');
   // Part B additions are token-only: slice just the Part B @layer subsection
   // (up to the unlayered overrides) so pre-existing hex below is not blamed.
   const full = css();

@@ -48,7 +48,11 @@ test('owned JLPT metadata reads as a personal tag, reference data untouched', ()
   const source = readSource('src/pages/entityPage.js');
   assert.ok(source.includes("label: 'JLPT tag'"), 'owned field renamed');
   assert.ok(source.includes('Your label for filtering — not official reference data.'), 'owned helper present');
-  assert.ok(source.includes('JLPT ${refJlpt} (Reference)'), 'shared reference wording preserved');
+  // B.1: the shared identity builder (src/kanjiDetail.js) renders the
+  // reference pill for both surfaces; entityPage consumes it via import.
+  const shared = readSource('src/kanjiDetail.js');
+  assert.ok(source.includes('kanjiDetail.js') || shared.includes('JLPT ${data.jlptLevel} (Reference)'), 'shared reference wording preserved');
+  assert.ok(shared.includes('(Reference)'), 'Reference-vs-user labeling kept in the shared builder');
   const reference = readSource('src/pages/kanjiReference.js');
   assert.ok(reference.includes('not an official syllabus'), 'provenance semantics intact');
 });

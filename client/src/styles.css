@@ -563,3 +563,43 @@ nav .nav-group-label:first-child { margin-top: 0; }
 @media (prefers-reduced-motion: reduce) {
   .first-use-screen, .first-use-card { animation: none; }
 }
+
+/* v5.1-B.1 Kanji Detail identity — ONE shared composition for the reference
+   page and the owned dialog (see client/src/kanjiDetail.js). Additive only:
+   existing glyph/panel rules above are untouched; the selectors below refine
+   the shared `.kanji-identity` mount. Token-only surfaces/borders so dark
+   theme follows automatically; the glyph keeps its serif stack from
+   `.kanji-glyph-large` (never overridden here); UI text stays sans.
+   No animations, no gradients, no new interactive elements. */
+.kanji-identity { display: grid; gap: var(--nt-space-5); grid-template-areas: "glyph" "copy"; min-width: 0; }
+.kanji-identity-copy { grid-area: copy; min-width: 0; }
+.kanji-identity-headline { overflow-wrap: break-word; text-wrap: balance; }
+.kanji-identity-readings { min-width: 0; }
+.kanji-identity-glyph { grid-area: glyph; min-width: 0; }
+.kanji-identity-glyph--square { width: 100%; max-width: 20rem; min-height: 0; aspect-ratio: 1 / 1; justify-self: center; padding: var(--nt-space-4); }
+.kanji-identity-glyph .kanji-glyph-large { font-size: clamp(4.5rem, 22vw, 6.5rem); }
+.kanji-stroke-slot { min-height: 0; }
+.kanji-stroke-slot[aria-hidden="true"] { display: contents; }
+.kanji-reference-facts { display: grid; gap: var(--nt-space-2); margin: 0; }
+.kanji-reference-fact { display: flex; flex-wrap: wrap; gap: var(--nt-space-2) var(--nt-space-3); min-width: 0; }
+.kanji-reference-fact dt { color: var(--jlt-muted); font-size: 0.8125rem; font-weight: 600; }
+.kanji-reference-fact dd { margin: 0; color: var(--jlt-ink); font-size: 0.875rem; font-weight: 500; }
+.kanji-detail-body { min-width: 0; }
+.kanji-detail-section { min-width: 0; }
+/* Tablet: narrow side-by-side split that cannot clip — linguistic column
+   shrinks (minmax 0) while the square panel keeps a fixed narrow track. */
+@media (min-width: 640px) and (max-width: 1023.98px) {
+  .kanji-identity { grid-template-areas: "copy glyph"; grid-template-columns: minmax(0, 1fr) minmax(10rem, 13rem); align-items: start; }
+  .kanji-identity-glyph--square { max-width: none; justify-self: stretch; }
+  .kanji-identity-glyph .kanji-glyph-large { font-size: clamp(4.5rem, 10vw, 6rem); }
+}
+/* Desktop (≥1024px): horizontal identity — linguistic/reference on the left
+   with whitespace-first type hierarchy, restrained square glyph panel on the
+   right as the anchor. The owned dialog widens via its own panel class so
+   the shared `sm:max-w-2xl` dialog geometry elsewhere is untouched. */
+@media (min-width: 1024px) {
+  .kanji-identity { grid-template-areas: "copy glyph"; grid-template-columns: minmax(0, 1fr) minmax(15rem, 19rem); gap: var(--nt-space-8); align-items: start; }
+  .kanji-identity-glyph--square { max-width: 19rem; justify-self: end; }
+  .kanji-identity-glyph .kanji-glyph-large { font-size: clamp(5rem, 7vw, 6.5rem); }
+  .dialog-panel--kanji-detail { max-width: 56rem; }
+}

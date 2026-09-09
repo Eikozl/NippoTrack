@@ -305,7 +305,7 @@ export function paginationControls(pagination, onPageChange) {
   ]);
 }
 
-export function openDialog({ title, content, submitLabel = 'Save', submitClassName = 'button-primary', cancelLabel = 'Cancel', pendingLabel = 'Saving…', showFooter = true, showCloseButton = true, onSubmit }) {
+export function openDialog({ title, content, submitLabel = 'Save', submitClassName = 'button-primary', cancelLabel = 'Cancel', pendingLabel = 'Saving…', showFooter = true, showCloseButton = true, panelClass = '', onSubmit }) {
   const root = document.getElementById('modal-root');
   const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const overlay = element('div', {
@@ -313,7 +313,7 @@ export function openDialog({ title, content, submitLabel = 'Save', submitClassNa
     attrs: { role: 'presentation' }
   });
   const form = element('form', {
-    className: 'dialog-panel max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-paper shadow-2xl sm:max-w-2xl sm:rounded-2xl',
+    className: `dialog-panel max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-paper shadow-2xl sm:max-w-2xl sm:rounded-2xl${panelClass ? ` ${panelClass}` : ''}`,
     attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'dialog-title' }
   });
   const closeButton = element('button', { className: 'icon-button', attrs: { type: 'button', 'aria-label': 'Close dialog' } }, [icon('close', { size: 20 })]);

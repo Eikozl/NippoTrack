@@ -2,6 +2,7 @@ import { apiRequest, queryString } from '../api';
 import { enableVocabularyAutofill } from '../vocabularyAutofill.js';
 import { buildKanjiImportPayload, getContextKanji, getReadingContext, formatKanjiContextEntry, VOCAB_READING_NOTICE } from '../vocabularyReading.js';
 import { applyPristineKanjiAutofill, changedKanjiReferenceFields, enableRomajiConversion, existingKanjiFromDuplicateError, isSingleHanCodePoint, transliteratedValue } from '../kanjiReference';
+import { buildKanjiIdentity, normalizeKanjiOwnedIdentity } from '../kanjiDetail.js';
 import {
   debounce,
   confirmDialog,
@@ -127,23 +128,12 @@ export const ENTITY_CONFIGS = {
     detail: (item) => item.meaning,
     japaneseTextFields: { onyomi: 'katakana', kunyomi: 'hiragana' },
 renderDetail: (item) => {
-      const ref = item.reference || null;
       const review = item.review || null;
       const encounters = item.encounters || { count: 0, firstEncounteredAt: null, lastEncounteredAt: null, bySource: [], recent: [] };
       const vocab = item.vocabulary || [];
       const usageExamples = item.usageExamples || [];
       const notes = item.notes || null;
       const linkedNotes = item.linkedNotes || [];
-      const status = item.status || 'New';
-
-      const refMeanings = ref?.meanings?.length ? ref.meanings : [];
-      const refOnyomi = ref?.onyomi?.length ? ref.onyomi : [];
-      const refKunyomi = ref?.kunyomi?.length ? ref.kunyomi : [];
-      const refJlpt = ref?.jlptLevel || null;
-      const refStrokeCount = ref?.strokeCount || null;
-
-      const userOnyomi = item.onyomi || null;
-      const userKunyomi = item.kunyomi || null;
 
       const formatDate = (iso) => {
         if (!iso) return '—';
@@ -164,36 +154,16 @@ renderDetail: (item) => {
         Mastered: 'bg-violet text-violet-foreground'
       };
 
-      return element('div', { className: 'sm:col-span-2 space-y-5' }, [
-        // 1. Hero / Identity
-        element('section', { className: 'kanji-intel-hero' }, [
-          element('div', { className: 'kanji-glyph-panel-large', attrs: { role: 'img', 'aria-label': `Selected kanji: ${item.character_kanji}` } }, [
-            element('span', { className: 'kanji-glyph-large', text: item.character_kanji, attrs: { lang: 'ja' } })
-          ]),
-          element('div', { className: 'kanji-hero-meta' }, [
-            element('h2', { className: 'text-2xl font-semibold text-ink', text: refMeanings.length ? refMeanings.join(' · ') : (item.meaning || 'Meaning not recorded') }),
-            element('div', { className: 'mt-2 flex flex-wrap items-center gap-2' }, [
-              refJlpt && element('span', { className: 'status-pill status-jlpt', text: `JLPT ${refJlpt} (Reference)` }),
-              element('span', { className: `status-pill ${statusColors[status] || 'bg-stone text-stone-foreground'}`, text: status, attrs: { title: 'Self-reported status' } }),
-              refStrokeCount && element('span', { className: 'status-pill bg-stone text-stone-foreground', text: `${refStrokeCount} strokes (Ref)` })
-            ]),
-            element('p', { className: 'mt-2 text-sm text-muted', text: `Character: ${item.character_kanji}` })
-          ])
-        ]),
+      return element('div', { className: 'sm:col-span-2 kanji-detail-body space-y-5' }, [
+        // 1. Identity — one shared builder (see ../kanjiDetail.js). Meaning
+        // headline, On'yomi/Kun'yomi with the Reference-vs-Your-record split,
+        // JLPT/strokes metadata, and status all live here.
+        buildKanjiIdentity(normalizeKanjiOwnedIdentity(item), element),
 
-        // 2. Readings
-        element('section', { className: 'rounded-lg border border-stone p-4' }, [
-          element('h3', { className: 'font-semibold text-ink', text: 'Readings' }),
-          element('dl', { className: 'mt-3 grid gap-4 sm:grid-cols-2' }, [
-            element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'On\'yomi (Reference)' }), element('dd', { className: 'mt-1 text-sm text-ink/80', text: refOnyomi.length ? refOnyomi.join(' · ') : '—' })]),
-            element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'On\'yomi (Your record)' }), element('dd', { className: 'mt-1 text-sm text-ink/80', text: userOnyomi || 'Not recorded' })]),
-            element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Kun\'yomi (Reference)' }), element('dd', { className: 'mt-1 text-sm text-ink/80', text: refKunyomi.length ? refKunyomi.join(' · ') : '—' })]),
-            element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Kun\'yomi (Your record)' }), element('dd', { className: 'mt-1 text-sm text-ink/80', text: userKunyomi || 'Not recorded' })])
-          ])
-        ]),
-
-        // 3. SRS Review
-        element('section', { className: 'rounded-lg border border-stone p-4' }, [
+        // 2 + 3. SRS Review + Encounter Intelligence side by side on wide
+        // dialogs; stacked otherwise. Exposure stays exposure-only.
+        element('div', { className: 'grid gap-4 lg:grid-cols-2' }, [
+        element('section', { className: 'kanji-detail-section surface p-5' }, [
           element('h3', { className: 'font-semibold text-ink', text: 'SRS Review' }),
           review ? element('dl', { className: 'mt-3 grid gap-3 text-sm sm:grid-cols-2' }, [
             element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Next Review' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatDate(review.dueOn) })]),
@@ -204,7 +174,7 @@ renderDetail: (item) => {
         ]),
 
         // 4. Encounter Intelligence — exposure only, never review evidence.
-        element('section', { className: 'rounded-lg border border-stone p-4' }, [
+        element('section', { className: 'kanji-detail-section surface p-5' }, [
           element('h3', { className: 'font-semibold text-ink', text: 'Encounter Intelligence' }),
           element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: 'Seen in your words and writings — exposure only, not review evidence.' }),
           element('dl', { className: 'mt-3 grid gap-4 sm:grid-cols-2' }, [
@@ -223,13 +193,14 @@ renderDetail: (item) => {
             ])))
           ]) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No encounters yet' })
         ]),
+        ]),
 
         // 5. Connected Vocabulary
-        element('section', { className: 'rounded-lg border border-stone p-4' }, [
+        element('section', { className: 'kanji-detail-section surface p-5' }, [
           element('h3', { className: 'font-semibold text-ink', text: 'Connected Vocabulary' }),
-          vocab.length ? element('div', { className: 'mt-3 grid gap-3' }, vocab.map((word) => {
+          vocab.length ? element('div', { className: 'mt-3 grid gap-3 sm:grid-cols-2' }, vocab.map((word) => {
             const wordExamples = usageExamples.filter((ex) => ex.id_vocabulary === word.id_vocabulary);
-            return element('article', { className: 'rounded-md bg-paper p-3' }, [
+            return element('article', { className: 'detail-panel p-3' }, [
               element('div', { className: 'flex items-start justify-between gap-3' }, [
                 element('div', {}, [
                   element('p', { className: 'font-jp font-medium text-ink', text: word.word }),
@@ -241,7 +212,7 @@ renderDetail: (item) => {
                   element('span', { className: `status-pill text-xs ${statusColors[word.status] || 'bg-stone text-stone-foreground'}`, text: word.status || 'New' })
                 ])
               ]),
-              wordExamples.length ? element('div', { className: 'mt-3 grid gap-2' }, wordExamples.map((ex) => element('div', { className: 'rounded bg-white/50 p-2 text-xs' }, [
+              wordExamples.length ? element('div', { className: 'mt-3 grid gap-2' }, wordExamples.map((ex) => element('div', { className: 'detail-panel p-2 text-xs' }, [
                 element('p', { className: 'whitespace-pre-wrap text-ink', text: ex.sentence }),
                 ex.translation && element('p', { className: 'mt-1 text-muted', text: ex.translation })
               ]))) : null
@@ -250,7 +221,7 @@ renderDetail: (item) => {
         ]),
 
         // 6. Personal Notes
-        element('section', { className: 'rounded-lg border border-stone p-4' }, [
+        element('section', { className: 'kanji-detail-section surface p-5' }, [
           element('h3', { className: 'font-semibold text-ink', text: 'Personal Notes' }),
           notes ? element('div', { className: 'mt-2' }, [
             element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Kanji Notes' }),
@@ -258,7 +229,7 @@ renderDetail: (item) => {
           ]) : null,
           linkedNotes.length ? element('div', { className: 'mt-4' }, [
             element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Linked Notes' }),
-            element('div', { className: 'mt-2 grid gap-2' }, linkedNotes.map((note) => element('article', { className: 'rounded-md bg-paper p-3' }, [
+            element('div', { className: 'mt-2 grid gap-2' }, linkedNotes.map((note) => element('article', { className: 'detail-panel p-3' }, [
               element('h5', { className: 'font-medium text-ink', text: note.title || 'Untitled' }),
               element('p', { className: 'mt-1 text-sm text-muted', text: note.category }),
               element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: note.body })
@@ -765,7 +736,7 @@ export function renderEntityPage(container, config) {
           }, { pendingLabel: 'Adding…', progressLabel: (done, total) => `Adding ${done}/${total}…` });
         });
       }
-      openDialog({ title: `${config.title} detail`, content: [content], submitLabel: 'Close', onSubmit: async (form, close) => close() });
+      openDialog({ title: `${config.title} detail`, content: [content], submitLabel: 'Close', ...(config === ENTITY_CONFIGS.kanji ? { panelClass: 'dialog-panel--kanji-detail' } : {}), onSubmit: async (form, close) => close() });
     } catch (error) {
       showToast(error.message, 'error');
     }
