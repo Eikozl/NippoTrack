@@ -96,7 +96,7 @@ export async function renderStatistics(container) {
 function summary(iconName, label, value, note) {
   return element('article', { className: 'surface p-5' }, [
     element('div', { className: 'flex items-center gap-3' }, [iconTile(iconName, { className: 'metric-icon' }), element('p', { className: 'text-sm font-medium text-muted', text: label })]),
-    element('p', { className: 'mt-2 text-3xl font-semibold text-ink', text: value }),
+    element('p', { className: 'mt-2 font-display text-3xl font-semibold text-ink', text: value }),
     element('p', { className: 'mt-2 text-xs text-muted', text: note })
   ]);
 }

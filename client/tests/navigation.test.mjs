@@ -81,5 +81,8 @@ test('mobile topbar carries controls, not brand text', () => {
 test('desktop sidebar branding remains', () => {
   const source = html();
   assert.ok(source.includes('id="brand-logo"'), 'sidebar brand logo preserved');
-  assert.ok(source.includes('data-i18n="Japanese Learning"'), 'sidebar product name preserved');
+  assert.ok(source.includes('alt="NippoTrack"'), 'sidebar product name is NippoTrack');
+  assert.ok(!source.includes('data-i18n="NippoTrack"'), 'no duplicated brand text beside the wordmark');
+  assert.ok(!source.includes('JLT_logo-png.png'), 'legacy JLT mark removed from shell');
+  assert.ok(source.includes('Logo_Modo_Claro_App.png'), 'normalized light wordmark wired');
 });

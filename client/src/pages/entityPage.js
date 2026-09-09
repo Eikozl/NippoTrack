@@ -52,7 +52,7 @@ export const ENTITY_CONFIGS = {
       const importableKanji = contextKanji.filter((kanji) => kanji.importable);
       return element('div', { className: 'sm:col-span-2' }, [
       element('dl', { className: 'grid gap-3 text-sm sm:grid-cols-2' }, [
-        element('div', {}, [element('dt', { className: 'text-muted', text: 'Word reading (authoritative for this entry)' }), element('dd', { className: 'mt-1 font-medium text-ink', text: wordReading || 'Not recorded', attrs: { lang: 'ja' } })]),
+        element('div', {}, [element('dt', { className: 'text-muted', text: 'Word reading (authoritative for this entry)' }), element('dd', { className: 'mt-1 font-jp font-medium text-ink', text: wordReading || 'Not recorded', attrs: { lang: 'ja' } })]),
         element('div', {}, [element('dt', { className: 'text-muted', text: 'Meaning' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.meaning })]),
         element('div', {}, [element('dt', { className: 'text-muted', text: 'JLPT tag' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.jlpt_level || 'Not set' })]),
         element('div', {}, [element('dt', { className: 'text-muted', text: 'Status (self-reported)' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.status || 'New' })])
@@ -71,7 +71,7 @@ export const ENTITY_CONFIGS = {
           return element('article', { className: 'rounded-md bg-paper p-3' }, [
           element('div', { className: 'flex items-start justify-between gap-3' }, [
             element('div', {}, [
-              element('p', { className: 'font-medium text-ink', text: title, attrs: { lang: 'ja' } }),
+              element('p', { className: 'font-jp font-medium text-ink', text: title, attrs: { lang: 'ja' } }),
               element('p', { className: 'mt-1 text-xs text-muted', text: 'No per-kanji reading claimed for this word.' })
             ]),
             kanji.inUserCollection
@@ -232,8 +232,8 @@ renderDetail: (item) => {
             return element('article', { className: 'rounded-md bg-paper p-3' }, [
               element('div', { className: 'flex items-start justify-between gap-3' }, [
                 element('div', {}, [
-                  element('p', { className: 'font-medium text-ink', text: word.word }),
-                  element('p', { className: 'text-sm text-muted', text: word.reading || 'Reading not recorded' }),
+                  element('p', { className: 'font-jp font-medium text-ink', text: word.word }),
+                  element('p', { className: 'font-jp text-sm text-muted', text: word.reading || 'Reading not recorded' }),
                   element('p', { className: 'mt-1 text-sm text-ink/80', text: word.meaning })
                 ]),
                 element('div', { className: 'flex flex-col items-end gap-1' }, [
@@ -293,7 +293,7 @@ renderDetail: (item) => {
     japaneseTextFields: { grammar_point: 'hiragana', structure: 'hiragana', example: 'hiragana' },
     renderDetail: (item) => element('div', { className: 'sm:col-span-2' }, [
       element('dl', { className: 'grid gap-3 text-sm sm:grid-cols-2' }, [
-        element('div', {}, [element('dt', { className: 'text-muted', text: 'Grammar point' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.grammar_point })]),
+        element('div', {}, [element('dt', { className: 'text-muted', text: 'Grammar point' }), element('dd', { className: 'mt-1 font-jp font-medium text-ink', text: item.grammar_point })]),
         element('div', {}, [element('dt', { className: 'text-muted', text: 'Meaning' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.meaning })]),
         element('div', {}, [element('dt', { className: 'text-muted', text: 'JLPT tag' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.jlpt_level || 'Not set' })]),
         element('div', {}, [element('dt', { className: 'text-muted', text: 'Status (self-reported)' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.status || 'New' })])
@@ -551,7 +551,7 @@ function recordCard(item, config, onView, onEdit, onDelete) {
       element('div', { className: 'flex min-w-0 items-start gap-3' }, [
         iconTile(iconForTitle(config.title), { className: 'preview-icon shrink-0' }),
         element('div', { className: 'min-w-0' }, [
-          element('h2', { className: 'break-words text-lg font-semibold text-ink', text: config.primary(item) }),
+          element('h2', { className: 'break-words font-jp text-lg font-semibold text-ink', text: config.primary(item) }),
           element('p', { className: 'mt-1 break-words text-sm text-muted', text: config.secondary(item) })
         ])
       ]),

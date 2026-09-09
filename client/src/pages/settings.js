@@ -1,12 +1,13 @@
 import { apiRequest } from '../api';
 import { element, pageHeader, showToast, withPendingAction } from '../ui';
 import { getLocale, setLocale } from '../i18n';
+import { applyAppThemeAttributes, isAllowedAppTheme, persistAppTheme } from '../appTheme';
 
 export async function renderSettings(container) {
   const current = document.documentElement.dataset.theme || 'light';
   const light = element('button', { className: `theme-option ${current === 'light' ? 'button-primary' : 'button-secondary'}`, text: 'Light mode', attrs: { type: 'button', 'aria-pressed': String(current === 'light') } });
   const dark = element('button', { className: `theme-option ${current === 'dark' ? 'button-primary' : 'button-secondary'}`, text: 'Dark mode', attrs: { type: 'button', 'aria-pressed': String(current === 'dark') } });
-  const setTheme = (theme) => { localStorage.setItem('jlt-theme', theme); document.documentElement.dataset.theme = theme; window.dispatchEvent(new CustomEvent('jlt-theme-change', { detail: theme })); showToast(`${theme === 'dark' ? 'Dark' : 'Light'} theme selected.`); renderSettings(container); };
+  const setTheme = (theme) => { if (!isAllowedAppTheme(theme)) return; persistAppTheme(theme, localStorage); applyAppThemeAttributes(theme); window.dispatchEvent(new CustomEvent('jlt-theme-change', { detail: theme })); showToast(`${theme === 'dark' ? 'Dark' : 'Light'} theme selected.`); renderSettings(container); };
   light.addEventListener('click', () => setTheme('light'));
   dark.addEventListener('click', () => setTheme('dark'));
   const locale = getLocale();

@@ -111,7 +111,7 @@ function sessionOverflowMenu(onDelete) {
     attrs: { type: 'button', role: 'menuitem' }
   });
   const menu = element('div', {
-    className: 'absolute right-0 top-[calc(100%+.25rem)] z-20 min-w-36 rounded-lg border border-stone bg-white p-1 shadow-lg',
+    className: 'absolute right-0 top-[calc(100%+.25rem)] z-20 min-w-36 rounded-lg border border-stone bg-paper p-1 shadow-lg',
     attrs: { role: 'menu', hidden: '' }
   }, [deleteItem]);
   const toggle = element('button', {

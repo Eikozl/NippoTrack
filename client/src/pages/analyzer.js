@@ -769,7 +769,7 @@ export async function renderAnalyzer(container) {
       filterBar.replaceChildren();
       for (const filter of ANALYZER_FILTERS) {
         const button = element('button', {
-          className: `rounded-full border px-3 py-1.5 text-xs font-semibold transition ${filter.value === activeFilter ? 'border-vermilion bg-vermilion text-white' : 'border-stone bg-white text-ink hover:bg-paper'}`,
+          className: `filter-pill ${filter.value === activeFilter ? 'filter-pill--active' : ''}`,
           text: filter.label,
           attrs: { type: 'button', 'aria-pressed': String(filter.value === activeFilter) }
         });
@@ -793,7 +793,7 @@ export async function renderAnalyzer(container) {
     const importable = getDiscoveryState(entry) === 'availableToAdd';
     const header = element('div', { className: 'flex items-start justify-between gap-3' }, [
       element('div', { className: 'flex items-baseline gap-2' }, [
-        element('span', { className: 'text-3xl font-medium text-ink', text: entry.character }),
+        element('span', { className: 'font-jp text-3xl font-medium text-ink', text: entry.character }),
         ...(entry.occurrences > 1 ? [element('span', { className: 'text-xs font-semibold text-muted', text: `×${entry.occurrences}` })] : [])
       ]),
       element('span', { className: 'status-pill shrink-0 text-xs', text: statePill(entry) })

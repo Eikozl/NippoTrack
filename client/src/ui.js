@@ -25,7 +25,7 @@ export function pageHeader({ eyebrow, title, description, action }) {
   const headerIcon = iconForTitle(title);
   const heading = element('div', { className: 'flex items-center gap-3' }, [
     ...(headerIcon ? [iconTile(headerIcon, { className: 'page-header-icon' })] : []),
-    element('h1', { className: 'text-2xl font-semibold tracking-tight text-ink sm:text-3xl', text: title })
+    element('h1', { className: 'font-display text-2xl font-semibold tracking-tight text-ink sm:text-3xl', text: title })
   ]);
   const copy = element('div', {}, [
     element('p', { className: 'eyebrow', text: eyebrow }),
@@ -36,7 +36,7 @@ export function pageHeader({ eyebrow, title, description, action }) {
 }
 
 export function loadingState(label = 'Loading data…') {
-  return element('div', { className: 'surface grid min-h-52 place-items-center p-8' }, [
+  return element('div', { className: 'surface loading-state grid min-h-52 place-items-center p-8' }, [
     element('div', { className: 'grid justify-items-center gap-3 text-muted' }, [
       element('span', { className: 'spinner', attrs: { 'aria-hidden': 'true' } }),
       element('p', { className: 'text-sm', text: label })
@@ -45,9 +45,9 @@ export function loadingState(label = 'Loading data…') {
 }
 
 export function emptyState({ title = 'Nothing here yet', description = 'Create your first record to get started.' } = {}) {
-  return element('div', { className: 'surface grid min-h-52 place-items-center p-8 text-center' }, [
+  return element('div', { className: 'surface empty-state grid min-h-52 place-items-center p-8 text-center' }, [
     element('div', {}, [
-      element('p', { className: 'text-base font-semibold text-ink', text: title }),
+      element('p', { className: 'empty-state-title font-display text-base font-semibold text-ink', text: title }),
       element('p', { className: 'mt-2 max-w-md text-sm leading-6 text-muted', text: description })
     ])
   ]);
@@ -56,9 +56,9 @@ export function emptyState({ title = 'Nothing here yet', description = 'Create y
 export function errorState(error, retry) {
   const retryButton = retry ? element('button', { className: 'button-secondary mt-4', text: 'Try again', attrs: { type: 'button' } }) : null;
   retryButton?.addEventListener('click', retry);
-  return element('div', { className: 'surface border-red-200 bg-red-50/60 p-6' }, [
-    element('p', { className: 'font-semibold text-red-800', text: 'We could not load this view.' }),
-    element('p', { className: 'mt-2 text-sm text-red-700', text: error?.message || 'Unexpected error.' }),
+  return element('div', { className: 'surface error-panel border-red-200 bg-red-50/60 p-6' }, [
+    element('p', { className: 'error-panel-title font-semibold text-red-800', text: 'We could not load this view.' }),
+    element('p', { className: 'error-panel-detail mt-2 text-sm text-red-700', text: error?.message || 'Unexpected error.' }),
     retryButton
   ]);
 }
@@ -66,7 +66,7 @@ export function errorState(error, retry) {
 export function showToast(message, type = 'success') {
   const region = document.getElementById('toast-region');
   const toast = element('div', {
-    className: `pointer-events-auto rounded-xl border bg-white px-4 py-3 text-sm shadow-lg ${type === 'error' ? 'border-red-200 text-red-800' : 'border-stone text-ink'}`,
+    className: `pointer-events-auto rounded-xl border px-4 py-3 text-sm shadow-lg toast-panel ${type === 'error' ? 'border-red-200 text-red-800 toast-panel--error' : 'border-stone bg-paper text-ink'}`,
     text: message,
     attrs: { role: type === 'error' ? 'alert' : 'status' }
   });
@@ -143,7 +143,7 @@ export function searchableMultiSelect({
 
   const chips = element('div', { className: 'flex min-h-8 flex-wrap gap-2' });
   const optionsList = element('div', {
-    className: 'max-h-40 overflow-y-auto rounded-lg border border-stone bg-white p-1',
+    className: 'multiselect-options max-h-40 overflow-y-auto rounded-lg border border-stone bg-paper p-1',
     attrs: { role: 'group', 'aria-labelledby': labelId }
   });
   const search = element('input', {
@@ -189,7 +189,7 @@ export function searchableMultiSelect({
         selectedValues.delete(selectedValue);
         syncSelection();
       });
-      chips.appendChild(element('span', { className: 'inline-flex items-center rounded-full bg-paper px-2.5 py-1 text-xs font-semibold text-ink' }, [
+      chips.appendChild(element('span', { className: 'inline-flex items-center rounded-full border border-stone bg-paper px-2.5 py-1 text-xs font-semibold text-ink' }, [
         element('span', { text: optionLabels.get(selectedValue) }),
         removeButton
       ]));
@@ -218,7 +218,7 @@ export function searchableMultiSelect({
         ...(option.meta ? [element('span', { className: 'block text-xs text-muted', text: option.meta })] : []),
         ...(option.description ? [element('span', { className: 'block truncate text-xs text-ink/70', text: option.description })] : [])
       ]);
-      const row = element('label', { className: 'flex cursor-pointer items-start gap-3 rounded-md px-3 py-2 text-sm font-normal transition hover:bg-paper' }, [
+      const row = element('label', { className: 'multiselect-row flex cursor-pointer items-start gap-3 rounded-md px-3 py-2 text-sm font-normal transition hover:bg-paper' }, [
         checkbox,
         details
       ]);
@@ -309,11 +309,11 @@ export function openDialog({ title, content, submitLabel = 'Save', submitClassNa
   const root = document.getElementById('modal-root');
   const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const overlay = element('div', {
-    className: 'fixed inset-0 z-50 grid place-items-end bg-ink/35 p-0 sm:place-items-center sm:p-5',
+    className: 'dialog-overlay fixed inset-0 z-50 grid place-items-end bg-ink/35 p-0 sm:place-items-center sm:p-5',
     attrs: { role: 'presentation' }
   });
   const form = element('form', {
-    className: 'max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white shadow-2xl sm:max-w-2xl sm:rounded-2xl',
+    className: 'dialog-panel max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-paper shadow-2xl sm:max-w-2xl sm:rounded-2xl',
     attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'dialog-title' }
   });
   const closeButton = element('button', { className: 'icon-button', attrs: { type: 'button', 'aria-label': 'Close dialog' } }, [icon('close', { size: 20 })]);
@@ -359,12 +359,12 @@ export function openDialog({ title, content, submitLabel = 'Save', submitClassNa
   });
 
   form.append(
-    element('header', { className: 'sticky top-0 z-10 flex items-center justify-between border-b border-stone bg-white px-5 py-4 sm:px-6' }, [
-      element('h2', { className: 'text-lg font-semibold text-ink', text: title, attrs: { id: 'dialog-title' } }),
+    element('header', { className: 'dialog-header sticky top-0 z-10 flex items-center justify-between border-b border-stone bg-paper px-5 py-4 sm:px-6' }, [
+      element('h2', { className: 'dialog-title font-display text-lg font-semibold text-ink', text: title, attrs: { id: 'dialog-title' } }),
       ...(showCloseButton ? [closeButton] : [])
     ]),
     element('div', { className: 'grid gap-4 p-5 sm:grid-cols-2 sm:p-6' }, content),
-    ...(showFooter ? [element('footer', { className: 'sticky bottom-0 flex justify-end gap-3 border-t border-stone bg-white px-5 py-4 sm:px-6' }, [cancelButton, ...(submitButton ? [submitButton] : [])])] : [])
+    ...(showFooter ? [element('footer', { className: 'dialog-footer sticky bottom-0 flex justify-end gap-3 border-t border-stone bg-paper px-5 py-4 sm:px-6' }, [cancelButton, ...(submitButton ? [submitButton] : [])])] : [])
   );
   overlay.appendChild(form);
   root.replaceChildren(overlay);

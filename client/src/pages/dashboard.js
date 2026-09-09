@@ -7,7 +7,7 @@ import { CONFIGS } from './v2Pages';
 function metric(iconName, label, value, note, page = null) {
   const body = [
     element('div', { className: 'flex items-center gap-3' }, [iconTile(iconName, { className: 'metric-icon' }), element('p', { className: 'text-xs font-semibold uppercase tracking-[0.13em] text-muted', text: label })]),
-    element('p', { className: 'mt-3 text-3xl font-semibold tracking-tight text-ink', text: value }),
+    element('p', { className: 'mt-3 font-display text-3xl font-semibold tracking-tight text-ink', text: value }),
     element('p', { className: 'mt-2 text-xs text-muted', text: note })
   ];
   // Linked metrics act as quiet deep links into their pages; unlinked
@@ -66,7 +66,7 @@ function goalsPreview(items, showAll) {
 
 export async function renderDashboard(container) {
   destroyCharts();
-  const content = element('div');
+  const content = element('div', { className: 'dashboard-frame' });
   container.replaceChildren(element('section', {}, [pageHeader({ eyebrow: 'Overview', title: 'Dashboard', description: 'A calm snapshot of your current Japanese study activity.' }), content]));
   content.replaceChildren(loadingState('Loading your study overview…'));
   async function load() {
@@ -93,12 +93,12 @@ export async function renderDashboard(container) {
       const eligibleGoals = goalItems.filter((item) => item.is_active && !item.isComplete);
       const previewGoals = eligibleGoals.slice(0, 3);
       content.replaceChildren(
-        element('div', { className: 'grid gap-4 sm:grid-cols-2 xl:grid-cols-4' }, [metric('today', 'Today', data.minutesToday, 'minutes studied'), metric('week', 'This week', data.minutesThisWeek, 'minutes studied'), metric('streak', 'Current streak', activity.currentStreak, 'consecutive active days'), metric('streak', 'Longest streak', activity.longestStreak, 'best run of active days'), metric('review', 'Due reviews', review.items.length, 'items ready to recall', 'review'), metric('vocabulary', 'Vocabulary', data.vocabularyCount, 'saved words', 'vocabulary'), metric('kanji', 'Kanji', data.kanjiCount, 'tracked characters', 'kanji'), metric('grammar', 'Grammar', data.grammarCount, 'saved patterns', 'grammar')]),
+        element('div', { className: 'dashboard-metrics grid gap-4 sm:grid-cols-2 xl:grid-cols-4' }, [metric('today', 'Today', data.minutesToday, 'minutes studied'), metric('week', 'This week', data.minutesThisWeek, 'minutes studied'), metric('streak', 'Current streak', activity.currentStreak, 'consecutive active days'), metric('streak', 'Longest streak', activity.longestStreak, 'best run of active days'), metric('review', 'Due reviews', review.items.length, 'items ready to recall', 'review'), metric('vocabulary', 'Vocabulary', data.vocabularyCount, 'saved words', 'vocabulary'), metric('kanji', 'Kanji', data.kanjiCount, 'tracked characters', 'kanji'), metric('grammar', 'Grammar', data.grammarCount, 'saved patterns', 'grammar')]),
         // Zero eligible goals: this section never renders — no empty card,
         // no placeholder, no reserved space.
         ...(previewGoals.length ? [goalsPreview(previewGoals, eligibleGoals.length > 3)] : []),
-        element('div', { className: 'mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]' }, [recentSessions(data.recentSessions), activityCalendar(activity.calendar)]),
-        element('p', { className: 'mt-5 text-center text-sm' }, [element('a', { className: 'font-semibold text-vermilion hover:underline', text: 'View detailed analytics in Statistics', attrs: { href: '#statistics' } })])
+        element('div', { className: 'dashboard-panels mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]' }, [recentSessions(data.recentSessions), activityCalendar(activity.calendar)]),
+        element('p', { className: 'dashboard-footnote mt-5 text-center text-sm' }, [element('a', { className: 'font-semibold text-vermilion hover:underline', text: 'View detailed analytics in Statistics', attrs: { href: '#statistics' } })])
       );
     } catch (error) { content.replaceChildren(errorState(error, load)); }
   }

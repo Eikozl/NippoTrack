@@ -5,7 +5,7 @@ const landingRoot = document.getElementById('landing-root');
 
 if (experience === 'app') {
   if (landingRoot) landingRoot.hidden = true;
-  document.title = 'Japanese Learning Tracker';
+  document.title = 'NippoTrack';
   document.querySelector('meta[name="description"]')?.setAttribute(
     'content',
     'A focused personal tracker for Japanese study sessions and learning material.'

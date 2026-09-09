@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const css = readFileSync(join(root, 'src/styles.css'), 'utf8');
+const tokens = readFileSync(join(root, 'src/tokens.css'), 'utf8');
 const mainSource = readFileSync(join(root, 'src/main.js'), 'utf8');
 const entityPageSource = readFileSync(join(root, 'src/pages/entityPage.js'), 'utf8');
 
@@ -29,6 +30,12 @@ function token(block, name) {
   return match[1].trim();
 }
 
+function ntToken(name) {
+  const match = tokens.match(new RegExp(`${name}:\\s*([^;]+);`));
+  assert.ok(match, `canonical ${name} exists in tokens.css`);
+  return match[1].trim();
+}
+
 function hexToRgb(hex) {
   const clean = hex.replace('#', '');
   const full = clean.length === 3 ? clean.split('').map((ch) => ch + ch).join('') : clean;
@@ -48,50 +55,44 @@ function contrastRatio(foreground, background) {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-// Warm-neutral guard: red dominates, blue is lowest (no cool gray, no blue
-// tint), and saturation stays modest (no yellow/sepia/mud).
-function isWarmNeutral(hex, maxSaturation) {
-  const [r, g, b] = hexToRgb(hex);
-  if (!(r >= g && g >= b)) return false;
-  return (r - b) / r <= maxSaturation;
-}
+// --- canonical tokens -------------------------------------------------------
 
-// Yellow guard: in true yellows green sits almost as high as red while blue
-// collapses; creams keep green roughly midway between red and blue.
-function isNotYellow(hex) {
-  const [r, g, b] = hexToRgb(hex);
-  if (r === b) return true;
-  return (g - b) / (r - b) <= 0.75;
-}
-
-// --- light palette ----------------------------------------------------------
-
-test('Light theme: Almond/Mocha layered tokens', () => {
-  const block = lightBlock();
-  assert.equal(token(block, '--jlt-bg'), '#EDD9C0');
-  assert.equal(token(block, '--jlt-surface'), '#FFF4E3');
-  assert.equal(token(block, '--jlt-surface-soft'), '#EAD9C1');
-  assert.equal(token(block, '--jlt-border'), '#C9AF94');
-  assert.equal(token(block, '--jlt-ink'), '#2A2522');
-  assert.equal(token(block, '--jlt-muted'), '#6A564D');
-  assert.equal(token(block, '--jlt-primary'), '#78564A');
-  assert.equal(token(block, '--jlt-primary-strong'), '#6B4A3F');
-  assert.equal(token(block, '--jlt-primary-soft'), '#EBD6BC');
-  assert.notEqual(token(block, '--jlt-bg'), token(block, '--jlt-surface'), 'page and cards differ');
-  assert.ok(luminance('#EDD9C0') < luminance('#FFF4E3'), 'cards elevate above the page');
+test('Canonical NippoTrack tokens match the frozen public palette', () => {
+  assert.equal(ntToken('--nt-canvas'), '#F5F0E8');
+  assert.equal(ntToken('--nt-surface'), '#FFFCF7');
+  assert.equal(ntToken('--nt-surface-muted'), '#EEE7DC');
+  assert.equal(ntToken('--nt-text'), '#111111');
+  assert.equal(ntToken('--nt-accent'), '#5A5A8D');
+  assert.equal(ntToken('--nt-accent-hover'), '#4D4D7D');
+  assert.equal(ntToken('--nt-accent-soft'), '#E8E7F2');
+  assert.ok(tokens.includes('--nt-surface-raised'));
+  assert.ok(tokens.includes('--nt-text-secondary'));
+  assert.ok(tokens.includes('--nt-border'));
+  assert.ok(tokens.includes('--nt-focus-ring'));
+  assert.ok(tokens.includes('--nt-space-1'));
+  assert.ok(tokens.includes('--nt-transition-base'));
+  assert.ok(tokens.includes('--nt-radius-sm'));
+  assert.ok(tokens.includes('--nt-radius-full'));
+  // Dark canonical values.
+  for (const dark of ['#1C1A18', '#24211E', '#2B2723', '#F5F0E8', '#B8AEA4', '#3A3530', '#9292C8']) {
+    assert.ok(tokens.toLowerCase().includes(dark.toLowerCase()), 'dark canonical present: ' + dark);
+  }
 });
 
-test('Light theme: warm, desaturated neutrals — never yellow, sepia, or cool gray', () => {
+// --- light aliases ----------------------------------------------------------
+
+test('Light theme: app tokens alias the canonical layer (muted Indigo)', () => {
   const block = lightBlock();
-  for (const name of ['--jlt-bg', '--jlt-surface', '--jlt-surface-soft', '--jlt-border']) {
-    const value = token(block, name);
-    assert.ok(isWarmNeutral(value, 0.28), `${name} (${value}) is a soft warm neutral`);
-    assert.ok(isNotYellow(value), `${name} (${value}) has no yellow cast`);
-  }
-  for (const name of ['--jlt-ink', '--jlt-muted', '--jlt-primary', '--jlt-primary-strong']) {
-    const [r, g, b] = hexToRgb(token(block, name));
-    assert.ok(r >= g && g >= b, `${name} stays in the warm family`);
-  }
+  assert.equal(token(block, '--jlt-bg'), 'var(--nt-canvas)');
+  assert.equal(token(block, '--jlt-surface'), 'var(--nt-surface)');
+  assert.equal(token(block, '--jlt-surface-soft'), 'var(--nt-surface-muted)');
+  assert.equal(token(block, '--jlt-border'), 'var(--nt-border)');
+  assert.equal(token(block, '--jlt-ink'), 'var(--nt-text)');
+  assert.equal(token(block, '--jlt-primary'), 'var(--nt-accent)');
+  assert.equal(token(block, '--jlt-primary-strong'), 'var(--nt-accent-hover)');
+  assert.equal(token(block, '--jlt-primary-soft'), 'var(--nt-accent-soft)');
+  // No Almond/Mocha literals remain in the app theme.
+  assert.doesNotMatch(block, /#EDD9C0|#FFF4E3|#EAD9C1|#C9AF94|#78564A|#6B4A3F|#EBD6BC/);
 });
 
 test('Light theme: secondary soft surfaces use the centralized token', () => {
@@ -103,69 +104,70 @@ test('Light theme: white-on-white hover rows keep visible feedback (centralized)
   assert.match(css, /:root:not\(\[data-theme="dark"\]\) \.hover\\:bg-white:hover \{\s*background-color:\s*var\(--jlt-surface-soft\);/);
 });
 
-test('Light theme: browser chrome tint follows the Almond page', () => {
-  assert.match(mainSource, /'#EDD9C0'/);
+test('Light theme: browser chrome tint follows the NippoTrack canvas', () => {
+  const appTheme = readFileSync(join(root, 'src/appTheme.js'), 'utf8');
+  assert.ok(appTheme.includes('#F5F0E8') && appTheme.includes('#1C1A18'), 'canonical meta pair lives in appTheme');
+  assert.ok(mainSource.includes('APP_THEME_META'), 'shell meta follows the canonical pair');
+  assert.doesNotMatch(mainSource, /'#EDD9C0'/);
   assert.doesNotMatch(mainSource, /'#eef1f7'/);
 });
 
 // --- light contrast ----------------------------------------------------------
 
-test('Light theme: text contrast meets WCAG AA on warm surfaces', () => {
-  const block = lightBlock();
-  const bg = token(block, '--jlt-bg');
-  const surface = token(block, '--jlt-surface');
-  const soft = token(block, '--jlt-surface-soft');
-  const ink = token(block, '--jlt-ink');
-  const muted = token(block, '--jlt-muted');
-  const primary = token(block, '--jlt-primary');
-  const strong = token(block, '--jlt-primary-strong');
+test('Light theme: text contrast meets WCAG AA on canonical surfaces', () => {
+  const bg = '#F5F0E8';
+  const surface = '#FFFCF7';
+  const soft = '#EEE7DC';
+  const ink = '#111111';
+  const muted = '#5C5853';
+  const primary = '#5A5A8D';
+  const strong = '#4D4D7D';
   assert.ok(contrastRatio(ink, surface) >= 7, `primary text on cards: ${contrastRatio(ink, surface).toFixed(2)}`);
   assert.ok(contrastRatio(ink, bg) >= 7, `primary text on page: ${contrastRatio(ink, bg).toFixed(2)}`);
   assert.ok(contrastRatio(muted, surface) >= 4.5, `secondary text on cards: ${contrastRatio(muted, surface).toFixed(2)}`);
   assert.ok(contrastRatio(muted, bg) >= 4.5, `secondary text on page: ${contrastRatio(muted, bg).toFixed(2)}`);
   assert.ok(contrastRatio(muted, soft) >= 4.5, `secondary text on soft surfaces: ${contrastRatio(muted, soft).toFixed(2)}`);
-  assert.ok(contrastRatio(primary, surface) >= 4.5, `mocha accents/links on cards: ${contrastRatio(primary, surface).toFixed(2)}`);
-  assert.ok(contrastRatio(primary, bg) >= 4.5, `mocha accents on page: ${contrastRatio(primary, bg).toFixed(2)}`);
-  assert.ok(contrastRatio('#ffffff', strong) >= 4.5, `white button text on strong mocha: ${contrastRatio('#ffffff', strong).toFixed(2)}`);
-  assert.ok(contrastRatio('#ffffff', primary) >= 4.5, `white text on mocha: ${contrastRatio('#ffffff', primary).toFixed(2)}`);
-  assert.ok(contrastRatio('#FFF7ED', strong) >= 4.5, `cream calendar text on strong mocha: ${contrastRatio('#FFF7ED', strong).toFixed(2)}`);
+  assert.ok(contrastRatio(primary, surface) >= 4.5, `indigo accents/links on cards: ${contrastRatio(primary, surface).toFixed(2)}`);
+  assert.ok(contrastRatio(primary, bg) >= 4.5, `indigo accents on page: ${contrastRatio(primary, bg).toFixed(2)}`);
+  assert.ok(contrastRatio('#ffffff', strong) >= 4.5, `white button text on hover indigo: ${contrastRatio('#ffffff', strong).toFixed(2)}`);
+  assert.ok(contrastRatio('#ffffff', primary) >= 4.5, `white text on indigo: ${contrastRatio('#ffffff', primary).toFixed(2)}`);
   // Destructive actions keep their Tailwind red on light surfaces.
   assert.ok(contrastRatio('#b91c1c', '#ffffff') >= 4.5, `destructive red on white: ${contrastRatio('#b91c1c', '#ffffff').toFixed(2)}`);
 });
 
-// --- dark accents ------------------------------------------------------------
+// --- dark aliases ------------------------------------------------------------
 
-test('Dark theme: surfaces unchanged, accent shifts blue → light Mocha', () => {
+test('Dark theme: app tokens alias the canonical dark layer', () => {
   const block = darkBlock();
-  assert.ok(block.includes('--jlt-bg: #202428; --jlt-surface: #202428; --jlt-border: #30363c;'));
-  assert.ok(block.includes('--jlt-surface-soft: #292E33;'), 'dark soft surfaces stay charcoal, never beige');
-  assert.ok(block.includes('--jlt-ink: #f4f7fb; --jlt-muted: #c3cedd;'));
-  assert.equal(token(block, '--jlt-primary'), '#C9AEA6');
-  assert.equal(token(block, '--jlt-primary-strong'), '#D8C2B9');
-  assert.equal(token(block, '--jlt-primary-soft'), '#3B2F29');
-  const [r, g, b] = hexToRgb(token(block, '--jlt-primary'));
-  assert.ok(r >= g && g >= b, 'dark accent joins the warm family');
+  assert.equal(token(block, '--jlt-bg'), 'var(--nt-canvas)');
+  assert.equal(token(block, '--jlt-surface'), 'var(--nt-surface)');
+  assert.equal(token(block, '--jlt-surface-soft'), 'var(--nt-surface-muted)');
+  assert.equal(token(block, '--jlt-primary'), 'var(--nt-accent)');
+  assert.equal(token(block, '--jlt-primary-strong'), 'var(--nt-accent-hover)');
+  assert.equal(token(block, '--jlt-primary-soft'), 'var(--nt-accent-soft)');
+  assert.doesNotMatch(block, /#202428[^;]*#202428[^;]*#30363c/);
 });
 
-test('Dark theme: light Mocha accents stay readable on charcoal', () => {
-  const block = darkBlock();
-  const bg = token(block, '--jlt-bg');
-  const soft = token(block, '--jlt-surface-soft');
-  const muted = token(block, '--jlt-muted');
+test('Dark theme: canonical Indigo accents stay readable on charcoal', () => {
+  const bg = '#1C1A18';
+  const soft = '#2B2723';
+  const muted = '#B8AEA4';
+  const primary = '#9292C8';
   assert.ok(contrastRatio(muted, soft) >= 4.5, `dark secondary text on soft surfaces: ${contrastRatio(muted, soft).toFixed(2)}`);
-  const primary = token(block, '--jlt-primary');
-  assert.ok(contrastRatio(primary, bg) >= 4.5, `dark accent on charcoal: ${contrastRatio(primary, bg).toFixed(2)}`);
-  assert.ok(contrastRatio('#241F1C', primary) >= 4.5, `dark button/calendar text on accent: ${contrastRatio('#241F1C', primary).toFixed(2)}`);
+  assert.ok(contrastRatio(primary, bg) >= 4.5, `dark accent on canvas: ${contrastRatio(primary, bg).toFixed(2)}`);
+  assert.ok(contrastRatio('#1C1A18', primary) >= 4.5, `dark button text on accent: ${contrastRatio('#1C1A18', primary).toFixed(2)}`);
   assert.match(css, /:root\[data-theme="dark"\] \.button-primary \{[^}]*background:\s*var\(--jlt-primary\)/);
-  assert.match(css, /#app-content \.activity-calendar-day\.bg-vermilion \{[^}]*background:\s*var\(--jlt-primary-strong\)[^}]*color:\s*#FFF7ED/);
-  assert.match(css, /:root\[data-theme="dark"\] #app-content \.activity-calendar-day\.bg-vermilion \{[^}]*background:\s*var\(--jlt-primary\)[^}]*color:\s*#241F1C/);
 });
 
 // --- blue audit + semantic preservation ---------------------------------------
 
-test('Theme: no leftover cool-blue brand tokens', () => {
-  assert.doesNotMatch(css, /#1f56d2|#dde7ff|#9db4ff|#b7c9ff|#3559b3|#121a32|#1746b1|#2b385b|#b9c9ff|#b7c8ff|#eef1f7/i);
-  assert.doesNotMatch(css, /145,\s*157,\s*181|150,\s*163,\s*181|128,\s*141,\s*169/);
+test('Theme: no leftover Almond/Mocha or cool-blue brand tokens', () => {
+  // Auth brand panel is frozen (auth visuals untouched) and keeps its own
+  // gradient; audit only the theme token layer + @theme mapping.
+  const themeLayer = css.slice(0, css.indexOf('@layer components'));
+  assert.doesNotMatch(themeLayer, /#EDD9C0|#FFF4E3|#EAD9C1|#C9AF94|#78564A|#6B4A3F|#EBD6BC|#C9AEA6|#D8C2B9|#3B2F29/);
+  assert.doesNotMatch(themeLayer, /#1f56d2|#dde7ff|#9db4ff|#b7c9ff|#3559b3|#121a32|#1746b1|#2b385b|#b9c9ff|#b7c8ff|#eef1f7/i);
+  assert.doesNotMatch(themeLayer, /145,\s*157,\s*181|150,\s*163,\s*181|128,\s*141,\s*169/);
 });
 
 test('Theme: semantic colors preserved (destructive, warning, status, streak)', () => {

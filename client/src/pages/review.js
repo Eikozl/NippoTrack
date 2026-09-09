@@ -406,7 +406,7 @@ export async function renderReview(container) {
           element('label', { className: 'flex cursor-pointer items-start gap-3 rounded-xl border border-stone bg-paper px-3 py-2.5 text-sm transition hover:bg-paper' }, [
             checkbox,
             element('span', { className: 'min-w-0' }, [
-              element('span', { className: 'block break-words font-semibold text-ink', text: item.display }),
+              element('span', { className: 'block break-words font-jp font-semibold text-ink', text: item.display }),
               ...(line ? [element('span', { className: 'mt-0.5 block break-words text-xs leading-5 text-muted', text: line })] : []),
               ...(meta ? [element('span', { className: 'mt-0.5 block break-words text-xs leading-5 text-muted', text: meta })] : []),
               ...(item.jlpt ? [element('span', { className: 'status-pill mt-1.5', text: item.jlpt })] : [])
@@ -451,7 +451,7 @@ export async function renderReview(container) {
             element('label', { className: 'flex cursor-pointer items-start gap-3 rounded-xl border border-stone bg-paper px-3 py-2.5 text-sm transition hover:bg-paper' }, [
               checkbox,
               element('span', { className: 'min-w-0' }, [
-                element('span', { className: 'block break-words font-semibold text-ink', text: item.display }),
+                element('span', { className: 'block break-words font-jp font-semibold text-ink', text: item.display }),
                 ...(line ? [element('span', { className: 'mt-0.5 block break-words text-xs leading-5 text-muted', text: line })] : [])
               ])
             ])

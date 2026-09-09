@@ -1,0 +1,118 @@
+/* NippoTrack canonical design tokens (Part A visual foundation).
+ *
+ * Single source of truth for palette / shadows / radii / focus / spacing.
+ * Composition lives elsewhere: app `--jlt-*` vars (client/src/styles.css)
+ * and public `--landing-*` vars (client/src/landing/landing.css) ALIAS to
+ * these values instead of redefining them, so unity is via shared values
+ * while selectors/attributes stay untouched:
+ *   - app keeps `:root` + `:root[data-theme="dark"]` + `data-theme` attr
+ *   - public keeps `.landing-page` + `[data-nippotrack-theme="dark"]`
+ * Dark `--nt-*` values flip on EITHER attribute so both experiences share
+ * one palette without merging stylesheets.
+ */
+
+:root {
+  color-scheme: light;
+  /* Light canvas family (matches frozen public landing light values). */
+  --nt-canvas: #F5F0E8;
+  --nt-surface: #FFFCF7;
+  --nt-surface-muted: #EEE7DC;
+  --nt-surface-raised: #FFFCF7;
+  --nt-text: #111111;
+  --nt-text-secondary: #5C5853;
+  --nt-text-muted: #726C66;
+  --nt-border: #DCD4CA;
+  --nt-border-subtle: #E8E1D8;
+  /* Brand accent: muted Indigo. */
+  --nt-accent: #5A5A8D;
+  --nt-accent-hover: #4D4D7D;
+  --nt-accent-soft: #E8E7F2;
+  /* Semantic states stay muted (never pure red/green/amber). */
+  --nt-success: #4E775E;
+  --nt-warning: #8A6D3B;
+  --nt-error: #A94442;
+  /* Muted semantic washes for pills/banners (text labels carry meaning). */
+  --nt-success-soft: #DDE8DF;
+  --nt-warning-soft: #EDE3CC;
+  --nt-error-soft: #F1DBDA;
+  /* Destructive action keeps the error hue (unchanged). */
+  --nt-danger: #A94442;
+  --nt-danger-soft: #F1DBDA;
+  /* Button contrast text (AA on the accent in each theme). */
+  --nt-accent-contrast: #FFFFFF;
+  /* Muted data-viz palette: Indigo + warm neutrals, never neon/red-hot. */
+  --nt-chart-1: #5A5A8D;
+  --nt-chart-2: #7C7CA6;
+  --nt-chart-3: #6E625E;
+  --nt-chart-4: #A89E93;
+  --nt-chart-5: #4E775E;
+  --nt-chart-6: #8A6D3B;
+  --nt-chart-7: #556B73;
+  --nt-chart-8: #B59672;
+  /* Subtle elevation (no neumorphic dual-light). */
+  --nt-shadow-sm: 0 1px 2px rgb(17 17 17 / 0.06), 0 2px 8px rgb(17 17 17 / 0.05);
+  --nt-shadow-md: 0 4px 16px rgb(17 17 17 / 0.06);
+  --nt-shadow-lg: 0 12px 32px rgb(17 17 17 / 0.09);
+  /* Radii. */
+  --nt-radius-sm: 8px;
+  --nt-radius-md: 12px;
+  --nt-radius-lg: 16px;
+  --nt-radius-xl: 20px;
+  --nt-radius-2xl: 24px;
+  --nt-radius-full: 999px;
+  /* Focus ring (Indigo). */
+  --nt-focus-ring: #5A5A8D;
+  /* 4px-grid spacing scale. */
+  --nt-space-1: 4px;
+  --nt-space-2: 8px;
+  --nt-space-3: 12px;
+  --nt-space-4: 16px;
+  --nt-space-5: 20px;
+  --nt-space-6: 24px;
+  --nt-space-8: 32px;
+  /* Transitions. */
+  --nt-transition-fast: 120ms ease;
+  --nt-transition-base: 160ms ease;
+  --nt-transition-slow: 220ms ease;
+}
+
+/* Dark canonical values (match frozen public landing dark values).
+ * Either host attribute activates them: app `data-theme` or public
+ * `data-nippotrack-theme`. Scoped to :root so descendant aliases follow. */
+:root[data-theme="dark"],
+:root[data-nippotrack-theme="dark"] {
+  color-scheme: dark;
+  --nt-canvas: #1C1A18;
+  --nt-surface: #24211E;
+  --nt-surface-muted: #2B2723;
+  --nt-surface-raised: #2B2723;
+  --nt-text: #F5F0E8;
+  --nt-text-secondary: #B8AEA4;
+  --nt-text-muted: #A89E93;
+  --nt-border: #3A3530;
+  --nt-border-subtle: #2F2B27;
+  --nt-accent: #9292C8;
+  --nt-accent-hover: #A9A9D6;
+  --nt-accent-soft: rgb(146 146 200 / 0.16);
+  --nt-success: #9AC3A8;
+  --nt-warning: #C9A96A;
+  --nt-error: #D48A8A;
+  --nt-success-soft: rgb(154 195 168 / 0.16);
+  --nt-warning-soft: rgb(201 169 106 / 0.16);
+  --nt-error-soft: rgb(212 138 138 / 0.16);
+  --nt-danger: #D48A8A;
+  --nt-danger-soft: rgb(212 138 138 / 0.16);
+  --nt-accent-contrast: #1C1A18;
+  --nt-chart-1: #9292C8;
+  --nt-chart-2: #A9A9D6;
+  --nt-chart-3: #8E857E;
+  --nt-chart-4: #B8AEA4;
+  --nt-chart-5: #9AC3A8;
+  --nt-chart-6: #C9A96A;
+  --nt-chart-7: #7FA3AD;
+  --nt-chart-8: #C2A884;
+  --nt-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.32), 0 2px 8px rgb(0 0 0 / 0.28);
+  --nt-shadow-md: 0 4px 16px rgb(0 0 0 / 0.32);
+  --nt-shadow-lg: 0 12px 36px rgb(0 0 0 / 0.34);
+  --nt-focus-ring: #9292C8;
+}

@@ -1,6 +1,7 @@
 import './styles.css';
-import lightBrandLogo from './assets/JLT_logo-png.png';
-import darkBrandLogo from './assets/JLT_logo-png-dark-mode.png';
+import lightBrandLogo from './assets/Logo_Modo_Claro_App.png';
+import darkBrandLogo from './assets/Logo_Modo_Oscuro_App.png';
+import { APP_THEME_META, applyAppThemeAttributes, isAllowedAppTheme, persistAppTheme, resolveAppTheme, wordmarkForAppTheme } from './appTheme';
 import { destroyCharts, refreshChartTheme } from './chartRegistry';
 import { apiRequest } from './api';
 import { kanjiReferenceRoute, parseKanjiReferenceRoute } from './kanjiReference';
@@ -71,19 +72,31 @@ const themeToggle = document.getElementById('theme-toggle');
 const mobileThemeToggle = document.getElementById('mobile-theme-toggle');
 const accountButtons = [document.getElementById('account-button'), document.getElementById('mobile-account-button')];
 const themeColorMeta = document.querySelector('meta[name="theme-color"]');
-const savedTheme = localStorage.getItem('jlt-theme') || 'light';
+// Canonical app theme preference (`nippotrack-theme`, shared with public).
+// Resolution: stored canonical → stored legacy `jlt-theme` (accepted AND
+// migrated forward to canonical, legacy left intact) → OS
+// prefers-color-scheme → light. Arbitrary strings rejected (allowlist).
+// Writes persist BOTH keys; `data-theme` attr, `jlt-theme-change` event,
+// and chart refresh consumers are unchanged (backward compat).
+const savedTheme = resolveAppTheme();
+const themeAssets = { lightSrc: lightBrandLogo, darkSrc: darkBrandLogo };
 document.querySelectorAll('[data-jlt-icon]').forEach((holder) => {
   holder.appendChild(icon(moduleIconMap[holder.dataset.jltIcon] || holder.dataset.jltIcon, { size: 19 }));
 });
 document.documentElement.dataset.theme = savedTheme;
+// Hotfix: prepaint sets BOTH attributes — runtime must keep them in sync or
+// a stale data-nippotrack-theme keeps dark tokens active after toggling.
+applyAppThemeAttributes(savedTheme);
 document.documentElement.lang = getLocale();
 translateDocument();
 function updateThemeControls(theme) {
-  const dark = theme === 'dark';
-  document.documentElement.style.colorScheme = theme;
-  themeColorMeta?.setAttribute('content', dark ? '#202428' : '#EDD9C0');
+  const next = isAllowedAppTheme(theme) ? theme : 'light';
+  const dark = next === 'dark';
+  document.documentElement.style.colorScheme = next;
+  themeColorMeta?.setAttribute('content', APP_THEME_META[next]);
   if (brandLogo) {
-    brandLogo.src = dark ? darkBrandLogo : lightBrandLogo;
+    // NippoTrack wordmarks: light ink on light canvas, ivory ink on dark.
+    brandLogo.src = wordmarkForAppTheme(next, themeAssets);
     brandLogo.classList.toggle('brand-logo-dark', dark);
   }
   [themeToggle, mobileThemeToggle].forEach((button) => {
@@ -97,8 +110,12 @@ function updateThemeControls(theme) {
   });
 }
 function setTheme(theme) {
-  localStorage.setItem('jlt-theme', theme);
-  document.documentElement.dataset.theme = theme;
+  if (!isAllowedAppTheme(theme)) return;
+  // Persist BOTH keys (canonical + legacy); legacy readers stay consistent.
+  persistAppTheme(theme, localStorage);
+  // Sync BOTH root attributes (data-theme + data-nippotrack-theme) so the
+  // shared token layer flips together in either direction.
+  applyAppThemeAttributes(theme);
   updateThemeControls(theme);
   refreshChartTheme();
   window.dispatchEvent(new CustomEvent('jlt-theme-change', { detail: theme }));
@@ -106,7 +123,11 @@ function setTheme(theme) {
 updateThemeControls(savedTheme);
 [themeToggle, mobileThemeToggle].forEach((button) => button?.addEventListener('click', () => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark')));
 window.addEventListener('jlt-theme-change', (event) => {
-  updateThemeControls(event.detail || document.documentElement.dataset.theme);
+  const next = event.detail || document.documentElement.dataset.theme;
+  // External dispatchers (e.g. settings) write attributes themselves, but
+  // re-sync here so a bare event can never leave the attributes split.
+  applyAppThemeAttributes(next);
+  updateThemeControls(next);
   refreshChartTheme();
 });
 

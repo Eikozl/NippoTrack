@@ -4,7 +4,7 @@ import { element, errorState, loadingState, pageHeader } from '../ui';
 function readingCard(title, readings) {
   return element('section', { className: 'kanji-reference-reading surface p-4' }, [
     element('h2', { className: 'eyebrow', text: title }),
-    element('p', { className: 'mt-2 text-lg font-semibold text-ink', text: readings.length ? readings.join(' · ') : 'Not recorded' })
+    element('p', { className: 'mt-2 font-jp text-lg font-semibold text-ink', text: readings.length ? readings.join(' · ') : 'Not recorded' })
   ]);
 }
 
