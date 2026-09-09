@@ -12,12 +12,20 @@ function referenceContent(reference) {
   ]);
 }
 
+// B.2 stroke-order overlay: lazy + fail-open — the reference content never
+// depends on it. The module (and its tiny eligibility table) loads only
+// when a reference hero actually renders, keeping it out of the main chunk.
+function mountStrokeOrderSlots(root) {
+  import('../strokeOrder.js').then((module) => module.mountStrokeSlots(root)).catch(() => {});
+}
+
 export async function renderKanjiReference(container, character) {
   const header = () => pageHeader({ eyebrow: 'Reference', title: 'Kanji reference', description: 'Reference details for this kanji.' });
   container.replaceChildren(header(), loadingState('Loading kanji reference…'));
   try {
     const reference = await apiRequest(`/api/kanji/lookup/${encodeURIComponent(character)}`);
     container.replaceChildren(pageHeader({ eyebrow: 'Reference', title: `Kanji ${reference.character}`, description: 'Shared JLPT reference data. Classifications are community/reference data, not an official syllabus.' }), referenceContent(reference));
+    mountStrokeOrderSlots(container);
   } catch (error) {
     const message = error?.status === 404 ? 'This kanji is not present in the shared JLPT reference data.' : error;
     container.replaceChildren(header(), errorState(message, () => renderKanjiReference(container, character)));

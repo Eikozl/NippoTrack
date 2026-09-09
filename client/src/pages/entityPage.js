@@ -737,6 +737,11 @@ export function renderEntityPage(container, config) {
         });
       }
       openDialog({ title: `${config.title} detail`, content: [content], submitLabel: 'Close', ...(config === ENTITY_CONFIGS.kanji ? { panelClass: 'dialog-panel--kanji-detail' } : {}), onSubmit: async (form, close) => close() });
+      if (config === ENTITY_CONFIGS.kanji) {
+        // B.2 stroke-order overlay: lazy + fail-open — the owned detail
+        // never depends on it. Same shared module as the reference page.
+        import('../strokeOrder.js').then((module) => module.mountStrokeSlots(content)).catch(() => {});
+      }
     } catch (error) {
       showToast(error.message, 'error');
     }
