@@ -418,21 +418,18 @@ export function initLandingInteractions(root) {
 }
 
 // Kanji stroke-sequence showcase (landing only, presentational).
-// Scripted progression 日 → 空 → 深 with reference readings and honest
-// community-level captions ("reference N5/N4/N3 range" plus a "levels
-// approximate, not official" note — never an official claim, matching the
-// "Starting estimate … range" + disclaimer pattern elsewhere).
+// One visual stage progresses 日 → 空 → 深 with restrained Japanese readings.
 // Bounded by construction: exactly these three local SVGs are ever
 // fetched (never the 2136 set). Parsing reuses the app-safe path via a
 // dynamic import of `../strokeOrder.js`, so the landing initial bundle
-// never absorbs the app stroke code or its eligibility table. Rendering
+// never absorbs the app stroke code or its availability index. Rendering
 // is createElementNS with `d`-only paths (no innerHTML). The panel stays
 // aria-hidden presentational; there is deliberately NO replay affordance
 // (no other landing showcase has one). Plays once, then rests.
 export const KANJI_SEQUENCE = [
-  { character: '日', strokes: 4, level: 'N5' },
-  { character: '空', strokes: 8, level: 'N4' },
-  { character: '深', strokes: 11, level: 'N3' },
+  { character: '日', readings: 'ニチ・ジツ\nひ・か' },
+  { character: '空', readings: 'クウ\nそら・あく' },
+  { character: '深', readings: 'シン\nふか・い' },
 ];
 // Demo pacing is landing-specific and faster than the app's calm ~400ms
 // study pacing: the full A→B→C arc lands around ~5.5s, matching the
@@ -440,6 +437,7 @@ export const KANJI_SEQUENCE = [
 export const KANJI_SEQ_DRAW_MS = 150;
 export const KANJI_SEQ_PAUSE_MS = 60;
 export const KANJI_SEQ_SETTLE_MS = 500;
+export const KANJI_SEQ_TRANSITION_MS = 280;
 export const KANJI_SEQ_SVG_NS = 'http://www.w3.org/2000/svg';
 export const KANJI_SEQ_VIEWBOX = '0 0 109 109';
 
@@ -552,32 +550,32 @@ function addSeqClass(node, cls) {
   }
 }
 
-function seqCardForSlot(slot) {
+function removeSeqClass(node, cls) {
   try {
-    let node = slot?.parentElement ?? slot?.parentNode ?? null;
-    while (node) {
-      let isCard = false;
-      try {
-        if (typeof node.classList?.contains === 'function') isCard = node.classList.contains('kanji-seq-card');
-        else {
-          const cls = typeof node.getAttribute === 'function' ? node.getAttribute('class') : '';
-          isCard = String(cls || '').split(/\s+/).includes('kanji-seq-card');
-        }
-      } catch {
-        isCard = false;
-      }
-      if (isCard) return node;
-      node = node.parentElement ?? node.parentNode ?? null;
-    }
+    node?.classList?.remove?.(cls);
   } catch {
-    return null;
+    // State classes are enhancement only.
   }
-  return null;
 }
 
-// Runs the scripted sequence inside a `[data-kanji-sequence]` container.
-// Once-only: a second call returns `{ status: 'skipped' }` without any
-// fetch. Fail-open per card: an unresolvable SVG keeps its static glyph.
+function stageForSequence(container) {
+  return container?.querySelector?.('[data-kanji-seq-stage]') ?? null;
+}
+
+function setSequenceStage(stage, entry) {
+  const glyph = stage?.querySelector?.('[data-kanji-seq-glyph]') ?? null;
+  const readings = stage?.querySelector?.('[data-kanji-seq-readings]') ?? null;
+  if (!glyph) return null;
+  glyph.textContent = entry.character;
+  glyph.setAttribute?.('data-kanji-seq-glyph', entry.character);
+  if (readings) readings.textContent = entry.readings;
+  return glyph;
+}
+
+// Runs the scripted sequence inside one `[data-kanji-sequence]` stage.
+// Once-only: a second call returns `{ status: 'skipped' }` without any fetch.
+// Fail-open per item: an unresolvable SVG holds its static glyph, then the
+// sequence calmly continues to the next character.
 export async function playKanjiSequence(container, options = {}) {
   if (!container || container.dataset?.kanjiPlayed === 'true') return { status: 'skipped', settled: [] };
   try {
@@ -594,6 +592,7 @@ export async function playKanjiSequence(container, options = {}) {
   const drawMs = options.drawMs ?? KANJI_SEQ_DRAW_MS;
   const pauseMs = options.pauseMs ?? KANJI_SEQ_PAUSE_MS;
   const settleMs = options.settleMs ?? KANJI_SEQ_SETTLE_MS;
+  const transitionMs = options.transitionMs ?? KANJI_SEQ_TRANSITION_MS;
   const wait = options.wait ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const signal = options.signal ?? null;
   let reduced = false;
@@ -603,55 +602,48 @@ export async function playKanjiSequence(container, options = {}) {
     reduced = false;
   }
 
-  // All three fetches fire in parallel up front: the ceiling is three
-  // requests, in 日 → 空 → 深 order, with no retries.
-  const loaded = await Promise.all(
-    KANJI_SEQUENCE.map((entry) => Promise.resolve()
-      .then(() => loadPaths(entry.character, { signal }))
-      .then((paths) => ({ entry, paths: Array.isArray(paths) ? paths : null }))
-      .catch(() => ({ entry, paths: null })))
-  );
-  const cards = [];
-  for (const { entry, paths } of loaded) {
-    let slot = null;
-    try {
-      slot = container.querySelector?.(`[data-kanji-seq-glyph="${entry.character}"]`) ?? null;
-    } catch {
-      slot = null;
+  const stage = stageForSequence(container);
+  if (!stage || !doc) return { status: 'skipped', settled: [] };
+  const sequence = reduced ? [KANJI_SEQUENCE.at(-1)] : KANJI_SEQUENCE;
+  const settled = [];
+
+  for (let index = 0; index < sequence.length; index += 1) {
+    const entry = sequence[index];
+    if (index > 0) {
+      addSeqClass(stage, 'is-transitioning');
+      if (transitionMs > 0) await wait(transitionMs);
     }
-    if (!slot || !doc || !paths?.length) continue;
-    const { svg, paths: built } = buildKanjiSeqSvg(doc, paths);
+    const glyph = setSequenceStage(stage, entry);
+    stage.getBoundingClientRect?.();
+    removeSeqClass(stage, 'is-transitioning');
+    let pathData = null;
     try {
-      slot.replaceChildren(svg);
-      slot.textContent = '';
+      pathData = await loadPaths(entry.character, { signal });
     } catch {
+      pathData = null;
+    }
+    if (!glyph || !Array.isArray(pathData) || !pathData.length) {
+      if (!reduced && index < sequence.length - 1 && settleMs > 0) await wait(settleMs);
       continue;
     }
-    cards.push({ entry, slot, paths: built });
+    const { svg, paths } = buildKanjiSeqSvg(doc, pathData);
+    glyph.textContent = '';
+    glyph.replaceChildren(svg);
+    if (reduced) {
+      const lengths = paths.map((path) => measureSeqPath(path));
+      paths.forEach((path, pathIndex) => setSeqDrawn(path, lengths[pathIndex], true));
+    } else {
+      await drawStrokesSequential(paths, { drawMs, pauseMs, raf });
+    }
+    settled.push(entry.character);
+    if (!reduced && index < sequence.length - 1 && settleMs > 0) await wait(settleMs);
   }
   if (reduced) {
-    for (const card of cards) {
-      const lengths = card.paths.map((path) => measureSeqPath(path));
-      card.paths.forEach((path, index) => setSeqDrawn(path, lengths[index], true));
-      addSeqClass(seqCardForSlot(card.slot), 'is-settled');
-    }
     addSeqClass(container, 'is-complete');
-    return { status: 'final', settled: cards.map((card) => card.entry.character) };
-  }
-  for (let index = 0; index < cards.length; index += 1) {
-    const card = cards[index];
-    await drawStrokesSequential(card.paths, { drawMs, pauseMs, raf });
-    addSeqClass(seqCardForSlot(card.slot), 'is-settled');
-    if (index < cards.length - 1 && settleMs > 0) {
-      try {
-        await wait(settleMs);
-      } catch {
-        // Settle pauses are pacing only.
-      }
-    }
+    return { status: 'final', settled };
   }
   addSeqClass(container, 'is-complete');
-  return { status: 'played', settled: cards.map((card) => card.entry.character) };
+  return { status: 'played', settled };
 }
 
 // One-shot viewport wiring for the kanji sequence: plays once when the

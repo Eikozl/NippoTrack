@@ -1,11 +1,10 @@
-// v5.1-B.2 Jōyō stroke-order animation — one shared implementation for both
+// v5.1-B.2 KanjiVG-supported stroke-order animation — one shared implementation for both
 // detail surfaces (Reference page + owned dialog via the shared kanjiDetail
 // builder). Client-only: assets are static SVGs under `stroke/kanji/`
-// (vendored KanjiVG, never bundled), eligibility comes from `strokeJoyo.js`
-// (the ONLY importer of that module — main paths must never import it
-// directly, so this module stays a lazy chunk).
+// (vendored KanjiVG, never bundled). Eligibility comes only from the generated
+// local asset index; this module remains a lazy chunk.
 //
-// Autoplay by design: a Jōyō mount fetches immediately and draws without
+// Autoplay by design: a supported mount fetches immediately and draws without
 // any trigger gesture (no trigger button, no Close, Escape does nothing —
 // the animation is persistent, not an overlay to dismiss). ONE Replay
 // button appears only after the first completion. While the animated SVG
@@ -17,7 +16,12 @@
 // order) are re-created programmatically via createElementNS — ids,
 // kvg:* attributes, groups, styles and everything else are dropped.
 
-import { isJoyoKanji } from './strokeJoyo.js';
+import {
+  hasStrokeAssetCodePoint,
+  strokeAssetCodePoints
+} from './strokeAssetIndex.js';
+
+export { strokeAssetCodePoints };
 
 export const STROKE_SVG_NS = 'http://www.w3.org/2000/svg';
 export const STROKE_SVG_VIEWBOX = '0 0 109 109';
@@ -25,6 +29,11 @@ export const STROKE_SVG_VIEWBOX = '0 0 109 109';
 export const STROKE_DRAW_MS = 400;
 export const STROKE_PAUSE_MS = 90;
 export const STROKE_SLOT_SELECTOR = '[data-kanji-stroke-slot]';
+
+export function hasStrokeAsset(character) {
+  if (typeof character !== 'string' || [...character].length !== 1) return false;
+  return hasStrokeAssetCodePoint(character.codePointAt(0));
+}
 
 // Ghost discipline: the animated SVG and the static font glyph must never
 // paint together. While the stroke view is present the sibling
@@ -75,8 +84,8 @@ function restoreGlyph(slot) {
 // KanjiVG file naming: lowercase hex of the code point, left-padded to at
 // least 5 digits (`05b66.svg` = 学 U+5B66, `20b9f.svg` = 𠮟 U+20B9F).
 export function strokeFileName(character) {
-  const codePoint = typeof character === 'string' ? character.codePointAt(0) : NaN;
-  if (!Number.isInteger(codePoint)) return null;
+  if (!hasStrokeAsset(character)) return null;
+  const codePoint = character.codePointAt(0);
   return `${codePoint.toString(16).padStart(5, '0')}.svg`;
 }
 
@@ -244,9 +253,9 @@ function playSequential(paths, options = {}) {
 }
 
 // Mounts the stroke autoplay into a B.1 `.kanji-stroke-slot`.
-// - Non-Jōyō: slot left empty/static (no control, no fetch), aria-hidden
+// - Unsupported: slot left empty/static (no control, no fetch), aria-hidden
 //   restored — zero visual trace, the static font glyph stands alone.
-// - Jōyō: fetch starts immediately on mount and the sequence auto-plays
+// - Supported: fetch starts immediately on mount and the sequence auto-plays
 //   (no trigger button is ever rendered, no Close, Escape does nothing —
 //   the animation is persistent, not an overlay to dismiss). ONE Replay
 //   button appears only after the first completion and replays on demand.
@@ -273,7 +282,7 @@ export function mountStrokeOrder(slot, options = {}) {
     ?? (typeof slot?.getAttribute === 'function' ? slot.getAttribute('data-kanji-stroke-slot') : null)
     ?? '';
   const doc = options.doc ?? slot?.ownerDocument ?? (typeof document !== 'undefined' ? document : null);
-  if (!slot || !doc || !isJoyoKanji(character)) {
+  if (!slot || !doc || !hasStrokeAsset(character)) {
     if (slot && typeof slot.replaceChildren === 'function') {
       slot.replaceChildren();
       slot.setAttribute?.('aria-hidden', 'true');

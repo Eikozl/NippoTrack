@@ -1299,12 +1299,9 @@
   font-weight: 600;
 }
 
-/* Kanji stroke-sequence showcase: three reference cards (日 → 空 → 深)
-   drawn once when the section enters the viewport (see
-   initKanjiSequence). Token-only surfaces/borders so the dark theme
-   follows automatically; cards stagger via the shared .demo-step reveal
-   and strokes draw via JS with a reduced-motion instant-final path — no
-   new motion system, no new breakpoints. */
+/* Kanji stroke-sequence showcase: one stage changes from 日 → 空 → 深.
+   It draws once when the section enters the viewport, using only the
+   existing shared motion vocabulary and token-driven surfaces. */
 .showcase-panel.kanji-demo {
   grid-template-columns: 1fr;
   align-content: center;
@@ -1313,33 +1310,39 @@
 
 .kanji-sequence {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 14px;
+  place-items: center;
   align-content: center;
 }
 
-.kanji-seq-card {
+.kanji-seq-stage {
   display: grid;
+  width: min(100%, 280px);
   justify-items: center;
-  gap: 10px;
-  padding: 18px 10px 14px;
+  gap: 12px;
+  padding: 28px 24px 24px;
   border: 1px solid var(--landing-border-subtle);
   border-radius: 14px;
   background: var(--landing-surface);
+  transition: opacity 280ms ease, transform 280ms ease;
+}
+
+.kanji-seq-stage.is-transitioning {
+  opacity: 0;
+  transform: translateY(-8px);
 }
 
 .kanji-seq-glyph {
   display: grid;
   place-items: center;
-  min-height: 76px;
-  font-size: 56px;
+  min-height: 154px;
+  font-size: 112px;
   font-weight: 600;
   line-height: 1;
 }
 
 .kanji-seq-glyph svg {
-  width: 64px;
-  height: 64px;
+  width: 132px;
+  height: 132px;
 }
 
 .kanji-seq-caption {
@@ -1350,24 +1353,10 @@
   text-align: center;
 }
 
-.kanji-seq-caption strong {
-  font-size: 15px;
-}
-
-.kanji-seq-caption span {
-  color: var(--landing-text-secondary);
-  font-size: 12px;
-}
-
 .kanji-seq-caption small {
   color: var(--landing-text-muted);
-  font-size: 11px;
-}
-
-.kanji-seq-note {
-  margin: 14px 0 0 !important;
-  color: var(--landing-text-muted);
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 1.55;
   text-align: center;
 }
 
@@ -2164,13 +2153,13 @@
   }
 
   .kanji-seq-glyph {
-    min-height: 64px;
-    font-size: 48px;
+    min-height: 128px;
+    font-size: 94px;
   }
 
   .kanji-seq-glyph svg {
-    width: 54px;
-    height: 54px;
+    width: 112px;
+    height: 112px;
   }
 }
 
@@ -2773,18 +2762,19 @@
     gap: 8px;
   }
 
-  .kanji-seq-card {
-    padding: 14px 6px 12px;
+  .kanji-seq-stage {
+    width: min(100%, 240px);
+    padding: 22px 18px 20px;
   }
 
   .kanji-seq-glyph {
-    min-height: 56px;
-    font-size: 42px;
+    min-height: 116px;
+    font-size: 86px;
   }
 
   .kanji-seq-glyph svg {
-    width: 48px;
-    height: 48px;
+    width: 102px;
+    height: 102px;
   }
 
   .review-rating {

@@ -1,14 +1,13 @@
-// v5.1-B.2 Jōyō stroke-order autoplay — contract tests.
+// v5.1-B.2 KanjiVG-supported stroke-order autoplay — contract tests.
 // Covers: eligibility, file naming/URLs, fetch-on-mount autoplay (no
 // trigger/Close in DOM, Escape does nothing), safe parsing (paths-only
 // via DOMParser + createElementNS, never innerHTML), sequential draw →
 // Replay hidden-until-done, ghost discipline (single rendering per phase),
 // reduced-motion instant-final, no focus theft, failure fallback,
-// cross-kanji no-leak, both-surface wiring, and the strokeJoyo import
-// discipline (tiny table imported ONLY by strokeOrder).
+// cross-kanji no-leak and both-surface lazy-module wiring.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -19,16 +18,37 @@ import {
   loadStrokePaths,
   mountStrokeOrder,
   mountStrokeSlots,
+  hasStrokeAsset,
   strokeAssetUrl,
-  strokeFileName
+  strokeFileName,
+  strokeAssetCodePoints
 } from '../src/strokeOrder.js';
-import { isJoyoKanji } from '../src/strokeJoyo.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readSource = (path) => readFileSync(join(root, path), 'utf8');
 const readAsset = (file) => readFileSync(join(root, 'public', 'stroke', 'kanji', file), 'utf8');
 const sleep = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 const settle = async () => { await sleep(); await sleep(); await sleep(); };
+
+test('KanjiVG availability follows the local canonical asset index, not Jōyō membership', () => {
+  for (const character of ['学', '龍', '鬱', '𠮟']) {
+    assert.equal(hasStrokeAsset(character), true, `${character} has a local KanjiVG asset`);
+  }
+  for (const character of ['龘', '', '日日', null, undefined]) {
+    assert.equal(hasStrokeAsset(character), false, `${JSON.stringify(character)} has no local KanjiVG asset`);
+  }
+});
+
+test('the generated index exactly matches each vendored canonical SVG', () => {
+  const files = readdirSync(join(root, 'public', 'stroke', 'kanji'))
+    .filter((file) => /^[0-9a-f]{5}\.svg$/.test(file))
+    .sort();
+  const indexed = [...strokeAssetCodePoints]
+    .map((codePoint) => `${codePoint.toString(16).padStart(5, '0')}.svg`)
+    .sort();
+  assert.equal(files.length, 6702, 'full r20250816 canonical set is vendored');
+  assert.deepEqual(indexed, files, 'index contains every asset exactly once');
+});
 
 // --- minimal DOM doubles ----------------------------------------------------
 // Just enough for the stroke module: namespaced creation, attributes,
@@ -265,26 +285,14 @@ function collectFocused(node, out = []) {
 
 // --- eligibility ------------------------------------------------------------
 
-test('eligibility: Jōyō representatives pass, non-Jōyō and non-chars fail', () => {
-  for (const char of ['日', '学', '鳥', '鬱', '花']) {
-    assert.equal(isJoyoKanji(char), true, `${char} is Jōyō`);
-  }
-  assert.equal(isJoyoKanji('𠮟'), true, '𠮟 (non-BMP extra) is eligible');
-  for (const char of ['屁', '々', 'A', '', '日日', '12']) {
-    assert.equal(isJoyoKanji(char), false, `${JSON.stringify(char)} is not eligible`);
-  }
-  assert.equal(isJoyoKanji(null), false, 'null is not eligible');
-  assert.equal(isJoyoKanji(undefined), false, 'undefined is not eligible');
-});
-
-test('mount autoplays exactly when the mask says Jōyō (喰 follows the mask)', async () => {
+test('mount autoplays only for indexed local assets', async () => {
   const doc = new FakeDoc();
-  for (const char of ['日', '学', '喰', '屁', '々']) {
+  for (const char of ['日', '学', '龍', '鬱', '龘']) {
     const slot = makeSlot(doc, char);
     const { fn, calls } = fetchOf(syntheticSvg);
     mountStrokeOrder(slot, { character: char, doc, fetchFn: fn, parseFn: miniParseSvg });
     await settle();
-    assert.equal(calls.length, isJoyoKanji(char) ? 1 : 0, `${char || '(empty)'} fetch matches eligibility`);
+    assert.equal(calls.length, hasStrokeAsset(char) ? 1 : 0, `${char || '(empty)'} fetch matches availability`);
   }
 });
 
@@ -354,11 +362,11 @@ test('extractor drops empty d values and ignores non-path documents', () => {
   );
 });
 
-// --- mount: non-Jōyō leaves the slot empty -------------------------------------
+// --- mount: unavailable assets leave the slot empty ----------------------------
 
-test('non-Jōyō mount leaves the slot empty/static with zero network and zero trace', async () => {
+test('unsupported mount leaves the slot empty/static with zero network and zero trace', async () => {
   const doc = new FakeDoc();
-  for (const char of ['屁', '々', '']) {
+  for (const char of ['龘', '日日', '']) {
     const panel = makePanel(doc, char);
     const slot = panel.querySelector('div');
     const glyph = panel.querySelector('span');
@@ -366,7 +374,7 @@ test('non-Jōyō mount leaves the slot empty/static with zero network and zero t
     const cleanup = mountStrokeOrder(slot, { character: char, doc, fetchFn: fn });
     assert.equal(typeof cleanup, 'function', 'cleanup returned');
     await settle();
-    assert.equal(calls.length, 0, 'no fetch for non-Jōyō');
+    assert.equal(calls.length, 0, 'no fetch for an unavailable asset');
     assert.equal(buttonsIn(slot).length, 0, 'no control rendered');
     assert.equal(svgsIn(slot).length, 0, 'no SVG rendered');
     assert.equal(slot.getAttribute('aria-hidden'), 'true', 'empty slot stays hidden');
@@ -376,9 +384,9 @@ test('non-Jōyō mount leaves the slot empty/static with zero network and zero t
   }
 });
 
-// --- mount: Jōyō autoplays on mount, no trigger/Close ---------------------------
+// --- mount: supported assets autoplay with no trigger/Close ---------------------
 
-test('Jōyō mount fetches on mount with a polite loading note and no trigger button', async () => {
+test('supported mount fetches on mount with a polite loading note and no trigger button', async () => {
   const doc = new FakeDoc();
   const panel = makePanel(doc, '日');
   const slot = panel.querySelector('div');
@@ -402,6 +410,23 @@ test('Jōyō mount fetches on mount with a polite loading note and no trigger bu
   assert.equal(queue.length, 0, 'no animation scheduled before the asset arrives');
   assert.equal(glyphHidden(glyph), false, 'static glyph stays visible while loading (no blank panel)');
   assert.equal(svgsIn(slot).length, 0, 'loading phase: glyph only, zero SVG');
+});
+
+test('newly included non-Jōyō assets autoplay and expose Replay after completion', async () => {
+  const doc = new FakeDoc();
+  const panel = makePanel(doc, '龍');
+  const slot = panel.querySelector('div');
+  const { fn, calls } = fetchOf(syntheticSvg);
+  const { raf, caf, drain } = makeRaf();
+  mountStrokeOrder(slot, {
+    character: '龍', doc, fetchFn: fn, parseFn: miniParseSvg, raf, caf,
+    drawMs: 60, pauseMs: 10, prefersReducedMotion: () => false
+  });
+  await settle();
+  assert.equal(calls.length, 1, '龍 fetches its one local asset');
+  drain();
+  assert.ok(replayIn(slot), 'Replay appears after the supported character settles');
+  assert.equal(svgsIn(slot).length, 1, 'the completed SVG remains the sole glyph');
 });
 
 // --- autoplay: fetch → safe build → sequential draw → Replay ---------------------
@@ -732,23 +757,23 @@ test('cleanup aborts loading and repeated mounts do not accumulate controls', as
 
 // --- shared mounting across both surfaces -------------------------------------------------
 
-test('mountStrokeSlots autoplays Jōyō slots only', async () => {
+test('mountStrokeSlots autoplays KanjiVG-supported slots only', async () => {
   const doc = new FakeDoc();
   const rootNode = doc.createElement('div');
   rootNode.appendChild(makePanel(doc, '日'));
-  rootNode.appendChild(makePanel(doc, '屁'));
+  rootNode.appendChild(makePanel(doc, '龘'));
   const { fn, calls } = fetchOf(syntheticSvg);
   const { raf, caf, drain } = makeRaf();
   const cleanups = mountStrokeSlots(rootNode, { doc, fetchFn: fn, raf, caf, parseFn: miniParseSvg });
   assert.equal(cleanups.length, 2, 'one cleanup per slot');
   await settle();
-  assert.equal(calls.length, 1, 'autoplay fetch for the Jōyō slot only');
+  assert.equal(calls.length, 1, 'autoplay fetch for the supported slot only');
   assert.ok(calls[0].url.endsWith('stroke/kanji/065e5.svg'), 'fetched 日 asset');
   drain();
   const slots = rootNode.querySelectorAll('[data-kanji-stroke-slot]');
   assert.ok(replayIn(slots[0]), '日 slot completes to Replay');
-  assert.equal(buttonsIn(slots[1]).length, 0, '屁 slot stays empty');
-  assert.equal(svgsIn(slots[1]).length, 0, '屁 slot renders nothing');
+  assert.equal(buttonsIn(slots[1]).length, 0, '龘 slot stays empty');
+  assert.equal(svgsIn(slots[1]).length, 0, '龘 slot renders nothing');
 });
 
 test('both surfaces share the autoplay stroke module; builder stays presentational', () => {
@@ -760,11 +785,11 @@ test('both surfaces share the autoplay stroke module; builder stays presentation
   assert.ok(reference.includes("../strokeOrder.js") && reference.includes('mountStrokeSlots'), 'reference page mounts via the shared module');
   assert.ok(entity.includes("import('../strokeOrder.js')"), 'owned surface lazy-loads (chunk split, fail-open)');
   assert.ok(reference.includes("import('../strokeOrder.js')"), 'reference surface lazy-loads (chunk split, fail-open)');
-  assert.ok(!builder.includes('strokeOrder') && !builder.includes('strokeJoyo'), 'builder stays presentational (B.1 contract)');
-  assert.ok(!main.includes('strokeOrder') && !main.includes('strokeJoyo'), 'main chunk untouched by stroke code');
+  assert.ok(!builder.includes('strokeOrder'), 'builder stays presentational (B.1 contract)');
+  assert.ok(!main.includes('strokeOrder'), 'main chunk untouched by stroke code');
 });
 
-test('strokeJoyo is imported ONLY by the stroke module (tiny table never leaks into main paths)', () => {
+test('stroke availability index stays inside the lazy stroke module', () => {
   const candidates = [
     'src/main.js',
     'src/kanjiDetail.js',
@@ -773,9 +798,9 @@ test('strokeJoyo is imported ONLY by the stroke module (tiny table never leaks i
     'src/ui.js'
   ];
   for (const path of candidates) {
-    assert.ok(!readSource(path).includes('strokeJoyo'), `${path} must not import the eligibility table`);
+    assert.ok(!readSource(path).includes('strokeAssetIndex'), `${path} must not import the asset index`);
   }
-  assert.ok(readSource('src/strokeOrder.js').includes("from './strokeJoyo.js'"), 'only the stroke module imports it');
+  assert.ok(readSource('src/strokeOrder.js').includes("from './strokeAssetIndex.js'"), 'only the lazy stroke module imports the index');
 });
 
 // --- pacing + restraint ----------------------------------------------------------------------

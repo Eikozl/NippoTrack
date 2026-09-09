@@ -209,20 +209,11 @@ function kanjiShowcase() {
         <div class="showcase-copy"><span class="landing-eyebrow">Kanji</span><h2 id="kanji-title">Keep kanji connected to what you're learning.</h2><p>See meanings, readings and study information together without separating kanji from the rest of your Japanese journey.</p></div>
         <div class="showcase-panel kanji-demo" aria-hidden="true">
           <div class="kanji-sequence" data-kanji-sequence>
-            <div class="kanji-seq-card demo-step" style="--step-delay:500ms" data-kanji-seq="0">
+            <div class="kanji-seq-stage demo-step" style="--step-delay:500ms" data-kanji-seq-stage>
               <div class="kanji-seq-glyph" data-kanji-seq-glyph="日" lang="ja">日</div>
-              <p class="kanji-seq-caption"><strong lang="ja">日</strong><span>sun/day</span><small lang="ja">ニチ・ジツ / ひ・か</small><small>reference N5 range</small></p>
-            </div>
-            <div class="kanji-seq-card demo-step" style="--step-delay:1100ms" data-kanji-seq="1">
-              <div class="kanji-seq-glyph" data-kanji-seq-glyph="空" lang="ja">空</div>
-              <p class="kanji-seq-caption"><strong lang="ja">空</strong><span>sky/empty</span><small lang="ja">クウ / そら・あく</small><small>reference N4 range</small></p>
-            </div>
-            <div class="kanji-seq-card demo-step" style="--step-delay:1700ms" data-kanji-seq="2">
-              <div class="kanji-seq-glyph" data-kanji-seq-glyph="深" lang="ja">深</div>
-              <p class="kanji-seq-caption"><strong lang="ja">深</strong><span>deep</span><small lang="ja">シン / ふか・い</small><small>reference N3 range</small></p>
+              <p class="kanji-seq-caption"><small data-kanji-seq-readings lang="ja">ニチ・ジツ<br>ひ・か</small></p>
             </div>
           </div>
-          <p class="kanji-seq-note demo-step" style="--step-delay:2200ms">Reference stroke previews · levels approximate, not official</p>
         </div>
       </div>
     </section>`;
