@@ -25,7 +25,8 @@
     "kanji-reference:import": "node scripts/import-kanji-reference.js",
     "jmdict": "node scripts/import-jmdict-reference.js",
     "kanji-reference:normalize-openjlpt": "node scripts/normalize-openjlpt-kanji.js",
-    "kanji-reference:build": "node scripts/build-kanji-reference.js"
+    "kanji-reference:build": "node scripts/build-kanji-reference.js",
+    "grammar-reference:import": "node scripts/import-grammar-reference.js"
   },
   "keywords": [],
   "author": "",

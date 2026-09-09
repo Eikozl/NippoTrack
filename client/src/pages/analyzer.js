@@ -156,6 +156,53 @@ export async function renderAnalyzer(container) {
     const grid = element('ul', { className: 'grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3' });
     const importBar = element('div', { className: 'surface flex min-w-0 flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between' });
     const lexicalSection = element('section', { className: 'surface min-w-0 p-4 sm:p-5', attrs: { 'aria-label': 'Vocabulary analysis' } });
+    const grammarSection = element('section', { className: 'surface min-w-0 p-4 sm:p-5', attrs: { 'aria-label': 'Grammar analysis' } });
+
+    const renderGrammar = () => {
+      grammarSection.replaceChildren(element('h2', { className: 'font-semibold text-ink', text: 'Grammar' }));
+      const grammar = analysis.lexical?.grammar;
+      if (!grammar || grammar.status !== 'ok') {
+        grammarSection.append(element('p', { className: 'mt-2 text-sm text-muted', text: 'Grammar analysis is unavailable.' }));
+        return;
+      }
+      const matches = Array.isArray(grammar.matches) ? grammar.matches : [];
+      if (!matches.length) {
+        grammarSection.append(element('p', { className: 'mt-2 text-sm text-muted', text: 'No supported grammar patterns detected.' }));
+        return;
+      }
+      const addReference = (reference) => {
+        const example = reference.examples?.find((item) => item?.ja)?.ja || '';
+        const content = [
+          field({ name: 'grammar_point', label: 'Grammar point', required: true, maxLength: 100, value: reference.grammarPoint }),
+          field({ name: 'meaning', label: 'Meaning', required: true, maxLength: 255, value: reference.meaning }),
+          field({ name: 'structure', label: 'Structure', type: 'textarea', maxLength: 2000, value: (reference.structures || []).join('\n') }),
+          field({ name: 'example', label: 'Example', type: 'textarea', maxLength: 2000, value: example }),
+          field({ name: 'jlpt_level', label: 'JLPT reference', type: 'select', value: reference.jlptLevel || '', options: [{ value: '', label: 'Not set' }, ...['N5','N4','N3','N2','N1'].map((value) => ({ value, label: `${value} reference` }))] })
+        ];
+        openDialog({ title: 'Add Grammar', content, submitLabel: 'Save Grammar', onSubmit: async (form, close) => {
+          const data = new FormData(form);
+          await apiRequest('/api/grammar', { method: 'POST', body: { grammar_point: data.get('grammar_point'), meaning: data.get('meaning'), structure: data.get('structure'), example: data.get('example'), jlpt_level: data.get('jlpt_level'), reference_id: reference.referenceId } });
+          close(); showToast('Grammar point added as New.');
+        } });
+      };
+      for (const match of matches) {
+        const references = match.status === 'AMBIGUOUS' ? match.references : [match.reference];
+        const card = element('article', { className: 'mt-3 rounded-lg border border-stone bg-paper p-3' }, [
+          element('p', { className: 'font-jp font-semibold text-ink', text: match.detected?.text || '', attrs: { lang: 'ja' } }),
+          element('p', { className: 'mt-1 text-xs text-muted', text: match.status === 'AMBIGUOUS' ? 'Grammar pattern detected. Possible uses:' : 'Seen here' })
+        ]);
+        for (const reference of references.filter(Boolean)) {
+          const row = element('div', { className: 'mt-2 flex flex-wrap items-center justify-between gap-2' }, [
+            element('p', { className: 'text-sm text-ink', text: `${reference.grammarPoint} · ${reference.meaning} · ${reference.jlptLevel} reference` }),
+            element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: match.collection?.inGrammar ? 'In your Grammar collection' : 'Add to Grammar', attrs: { type: 'button', disabled: match.collection?.inGrammar ? 'true' : null } })
+          ]);
+          const button = row.querySelector('button'); if (!match.collection?.inGrammar) button.addEventListener('click', () => addReference(reference));
+          card.append(row);
+        }
+        grammarSection.append(card);
+      }
+      grammarSection.append(element('p', { className: 'mt-3 text-xs text-muted', text: 'Grammar reference data: Nihongo Mono · MIT' }));
+    };
 
     const renderLexical = () => {
       lexicalSection.replaceChildren();
@@ -786,7 +833,8 @@ export async function renderAnalyzer(container) {
     renderGrid();
     renderImportBar();
     renderLexical();
-    resultsSection.append(summaryGrid, lexicalSection, distributionCard, notice, filterBar, grid, importBar);
+    renderGrammar();
+    resultsSection.append(summaryGrid, lexicalSection, grammarSection, distributionCard, notice, filterBar, grid, importBar);
   };
 
   const kanjiCard = (entry) => {

@@ -1,5 +1,6 @@
 import { apiRequest, queryString } from '../api';
 import { enableVocabularyAutofill } from '../vocabularyAutofill.js';
+import { enableGrammarReferenceAutofill } from '../grammarReferenceAutofill.js';
 import { buildKanjiImportPayload, getContextKanji, getReadingContext, formatKanjiContextEntry, VOCAB_READING_NOTICE } from '../vocabularyReading.js';
 import { applyPristineKanjiAutofill, changedKanjiReferenceFields, enableRomajiConversion, existingKanjiFromDuplicateError, isSingleHanCodePoint, transliteratedValue } from '../kanjiReference';
 import { buildKanjiIdentity, normalizeKanjiOwnedIdentity } from '../kanjiDetail.js';
@@ -311,7 +312,9 @@ function buildFields(config, record = {}) {
 
 function formPayload(form, config) {
   const formData = new FormData(form);
-  return Object.fromEntries(config.fields.map(({ name }) => [name, formData.get(name) ?? '']));
+  const payload = Object.fromEntries(config.fields.map(({ name }) => [name, formData.get(name) ?? '']));
+  if (config === ENTITY_CONFIGS.grammar && formData.get('reference_id')) payload.reference_id = formData.get('reference_id');
+  return payload;
 }
 
 function inputFor(content, name) {
@@ -634,6 +637,9 @@ export function renderEntityPage(container, config) {
     enableRomajiConversion(content, config, apiRequest);
     if (config === ENTITY_CONFIGS.vocabulary && !record[config.idKey]) {
       enableVocabularyAutofill(content);
+    }
+    if (config === ENTITY_CONFIGS.grammar && !record[config.idKey]) {
+      enableGrammarReferenceAutofill(content, apiRequest);
     }
     if (config === ENTITY_CONFIGS.kanji && !record[config.idKey]) {
       content.unshift(duplicateNotice);

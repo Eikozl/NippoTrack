@@ -20,6 +20,8 @@ const {
 const { tryConsumeLexical } = require('../services/lexicalRateLimit');
 const { resolveContext } = require('../services/contextService');
 const { lexicalRequiredBlock, unavailableBlock } = require('../services/contextResponse');
+const { detectGrammar } = require('../services/grammarDetector');
+const { hydrateGrammarMatches } = require('../services/grammarReferenceStore');
 
 // Log only slow parses, and never with user content: version, sizes,
 // durations, outcome category.
@@ -103,7 +105,7 @@ async function buildLexicalBlock(text, { userId, ip, wantContext } = {}) {
         durationMs
       }));
     }
-    return attachContext({
+    const payload = {
       status: 'ok',
       engine,
       tokens: adapted.map(stripTokenEngine),
@@ -116,7 +118,13 @@ async function buildLexicalBlock(text, { userId, ip, wantContext } = {}) {
         : ['Vocabulary collection matching is unavailable. Candidates are shown without ownership state.'],
       limit: MAX_LEXICAL_TEXT_LENGTH,
       durationMs
-    }, wantContext, candidates, adapted);
+    };
+    try {
+      payload.grammar = { status: 'ok', source: { name: 'Nihongo Mono', commit: 'ec0ba4a0ce1611c568b0e4f8a223eb8029249a25' }, matches: await hydrateGrammarMatches(userId, detectGrammar(adapted)) };
+    } catch (_) {
+      payload.grammar = { status: 'unavailable', matches: [] };
+    }
+    return attachContext(payload, wantContext, candidates, adapted);
   } catch (_) {
     return attachContext({
       status: 'unavailable',
@@ -129,7 +137,8 @@ async function buildLexicalBlock(text, { userId, ip, wantContext } = {}) {
       matching: { available: true },
       warnings: ['Word-level analysis is unavailable. Kanji results below are complete.'],
       limit: MAX_LEXICAL_TEXT_LENGTH,
-      retryable: true
+      retryable: true,
+      grammar: { status: 'unavailable', matches: [] }
     }, wantContext);
   }
 }

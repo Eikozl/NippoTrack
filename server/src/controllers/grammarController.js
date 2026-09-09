@@ -13,6 +13,7 @@ const {
 } = require('../validation');
 const { fetchEntityById } = require('./helpers');
 const { executePaginatedList } = require('./listHelpers');
+const { findGrammarReferenceId, getGrammarReferenceById, searchGrammarReferences } = require('../services/grammarReferenceStore');
 
 async function listGrammar(req, res) {
   try {
@@ -62,7 +63,7 @@ async function listGrammar(req, res) {
 
     return res.json(await executePaginatedList(pool, {
       table: 'grammar_points',
-      columns: 'id_grammar, grammar_point, meaning, structure, example, jlpt_level, status',
+      columns: 'id_grammar, grammar_point, meaning, structure, example, jlpt_level, status, reference_id',
       whereSql,
       params,
       orderBy,
@@ -126,7 +127,9 @@ async function getGrammar(req, res) {
     const id = parseIdParam(req, 'grammar point');
     const entry = await fetchEntityById('grammar', id, req.user.id);
     if (!entry) return res.status(404).json({ error: 'grammar point not found' });
-    return res.json(entry);
+    let reference = null;
+    try { if (entry.reference_id) reference = await getGrammarReferenceById(entry.reference_id); } catch (_) { /* fail open for user record */ }
+    return res.json({ ...entry, reference });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load grammar point.' });
   }
@@ -159,9 +162,10 @@ async function createGrammar(req, res) {
       ...body,
       status: body.status === undefined || body.status === null || body.status === '' ? 'New' : body.status
     });
+    const referenceId = await findGrammarReferenceId(body.reference_id);
     const [result] = await pool.execute(
-      'INSERT INTO grammar_points (grammar_point, meaning, structure, example, jlpt_level, status, notes, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [values.grammarPoint, values.meaning, values.structure, values.example, values.jlptLevel, values.status, values.notes, req.user.id]
+      'INSERT INTO grammar_points (grammar_point, meaning, structure, example, jlpt_level, status, notes, user_id, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [values.grammarPoint, values.meaning, values.structure, values.example, values.jlptLevel, values.status, values.notes, req.user.id, referenceId]
     );
     return res.status(201).json(await fetchEntityById('grammar', result.insertId, req.user.id));
   } catch (error) {
@@ -182,9 +186,10 @@ async function updateGrammar(req, res) {
     validateWriteFields(body, ALLOWED_FIELDS.grammar);
     validateStandardRecordPayload(body, { requiredWord: false, requiredMeaning: false });
     const values = normalizeGrammar(body, current);
+    const referenceId = body.reference_id === undefined ? current.reference_id : await findGrammarReferenceId(body.reference_id);
     await pool.execute(
-      'UPDATE grammar_points SET grammar_point = ?, meaning = ?, structure = ?, example = ?, jlpt_level = ?, status = ?, notes = ? WHERE id_grammar = ? AND user_id = ?',
-      [values.grammarPoint, values.meaning, values.structure, values.example, values.jlptLevel, values.status, values.notes, id, req.user.id]
+      'UPDATE grammar_points SET grammar_point = ?, meaning = ?, structure = ?, example = ?, jlpt_level = ?, status = ?, notes = ?, reference_id = ? WHERE id_grammar = ? AND user_id = ?',
+      [values.grammarPoint, values.meaning, values.structure, values.example, values.jlptLevel, values.status, values.notes, referenceId, id, req.user.id]
     );
     return res.json(await fetchEntityById('grammar', id, req.user.id));
   } catch (error) {
@@ -192,6 +197,16 @@ async function updateGrammar(req, res) {
       defaultMessage: 'Unable to update grammar point.',
       conflictMessage: 'Grammar point already exists.'
     });
+  }
+}
+
+async function listGrammarReferences(req, res) {
+  try {
+    const search = normalizeText(req.query.search, 100, 'search');
+    if (!search) return res.json({ items: [] });
+    return res.json(await searchGrammarReferences(search, parseOptionLimit(req.query.limit)));
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to search grammar references.' });
   }
 }
 
@@ -206,4 +221,4 @@ async function deleteGrammar(req, res) {
   }
 }
 
-module.exports = { createGrammar, deleteGrammar, getGrammar, listGrammar, listGrammarOptions, updateGrammar };
+module.exports = { createGrammar, deleteGrammar, getGrammar, listGrammar, listGrammarOptions, listGrammarReferences, updateGrammar };
