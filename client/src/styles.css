@@ -682,7 +682,11 @@ nav .nav-group-label:first-child { margin-top: 0; }
   .drawer-overlay, .drawer-panel, .dialog-overlay, .dialog-panel,
   .detail-overlay, .detail-panel,
   #toast-region > div, .skeleton-block { animation: none !important; transition: none !important; }
-  .metric-link:hover, .collection-card--interactive:hover { transform: none; }
+  .metric-link, .collection-card--interactive,
+  .button-primary, .button-secondary, .button-danger, .button-ghost { transition: none !important; }
+  .metric-link:hover, .collection-card--interactive:hover,
+  .metric-link:active, .collection-card--interactive:active,
+  .button-primary:active, .button-secondary:active, .button-danger:active, .button-ghost:active { transform: none !important; }
 }
 
 /* v5.1-E.2 Core experience upgrade — additive only, same placement rule as
