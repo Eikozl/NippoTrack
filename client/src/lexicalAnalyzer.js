@@ -79,20 +79,40 @@ export function formatLexicalCandidate(candidate, { added = false } = {}) {
   };
 }
 
+// v5.1-E presentation filter (linguistic-presentation review: SAFE).
+// Hides whitespace-only and punctuation/symbol-only canonicals from the
+// rendered card list WITHOUT touching internal spans, offsets, sentence
+// reconstruction, or Context payloads. Kanji path untouched (Han-only).
+// Unicode rule: keep when the canonical contains a Letter or Number.
+// Adjustment per review: lone prolonged-sound marks (ーｰ) and lone
+// iteration/closing marks (々〆ゝゞヽヾ) count as symbol-only for display.
+const PRESENTATION_NOISE_SINGLETONS = new Set(['ー', 'ｰ', '々', '〆', 'ゝ', 'ゞ', 'ヽ', 'ヾ']);
+
+export function isLexicalPresentationNoise(canonical) {
+  if (typeof canonical !== 'string') return true;
+  if (!canonical.trim()) return true;
+  if (PRESENTATION_NOISE_SINGLETONS.has(canonical.trim())) return true;
+  return !/[\p{L}\p{N}]/u.test(canonical);
+}
+
 // Groups server candidates + unverified material for rendering. localAdded is
 // a Set of canonical forms the user added in this session (no re-analysis).
+// Presentation-layer noise (whitespace/punctuation-only) is skipped here so
+// it never becomes a card; the server payload stays intact for offsets and
+// Context.
 export function groupLexicalCandidates(lexical, localAdded) {
   const added = localAdded instanceof Set ? localAdded : new Set();
   const candidates = Array.isArray(lexical?.candidates) ? lexical.candidates : [];
   const unverified = Array.isArray(lexical?.unverified) ? lexical.unverified : [];
   const groups = { existing: [], fresh: [], verify: [] };
   for (const candidate of candidates) {
+    if (isLexicalPresentationNoise(candidate?.canonical)) continue;
     const view = formatLexicalCandidate(candidate, { added: added.has(candidate.canonical) });
     if (view.matchState === 'existing') groups.existing.push(view);
     else if (view.matchState === 'new') groups.fresh.push(view);
     else groups.verify.push(view);
   }
-  const verifyUnverified = unverified.map((item) => ({
+  const verifyUnverified = unverified.filter((item) => !isLexicalPresentationNoise(item?.canonical)).map((item) => ({
     key: item.key,
     canonical: item.canonical,
     pill: lexicalMatchPill('unsupported'),

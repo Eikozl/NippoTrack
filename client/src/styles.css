@@ -656,6 +656,42 @@ nav .nav-group-label:first-child { margin-top: 0; }
   .metric-link:hover, .collection-card--interactive:hover { transform: none; }
 }
 
+/* v5.1-E.2 Core experience upgrade — additive only, same placement rule as
+   E.1 (before the frozen A/B blocks). Visual hierarchy + density only; no
+   semantic, API, or algorithm changes. */
+
+/* Dashboard welcome: warm, restrained, premium. No celebration chrome. */
+.dashboard-welcome { padding: 0.15rem 0.25rem 0; }
+.metric-card--featured { border-color: color-mix(in srgb, var(--jlt-primary) 32%, transparent); box-shadow: var(--nt-shadow-md); }
+.activity-calendar-day.is-today { outline: 2px solid var(--jlt-primary); outline-offset: 1px; }
+
+/* Analyzer result entrance: sections arrive once (200ms), cards stay still
+   so long lists never stagger. */
+.analyzer-result { animation: nt-page-enter var(--nt-motion-page); }
+
+/* Review focus: sticky candidate footer keeps Start visible; thin progress
+   track mirrors the announced count; card entrance is a single fade. */
+.review-sticky-footer { position: sticky; bottom: 1rem; z-index: 5; }
+.review-progress-track { height: 6px; overflow: hidden; border-radius: 999px; background: var(--jlt-surface-soft); border: 1px solid var(--nt-border-subtle); }
+.review-progress-fill { height: 100%; border-radius: inherit; background: var(--jlt-primary); }
+.review-card { animation: nt-page-enter var(--nt-motion-component); }
+
+/* Restrained ghost-danger for contextual collection actions. */
+.button-ghost--danger { color: var(--jlt-danger); }
+.button-ghost--danger:hover { background: var(--jlt-danger-soft); color: var(--jlt-danger); }
+
+/* Settings hierarchy: one H1 per page — section titles step down via CSS
+   so the JS heading structure stays intact for tests/AT. */
+.settings-section > h2 { font-size: 1rem; line-height: 1.5; }
+
+@media (max-width: 640px) {
+  .review-sticky-footer { bottom: 0.75rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .analyzer-result, .review-card { animation: none !important; }
+}
+
 /* v5.1-A.2 first-experience onboarding — calm editorial transitions.
    Additive only: motion + easing reuse the frozen --nt-* transition
    tokens. No palette, no layout overrides; the panel itself uses shared

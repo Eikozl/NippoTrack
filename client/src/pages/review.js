@@ -83,7 +83,8 @@ export async function renderReview(container) {
   const heroSurface = element('div', { className: 'surface p-5 sm:p-8' });
 
   const introBlock = element('div', {}, [
-    element('h1', { className: 'text-2xl font-semibold tracking-tight text-ink sm:text-3xl', text: 'Want to review your JLPT study?', attrs: { tabindex: '-1' } }),
+    element('p', { className: 'eyebrow', text: 'Review' }),
+    element('h1', { className: 'mt-2 text-2xl font-semibold tracking-tight text-ink sm:text-3xl', text: 'Want to review your JLPT study?', attrs: { tabindex: '-1' } }),
     element('p', { className: 'mt-3 max-w-2xl text-sm leading-6 text-muted', text: 'Revisit recent study activity with focused recall, one item at a time. Use self-assessment to note how each item felt and decide what to look at again.' })
   ]);
   const startWrap = element('div', { className: 'mt-5' });
@@ -355,7 +356,7 @@ export async function renderReview(container) {
     }
 
     candidatesBlock.replaceChildren();
-    const footer = element('div', { className: 'surface flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between' });
+    const footer = element('div', { className: 'surface review-sticky-footer flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between' });
     const countNote = element('p', { className: 'text-sm text-muted', text: '0 selected', attrs: { 'aria-live': 'polite' } });
     const beginButton = element('button', { className: 'button-primary', text: 'Start review', attrs: { type: 'button', disabled: '' } });
     footer.append(countNote, beginButton);
@@ -550,9 +551,15 @@ export async function renderReview(container) {
       attrs: { 'aria-live': 'polite' }
     });
     const counter = element('span', { className: 'text-xs font-semibold text-muted', text: `${currentIndex + 1} / ${total}` });
+    // Thin determinate track mirrors the announced progress visually only
+    // (text labels carry meaning; color never acts alone).
+    const track = element('div', { className: 'review-progress-track mt-3', attrs: { 'aria-hidden': 'true' } }, [
+      element('div', { className: 'review-progress-fill', attrs: { style: `width: ${total ? Math.round(((currentIndex + 1) / total) * 100) : 0}%` } })
+    ]);
     const title = element('h2', { className: 'mt-2 break-words text-3xl font-semibold tracking-tight text-ink', text: item.display, attrs: { tabindex: '-1' } });
-    const card = element('article', { className: 'surface p-5 sm:p-8' }, [
+    const card = element('article', { className: 'surface review-card p-5 sm:p-8' }, [
       element('div', { className: 'flex items-start justify-between gap-3' }, [progress, counter]),
+      track,
       title
     ]);
 
@@ -575,8 +582,8 @@ export async function renderReview(container) {
       if (item.meaning) body.appendChild(element('p', { className: 'mt-2 text-base leading-7 text-ink', text: item.meaning }));
       body.appendChild(element('p', { className: 'mt-5 text-sm font-semibold text-ink', text: 'How did recall feel?' }));
       const grades = element('div', { className: 'mt-3 grid gap-2 sm:grid-cols-3' });
-      GRADES.forEach(({ result, hint }) => {
-        const button = element('button', { className: 'button-secondary flex-col gap-1 px-4 py-3 text-center', attrs: { type: 'button' } }, [
+      GRADES.forEach(({ result, hint }, gradeIndex) => {
+        const button = element('button', { className: 'button-secondary flex-col gap-1 px-4 py-3 text-center', attrs: { type: 'button', 'aria-keyshortcuts': String(gradeIndex + 1) } }, [
           element('span', { className: 'block text-sm font-semibold', text: result }),
           element('span', { className: 'block text-xs font-normal leading-5 text-muted', text: hint })
         ]);

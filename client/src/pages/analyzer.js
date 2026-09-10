@@ -128,26 +128,35 @@ export async function renderAnalyzer(container) {
 
     const summary = summarizeAnalyzerEntries(formatted);
     const distribution = analysis.jlptDistribution || {};
+    const lexicalCount = analysis.lexical?.status === 'ok' ? (analysis.lexical.candidates?.length || 0) : 0;
+    const grammarCount = analysis.lexical?.grammar?.status === 'ok' ? (analysis.lexical.grammar.matches?.length || 0) : 0;
 
-    const summaryTiles = [
-      ['Unique kanji', String(summary.uniqueKanji)],
-      ['Total occurrences', String(summary.totalOccurrences)],
-      ['In collection', String(summary.inCollection)],
-      ['Available to add', String(summary.availableToAdd)],
-      ['No reference data', String(summary.noReferenceData)]
-    ].map(([label, value]) => element('div', { className: 'surface p-4 text-center' }, [
-      element('p', { className: 'text-2xl font-semibold text-ink', text: value }),
-      element('p', { className: 'mt-1 text-xs text-muted', text: label })
-    ]));
-    const summaryGrid = element('div', { className: 'grid grid-cols-2 gap-3 sm:grid-cols-5' }, summaryTiles);
+    // v5.1-E summary strip: one calm grouped line instead of five equal
+    // tiles. Tabular numerals; hierarchy via a single strip.
+    const summaryStrip = element('div', { className: 'summary-strip', attrs: { role: 'status' } }, [
+      element('span', {}, [
+        element('strong', { text: String(lexicalCount) }),
+        element('span', { text: ' vocabulary' })
+      ]),
+      element('span', { text: '·', attrs: { 'aria-hidden': 'true' } }),
+      element('span', {}, [
+        element('strong', { text: String(grammarCount) }),
+        element('span', { text: ' grammar' })
+      ]),
+      element('span', { text: '·', attrs: { 'aria-hidden': 'true' } }),
+      element('span', {}, [
+        element('strong', { text: String(summary.uniqueKanji) }),
+        element('span', { text: ' kanji' })
+      ])
+    ]);
 
     const distributionLine = [...ANALYZER_JLPT_LEVELS, 'unclassified']
       .map((level) => `${level === 'unclassified' ? 'Unclassified' : level}: ${distribution[level] ?? 0}`)
       .join(' · ');
-    const distributionCard = element('div', { className: 'surface p-4' }, [
-      element('h3', { className: 'text-sm font-semibold text-ink', text: 'Kanji reference distribution' }),
-      element('p', { className: 'mt-1 break-words text-sm text-ink/80', text: distributionLine }),
-      element('p', { className: 'mt-1 text-xs text-muted', text: 'Unique kanji by reference level only — not a text level, not a proficiency estimate.' })
+    // Quiet caption line (not a competing card): reference distribution is
+    // unique-kanji only — never a text level, never proficiency.
+    const distributionCaption = element('div', { className: 'mt-1 px-1' }, [
+      element('p', { className: 'break-words text-xs leading-5 text-muted', text: `Kanji reference: ${distributionLine}` })
     ]);
 
     const notice = element('p', { className: 'rounded-lg border border-stone bg-paper p-4 text-xs leading-5 text-muted', text: analysis.notice || '' });
@@ -834,7 +843,17 @@ export async function renderAnalyzer(container) {
     renderImportBar();
     renderLexical();
     renderGrammar();
-    resultsSection.append(summaryGrid, lexicalSection, grammarSection, distributionCard, notice, filterBar, grid, importBar);
+    // v5.1-E information architecture: Summary → Vocabulary → Grammar →
+    // Kanji → quiet reference caption → notice. Usefulness order; the
+    // kanji filter/grid/import stay grouped as one Kanji chapter.
+    const kanjiChapter = element('section', { className: 'surface min-w-0 p-4 sm:p-5', attrs: { 'aria-label': 'Kanji analysis' } }, [
+      element('h2', { className: 'font-semibold text-ink', text: 'Kanji' }),
+      element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: `${summary.uniqueKanji} unique · ${summary.totalOccurrences} occurrences · ${summary.inCollection} in collection · ${summary.availableToAdd} available · ${summary.noReferenceData} no reference` }),
+      element('div', { className: 'mt-3' }, [filterBar]),
+      element('div', { className: 'mt-3' }, [grid]),
+      element('div', { className: 'mt-3' }, [importBar])
+    ]);
+    resultsSection.append(summaryStrip, lexicalSection, grammarSection, kanjiChapter, distributionCaption, notice);
   };
 
   const kanjiCard = (entry) => {
@@ -943,6 +962,15 @@ export async function renderAnalyzer(container) {
     }
     showFormError(null);
     if (!setActionPending(analyzeButton, true, { pendingLabel: 'Analyzing…' })) return;
+    // v5.1-E deliberate analyzing transition: truthful skeleton chapters
+    // replace prior results the moment analysis starts (no decorative wait).
+    resultsSection.replaceChildren(
+      element('div', { className: 'surface grid gap-3 p-4 sm:p-5', attrs: { role: 'status', 'aria-label': 'Analyzing text' } }, [
+        element('div', { className: 'skeleton-block h-5 w-2/3' }),
+        element('div', { className: 'skeleton-block h-4 w-full' }),
+        element('div', { className: 'skeleton-block h-4 w-5/6' })
+      ])
+    );
     try {
       // Hybrid: local button state plus the global overlay if analysis is
       // visibly delayed. Imports keep local progress feedback only.

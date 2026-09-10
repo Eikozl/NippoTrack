@@ -13,6 +13,7 @@ import {
   field,
   loadingState,
   openDialog,
+  openDrawer,
   pageHeader,
   paginationControls,
   showToast,
@@ -346,7 +347,7 @@ function enableKanjiReferenceAutofill(content) {
   content.unshift(status);
   const candidates = element('div', {
     className: 'kanji-reference-candidates hidden sm:col-span-2',
-    attrs: { role: 'listbox', 'aria-label': 'Kanji reference matches' }
+    attrs: { role: 'group', 'aria-label': 'Kanji reference matches' }
   });
   content.unshift(candidates);
 
@@ -381,7 +382,7 @@ function enableKanjiReferenceAutofill(content) {
         const button = element('button', {
           className: 'kanji-reference-candidate',
           text: `${reference.character} · ${reference.meanings.join(', ')} · ${reference.jlptLevel || 'JLPT not set'}`,
-          attrs: { type: 'button', role: 'option', 'aria-label': `Select ${reference.character}` }
+          attrs: { type: 'button', 'aria-label': `Select ${reference.character}` }
         });
         button.addEventListener('click', () => {
           characterField.value = reference.character;
@@ -501,19 +502,20 @@ function enableKanjiReferenceRestore(content, record) {
         return;
       }
 
-      const confirmed = window.confirm(
-        `Replace the following fields with OpenJLPT reference data?\n\n` +
-        changes.map(c => `• ${c}`).join('\n') +
-        `\n\nYour personal notes, status, SRS/review data, encounters, and linked vocabulary will NOT be changed.`
-      );
-      if (!confirmed) return;
-
-      if (referenceMeanings) fields.meaning.value = referenceMeanings;
-      if (referenceOnyomi) fields.onyomi.value = referenceOnyomi;
-      if (referenceKunyomi) fields.kunyomi.value = referenceKunyomi;
-      if (referenceJlpt) fields.jlpt_level.value = referenceJlpt;
-
-      showToast('Reference values restored. Review and save to persist.');
+      confirmDialog({
+        title: 'Restore reference values?',
+        description: `Replace the following fields with OpenJLPT reference data?\n\n` +
+          changes.map(c => `• ${c}`).join('\n') +
+          `\n\nYour personal notes, status, SRS/review data, encounters, and linked vocabulary will NOT be changed.`,
+        confirmLabel: 'Restore',
+        onConfirm: async () => {
+          if (referenceMeanings) fields.meaning.value = referenceMeanings;
+          if (referenceOnyomi) fields.onyomi.value = referenceOnyomi;
+          if (referenceKunyomi) fields.kunyomi.value = referenceKunyomi;
+          if (referenceJlpt) fields.jlpt_level.value = referenceJlpt;
+          showToast('Reference values restored. Review and save to persist.');
+        }
+      });
     }, { pendingLabel: 'Loading…' }).catch((error) => {
       showToast(error.message || 'Failed to restore reference data.', 'error');
     });
@@ -521,28 +523,32 @@ function enableKanjiReferenceRestore(content, record) {
 }
 
 function recordCard(item, config, onView, onEdit, onDelete) {
+  // v5.1-E collection hierarchy: PRIMARY Japanese identity, SECONDARY
+  // reading/meaning, TERTIARY JLPT/status metadata. Actions are contextual:
+  // View (secondary weight) opens the read-first drawer; Edit is a quiet
+  // ghost; Delete is a restrained ghost-danger. Semantics unchanged.
   const viewButton = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5', text: 'View', attrs: { type: 'button' } });
-  const editButton = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5', text: 'Edit', attrs: { type: 'button' } });
-  const deleteButton = element('button', { className: 'button-danger', text: 'Delete', attrs: { type: 'button' } });
+  const editButton = element('button', { className: 'button-ghost min-h-9 px-3 py-1.5', text: 'Edit', attrs: { type: 'button' } });
+  const deleteButton = element('button', { className: 'button-ghost button-ghost--danger min-h-9 px-3 py-1.5', text: 'Delete', attrs: { type: 'button' } });
   viewButton.addEventListener('click', () => onView(item));
   editButton.addEventListener('click', () => onEdit(item));
   deleteButton.addEventListener('click', () => onDelete(item));
 
-  return element('article', { className: 'surface flex min-h-48 flex-col p-5' }, [
+  return element('article', { className: 'surface collection-card flex min-h-48 flex-col p-5' }, [
     element('div', { className: 'flex items-start justify-between gap-4' }, [
       element('div', { className: 'flex min-w-0 items-start gap-3' }, [
         iconTile(iconForTitle(config.title), { className: 'preview-icon shrink-0' }),
         element('div', { className: 'min-w-0' }, [
-          element('h2', { className: 'break-words font-jp text-lg font-semibold text-ink', text: config.primary(item) }),
-          element('p', { className: 'mt-1 break-words text-sm text-muted', text: config.secondary(item) })
+          element('h2', { className: 'entity-row-primary break-words font-jp text-lg font-semibold text-ink', text: config.primary(item), attrs: { lang: 'ja' } }),
+          element('p', { className: 'entity-row-secondary mt-1 break-words text-sm text-muted', text: config.secondary(item) })
         ])
       ]),
       element('span', { className: 'status-pill shrink-0', text: item.status || 'New', attrs: { title: 'Self-reported status' } })
     ]),
-    element('p', { className: 'mt-4 line-clamp-3 text-sm leading-6 text-ink/80', text: config.detail(item) }),
-    element('div', { className: 'mt-auto flex items-end justify-between gap-3 pt-5' }, [
+    element('p', { className: 'mt-3 line-clamp-3 text-sm leading-6 text-ink/80', text: config.detail(item) }),
+    element('div', { className: 'entity-row-tertiary mt-auto flex items-end justify-between gap-3 pt-5' }, [
       element('span', { className: 'text-xs font-semibold text-muted', text: item.jlpt_level || 'JLPT tag not set' }),
-      element('div', { className: 'flex gap-2' }, [viewButton, editButton, deleteButton])
+      element('div', { className: 'flex gap-1' }, [viewButton, editButton, deleteButton])
     ])
   ]);
 }
@@ -559,7 +565,7 @@ export function renderEntityPage(container, config) {
     ...STATUS_OPTIONS.map((option) => element('option', { text: option.label, attrs: { value: option.value } }))
   ]);
   const results = element('div');
-  const filterBar = element('div', { className: 'surface mb-5 grid gap-3 p-4 sm:grid-cols-[minmax(14rem,1fr)_10rem_11rem]' }, [search, jlpt, status]);
+  const filterBar = element('div', { className: 'toolbar-strip surface mb-5 grid gap-3 p-4 sm:grid-cols-[minmax(14rem,1fr)_10rem_11rem]' }, [search, jlpt, status]);
   const page = element('section', {}, [
     pageHeader({ eyebrow: config.eyebrow, title: config.title, description: config.description, action: addButton }),
     filterBar,
@@ -587,7 +593,7 @@ export function renderEntityPage(container, config) {
         return;
       }
       if (!items.length) {
-        results.replaceChildren(emptyState({ title: `No ${config.title.toLowerCase()} found`, description: config.empty }));
+        results.replaceChildren(emptyState({ title: `No ${config.title.toLowerCase()} found`, description: config.empty, icon: iconForTitle(config.title) }));
         return;
       }
       const pager = paginationControls(pagination, (pageNumber) => {
@@ -750,7 +756,22 @@ export function renderEntityPage(container, config) {
           }, { pendingLabel: 'Adding…', progressLabel: (done, total) => `Adding ${done}/${total}…` });
         });
       }
-      openDialog({ title: `${config.title} detail`, content: [content], submitLabel: 'Close', ...(config === ENTITY_CONFIGS.kanji ? { panelClass: 'dialog-panel--kanji-detail' } : {}), onSubmit: async (form, close) => close() });
+      // v5.1-E detail model: read-first drawer (desktop contextual panel,
+      // mobile full-screen sheet). Editing stays an explicit dialog action
+      // via the footer — the record is SEEN first, edited deliberately.
+      const editButton = element('button', { className: 'button-secondary', text: `Edit ${config.singular}`, attrs: { type: 'button' } });
+      const closeButton = element('button', { className: 'button-ghost', text: 'Close', attrs: { type: 'button' } });
+      const closeDrawer = openDrawer({
+        title: config.primary(record) || `${config.title} detail`,
+        subtitle: config.secondary(record) || null,
+        content: [content],
+        actions: [closeButton, editButton]
+      });
+      closeButton.addEventListener('click', closeDrawer);
+      editButton.addEventListener('click', async () => {
+        closeDrawer();
+        await editRecord(record);
+      });
       const grammarSlot = content.querySelector('[data-grammar-example-context]');
       if (grammarSlot && config === ENTITY_CONFIGS.vocabulary) {
         const openGrammarReferenceDialog = (reference) => {
