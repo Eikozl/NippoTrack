@@ -50,7 +50,7 @@ function loadGrammarCatalog() {
 function searchableReferences(catalog, query, limit = 8) {
   const needle = String(query || '').normalize('NFKC').trim().toLocaleLowerCase('en');
   if (!needle) return [];
-  return catalog.filter((item) => [item.grammarPoint, item.kana, item.romaji, item.meaning]
+  return catalog.filter((item) => [item.grammarPoint, item.kana, item.romaji, item.meaning, item.summary]
     .filter(Boolean).some((value) => value.normalize('NFKC').toLocaleLowerCase('en').includes(needle)))
     .slice(0, Math.min(Math.max(Number(limit) || 8, 1), 20));
 }

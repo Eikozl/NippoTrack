@@ -1,6 +1,6 @@
 import { apiRequest, queryString } from '../api';
 import { enableVocabularyAutofill } from '../vocabularyAutofill.js';
-import { enableGrammarReferenceAutofill } from '../grammarReferenceAutofill.js';
+import { enableGrammarReferenceAutofill, formatGrammarReferenceStructures } from '../grammarReferenceAutofill.js';
 import { buildKanjiImportPayload, getContextKanji, getReadingContext, formatKanjiContextEntry, VOCAB_READING_NOTICE } from '../vocabularyReading.js';
 import { applyPristineKanjiAutofill, changedKanjiReferenceFields, enableRomajiConversion, existingKanjiFromDuplicateError, isSingleHanCodePoint, transliteratedValue } from '../kanjiReference';
 import { buildKanjiIdentity, normalizeKanjiOwnedIdentity } from '../kanjiDetail.js';
@@ -754,7 +754,7 @@ export function renderEntityPage(container, config) {
       const grammarSlot = content.querySelector('[data-grammar-example-context]');
       if (grammarSlot && config === ENTITY_CONFIGS.vocabulary) {
         const openGrammarReferenceDialog = (reference) => {
-          const structure = (reference.structures || []).map((item) => typeof item === 'string' ? item : (item.pattern || item.structure || '')).filter(Boolean).join('\n');
+          const structure = formatGrammarReferenceStructures(reference.structures);
           openDialog({
             title: `Add ${reference.grammarPoint} to Grammar`,
             content: [

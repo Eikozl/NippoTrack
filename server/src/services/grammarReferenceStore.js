@@ -40,9 +40,9 @@ async function searchGrammarReferences(query, limit = 8) {
   const needle = `%${String(query || '').normalize('NFKC').trim()}%`;
   const [rows] = await pool.execute(
     `SELECT id_grammar_reference, grammar_point, kana, romaji, meaning, summary, structures, pitfalls, examples, jlpt_level, source, source_slug, source_commit
-     FROM grammar_reference WHERE grammar_point ILIKE ? OR kana ILIKE ? OR romaji ILIKE ? OR meaning ILIKE ?
+     FROM grammar_reference WHERE grammar_point ILIKE ? OR kana ILIKE ? OR romaji ILIKE ? OR meaning ILIKE ? OR summary ILIKE ?
      ORDER BY CASE WHEN grammar_point ILIKE ? THEN 0 ELSE 1 END, grammar_point LIMIT ?`,
-    [needle, needle, needle, needle, `${String(query || '').trim()}%`, size]
+    [needle, needle, needle, needle, needle, `${String(query || '').trim()}%`, size]
   );
   return { items: rows.map(serializeReference) };
 }

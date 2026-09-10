@@ -7,7 +7,8 @@ const {
   EXPECTED_LEVEL_COUNTS,
   EXPECTED_TOTAL,
   loadGrammarCatalog,
-  normalizeReference
+  normalizeReference,
+  searchableReferences
 } = require('../src/services/grammarReference');
 
 test('pinned Nihongo Mono catalog has the frozen size and level distribution', () => {
@@ -35,6 +36,12 @@ test('catalog records are normalized into NippoTrack-owned reference fields', ()
     meaning: 'x', summary: null, structures: [], pitfalls: [], examples: [], jlptLevel: 'N5',
     source: 'nihongo-mono', sourceSlug: 'x', sourceCommit: 'ec0ba4a0ce1611c568b0e4f8a223eb8029249a25'
   });
+});
+
+test('English summary terms remain searchable for reference selection', () => {
+  const matches = searchableReferences(loadGrammarCatalog(), 'permission');
+  assert.ok(matches.length > 0);
+  assert.ok(matches.some((item) => item.summary?.toLocaleLowerCase('en').includes('permission')));
 });
 
 test('runtime security verifier recognizes grammar_reference as read-only after migration 019', () => {
