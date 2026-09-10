@@ -2895,3 +2895,10 @@
     animation: none !important;
   }
 }
+
+/* v5.1-E corrective Lenis guard subset (upstream lenis/dist/lenis.css
+   essentials, landing-scoped): the enhanced root owns auto behavior and
+   the stopped state keeps layout stable. Native everywhere Lenis is off. */
+html.lenis, html.lenis body { height: auto; }
+.lenis.lenis-smooth { scroll-behavior: auto !important; }
+.lenis.lenis-stopped { overflow: hidden; }
