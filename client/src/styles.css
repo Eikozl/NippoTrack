@@ -616,8 +616,13 @@ nav .nav-group-label:first-child { margin-top: 0; }
    vocab/grammar ~58rem, kanji ~68rem, always with viewport margins.
    Mobile is a full-screen focused experience. */
 .detail-overlay { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 1rem; background: rgb(0 0 0 / 0.45); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); animation: nt-overlay-enter var(--nt-motion-component); overflow-y: auto; overscroll-behavior: contain; }
-.detail-panel { display: flex; flex-direction: column; width: min(58rem, 100%); max-height: min(92vh, 100%); overflow: hidden; background: var(--jlt-surface); border: 1px solid var(--nt-border-subtle); border-radius: var(--nt-radius-xl); box-shadow: var(--nt-shadow-lg); animation: nt-detail-enter 220ms ease-out; }
-.detail-panel--kanji { width: min(68rem, 100%); }
+/* Scoped with the direct-child combinator: `.detail-panel` is also the
+   long-standing quiet inset surface (see @layer components above). Without
+   scoping, the modal geometry (flex column, 92vh cap, 100dvh on mobile)
+   leaks into every inset card — e.g. reference vocabulary examples
+   stretching to full viewport height on mobile. */
+.detail-overlay > .detail-panel { display: flex; flex-direction: column; width: min(58rem, 100%); max-height: min(92vh, 100%); overflow: hidden; background: var(--jlt-surface); border: 1px solid var(--nt-border-subtle); border-radius: var(--nt-radius-xl); box-shadow: var(--nt-shadow-lg); animation: nt-detail-enter 220ms ease-out; }
+.detail-overlay > .detail-panel--kanji { width: min(68rem, 100%); }
 @keyframes nt-detail-enter { from { opacity: 0; transform: translateY(10px) scale(0.985); } to { opacity: 1; transform: none; } }
 .detail-header { position: sticky; top: 0; z-index: 1; display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 1.35rem 1.5rem 1.1rem; background: var(--jlt-surface); border-bottom: 1px solid var(--nt-border-subtle); }
 .detail-title { font-family: var(--font-display); font-size: 1.35rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.3; color: var(--jlt-ink); overflow-wrap: break-word; }
@@ -626,7 +631,7 @@ nav .nav-group-label:first-child { margin-top: 0; }
 .detail-footer { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.75rem; padding: 1rem 1.5rem; background: var(--jlt-surface); border-top: 1px solid var(--nt-border-subtle); }
 @media (max-width: 640px) {
   .detail-overlay { padding: 0; place-items: stretch; }
-  .detail-panel, .detail-panel--kanji { width: 100%; height: 100dvh; max-height: none; border: 0; border-radius: 0; }
+  .detail-overlay > .detail-panel, .detail-overlay > .detail-panel--kanji { width: 100%; height: 100dvh; max-height: none; border: 0; border-radius: 0; }
   .detail-header, .detail-body, .detail-footer { padding-left: 1rem; padding-right: 1rem; }
 }
 
@@ -680,7 +685,7 @@ nav .nav-group-label:first-child { margin-top: 0; }
 @media (prefers-reduced-motion: reduce) {
   .page-enter, #app-content > section:first-child, .reveal-group > *,
   .drawer-overlay, .drawer-panel, .dialog-overlay, .dialog-panel,
-  .detail-overlay, .detail-panel,
+  .detail-overlay, .detail-overlay > .detail-panel,
   #toast-region > div, .skeleton-block { animation: none !important; transition: none !important; }
   .metric-link, .collection-card--interactive,
   .button-primary, .button-secondary, .button-danger, .button-ghost { transition: none !important; }
