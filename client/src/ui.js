@@ -36,7 +36,7 @@ export function pageHeader({ eyebrow, title, description, action }) {
 }
 
 export function loadingState(label = 'Loading data…') {
-  return element('div', { className: 'surface loading-state grid min-h-52 place-items-center p-8' }, [
+  return element('div', { className: 'surface loading-state grid min-h-52 place-items-center p-8', attrs: { role: 'status', 'aria-live': 'polite' } }, [
     element('div', { className: 'grid justify-items-center gap-3 text-muted' }, [
       element('span', { className: 'spinner', attrs: { 'aria-hidden': 'true' } }),
       element('p', { className: 'text-sm', text: label })
@@ -44,11 +44,13 @@ export function loadingState(label = 'Loading data…') {
   ]);
 }
 
-export function emptyState({ title = 'Nothing here yet', description = 'Create your first record to get started.' } = {}) {
+export function emptyState({ title = 'Nothing here yet', description = 'Create your first record to get started.', icon = null, action = null } = {}) {
   return element('div', { className: 'surface empty-state grid min-h-52 place-items-center p-8 text-center' }, [
-    element('div', {}, [
+    element('div', { className: 'grid max-w-md justify-items-center' }, [
+      ...(icon ? [iconTile(icon, { className: 'panel-icon' })] : []),
       element('p', { className: 'empty-state-title font-display text-base font-semibold text-ink', text: title }),
-      element('p', { className: 'mt-2 max-w-md text-sm leading-6 text-muted', text: description })
+      element('p', { className: 'mt-2 max-w-md text-sm leading-6 text-muted', text: description }),
+      ...(action ? [element('div', { className: 'mt-4' }, [action])] : [])
     ])
   ]);
 }
@@ -56,7 +58,7 @@ export function emptyState({ title = 'Nothing here yet', description = 'Create y
 export function errorState(error, retry) {
   const retryButton = retry ? element('button', { className: 'button-secondary mt-4', text: 'Try again', attrs: { type: 'button' } }) : null;
   retryButton?.addEventListener('click', retry);
-  return element('div', { className: 'surface error-panel border-red-200 bg-red-50/60 p-6' }, [
+  return element('div', { className: 'surface error-panel border-red-200 bg-red-50/60 p-6', attrs: { role: 'alert' } }, [
     element('p', { className: 'error-panel-title font-semibold text-red-800', text: 'We could not load this view.' }),
     element('p', { className: 'error-panel-detail mt-2 text-sm text-red-700', text: error?.message || 'Unexpected error.' }),
     retryButton
@@ -305,7 +307,7 @@ export function paginationControls(pagination, onPageChange) {
   ]);
 }
 
-export function openDialog({ title, content, submitLabel = 'Save', submitClassName = 'button-primary', cancelLabel = 'Cancel', pendingLabel = 'Saving…', showFooter = true, showCloseButton = true, panelClass = '', onSubmit }) {
+export function openDialog({ title, content, submitLabel = 'Save', submitClassName = 'button-primary', cancelLabel = 'Cancel', pendingLabel = 'Saving…', showFooter = true, showCloseButton = true, panelClass = '', description = null, onSubmit }) {
   const root = document.getElementById('modal-root');
   const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const overlay = element('div', {
@@ -314,7 +316,7 @@ export function openDialog({ title, content, submitLabel = 'Save', submitClassNa
   });
   const form = element('form', {
     className: `dialog-panel max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-paper shadow-2xl sm:max-w-2xl sm:rounded-2xl${panelClass ? ` ${panelClass}` : ''}`,
-    attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'dialog-title' }
+    attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'dialog-title', ...(description ? { 'aria-describedby': 'dialog-description' } : {}) }
   });
   const closeButton = element('button', { className: 'icon-button', attrs: { type: 'button', 'aria-label': 'Close dialog' } }, [icon('close', { size: 20 })]);
   const submitButton = submitLabel ? element('button', { className: submitClassName, text: submitLabel, attrs: { type: 'submit' } }) : null;
@@ -363,7 +365,10 @@ export function openDialog({ title, content, submitLabel = 'Save', submitClassNa
       element('h2', { className: 'dialog-title font-display text-lg font-semibold text-ink', text: title, attrs: { id: 'dialog-title' } }),
       ...(showCloseButton ? [closeButton] : [])
     ]),
-    element('div', { className: 'grid gap-4 p-5 sm:grid-cols-2 sm:p-6' }, content),
+    element('div', { className: 'grid gap-4 p-5 sm:grid-cols-2 sm:p-6' }, [
+      ...(description ? [element('p', { className: 'text-sm leading-6 text-muted sm:col-span-2', text: description, attrs: { id: 'dialog-description' } })] : []),
+      ...content
+    ]),
     ...(showFooter ? [element('footer', { className: 'dialog-footer sticky bottom-0 flex justify-end gap-3 border-t border-stone bg-paper px-5 py-4 sm:px-6' }, [cancelButton, ...(submitButton ? [submitButton] : [])])] : [])
   );
   overlay.appendChild(form);
@@ -373,9 +378,71 @@ export function openDialog({ title, content, submitLabel = 'Save', submitClassNa
   return close;
 }
 
+// v5.1-E.1 drawer / detail primitive — read/detail-only presentation model.
+// Desktop: contextual right-side panel preserving collection context.
+// Mobile: full-screen focused sheet. Forms stay in dialogs (openDialog);
+// drawers never host a second form stack. Single-instance like dialogs:
+// opening a drawer replaces any open dialog/drawer overlay.
+// Focus trap + Escape + overlay-click + focus return mirror openDialog.
+export function openDrawer({ title, subtitle = null, content = [], actions = [], onClose = null }) {
+  const root = document.getElementById('modal-root');
+  const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const overlay = element('div', { className: 'drawer-overlay', attrs: { role: 'presentation' } });
+  const panel = element('section', {
+    className: 'drawer-panel',
+    attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'drawer-title' }
+  });
+  const closeButton = element('button', { className: 'icon-button shrink-0', attrs: { type: 'button', 'aria-label': 'Close detail panel' } }, [icon('close', { size: 20 })]);
+  let closed = false;
+  const focusable = () => [...panel.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')];
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    document.removeEventListener('keydown', onKeyDown, true);
+    document.body.style.overflow = '';
+    overlay.remove();
+    try { onClose?.(); } catch { /* close hooks are best-effort */ }
+    if (previouslyFocused?.isConnected) requestAnimationFrame(() => previouslyFocused.focus({ preventScroll: true }));
+  };
+  const onKeyDown = (event) => {
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); return; }
+    if (event.key !== 'Tab') return;
+    const controls = focusable();
+    if (!controls.length) return event.preventDefault();
+    const first = controls[0];
+    const last = controls.at(-1);
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  };
+
+  closeButton.addEventListener('click', close);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) close();
+  });
+
+  panel.append(
+    element('header', { className: 'drawer-header' }, [
+      element('div', { className: 'min-w-0' }, [
+        element('h2', { className: 'drawer-title', text: title, attrs: { id: 'drawer-title' } }),
+        ...(subtitle ? [element('p', { className: 'drawer-subtitle', text: subtitle })] : [])
+      ]),
+      closeButton
+    ]),
+    element('div', { className: 'drawer-body' }, content),
+    ...(actions.length ? [element('footer', { className: 'drawer-footer' }, actions)] : [])
+  );
+  overlay.appendChild(panel);
+  root.replaceChildren(overlay);
+  document.body.style.overflow = 'hidden';
+  document.addEventListener('keydown', onKeyDown, true);
+  (panel.querySelector('button:not([disabled]), [href], input, select, textarea') || closeButton)?.focus();
+  return close;
+}
+
 export function confirmDialog({ title = 'Confirm deletion', description, confirmLabel = 'Delete', onConfirm }) {
   return openDialog({
     title,
+    description,
     content: [element('div', { className: 'sm:col-span-2' }, [element('p', { className: 'text-sm leading-6 text-muted', text: description })])],
     submitLabel: confirmLabel,
     submitClassName: 'button-danger',

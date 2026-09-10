@@ -564,6 +564,98 @@ nav .nav-group-label:first-child { margin-top: 0; }
   .user-menu { transform: none; }
 }
 
+/* v5.1-E.1 Premium Interaction Foundation — additive only.
+   Shared motion/transition language, drawer/detail model, dialog polish,
+   page entrances, card interaction, loading/success feedback. No palette,
+   radius, or IA changes; all values alias the frozen --nt-* tokens.
+   NOTE: this block lives BEFORE the frozen v5.1-A/B blocks because those
+   tests slice from their marker to EOF — E styles must never land inside
+   that slice. */
+
+/* Page entrance: route content arrives deliberately (opacity + 6px rise,
+   220ms). CSS-only fallback on first child. Never loops; reduced-motion
+   removes the translate. */
+.page-enter { animation: nt-page-enter var(--nt-motion-page); }
+@keyframes nt-page-enter { from { opacity: 0; transform: translateY(var(--nt-motion-enter-distance)); } to { opacity: 1; transform: none; } }
+#app-content > section:first-child { animation: nt-page-enter var(--nt-motion-page); }
+
+/* Section stagger: only explicit .reveal-group children participate, max 3
+   items, 60ms steps. Long lists never stagger (perf + calm). */
+.reveal-group > *:nth-child(1) { animation: nt-page-enter var(--nt-motion-page); }
+.reveal-group > *:nth-child(2) { animation: nt-page-enter var(--nt-motion-page) 60ms backwards; }
+.reveal-group > *:nth-child(3) { animation: nt-page-enter var(--nt-motion-page) 120ms backwards; }
+
+/* Drawer / detail model: desktop right-side contextual panel, mobile
+   full-screen sheet. Layered above collection (z-50, same as dialogs;
+   single-instance so they never stack). */
+.drawer-overlay { position: fixed; inset: 0; z-index: 50; display: grid; justify-items: end; background: rgb(0 0 0 / 0.45); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); animation: nt-overlay-enter var(--nt-motion-component); }
+@keyframes nt-overlay-enter { from { opacity: 0; } to { opacity: 1; } }
+.drawer-panel { display: flex; flex-direction: column; width: min(30rem, 100%); height: 100%; overflow: hidden; background: var(--jlt-surface); border-left: 1px solid var(--nt-border-subtle); box-shadow: var(--nt-shadow-lg); animation: nt-drawer-enter var(--nt-motion-component); }
+@keyframes nt-drawer-enter { from { opacity: 0; transform: translateX(var(--nt-motion-drawer-distance)); } to { opacity: 1; transform: none; } }
+.drawer-header { position: sticky; top: 0; z-index: 1; display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 1.25rem 1.25rem 1rem; background: var(--jlt-surface); border-bottom: 1px solid var(--nt-border-subtle); }
+.drawer-title { font-family: var(--font-display); font-size: 1.125rem; font-weight: 600; letter-spacing: -0.01em; color: var(--jlt-ink); overflow-wrap: break-word; }
+.drawer-subtitle { margin-top: 0.25rem; font-size: 0.8125rem; line-height: 1.5; color: var(--jlt-muted); }
+.drawer-body { flex: 1; min-height: 0; overflow-y: auto; padding: 1.25rem; overscroll-behavior: contain; }
+.drawer-footer { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.75rem; padding: 1rem 1.25rem; background: var(--jlt-surface); border-top: 1px solid var(--nt-border-subtle); }
+@media (max-width: 640px) {
+  .drawer-overlay { justify-items: stretch; align-items: stretch; }
+  .drawer-panel { width: 100%; height: 100dvh; border-left: 0; border-radius: 0; animation-name: nt-sheet-enter; }
+  @keyframes nt-sheet-enter { from { opacity: 0; transform: translateY(var(--nt-motion-drawer-distance)); } to { opacity: 1; transform: none; } }
+  .drawer-header, .drawer-body, .drawer-footer { padding-left: 1rem; padding-right: 1rem; }
+}
+
+/* Dialog polish: deliberate entrance (fade + 6px rise, 160ms) without
+   changing geometry, stacking, or submit behavior. */
+.dialog-overlay { animation: nt-overlay-enter var(--nt-motion-component); }
+.dialog-panel { animation: nt-dialog-enter var(--nt-motion-component); }
+@keyframes nt-dialog-enter { from { opacity: 0; transform: translateY(var(--nt-motion-enter-distance)); } to { opacity: 1; transform: none; } }
+
+/* Card/surface interaction: calm hover lift on linked cards only; plain
+   surfaces stay still so hierarchy stays honest. */
+.metric-link, .collection-card--interactive { transition: box-shadow var(--nt-motion-micro), transform var(--nt-motion-micro), background-color var(--nt-motion-micro); }
+.metric-link:hover, .collection-card--interactive:hover { box-shadow: var(--nt-shadow-md); transform: translateY(-1px); }
+.collection-card { transition: box-shadow var(--nt-motion-micro), background-color var(--nt-motion-micro); }
+
+/* Collection density: quiet toolbar strip (de-carded filter bar) + dense
+   entity rows with PRIMARY (Japanese identity) / SECONDARY (reading-meaning)
+/  TERTIARY (metadata) hierarchy. Actions stay contextual. */
+.toolbar-strip { background: transparent; border: 1px solid transparent; box-shadow: none; }
+@media (min-width: 640px) { .toolbar-strip { padding-left: 0.25rem; padding-right: 0.25rem; } }
+.entity-row { display: flex; align-items: flex-start; gap: 0.9rem; width: 100%; padding: 1rem 1.1rem; border-radius: var(--nt-radius-lg); text-align: left; transition: background-color var(--nt-motion-micro); }
+.entity-row:hover { background: color-mix(in srgb, var(--jlt-primary-soft) 45%, transparent); }
+.entity-row.is-selected { background: var(--jlt-primary-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--jlt-primary) 26%, transparent); }
+.entity-row-primary { font-family: var(--font-jp); font-size: 1.05rem; font-weight: 600; line-height: 1.4; color: var(--jlt-ink); overflow-wrap: break-word; }
+.entity-row-secondary { margin-top: 0.2rem; font-size: 0.875rem; line-height: 1.5; color: var(--jlt-muted); overflow-wrap: break-word; }
+.entity-row-tertiary { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-top: 0.55rem; }
+
+/* Summary strip: one calm line of grouped counts (Analyzer/Dashboard),
+   tabular numerals, no competing tiles. */
+.summary-strip { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 0.75rem; padding: 0.9rem 1.15rem; border-radius: var(--nt-radius-lg); background: var(--jlt-surface); border: 1px solid var(--nt-border-subtle); font-size: 0.875rem; color: var(--jlt-muted); }
+.summary-strip strong { font-variant-numeric: tabular-nums; color: var(--jlt-ink); font-weight: 700; }
+
+/* Skeleton shimmer for analyzing/loading transitions (truthful pending
+   state — replaces content only while the request is in flight). */
+.skeleton-block { border-radius: var(--nt-radius-md); background: linear-gradient(100deg, var(--jlt-surface-soft) 40%, color-mix(in srgb, var(--jlt-surface-soft) 55%, var(--jlt-surface)) 50%, var(--jlt-surface-soft) 60%); background-size: 200% 100%; animation: nt-skeleton 1.2s ease-in-out infinite; }
+@keyframes nt-skeleton { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* Toast entrance: restrained rise, same component timing as dialogs. */
+#toast-region > div { animation: nt-dialog-enter var(--nt-motion-component); }
+
+/* Touch targets: icon buttons meet 44px without changing visual rhythm
+   (padding absorbs the growth; layout width unchanged on desktop). */
+.icon-button { min-width: 2.75rem; min-height: 2.75rem; }
+
+/* App shell quiet separation: sidebar keeps surface but gains a softer
+   right edge so content cards own the elevation. */
+#sidebar { box-shadow: var(--nt-shadow-sm); }
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter, #app-content > section:first-child, .reveal-group > *,
+  .drawer-overlay, .drawer-panel, .dialog-overlay, .dialog-panel,
+  #toast-region > div, .skeleton-block { animation: none !important; transition: none !important; }
+  .metric-link:hover, .collection-card--interactive:hover { transform: none; }
+}
+
 /* v5.1-A.2 first-experience onboarding — calm editorial transitions.
    Additive only: motion + easing reuse the frozen --nt-* transition
    tokens. No palette, no layout overrides; the panel itself uses shared

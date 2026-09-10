@@ -645,6 +645,10 @@ function openNavigation() {
   sidebar.classList.remove('-translate-x-full');
   backdrop.classList.remove('hidden');
   syncDrawerState();
+  // v5.1-E.1: move keyboard focus into the drawer so keyboard users do not
+  // keep tabbing behind the backdrop. Focus return stays on close paths.
+  const closeButton = document.getElementById('close-navigation');
+  (closeButton || sidebar.querySelector('button[data-page]') || sidebar).focus?.();
 }
 
 // Mobile drawer focus hygiene: the trigger reports expanded state, Escape

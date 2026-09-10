@@ -74,6 +74,17 @@
   --nt-transition-fast: 120ms ease;
   --nt-transition-base: 160ms ease;
   --nt-transition-slow: 220ms ease;
+  /* v5.1-E motion system (aliases over the frozen transition tokens).
+     MICRO (hover/focus/press/badge): fast. COMPONENT (popover/drawer/dialog/
+     menu/accordion): base. PAGE/RESULT (route entrance, dashboard sections,
+     analyzer results): slow. Distances stay small: 6px entrances, 8px max
+     for drawers. Easing inherits the base `ease` so Landing and app share
+     one rhythm without a new language. */
+  --nt-motion-micro: var(--nt-transition-fast);
+  --nt-motion-component: var(--nt-transition-base);
+  --nt-motion-page: var(--nt-transition-slow);
+  --nt-motion-enter-distance: 6px;
+  --nt-motion-drawer-distance: 8px;
 }
 
 /* Dark canonical values (match frozen public landing dark values).
