@@ -118,10 +118,10 @@
    const byKey = new Map();
    const unverifiedByKey = new Map();
    const list = Array.isArray(tokens) ? tokens : [];
- 
+
    // First pass: build observed forms map from the full token stream
    const observedFormsMap = buildObservedFormsMap(list);
- 
+
    for (const token of list) {
      if (!token || typeof token !== 'object' || typeof token.surface !== 'string') continue;
      const verdict = classifyCandidate(token);
