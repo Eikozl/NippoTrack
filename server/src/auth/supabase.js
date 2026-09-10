@@ -4,8 +4,7 @@ const { createHash } = require('node:crypto');
 const verifiedUsers = new Map();
 const verificationTtlMs = 15_000;
 const verificationTimeoutMs = 5_000;
-const productionAuthRedirectUrl = 'https://japanese-learning-tracker.vercel.app/';
-const previewAuthRedirectUrl = 'https://japanese-learning-tracker-git-master-yeferson-sena.vercel.app/';
+const productionAuthRedirectUrl = 'https://nippotrack.vercel.app/';
 const defaultSupabaseUrl = 'https://milayuvlajmgrcxmrxdg.supabase.co';
 const defaultSupabasePublishableKey = 'sb_publishable_UJQwQKZge3SKbj-j-BfVkg_2QmvbX4O';
 const localDevelopmentToken = 'jlt-local-development';
@@ -53,15 +52,14 @@ function authRedirectUrl(req) {
   // Derive redirects from the public host rather than VERCEL_ENV so a verified
   // Preview deployment can be promoted without rebuilding it for Production.
   const host = (req?.get?.('host') || '').toLowerCase().split(':')[0];
-  if (host === 'japanese-learning-tracker.vercel.app' || host === 'japanese-learning-tracker-yeferson-sena.vercel.app') {
+  if (host === 'nippotrack.vercel.app' || host === 'nippotrack-yeferson-sena.vercel.app') {
     return productionAuthRedirectUrl;
   }
   if (host.endsWith('.vercel.app')) {
     // Branch previews share one build: prefer the requesting preview host so
     // email confirm/recovery links return to the preview that sent them. Only
-    // well-formed hostnames are echoed; anything else keeps the pinned URL.
+    // well-formed hostnames are echoed; anything else uses the safe fallback.
     if (/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.vercel\.app$/.test(host)) return `https://${host}/`;
-    return previewAuthRedirectUrl;
   }
 
   const configuredRedirect = process.env.SUPABASE_AUTH_REDIRECT_URL;

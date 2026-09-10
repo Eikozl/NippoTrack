@@ -7,21 +7,44 @@ function request(host) {
   return { get(name) { return name.toLowerCase() === 'host' ? host : ''; } };
 }
 
-test('auth redirects keep the pinned production hosts (F correctness)', () => {
+test('auth redirects canonical Production and its stable alias to NippoTrack', () => {
   delete process.env.SUPABASE_AUTH_REDIRECT_URL;
-  assert.equal(authRedirectUrl(request('japanese-learning-tracker.vercel.app')), 'https://japanese-learning-tracker.vercel.app/');
-  assert.equal(authRedirectUrl(request('japanese-learning-tracker-yeferson-sena.vercel.app')), 'https://japanese-learning-tracker.vercel.app/');
+  assert.equal(authRedirectUrl(request('nippotrack.vercel.app')), 'https://nippotrack.vercel.app/');
+  assert.equal(authRedirectUrl(request('nippotrack-yeferson-sena.vercel.app')), 'https://nippotrack.vercel.app/');
 });
 
 test('auth redirects follow the requesting preview host (F correctness)', () => {
   delete process.env.SUPABASE_AUTH_REDIRECT_URL;
   assert.equal(
-    authRedirectUrl(request('japanese-learning-tracker-git-phase0-openjlpt-integration-abc123.vercel.app')),
-    'https://japanese-learning-tracker-git-phase0-openjlpt-integration-abc123.vercel.app/'
+    authRedirectUrl(request('nippotrack-git-dev-abc123.vercel.app')),
+    'https://nippotrack-git-dev-abc123.vercel.app/'
   );
 });
 
-test('auth redirects never echo untrusted hosts (F correctness)', () => {
+test('auth redirects keep local and configured local behavior compatible', () => {
+  delete process.env.SUPABASE_AUTH_REDIRECT_URL;
+  assert.equal(authRedirectUrl(request('localhost:5173')), 'http://localhost:5173/');
+  process.env.SUPABASE_AUTH_REDIRECT_URL = 'http://localhost:3000/';
+  try {
+    assert.equal(authRedirectUrl(request('localhost:5173')), 'http://localhost:3000/');
+  } finally {
+    delete process.env.SUPABASE_AUTH_REDIRECT_URL;
+  }
+});
+
+test('auth redirects use configured fallback for malformed or untrusted hosts', () => {
+  process.env.SUPABASE_AUTH_REDIRECT_URL = 'https://nippotrack.vercel.app/';
+  try {
+    assert.equal(authRedirectUrl(request('nippotrack..vercel.app')), 'https://nippotrack.vercel.app/');
+    assert.equal(authRedirectUrl(request('evil.com')), 'https://nippotrack.vercel.app/');
+    assert.equal(authRedirectUrl(request('foo.vercel.app.evil.com')), 'https://nippotrack.vercel.app/');
+    assert.equal(authRedirectUrl(request('not a host!!')), 'https://nippotrack.vercel.app/');
+  } finally {
+    delete process.env.SUPABASE_AUTH_REDIRECT_URL;
+  }
+});
+
+test('auth redirects never echo untrusted hosts without configured fallback', () => {
   delete process.env.SUPABASE_AUTH_REDIRECT_URL;
   assert.equal(authRedirectUrl(request('evil.com')), 'http://localhost:5173/');
   assert.equal(authRedirectUrl(request('foo.vercel.app.evil.com')), 'http://localhost:5173/');
