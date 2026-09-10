@@ -140,24 +140,68 @@ function renderAuthGate(message = '', view = 'sign-in') {
   authView = view;
   appShell.hidden = true;
   if (!authConfigured) { authRoot.textContent = 'Supabase Auth configuration is required.'; return; }
-  const email = element('input', { className: 'field-control', attrs: { type: 'email', required: '', autocomplete: 'email', placeholder: 'you@example.com' } });
-  const password = element('input', { className: 'field-control', attrs: { type: 'password', required: '', autocomplete: view === 'sign-up' ? 'new-password' : 'current-password', placeholder: 'Password' } });
-  const confirm = element('input', { className: 'field-control', attrs: { type: 'password', required: '', autocomplete: 'new-password', placeholder: 'Confirm password' } });
-  const feedback = element('p', { className: `min-h-5 text-sm ${message ? 'text-red-700' : 'text-muted'}`, text: message, attrs: { 'aria-live': 'polite' } });
+  // Visual shell only — every field, handler, endpoint, validation message,
+  // and focus rule below matches the frozen authentication semantics.
+  const email = element('input', { className: 'field-control auth-input', attrs: { type: 'email', required: '', autocomplete: 'email', placeholder: 'you@example.com' } });
+  const password = element('input', { className: 'field-control auth-input', attrs: { id: 'auth-password', type: 'password', required: '', autocomplete: view === 'sign-up' ? 'new-password' : 'current-password', placeholder: 'Password' } });
+  const confirm = element('input', { className: 'field-control auth-input', attrs: { type: 'password', required: '', autocomplete: 'new-password', placeholder: 'Confirm password' } });
+  // Show/hide is presentation-only around the same password field: the
+  // submitted payload and validation never change.
+  const showToggle = element('button', { className: 'auth-show', text: 'Show', attrs: { type: 'button', 'aria-pressed': 'false', 'aria-label': 'Show password' } });
+  showToggle.addEventListener('click', () => {
+    const showing = password.getAttribute('type') === 'password';
+    password.setAttribute('type', showing ? 'text' : 'password');
+    showToggle.textContent = showing ? 'Hide' : 'Show';
+    showToggle.setAttribute('aria-pressed', String(showing));
+    showToggle.setAttribute('aria-label', showing ? 'Hide password' : 'Show password');
+    password.focus();
+  });
+  const feedback = element('p', { className: `auth-feedback min-h-5 text-sm ${message ? 'text-red-700' : 'text-muted'}`, text: message, attrs: { 'aria-live': 'polite' } });
   const titles = { 'sign-in': 'Sign in', 'sign-up': 'Create your account', forgot: 'Reset your password', reset: 'Choose a new password' };
-  const submit = element('button', { className: 'button-primary w-full', text: titles[view], attrs: { type: 'submit' } });
+  const headings = { 'sign-in': 'Welcome back', 'sign-up': 'Create your account', forgot: 'Reset your password', reset: 'Choose a new password' };
+  const descriptions = {
+    'sign-in': 'Sign in to continue to your Japanese workspace.',
+    'sign-up': 'Start building a Japanese workspace around the way you already learn.',
+    forgot: 'Enter the email connected to your account. We will send you a recovery link.',
+    reset: 'Choose a new password to regain access to your workspace.'
+  };
+  const submitLabels = { 'sign-in': 'Sign in', 'sign-up': 'Create your account', forgot: 'Send recovery link', reset: 'Update password' };
+  const pendingLabels = { 'sign-in': 'Signing in…', 'sign-up': 'Creating account…', forgot: 'Sending…', reset: 'Updating…' };
+  const submitLabel = element('span', { text: submitLabels[view] });
+  const submit = element('button', { className: 'button-primary auth-submit', attrs: { type: 'submit' } }, [submitLabel]);
+  const setPending = (pending) => {
+    submit.disabled = pending;
+    submit.setAttribute('aria-busy', String(pending));
+    submitLabel.parentElement?.querySelector('.spinner-inline')?.remove();
+    if (pending) {
+      const spinner = element('span', { className: 'spinner spinner-inline', attrs: { 'aria-hidden': 'true' } });
+      submit.prepend(spinner);
+      submitLabel.textContent = pendingLabels[view];
+    } else {
+      submitLabel.textContent = submitLabels[view];
+    }
+  };
+  const emailField = element('label', { className: 'field' }, [element('span', { text: 'Email' }), email]);
+  // NOTE: the password label must not wrap the Show/Hide button (interactive
+  // content inside <label> corrupts the accessible name), so label and
+  // control are siblings joined by for/id instead of nesting.
+  const passwordField = element('div', { className: 'field' }, [
+    element('label', { attrs: { for: 'auth-password' } }, [element('span', { text: 'Password' })]),
+    element('span', { className: 'auth-password-wrap' }, [password, showToggle])
+  ]);
   const fields = [];
-  if (view !== 'reset') fields.push(element('label', { className: 'field' }, [element('span', { text: 'Email' }), email]));
-  if (view !== 'forgot') fields.push(element('label', { className: 'field' }, [element('span', { text: 'Password' }), password]));
+  if (view !== 'reset') fields.push(emailField);
+  if (view !== 'forgot') fields.push(passwordField);
   if (view === 'sign-up' || view === 'reset') fields.push(element('label', { className: 'field' }, [element('span', { text: 'Confirm password' }), confirm]));
-  const form = element('form', { className: 'mt-6 grid gap-4', attrs: { 'aria-label': 'Sign in to Japanese Learning Tracker' } }, [
+  const form = element('form', { className: 'auth-form', attrs: { 'aria-label': headings[view] } }, [
     ...fields, feedback, submit
   ]);
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    submit.disabled = true;
-    submit.textContent = 'Please wait…';
+    setPending(true);
     feedback.textContent = '';
+    feedback.classList.remove('text-red-700');
+    feedback.classList.add('text-muted');
     try {
       if ((view === 'sign-up' || view === 'reset') && password.value !== confirm.value) throw new Error('Passwords do not match.');
       if (view === 'sign-in') { const data = await apiRequest('/api/auth/sign-in', { method: 'POST', body: { email: email.value, password: password.value }, notifyAuth: false }); const { error } = await supabase.auth.setSession(data.session); if (error) throw error; return bootstrapApp(); }
@@ -166,21 +210,41 @@ function renderAuthGate(message = '', view = 'sign-in') {
       const { error } = await supabase.auth.updateUser({ password: password.value }); if (error) throw error; await supabase.auth.signOut(); return renderAuthGate('Password updated. Sign in with your new password.');
     } catch (error) {
       feedback.textContent = error?.status === 429 ? 'Too many attempts. Please wait before trying again.' : error?.message || 'Unable to complete that request.';
-      submit.disabled = false;
-      submit.textContent = titles[view];
+      feedback.classList.remove('text-muted');
+      feedback.classList.add('text-red-700', 'auth-feedback--error');
+      setPending(false);
       (view === 'forgot' ? email : password).focus();
     }
   });
-  const switcher = element('p', { className: 'auth-switcher' }, view === 'sign-in' ? [linkButton('Create account', () => renderAuthGate('', 'sign-up')), linkButton('Forgot password?', () => renderAuthGate('', 'forgot'))] : [linkButton('Back to sign in', () => renderAuthGate())]);
+  const switcher = element('p', { className: 'auth-switcher' });
+  if (view === 'sign-in') {
+    switcher.append(
+      element('span', { text: 'New to NippoTrack? ' }),
+      linkButton('Create account', () => renderAuthGate('', 'sign-up'))
+    );
+    switcher.append(element('span', { className: 'auth-forgot-row' }, [
+      linkButton('Forgot password?', () => renderAuthGate('', 'forgot'))
+    ]));
+  } else if (view === 'forgot' || view === 'reset') {
+    switcher.append(linkButton('Back to sign in', () => renderAuthGate()));
+  } else {
+    switcher.append(
+      element('span', { text: 'Already have an account? ' }),
+      linkButton('Back to sign in', () => renderAuthGate())
+    );
+  }
+  const homeLink = element('a', { className: 'auth-home-link', text: '← Back to NippoTrack', attrs: { href: '/' } });
   const formPanel = element('section', { className: 'auth-form-panel', attrs: { 'aria-labelledby': 'login-title' } }, [
-    element('p', { className: 'eyebrow', text: 'Japanese Learning Tracker' }),
-    element('h1', { className: 'auth-title', text: titles[view], attrs: { id: 'login-title' } }),
-    element('p', { className: 'auth-description', text: view === 'sign-up' ? 'Confirm your email before accessing your private workspace.' : view === 'forgot' ? 'We will email recovery instructions if the account exists.' : 'Your personal space to build a steady Japanese study practice.' }), form, switcher
+    element('div', { className: 'auth-card auth-mode', dataset: { authView: view } }, [
+      element('p', { className: 'eyebrow', text: 'Japanese Learning Tracker' }),
+      element('h1', { className: 'auth-title', text: headings[view], attrs: { id: 'login-title' } }),
+      element('p', { className: 'auth-description', text: descriptions[view] }), form, switcher, homeLink
+    ])
   ]);
   const localeMenu = element('div', { className: 'auth-locale-menu', attrs: { role: 'menu', hidden: '' } }, [
     ['en', 'English'], ['es', 'Spanish']
   ].map(([value, label]) => {
-    const option = element('button', { className: 'auth-locale-option', text: label, attrs: { type: 'button', role: 'menuitem', 'aria-checked': String(getLocale() === value) } });
+    const option = element('button', { className: 'auth-locale-option', text: label, attrs: { type: 'button', role: 'menuitemradio', 'aria-checked': String(getLocale() === value) } });
     option.addEventListener('click', () => setLocale(value));
     return option;
   }));
@@ -192,15 +256,26 @@ function renderAuthGate(message = '', view = 'sign-in') {
     localeToggle.setAttribute('aria-expanded', String(open));
   });
   const localeControl = element('div', { className: 'auth-locale-control' }, [localeToggle, localeMenu]);
-  const brandPanel = element('aside', { className: 'auth-brand-panel', attrs: { 'aria-label': 'Japanese Learning Tracker' } }, [
+  // Editorial brand canvas: identity + one restrained headline + the
+  // existing product statement + Japanese typography as visual material.
+  // No marketing sections, no clichés, no new copy claims.
+  const brandPanel = element('aside', { className: 'auth-brand-panel', attrs: { 'aria-label': 'About NippoTrack' } }, [
     element('div', { className: 'auth-brand-glow', attrs: { 'aria-hidden': 'true' } }),
-    element('div', { className: 'auth-brand-content' }, [
-      element('img', { className: 'auth-brand-logo', attrs: { src: lightBrandLogo, alt: 'Japanese Learning Tracker logo' } }),
-      element('p', { className: 'auth-brand-kicker', text: 'LEARN WITH INTENTION' }),
-      element('p', { className: 'auth-brand-copy', text: 'Small sessions become lasting progress.' })
+    element('div', { className: 'auth-editorial' }, [
+      element('p', { className: 'auth-editorial-eyebrow', text: 'NippoTrack' }),
+      element('p', { className: 'auth-editorial-headline', text: 'Learn your way. Keep the context.' }),
+      element('p', { className: 'auth-editorial-statement', text: 'NippoTrack doesn\'t replace how you learn Japanese. It makes the way you already learn Japanese smarter.' }),
+      element('p', { className: 'auth-editorial-jp', text: '日本語', attrs: { lang: 'ja' } }),
+      element('p', { className: 'auth-editorial-motif', text: 'Vocabulary · Kanji · Grammar' })
     ])
   ]);
-  authRoot.replaceChildren(element('main', { className: 'auth-screen' }, [localeControl, element('div', { className: 'auth-shell' }, [formPanel, brandPanel]) ]));
+  // Minimal chrome: wordmark back to the public Landing + the existing
+  // locale control. No marketing navbar; the page stays task-focused.
+  const wordmarkLink = element('a', { className: 'auth-wordmark', attrs: { href: '/', 'aria-label': 'NippoTrack home' } }, [
+    element('img', { className: 'auth-wordmark-logo', attrs: { src: lightBrandLogo, alt: 'NippoTrack' } })
+  ]);
+  const topbar = element('header', { className: 'auth-topbar' }, [wordmarkLink, localeControl]);
+  authRoot.replaceChildren(element('main', { className: 'auth-screen' }, [topbar, element('div', { className: 'auth-shell' }, [brandPanel, formPanel])]));
   (view === 'forgot' || view === 'sign-up' ? email : password).focus();
 }
 
@@ -263,7 +338,11 @@ async function bootstrapApp() {
 window.addEventListener('jlt-auth-required', (event) => { levelEstimateControl.reset(); renderAuthGate(event.detail?.code === 'EMAIL_UNVERIFIED' ? 'Please verify your email before continuing.' : 'Your session has ended. Please sign in again.'); });
 
 async function signOut() {
-  try { await supabase.auth.signOut(); await apiRequest('/api/auth/logout', { method: 'POST', notifyAuth: false }); } finally { profileStore.reset(); currentAuthEmail = null; closeUserMenu(); renderAuthGate(); }
+  // Existing logout completes normally (Supabase + API session invalidation
+  // + local identity reset); the canonical destination is the public
+  // Landing (/), never the Auth screen. '/' resolves to the Landing
+  // experience, so this cannot loop back into Auth.
+  try { await supabase.auth.signOut(); await apiRequest('/api/auth/logout', { method: 'POST', notifyAuth: false }); } finally { profileStore.reset(); currentAuthEmail = null; closeUserMenu(); window.location.assign('/'); }
 }
 
 function confirmSignOut() {
