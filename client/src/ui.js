@@ -461,6 +461,72 @@ export function openDrawer({ title, subtitle = null, content = [], actions = [],
   return close;
 }
 
+// v5.1-E corrective spotlight detail modal — the primary entity detail UX.
+// Centered, content-appropriate width (vocab/grammar ~58rem, kanji ~68rem),
+// dimmed + subtly blurred backdrop, read state first with explicit actions.
+// Mobile becomes a full-screen focused experience. Replaces the rejected
+// side drawer for Vocabulary/Kanji/Grammar detail; openDrawer stays exported
+// but is no longer the detail path. Single-overlay slot, focus trap, Escape,
+// overlay-click, and focus return mirror openDialog.
+export function openDetailModal({ title, subtitle = null, content = [], actions = [], size = 'default', onClose = null }) {
+  const root = document.getElementById('modal-root');
+  const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const overlay = element('div', { className: 'detail-overlay', attrs: { role: 'presentation' } });
+  const panel = element('section', {
+    className: `detail-panel${size === 'kanji' ? ' detail-panel--kanji' : ''}`,
+    attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'detail-title' }
+  });
+  const closeButton = element('button', { className: 'icon-button shrink-0', attrs: { type: 'button', 'aria-label': 'Close detail view' } }, [icon('close', { size: 20 })]);
+  let closed = false;
+  const focusable = () => [...panel.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')];
+  const close = ({ silent = false } = {}) => {
+    if (closed) return;
+    closed = true;
+    document.removeEventListener('keydown', onKeyDown, true);
+    document.body.style.overflow = '';
+    overlay.remove();
+    releaseOverlaySlot(close);
+    if (!silent) {
+      try { onClose?.(); } catch { /* close hooks are best-effort */ }
+      if (previouslyFocused?.isConnected) requestAnimationFrame(() => previouslyFocused.focus({ preventScroll: true }));
+    }
+  };
+  const onKeyDown = (event) => {
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); return; }
+    if (event.key !== 'Tab') return;
+    const controls = focusable();
+    if (!controls.length) return event.preventDefault();
+    const first = controls[0];
+    const last = controls.at(-1);
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  };
+
+  closeButton.addEventListener('click', close);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) close();
+  });
+
+  panel.append(
+    element('header', { className: 'detail-header' }, [
+      element('div', { className: 'min-w-0' }, [
+        element('h2', { className: 'detail-title', text: title, attrs: { id: 'detail-title' } }),
+        ...(subtitle ? [element('p', { className: 'detail-subtitle', text: subtitle })] : [])
+      ]),
+      closeButton
+    ]),
+    element('div', { className: 'detail-body' }, content),
+    ...(actions.length ? [element('footer', { className: 'detail-footer' }, actions)] : [])
+  );
+  overlay.appendChild(panel);
+  claimOverlaySlot(close);
+  root.replaceChildren(overlay);
+  document.body.style.overflow = 'hidden';
+  document.addEventListener('keydown', onKeyDown, true);
+  (panel.querySelector('button:not([disabled]), [href], input, select, textarea') || closeButton)?.focus();
+  return close;
+}
+
 export function confirmDialog({ title = 'Confirm deletion', description, confirmLabel = 'Delete', onConfirm }) {
   return openDialog({
     title,

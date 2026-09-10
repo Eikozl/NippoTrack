@@ -12,8 +12,8 @@ import {
   errorState,
   field,
   loadingState,
+  openDetailModal,
   openDialog,
-  openDrawer,
   pageHeader,
   paginationControls,
   showToast,
@@ -756,20 +756,23 @@ export function renderEntityPage(container, config) {
           }, { pendingLabel: 'Adding…', progressLabel: (done, total) => `Adding ${done}/${total}…` });
         });
       }
-      // v5.1-E detail model: read-first drawer (desktop contextual panel,
-      // mobile full-screen sheet). Editing stays an explicit dialog action
-      // via the footer — the record is SEEN first, edited deliberately.
+      // v5.1-E corrective spotlight: read-first centered detail modal with
+      // content-appropriate width (kanji gets the wide canvas so identity,
+      // readings, stroke, and SRS/encounter grids never collide). Editing
+      // stays an explicit dialog action via the footer — SEEN first, edited
+      // deliberately.
       const editButton = element('button', { className: 'button-secondary', text: `Edit ${config.singular}`, attrs: { type: 'button' } });
       const closeButton = element('button', { className: 'button-ghost', text: 'Close', attrs: { type: 'button' } });
-      const closeDrawer = openDrawer({
+      const closeDetail = openDetailModal({
         title: config.primary(record) || `${config.title} detail`,
         subtitle: config.secondary(record) || null,
         content: [content],
-        actions: [closeButton, editButton]
+        actions: [closeButton, editButton],
+        size: config === ENTITY_CONFIGS.kanji ? 'kanji' : 'default'
       });
-      closeButton.addEventListener('click', closeDrawer);
+      closeButton.addEventListener('click', closeDetail);
       editButton.addEventListener('click', async () => {
-        closeDrawer();
+        closeDetail();
         await editRecord(record);
       });
       const grammarSlot = content.querySelector('[data-grammar-example-context]');

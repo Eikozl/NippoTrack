@@ -226,16 +226,17 @@ test('CSS composes desktop/tablet/mobile with the square-panel hook', () => {
 
 // --- dialog width plumbing -----------------------------------------------------
 
-test('kanji detail opens in the read-first drawer without changing shared dialog behavior', () => {
+test('kanji detail opens in a wide spotlight modal without changing shared dialog behavior', () => {
   const ui = readSource('src/ui.js');
   assert.ok(ui.includes('panelClass'), 'openDialog accepts a panel class');
-  assert.ok(ui.includes('openDrawer'), 'drawer primitive exists for read-first detail');
+  assert.ok(ui.includes('openDetailModal'), 'spotlight detail primitive exists for read-first detail');
   const entity = readSource('src/pages/entityPage.js');
-  // v5.1-E detail model: collection detail (incl. kanji) opens in the
-  // contextual drawer (desktop panel / mobile sheet); editing stays an
-  // explicit dialog action. The wide dialog panel is superseded, not broken:
-  // vocabulary/grammar dialogs never used it either.
-  assert.ok(entity.includes('openDrawer('), 'owned detail opens in the drawer');
+  // v5.1-E corrective: collection detail (incl. kanji) opens centered and
+  // content-wide (kanji gets the wide canvas); editing stays an explicit
+  // dialog action. The cramped side drawer is no longer the detail path.
+  assert.ok(entity.includes('openDetailModal('), 'owned detail opens in the spotlight modal');
+  assert.ok(entity.includes("size: config === ENTITY_CONFIGS.kanji ? 'kanji' : 'default'"), 'kanji detail requests the wide canvas');
+  assert.ok(!entity.includes('openDrawer('), 'side drawer is not the detail path');
   assert.ok(!entity.includes('dialog-panel--vocabulary') && !entity.includes('dialog-panel--grammar'), 'vocabulary/grammar dialogs unchanged');
   assert.ok(ui.includes("event.key === 'Escape'") && ui.includes('document.activeElement === first'), 'focus trap + ESC intact');
 });
