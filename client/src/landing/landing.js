@@ -4,6 +4,31 @@ import wordmarkDark from '../assets/Logo_Modo_Oscuro.png';
 import { createLandingMarkup } from './sections.js';
 import { initEstimateRotation, initKanjiSequence, initLandingInteractions } from './interactions.js';
 import { initLandingSmoothScroll } from './smoothScroll.js';
+
+// Canonical Auth entry: public Sign in/up CTAs open the modal over the
+// Landing instead of navigating away. Anchors keep their /app?auth=… hrefs
+// as a no-JS fallback; with JS the click is intercepted. Auth failures of
+// the dynamic import fall back to plain navigation.
+function initAuthModalTriggers(root) {
+  if (!root || typeof root.addEventListener !== 'function') return;
+  root.addEventListener('click', (event) => {
+    const trigger = event.target?.closest?.('[data-auth-open]');
+    if (!trigger || !root.contains(trigger)) return;
+    event.preventDefault();
+    const view = trigger.dataset.authOpen === 'sign-up' ? 'sign-up' : 'sign-in';
+    import('../authModal.js').then(({ openAuthModal }) => {
+      openAuthModal({
+        host: document.body,
+        background: root,
+        initialView: view,
+        trigger,
+        onAuthenticated: () => window.location.assign('/app')
+      });
+    }).catch(() => {
+      window.location.href = trigger.getAttribute('href') || '/app';
+    });
+  });
+}
 import {
   applyLandingTheme,
   persistLandingTheme,
@@ -55,6 +80,7 @@ if (root) {
   initLandingInteractions(root);
   initKanjiSequence(root);
   initEstimateRotation(root);
+  initAuthModalTriggers(root);
   // v5.1-E.3 Lenis: public landing only, fail-open, reduced-motion native.
   try { initLandingSmoothScroll(root)?.catch?.(() => {}); } catch { /* native scroll */ }
   const anchor = window.location.hash.slice(1);

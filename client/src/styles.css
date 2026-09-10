@@ -394,27 +394,30 @@
 :root[data-theme="dark"] .theme-option.button-primary { color: #241F1C !important; }
 .surface, .button-primary, .button-secondary, .icon-button, .field-control, .nav-item { transition: box-shadow 160ms ease, background-color 160ms ease, color 160ms ease; }
 .surface:has(button:hover) { box-shadow: var(--shadow-raised-md); }
-.auth-screen { position:relative; box-sizing:border-box; display:grid; grid-template-rows:auto minmax(0,1fr); min-height:100svh; overflow-x:hidden; padding:clamp(1rem,3vw,2rem) clamp(1.25rem,4vw,3rem) clamp(1.5rem,4vw,3rem); background:radial-gradient(circle at 12% 12%,color-mix(in srgb,var(--jlt-primary-soft) 74%,transparent),transparent 34rem),var(--jlt-bg); }
-/* Minimal chrome: wordmark home + the existing locale control. */
-.auth-topbar { display:flex; width:min(100%,76rem); align-items:center; justify-content:space-between; gap:1rem; margin:0 auto; }
-.auth-wordmark { display:inline-flex; min-height:2.75rem; align-items:center; border-radius:12px; }
-.auth-wordmark:focus-visible { outline:2px solid var(--nt-focus-ring); outline-offset:2px; }
-.auth-wordmark-logo { display:block; height:2rem; width:auto; object-fit:contain; }
-/* Editorial two-zone composition (~56% brand canvas / ~44% auth area). */
-.auth-shell { box-sizing:border-box; display:grid; width:min(100%,76rem); align-self:center; gap:clamp(1.5rem,4vw,4rem); margin:0 auto; grid-template-columns:minmax(0,1.3fr) minmax(22rem,1fr); align-items:center; }
-.auth-form-panel { box-sizing:border-box; display:grid; min-width:0; justify-items:center; padding:clamp(.5rem,1vw,1rem); }
+/* Canonical Auth modal: centered over the Landing (or the legacy /app
+   canvas). The Landing stays recognizably visible behind a restrained dim
+   plus subtle blur while Auth clearly owns focus. */
+.auth-modal-overlay { position:fixed; inset:0; z-index:200; display:grid; place-items:center; overflow-y:auto; overscroll-behavior:contain; padding:1.25rem; background:rgb(17 14 12 / 0.52); backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px); animation:auth-backdrop-enter 200ms ease-out; }
+@keyframes auth-backdrop-enter { from { opacity:0; } to { opacity:1; } }
+/* Panel reuses the approved Auth surface: warm token surface, restrained
+   border, premium elevation, 22px radius, ~448px useful width. */
+.auth-card { width:min(100%,28rem); border-radius:22px; background:var(--jlt-surface); border:1px solid var(--nt-border-subtle); box-shadow:var(--nt-shadow-lg); }
+.auth-modal-card { position:relative; display:flex; flex-direction:column; max-height:calc(100dvh - 2rem); overflow:hidden; animation:auth-card-enter 240ms ease-out; }
+.auth-modal-toprow { display:flex; align-items:center; justify-content:space-between; gap:.5rem; padding:.85rem .85rem 0; }
+.auth-modal-close { flex:none; }
+.auth-modal-body { overflow-y:auto; overscroll-behavior:contain; padding:.15rem clamp(1.4rem,3vw,2.25rem) clamp(1.5rem,3vw,2.25rem); }
 .auth-locale-control { position:relative; z-index:3; }
+.auth-locale-control--modal { position:relative; }
 .auth-locale-toggle { display:grid; min-width:2.8rem; min-height:2.75rem; place-items:center; border:1px solid color-mix(in srgb,var(--jlt-border) 75%,transparent); border-radius:12px; background:var(--jlt-surface); color:var(--jlt-primary); box-shadow:var(--shadow-raised-sm); }
-.auth-locale-menu { position:absolute; top:calc(100% + .5rem); right:0; display:grid; min-width:8rem; gap:.25rem; padding:.4rem; border:1px solid color-mix(in srgb,var(--jlt-border) 75%,transparent); border-radius:14px; background:var(--jlt-surface); box-shadow:var(--shadow-raised-md); }
+.auth-locale-toggle--compact { min-width:2.75rem; padding:0 .7rem; font-size:.8rem; font-weight:700; }
+.auth-locale-menu { position:absolute; top:calc(100% + .5rem); right:0; z-index:5; display:grid; min-width:8rem; gap:.25rem; padding:.4rem; border:1px solid color-mix(in srgb,var(--jlt-border) 75%,transparent); border-radius:14px; background:var(--jlt-surface); box-shadow:var(--shadow-raised-md); }
 .auth-locale-menu[hidden] { display:none; }
-.auth-locale-option { padding:.55rem .7rem; border-radius:9px; color:var(--jlt-ink); font-size:.8rem; text-align:left; }
+.auth-locale-option { display:flex; min-height:2.75rem; align-items:center; padding:.55rem .7rem; border-radius:9px; color:var(--jlt-ink); font-size:.8rem; text-align:left; }
 .auth-locale-option:hover,.auth-locale-option[aria-checked="true"] { background:color-mix(in srgb,var(--jlt-primary-soft) 65%,transparent); color:var(--jlt-primary); }
-/* Focused premium task surface (420–460px usable form width). */
-.auth-card { width:min(100%,28.75rem); border-radius:22px; background:var(--jlt-surface); border:1px solid var(--nt-border-subtle); box-shadow:var(--nt-shadow-lg); padding:clamp(1.5rem,3vw,2.5rem); animation:auth-card-enter 260ms ease-out 65ms backwards; }
-.auth-title { margin:.45rem 0 0; color:var(--jlt-ink); font-family:var(--font-display); font-size:1.75rem; font-weight:700; letter-spacing:-.02em; line-height:1.15; }
-.auth-description { max-width:25rem; margin:.6rem 0 0; color:var(--jlt-muted); font-size:.95rem; line-height:1.6; }
-.auth-form { display:grid; gap:1rem; margin-top:1.5rem; }
-.auth-form-panel .field-control, .auth-input { min-height:3.25rem; padding-inline:1.15rem; }
+.auth-title { margin:0; color:var(--jlt-ink); font-family:var(--font-display); font-size:1.65rem; font-weight:700; letter-spacing:-.02em; line-height:1.2; overflow-wrap:break-word; }
+.auth-description { max-width:25rem; margin:.55rem 0 0; color:var(--jlt-muted); font-size:.93rem; line-height:1.6; overflow-wrap:break-word; }
+.auth-form { display:grid; gap:1rem; margin-top:1.4rem; }
+.auth-input { min-height:3.25rem; padding-inline:1.15rem; }
 .auth-password-wrap { position:relative; display:block; }
 .auth-password-wrap .auth-input { width:100%; padding-right:4.5rem; }
 .auth-show { position:absolute; top:50%; right:.5rem; display:inline-grid; min-width:2.75rem; min-height:2.75rem; place-items:center; padding:0 .65rem; border-radius:10px; background:transparent; border:1px solid transparent; color:var(--jlt-primary); font-size:.8125rem; font-weight:600; transform:translateY(-50%); transition:background-color var(--nt-motion-micro),transform 100ms ease; }
@@ -423,52 +426,38 @@
 .auth-show:focus-visible { outline:2px solid var(--nt-focus-ring); outline-offset:1px; }
 .auth-submit { width:100%; min-height:3.25rem; margin-top:.25rem; }
 .auth-submit .spinner-inline { width:1.1em; height:1.1em; }
+.auth-submit.is-success { pointer-events:none; }
+.auth-check { display:inline-flex; animation:auth-check-pop 200ms ease-out; }
 .auth-feedback { overflow-wrap:break-word; }
 .auth-feedback--error { animation:auth-feedback-enter 160ms ease-out; }
-.auth-switcher { display:flex; flex-wrap:wrap; align-items:baseline; gap:.35rem .5rem; margin:1.25rem 0 0; color:var(--jlt-muted); font-size:.875rem; }
+.auth-switcher { display:flex; flex-wrap:wrap; align-items:baseline; gap:.35rem .5rem; margin:1.25rem 0 0; color:var(--jlt-muted); font-size:.875rem; overflow-wrap:break-word; }
 .auth-switcher button { color:var(--jlt-primary); font-weight:600; border-radius:8px; }
 .auth-switcher button:hover { text-decoration:underline; text-underline-offset:3px; }
 .auth-switcher button:focus-visible { outline:2px solid var(--nt-focus-ring); outline-offset:2px; }
 .auth-forgot-row { display:block; flex-basis:100%; margin-top:.15rem; }
-.auth-home-link { display:inline-block; margin-top:1.1rem; color:var(--jlt-muted); font-size:.875rem; font-weight:600; text-decoration:none; border-radius:8px; }
-.auth-home-link:hover { color:var(--jlt-primary); text-decoration:underline; text-underline-offset:3px; }
-.auth-home-link:focus-visible { outline:2px solid var(--nt-focus-ring); outline-offset:2px; }
-/* Editorial brand canvas: identity, one headline, the existing product
-   statement, Japanese typography as visual material. */
-.auth-brand-panel { position:relative; display:grid; min-height:30rem; place-items:center; overflow:hidden; isolation:isolate; border-radius:24px; background:linear-gradient(145deg,#3E2B24 0%,#5D4036 45%,#78564A 100%); box-shadow:var(--nt-shadow-lg); }
-.auth-brand-panel::before,.auth-brand-panel::after { position:absolute; z-index:-1; width:22rem; height:22rem; border-radius:999px; content:""; filter:blur(2px); }
-.auth-brand-panel::before { top:-9rem; right:-7rem; background:rgba(255,255,255,.27); }
-.auth-brand-panel::after { bottom:-11rem; left:-9rem; background:rgba(40,25,18,.35); }
-.auth-brand-glow { position:absolute; inset:7%; border:1px solid rgba(255,255,255,.24); border-radius:20px; box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 24px 60px rgba(40,25,18,.20); pointer-events:none; }
-.auth-editorial { position:relative; display:grid; gap:1.1rem; max-width:26rem; padding:clamp(2rem,4vw,3.5rem); color:#fff; animation:auth-editorial-enter 300ms ease-out; }
-.auth-editorial-eyebrow { margin:0; font-size:.72rem; font-weight:700; letter-spacing:.24em; text-transform:uppercase; opacity:.9; }
-.auth-editorial-headline { margin:0; font-family:var(--font-display); font-size:clamp(2rem,3.4vw,2.9rem); font-weight:700; letter-spacing:-.03em; line-height:1.08; text-wrap:balance; }
-.auth-editorial-statement { margin:0; max-width:22rem; font-size:1rem; line-height:1.65; opacity:.96; }
-.auth-editorial-jp { margin:1rem 0 0; font-family:var(--font-jp); font-size:clamp(2.6rem,4.5vw,3.6rem); font-weight:600; line-height:1.2; letter-spacing:.08em; }
-.auth-editorial-motif { margin:0; font-size:.78rem; font-weight:600; letter-spacing:.18em; text-transform:uppercase; opacity:.88; }
-/* Auth mode transition: shell stays stable, only the card content shifts. */
-.auth-mode { animation:auth-mode-enter 200ms ease-out; }
-@keyframes auth-editorial-enter { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
-@keyframes auth-card-enter { from { opacity:0; transform:translateY(14px) scale(.985); } to { opacity:1; transform:none; } }
-@keyframes auth-mode-enter { from { opacity:0; transform:translateX(8px); } to { opacity:1; transform:none; } }
+/* In-modal view transition: the shell stays stable, only the body content
+   swaps with a small directional slide (forward exits left / enters from
+   the right; back reverses). */
+.auth-swap-out { animation:auth-swap-out 110ms ease-in; }
+.auth-swap-out--forward { --auth-swap-x:-10px; }
+.auth-swap-out--back { --auth-swap-x:10px; }
+@keyframes auth-swap-out { from { opacity:1; transform:none; } to { opacity:0; transform:translateX(var(--auth-swap-x,-10px)); } }
+.auth-swap-in { animation:auth-swap-in 200ms ease-out; }
+.auth-swap-in--forward { --auth-swap-x:10px; }
+.auth-swap-in--back { --auth-swap-x:-10px; }
+@keyframes auth-swap-in { from { opacity:0; transform:translateX(var(--auth-swap-x,10px)); } to { opacity:1; transform:none; } }
+@keyframes auth-card-enter { from { opacity:0; transform:translateY(12px) scale(.985); } to { opacity:1; transform:none; } }
+@keyframes auth-check-pop { from { opacity:0; transform:scale(.75); } to { opacity:1; transform:scale(1); } }
 @keyframes auth-feedback-enter { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
-:root[data-theme="dark"] .auth-screen { background:radial-gradient(circle at 12% 12%,#273a68,transparent 34rem),var(--jlt-bg); }
-:root[data-theme="dark"] .auth-brand-panel { background:linear-gradient(145deg,#172852 0%,#3157a7 50%,#6f95df 100%); }
-:root[data-theme="dark"] .auth-card { box-shadow:var(--nt-shadow-lg); }
 @media (prefers-reduced-motion: reduce) {
-  .auth-editorial, .auth-card, .auth-mode, .auth-feedback--error, .auth-show { animation:none !important; transition:none !important; }
+  .auth-modal-overlay, .auth-modal-card, .auth-swap-out, .auth-swap-in, .auth-check, .auth-feedback--error, .auth-show { animation:none !important; transition:none !important; }
   .auth-show:active { transform:translateY(-50%); }
 }
-@media (max-height: 720px) and (min-width: 901px) { .auth-brand-panel { min-height:24rem; } .auth-editorial-jp { font-size:2.4rem; } .auth-title { font-size:1.6rem; } }
-/* Mobile/tablet: the two-column concept is removed — no marketing canvas
-   stacked above the form. Slim topbar, immediate task surface. */
-@media (max-width: 900px) {
-  .auth-screen { padding:1.25rem 1.25rem 2rem; }
-  .auth-shell { grid-template-columns:minmax(0,1fr); gap:1.25rem; width:min(100%,30rem); }
-  .auth-brand-panel { display:none; }
-  .auth-form-panel { padding:0; }
-  .auth-title, .auth-description, .auth-switcher { min-width:0; overflow-wrap:break-word; }
-  .auth-card { box-shadow:var(--nt-shadow-sm); padding:1.5rem 1.25rem; animation-name:auth-mode-enter; animation-duration:200ms; animation-delay:0s; }
+/* Mobile: nearly full width with viewport margins, natural content height,
+   internal scroll only when genuinely needed. No split panel anywhere. */
+@media (max-width: 640px) {
+  .auth-modal-overlay { padding:1rem; }
+  .auth-modal-body { padding-left:1.25rem; padding-right:1.25rem; }
 }
 #global-search-results:not(.hidden) { box-shadow: var(--shadow-raised-lg); background: var(--jlt-surface); border:1px solid color-mix(in srgb,var(--jlt-border) 70%,transparent); border-radius:16px; }
 /* Global search visuals only (logic in main.js untouched): calm dropdown,

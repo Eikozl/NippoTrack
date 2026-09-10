@@ -6,6 +6,29 @@ import { footer, navbar } from './sections.js';
 import { initEstimateRotation, initLandingInteractions } from './interactions.js';
 import { initHowItWorksMotion } from './howItWorksMotion.js';
 import { initLandingSmoothScroll } from './smoothScroll.js';
+
+// Same canonical Auth entry as the Landing: public sign-up CTAs open the
+// modal in place, with plain navigation as the no-JS/dynamic-import fallback.
+function initAuthModalTriggers(root) {
+  if (!root || typeof root.addEventListener !== 'function') return;
+  root.addEventListener('click', (event) => {
+    const trigger = event.target?.closest?.('[data-auth-open]');
+    if (!trigger || !root.contains(trigger)) return;
+    event.preventDefault();
+    const view = trigger.dataset.authOpen === 'sign-up' ? 'sign-up' : 'sign-in';
+    import('../authModal.js').then(({ openAuthModal }) => {
+      openAuthModal({
+        host: document.body,
+        background: root,
+        initialView: view,
+        trigger,
+        onAuthenticated: () => window.location.assign('/app')
+      });
+    }).catch(() => {
+      window.location.href = trigger.getAttribute('href') || '/app';
+    });
+  });
+}
 import {
   applyLandingTheme,
   persistLandingTheme,
@@ -31,7 +54,7 @@ function hero() {
           <h1 id="hiw-title">See how your Japanese moves through NippoTrack.</h1>
           <p class="hiw-lede">From something you encounter to something you understand, keep, review, and build on.</p>
           <div class="hiw-hero-actions">
-            <a class="landing-button landing-button-primary" href="/app?auth=sign-up">Start with NippoTrack</a>
+            <a class="landing-button landing-button-primary" href="/app?auth=sign-up" data-auth-open="sign-up">Start with NippoTrack</a>
             <a class="landing-text-link" href="/">Back to overview</a>
           </div>
         </div>
@@ -287,7 +310,7 @@ function philosophy() {
 function finalCta() {
   return `
     <section class="final-cta" id="hiw-final" aria-labelledby="hiw-final-title">
-      <div class="landing-container"><h2 id="hiw-final-title">Bring your Japanese learning together.</h2><div><a class="landing-button landing-button-primary" href="/app?auth=sign-up">Start with NippoTrack</a><a class="landing-text-link" href="/">Back to overview</a></div></div>
+      <div class="landing-container"><h2 id="hiw-final-title">Bring your Japanese learning together.</h2><div><a class="landing-button landing-button-primary" href="/app?auth=sign-up" data-auth-open="sign-up">Start with NippoTrack</a><a class="landing-text-link" href="/">Back to overview</a></div></div>
     </section>`;
 }
 
@@ -380,6 +403,7 @@ if (root) {
   initLandingInteractions(root);
   const stopHiwMotion = initHowItWorksMotion(root);
   initEstimateRotation(root);
+  initAuthModalTriggers(root);
   // v5.1-E.3 Lenis: public How-It-Works too (same fail-open contract).
   try { initLandingSmoothScroll(root)?.catch?.(() => {}); } catch { /* native scroll */ }
   try {

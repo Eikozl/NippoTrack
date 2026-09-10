@@ -29,8 +29,8 @@ export function navbar(wordmarkUrl, themeAssets = {}, options = {}) {
           <a href="#faq">FAQ</a>
         </nav>
         <div class="landing-nav-actions">
-          <a class="landing-text-link" href="/app?auth=sign-in">Log in</a>
-          <a class="landing-button landing-button-primary landing-nav-cta" href="/app?auth=sign-up">Get started</a>
+          <a class="landing-text-link" href="/app?auth=sign-in" data-auth-open="sign-in">Log in</a>
+          <a class="landing-button landing-button-primary landing-nav-cta" href="/app?auth=sign-up" data-auth-open="sign-up">Get started</a>
         </div>
         <div class="landing-nav-tools">
           ${themeToggle()}
@@ -43,8 +43,8 @@ export function navbar(wordmarkUrl, themeAssets = {}, options = {}) {
         <a href="${featuresHref}">Features</a>
         <a href="${howItWorksHref}"${howItWorksCurrent}>How it works</a>
         <a href="#faq">FAQ</a>
-        <a href="/app?auth=sign-in">Log in</a>
-        <a class="landing-button landing-button-primary" href="/app?auth=sign-up">Get started</a>
+        <a href="/app?auth=sign-in" data-auth-open="sign-in">Log in</a>
+        <a class="landing-button landing-button-primary" href="/app?auth=sign-up" data-auth-open="sign-up">Get started</a>
       </nav>
     </header>`;
 }
@@ -68,7 +68,7 @@ function hero() {
           </div>
           <p class="landing-lede">Organize what you learn, understand Japanese in context, and keep a clear view of your progress.</p>
           <div class="landing-hero-actions">
-            <a class="landing-button landing-button-primary" href="/app?auth=sign-up">Start free</a>
+            <a class="landing-button landing-button-primary" href="/app?auth=sign-up" data-auth-open="sign-up">Start free</a>
             <a class="landing-text-link landing-arrow-link" href="/how-it-works">See how it works <span aria-hidden="true">→</span></a>
           </div>
           <p class="landing-supporting">Built for the way you already study Japanese.</p>
@@ -304,7 +304,7 @@ function emotionalMoment() {
 function finalCta() {
   return `
     <section class="final-cta" id="final-cta" aria-labelledby="final-cta-title">
-      <div class="landing-container"><h2 id="final-cta-title">Ready to bring your Japanese study together?</h2><div><a class="landing-button landing-button-primary" href="/app?auth=sign-up">Start with NippoTrack</a><a class="landing-text-link" href="/app?auth=sign-in">Already have an account? Log in</a></div></div>
+      <div class="landing-container"><h2 id="final-cta-title">Ready to bring your Japanese study together?</h2><div><a class="landing-button landing-button-primary" href="/app?auth=sign-up" data-auth-open="sign-up">Start with NippoTrack</a><a class="landing-text-link" href="/app?auth=sign-in" data-auth-open="sign-in">Already have an account? Log in</a></div></div>
     </section>`;
 }
 

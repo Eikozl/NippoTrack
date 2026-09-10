@@ -109,8 +109,10 @@ test('how-it-works navbar links Logo, Features, current page, FAQ, and auth dest
     'aria-current marks the page in desktop and mobile navs'
   );
   assert.ok(hiwNav.includes('href="#faq">FAQ</a>'), 'existing FAQ behavior preserved');
-  assert.ok(hiwNav.includes('href="/app?auth=sign-in">Log in</a>'), 'existing Log in destination reused');
-  assert.ok(hiwNav.includes('href="/app?auth=sign-up">Get started</a>'), 'existing Get started destination reused');
+  assert.ok(hiwNav.includes('href="/app?auth=sign-in"'), 'existing Log in destination reused');
+  assert.ok(hiwNav.includes('data-auth-open="sign-in"'), 'Log in opens the modal in place');
+  assert.ok(hiwNav.includes('href="/app?auth=sign-up"'), 'existing Get started destination reused');
+  assert.ok(hiwNav.includes('data-auth-open="sign-up"'), 'Get started opens the modal in place');
   const landingFooter = footer('/wordmark.png', {});
   assert.ok(landingFooter.includes('href="#features">Features</a>'), 'landing footer unchanged');
   assert.ok(landingFooter.includes('href="#how-it-works">How it works</a>'), 'landing footer unchanged');
@@ -124,7 +126,8 @@ test('hero owns the single H1 with both CTAs', () => {
   assert.equal(h1Count, 1);
   assert.ok(hiw.includes('<h1 id="hiw-title">See how your Japanese moves through NippoTrack.</h1>'));
   assert.ok(hiw.includes('From something you encounter to something you understand, keep, review, and build on.'));
-  assert.ok(hiw.includes('href="/app?auth=sign-up">Start with NippoTrack</a>'));
+  assert.ok(hiw.includes('href="/app?auth=sign-up"'), 'sign-up fallback destination kept');
+  assert.ok(hiw.includes('data-auth-open="sign-up">Start with NippoTrack</a>'), 'hero CTA opens the modal in place');
   assert.ok(hiw.includes('href="/">Back to overview</a>'));
   assert.ok(hiw.includes('data-hiw-hero-journey'), 'hero journey mount point exists');
 });

@@ -1,5 +1,5 @@
 import {
-  BookOpen, CalendarDays, CalendarRange, ChartNoAxesCombined, Circle, CircleUserRound,
+  BookOpen, CalendarDays, CalendarRange, ChartNoAxesCombined, Check, Circle, CircleUserRound,
   Clock, createElement, FileText, Flame, History, LayoutDashboard, Library, Languages,
   Menu, MessagesSquare, Moon, PieChart, RefreshCw, ScanText, Search, Settings, Sun, Tag, Target, X, Zap
 } from 'lucide';
@@ -31,7 +31,8 @@ const ICONS = {
   user: CircleUserRound,
   menu: Menu,
   search: Search,
-  close: X
+  close: X,
+  check: Check
 };
 
 const TITLES = {

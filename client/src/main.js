@@ -7,6 +7,7 @@ import { apiRequest } from './api';
 import { kanjiReferenceRoute, parseKanjiReferenceRoute } from './kanjiReference';
 import { icon, moduleIconMap } from './icons';
 import { confirmDialog, element, showToast } from './ui';
+import { openAuthModal } from './authModal.js';
 import { createLevelEstimateControl } from './levelEstimateControl';
 import { authConfigured, localAuthBypass, localAuthBypassEmail, supabase } from './authClient';
 import { profileStore } from './accountProfile.js';
@@ -136,150 +137,27 @@ let authMessage = '';
 let authView = 'sign-in';
 let currentAuthEmail = localAuthBypassEmail || null;
 function renderAuthGate(message = '', view = 'sign-in') {
+  // Legacy /app entry point. The canonical public interaction is the
+  // Landing modal, but this route must keep working for protected-route
+  // fallback, recovery links, and deep links — so it hosts the SAME modal
+  // (same fields, calls, validation, messages, focus rules) over a plain
+  // canvas. No separate login page, no divergent Auth implementation.
   authMessage = message;
   authView = view;
   appShell.hidden = true;
-  if (!authConfigured) { authRoot.textContent = 'Supabase Auth configuration is required.'; return; }
-  // Visual shell only — every field, handler, endpoint, validation message,
-  // and focus rule below matches the frozen authentication semantics.
-  const email = element('input', { className: 'field-control auth-input', attrs: { type: 'email', required: '', autocomplete: 'email', placeholder: 'you@example.com' } });
-  const password = element('input', { className: 'field-control auth-input', attrs: { id: 'auth-password', type: 'password', required: '', autocomplete: view === 'sign-up' ? 'new-password' : 'current-password', placeholder: 'Password' } });
-  const confirm = element('input', { className: 'field-control auth-input', attrs: { type: 'password', required: '', autocomplete: 'new-password', placeholder: 'Confirm password' } });
-  // Show/hide is presentation-only around the same password field: the
-  // submitted payload and validation never change.
-  const showToggle = element('button', { className: 'auth-show', text: 'Show', attrs: { type: 'button', 'aria-pressed': 'false', 'aria-label': 'Show password' } });
-  showToggle.addEventListener('click', () => {
-    const showing = password.getAttribute('type') === 'password';
-    password.setAttribute('type', showing ? 'text' : 'password');
-    showToggle.textContent = showing ? 'Hide' : 'Show';
-    showToggle.setAttribute('aria-pressed', String(showing));
-    showToggle.setAttribute('aria-label', showing ? 'Hide password' : 'Show password');
-    password.focus();
+  if (!authConfigured) { authRoot.textContent = 'Supabase Auth configuration is required.'; return () => {}; }
+  return openAuthModal({
+    host: authRoot,
+    background: null,
+    initialView: view,
+    message,
+    messageKind: 'error',
+    dismissible: true,
+    trigger: null,
+    onAuthenticated: () => bootstrapApp(),
+    onClose: () => window.location.assign('/')
   });
-  const feedback = element('p', { className: `auth-feedback min-h-5 text-sm ${message ? 'text-red-700' : 'text-muted'}`, text: message, attrs: { 'aria-live': 'polite' } });
-  const titles = { 'sign-in': 'Sign in', 'sign-up': 'Create your account', forgot: 'Reset your password', reset: 'Choose a new password' };
-  const headings = { 'sign-in': 'Welcome back', 'sign-up': 'Create your account', forgot: 'Reset your password', reset: 'Choose a new password' };
-  const descriptions = {
-    'sign-in': 'Sign in to continue to your Japanese workspace.',
-    'sign-up': 'Start building a Japanese workspace around the way you already learn.',
-    forgot: 'Enter the email connected to your account. We will send you a recovery link.',
-    reset: 'Choose a new password to regain access to your workspace.'
-  };
-  const submitLabels = { 'sign-in': 'Sign in', 'sign-up': 'Create your account', forgot: 'Send recovery link', reset: 'Update password' };
-  const pendingLabels = { 'sign-in': 'Signing in…', 'sign-up': 'Creating account…', forgot: 'Sending…', reset: 'Updating…' };
-  const submitLabel = element('span', { text: submitLabels[view] });
-  const submit = element('button', { className: 'button-primary auth-submit', attrs: { type: 'submit' } }, [submitLabel]);
-  const setPending = (pending) => {
-    submit.disabled = pending;
-    submit.setAttribute('aria-busy', String(pending));
-    submitLabel.parentElement?.querySelector('.spinner-inline')?.remove();
-    if (pending) {
-      const spinner = element('span', { className: 'spinner spinner-inline', attrs: { 'aria-hidden': 'true' } });
-      submit.prepend(spinner);
-      submitLabel.textContent = pendingLabels[view];
-    } else {
-      submitLabel.textContent = submitLabels[view];
-    }
-  };
-  const emailField = element('label', { className: 'field' }, [element('span', { text: 'Email' }), email]);
-  // NOTE: the password label must not wrap the Show/Hide button (interactive
-  // content inside <label> corrupts the accessible name), so label and
-  // control are siblings joined by for/id instead of nesting.
-  const passwordField = element('div', { className: 'field' }, [
-    element('label', { attrs: { for: 'auth-password' } }, [element('span', { text: 'Password' })]),
-    element('span', { className: 'auth-password-wrap' }, [password, showToggle])
-  ]);
-  const fields = [];
-  if (view !== 'reset') fields.push(emailField);
-  if (view !== 'forgot') fields.push(passwordField);
-  if (view === 'sign-up' || view === 'reset') fields.push(element('label', { className: 'field' }, [element('span', { text: 'Confirm password' }), confirm]));
-  const form = element('form', { className: 'auth-form', attrs: { 'aria-label': headings[view] } }, [
-    ...fields, feedback, submit
-  ]);
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    setPending(true);
-    feedback.textContent = '';
-    feedback.classList.remove('text-red-700');
-    feedback.classList.add('text-muted');
-    try {
-      if ((view === 'sign-up' || view === 'reset') && password.value !== confirm.value) throw new Error('Passwords do not match.');
-      if (view === 'sign-in') { const data = await apiRequest('/api/auth/sign-in', { method: 'POST', body: { email: email.value, password: password.value }, notifyAuth: false }); const { error } = await supabase.auth.setSession(data.session); if (error) throw error; return bootstrapApp(); }
-      if (view === 'sign-up') { await apiRequest('/api/auth/sign-up', { method: 'POST', body: { email: email.value, password: password.value }, notifyAuth: false }); return renderAuthGate('Check your email to confirm your account before signing in.'); }
-      if (view === 'forgot') { await apiRequest('/api/auth/forgot-password', { method: 'POST', body: { email: email.value }, notifyAuth: false }); return renderAuthGate('If an account exists, recovery instructions have been sent.'); }
-      const { error } = await supabase.auth.updateUser({ password: password.value }); if (error) throw error; await supabase.auth.signOut(); return renderAuthGate('Password updated. Sign in with your new password.');
-    } catch (error) {
-      feedback.textContent = error?.status === 429 ? 'Too many attempts. Please wait before trying again.' : error?.message || 'Unable to complete that request.';
-      feedback.classList.remove('text-muted');
-      feedback.classList.add('text-red-700', 'auth-feedback--error');
-      setPending(false);
-      (view === 'forgot' ? email : password).focus();
-    }
-  });
-  const switcher = element('p', { className: 'auth-switcher' });
-  if (view === 'sign-in') {
-    switcher.append(
-      element('span', { text: 'New to NippoTrack? ' }),
-      linkButton('Create account', () => renderAuthGate('', 'sign-up'))
-    );
-    switcher.append(element('span', { className: 'auth-forgot-row' }, [
-      linkButton('Forgot password?', () => renderAuthGate('', 'forgot'))
-    ]));
-  } else if (view === 'forgot' || view === 'reset') {
-    switcher.append(linkButton('Back to sign in', () => renderAuthGate()));
-  } else {
-    switcher.append(
-      element('span', { text: 'Already have an account? ' }),
-      linkButton('Back to sign in', () => renderAuthGate())
-    );
-  }
-  const homeLink = element('a', { className: 'auth-home-link', text: '← Back to NippoTrack', attrs: { href: '/' } });
-  const formPanel = element('section', { className: 'auth-form-panel', attrs: { 'aria-labelledby': 'login-title' } }, [
-    element('div', { className: 'auth-card auth-mode', dataset: { authView: view } }, [
-      element('p', { className: 'eyebrow', text: 'Japanese Learning Tracker' }),
-      element('h1', { className: 'auth-title', text: headings[view], attrs: { id: 'login-title' } }),
-      element('p', { className: 'auth-description', text: descriptions[view] }), form, switcher, homeLink
-    ])
-  ]);
-  const localeMenu = element('div', { className: 'auth-locale-menu', attrs: { role: 'menu', hidden: '' } }, [
-    ['en', 'English'], ['es', 'Spanish']
-  ].map(([value, label]) => {
-    const option = element('button', { className: 'auth-locale-option', text: label, attrs: { type: 'button', role: 'menuitemradio', 'aria-checked': String(getLocale() === value) } });
-    option.addEventListener('click', () => setLocale(value));
-    return option;
-  }));
-  const localeToggle = element('button', { className: 'auth-locale-toggle', attrs: { type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': 'Language', title: 'Language' } }, [icon('kanji', { size: 20 })]);
-  localeToggle.addEventListener('click', (event) => {
-    event.stopPropagation();
-    const open = localeMenu.hasAttribute('hidden');
-    if (open) localeMenu.removeAttribute('hidden'); else localeMenu.setAttribute('hidden', '');
-    localeToggle.setAttribute('aria-expanded', String(open));
-  });
-  const localeControl = element('div', { className: 'auth-locale-control' }, [localeToggle, localeMenu]);
-  // Editorial brand canvas: identity + one restrained headline + the
-  // existing product statement + Japanese typography as visual material.
-  // No marketing sections, no clichés, no new copy claims.
-  const brandPanel = element('aside', { className: 'auth-brand-panel', attrs: { 'aria-label': 'About NippoTrack' } }, [
-    element('div', { className: 'auth-brand-glow', attrs: { 'aria-hidden': 'true' } }),
-    element('div', { className: 'auth-editorial' }, [
-      element('p', { className: 'auth-editorial-eyebrow', text: 'NippoTrack' }),
-      element('p', { className: 'auth-editorial-headline', text: 'Learn your way. Keep the context.' }),
-      element('p', { className: 'auth-editorial-statement', text: 'NippoTrack doesn\'t replace how you learn Japanese. It makes the way you already learn Japanese smarter.' }),
-      element('p', { className: 'auth-editorial-jp', text: '日本語', attrs: { lang: 'ja' } }),
-      element('p', { className: 'auth-editorial-motif', text: 'Vocabulary · Kanji · Grammar' })
-    ])
-  ]);
-  // Minimal chrome: wordmark back to the public Landing + the existing
-  // locale control. No marketing navbar; the page stays task-focused.
-  const wordmarkLink = element('a', { className: 'auth-wordmark', attrs: { href: '/', 'aria-label': 'NippoTrack home' } }, [
-    element('img', { className: 'auth-wordmark-logo', attrs: { src: lightBrandLogo, alt: 'NippoTrack' } })
-  ]);
-  const topbar = element('header', { className: 'auth-topbar' }, [wordmarkLink, localeControl]);
-  authRoot.replaceChildren(element('main', { className: 'auth-screen' }, [topbar, element('div', { className: 'auth-shell' }, [brandPanel, formPanel])]));
-  (view === 'forgot' || view === 'sign-up' ? email : password).focus();
 }
-
-function linkButton(text, action) { const button = element('button', { className: 'underline underline-offset-4', text, attrs: { type: 'button' } }); button.addEventListener('click', action); return button; }
 
 // v5.1-A.2 first-experience session: set during the post-auth boot gate
 // below, cleared when setup completes. Declared here (ahead of navigate)
@@ -288,7 +166,7 @@ let firstExperienceSession = null;
 
 async function bootstrapApp() {
   // Never leave the document blank while a stored session is checked remotely.
-  renderAuthGate('', initialAuthView);
+  const closeGate = renderAuthGate('', initialAuthView);
   try {
     if (!localAuthBypass) {
       const { data } = await supabase.auth.getSession();
@@ -298,6 +176,9 @@ async function bootstrapApp() {
     if (!session.authenticated) return;
     currentAuthEmail = session.user?.email || localAuthBypassEmail || null;
     profileStore.setEmail(currentAuthEmail);
+    // Session restore must retire the gate modal through its own teardown
+    // (scroll lock, listeners, singleton) — never by dropping its nodes.
+    try { closeGate?.('silent'); } catch { /* teardown is best-effort */ }
     authRoot.replaceChildren();
     appShell.hidden = false;
     // Profile identity is presentation-only and never blocks the shell. The

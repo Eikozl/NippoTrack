@@ -51,8 +51,9 @@ test('Japanese examples declare their language', () => {
 test('navigation, hero, and final CTA use their frozen labels', () => {
   const navigation = source.slice(source.indexOf('landing-nav-actions'), source.indexOf('landing-menu-button'));
   assert.ok(navigation.indexOf('Log in') < navigation.indexOf('Get started'));
-  assert.ok(source.includes('href="/app?auth=sign-up">Start free</a>'));
-  assert.ok(source.includes('href="/app?auth=sign-up">Start with NippoTrack</a>'));
+  assert.ok(source.includes('href="/app?auth=sign-up"'), 'sign-up fallback destinations kept');
+  assert.ok(source.includes('data-auth-open="sign-up">Start free</a>'), 'hero CTA opens the modal in place');
+  assert.ok(source.includes('data-auth-open="sign-up">Start with NippoTrack</a>'), 'final CTA opens the modal in place');
   assert.ok(source.includes('Already have an account? Log in'));
 });
 
