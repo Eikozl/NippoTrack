@@ -3,6 +3,7 @@ import wordmarkLight from '../assets/Logo_Modo_Claro.png';
 import wordmarkDark from '../assets/Logo_Modo_Oscuro.png';
 import { createLandingMarkup } from './sections.js';
 import { initEstimateRotation, initKanjiSequence, initLandingInteractions } from './interactions.js';
+import { initLandingSmoothScroll } from './smoothScroll.js';
 import {
   applyLandingTheme,
   persistLandingTheme,
@@ -54,6 +55,8 @@ if (root) {
   initLandingInteractions(root);
   initKanjiSequence(root);
   initEstimateRotation(root);
+  // v5.1-E.3 Lenis: public landing only, fail-open, reduced-motion native.
+  try { initLandingSmoothScroll(root)?.catch?.(() => {}); } catch { /* native scroll */ }
   const anchor = window.location.hash.slice(1);
   if (['features', 'how-it-works', 'final-cta', 'faq'].includes(anchor)) {
     requestAnimationFrame(() => document.getElementById(anchor)?.scrollIntoView());

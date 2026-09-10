@@ -5,6 +5,7 @@ import wordmarkDark from '../assets/Logo_Modo_Oscuro.png';
 import { footer, navbar } from './sections.js';
 import { initEstimateRotation, initLandingInteractions } from './interactions.js';
 import { initHowItWorksMotion } from './howItWorksMotion.js';
+import { initLandingSmoothScroll } from './smoothScroll.js';
 import {
   applyLandingTheme,
   persistLandingTheme,
@@ -379,6 +380,8 @@ if (root) {
   initLandingInteractions(root);
   const stopHiwMotion = initHowItWorksMotion(root);
   initEstimateRotation(root);
+  // v5.1-E.3 Lenis: public How-It-Works too (same fail-open contract).
+  try { initLandingSmoothScroll(root)?.catch?.(() => {}); } catch { /* native scroll */ }
   try {
     window.addEventListener('pagehide', () => {
       try {

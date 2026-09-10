@@ -128,7 +128,11 @@ export async function renderAnalyzer(container) {
 
     const summary = summarizeAnalyzerEntries(formatted);
     const distribution = analysis.jlptDistribution || {};
-    const lexicalCount = analysis.lexical?.status === 'ok' ? (analysis.lexical.candidates?.length || 0) : 0;
+    // Strip counts mirror the rendered cards: the presentation-layer noise
+    // filter (whitespace/punctuation-only) applies to grouping, so the
+    // visible grouped total is the truthful count — never the raw payload.
+    const groupedForCount = groupLexicalCandidates(analysis.lexical, localVocabAdded);
+    const lexicalCount = groupedForCount.existing.length + groupedForCount.fresh.length + groupedForCount.verify.length;
     const grammarCount = analysis.lexical?.grammar?.status === 'ok' ? (analysis.lexical.grammar.matches?.length || 0) : 0;
 
     // v5.1-E summary strip: one calm grouped line instead of five equal
@@ -156,7 +160,8 @@ export async function renderAnalyzer(container) {
     // Quiet caption line (not a competing card): reference distribution is
     // unique-kanji only — never a text level, never proficiency.
     const distributionCaption = element('div', { className: 'mt-1 px-1' }, [
-      element('p', { className: 'break-words text-xs leading-5 text-muted', text: `Kanji reference: ${distributionLine}` })
+      element('p', { className: 'break-words text-xs leading-5 text-muted', text: `Kanji reference: ${distributionLine}` }),
+      element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: 'Unique kanji by reference level only — not a text level, not a proficiency estimate.' })
     ]);
 
     const notice = element('p', { className: 'rounded-lg border border-stone bg-paper p-4 text-xs leading-5 text-muted', text: analysis.notice || '' });

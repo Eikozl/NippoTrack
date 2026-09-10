@@ -63,6 +63,9 @@ test('how-it-works bundle stays isolated from app/supabase/backend code', () => 
       specifier === './interactions.js' ||
       specifier === './howItWorksMotion.js' ||
       specifier === './theme.js' ||
+      // v5.1-E.3 authorizes Lenis smooth scroll for the public experience.
+      // smoothScroll.js is landing-scoped (dynamic lenis import, no backend).
+      specifier === './smoothScroll.js' ||
       specifier.startsWith('../assets/');
     assert.ok(allowed, 'unexpected howItWorks import: ' + specifier);
   }

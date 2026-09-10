@@ -307,6 +307,22 @@ export function paginationControls(pagination, onPageChange) {
   ]);
 }
 
+// Single-overlay slot: dialogs and drawers share #modal-root and never
+// stack. Opening a new overlay silently retires the previous one (listeners
+// removed, scroll lock handed over) so recursive detail refreshes
+// (viewRecord → viewRecord) cannot leak key handlers or strand focus.
+let currentOverlayClose = null;
+function claimOverlaySlot(close) {
+  const previous = currentOverlayClose;
+  currentOverlayClose = close;
+  if (previous && previous !== close) {
+    try { previous({ silent: true }); } catch { /* retirement is best-effort */ }
+  }
+}
+function releaseOverlaySlot(close) {
+  if (currentOverlayClose === close) currentOverlayClose = null;
+}
+
 export function openDialog({ title, content, submitLabel = 'Save', submitClassName = 'button-primary', cancelLabel = 'Cancel', pendingLabel = 'Saving…', showFooter = true, showCloseButton = true, panelClass = '', description = null, onSubmit }) {
   const root = document.getElementById('modal-root');
   const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -323,12 +339,13 @@ export function openDialog({ title, content, submitLabel = 'Save', submitClassNa
   const cancelButton = element('button', { className: 'button-secondary', text: cancelLabel, attrs: { type: 'button' } });
   let closed = false;
   const focusable = () => [...form.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')];
-  const close = () => {
+  const close = ({ silent = false } = {}) => {
     if (closed) return;
     closed = true;
     document.removeEventListener('keydown', onKeyDown);
     overlay.remove();
-    if (previouslyFocused?.isConnected) requestAnimationFrame(() => previouslyFocused.focus({ preventScroll: true }));
+    releaseOverlaySlot(close);
+    if (!silent && previouslyFocused?.isConnected) requestAnimationFrame(() => previouslyFocused.focus({ preventScroll: true }));
   };
   const onKeyDown = (event) => {
     if (event.key === 'Escape') { event.preventDefault(); close(); }
@@ -372,6 +389,7 @@ export function openDialog({ title, content, submitLabel = 'Save', submitClassNa
     ...(showFooter ? [element('footer', { className: 'dialog-footer sticky bottom-0 flex justify-end gap-3 border-t border-stone bg-paper px-5 py-4 sm:px-6' }, [cancelButton, ...(submitButton ? [submitButton] : [])])] : [])
   );
   overlay.appendChild(form);
+  claimOverlaySlot(close);
   root.replaceChildren(overlay);
   document.addEventListener('keydown', onKeyDown);
   (form.querySelector('input, select, textarea') || focusable()[0])?.focus();
@@ -395,14 +413,17 @@ export function openDrawer({ title, subtitle = null, content = [], actions = [],
   const closeButton = element('button', { className: 'icon-button shrink-0', attrs: { type: 'button', 'aria-label': 'Close detail panel' } }, [icon('close', { size: 20 })]);
   let closed = false;
   const focusable = () => [...panel.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')];
-  const close = () => {
+  const close = ({ silent = false } = {}) => {
     if (closed) return;
     closed = true;
     document.removeEventListener('keydown', onKeyDown, true);
     document.body.style.overflow = '';
     overlay.remove();
-    try { onClose?.(); } catch { /* close hooks are best-effort */ }
-    if (previouslyFocused?.isConnected) requestAnimationFrame(() => previouslyFocused.focus({ preventScroll: true }));
+    releaseOverlaySlot(close);
+    if (!silent) {
+      try { onClose?.(); } catch { /* close hooks are best-effort */ }
+      if (previouslyFocused?.isConnected) requestAnimationFrame(() => previouslyFocused.focus({ preventScroll: true }));
+    }
   };
   const onKeyDown = (event) => {
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); return; }
@@ -432,6 +453,7 @@ export function openDrawer({ title, subtitle = null, content = [], actions = [],
     ...(actions.length ? [element('footer', { className: 'drawer-footer' }, actions)] : [])
   );
   overlay.appendChild(panel);
+  claimOverlaySlot(close);
   root.replaceChildren(overlay);
   document.body.style.overflow = 'hidden';
   document.addEventListener('keydown', onKeyDown, true);
@@ -443,7 +465,7 @@ export function confirmDialog({ title = 'Confirm deletion', description, confirm
   return openDialog({
     title,
     description,
-    content: [element('div', { className: 'sm:col-span-2' }, [element('p', { className: 'text-sm leading-6 text-muted', text: description })])],
+    content: [],
     submitLabel: confirmLabel,
     submitClassName: 'button-danger',
     pendingLabel: 'Deleting…',

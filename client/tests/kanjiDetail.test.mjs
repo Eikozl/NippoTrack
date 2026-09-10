@@ -226,11 +226,16 @@ test('CSS composes desktop/tablet/mobile with the square-panel hook', () => {
 
 // --- dialog width plumbing -----------------------------------------------------
 
-test('kanji dialog widens on desktop without changing shared dialog behavior', () => {
+test('kanji detail opens in the read-first drawer without changing shared dialog behavior', () => {
   const ui = readSource('src/ui.js');
   assert.ok(ui.includes('panelClass'), 'openDialog accepts a panel class');
+  assert.ok(ui.includes('openDrawer'), 'drawer primitive exists for read-first detail');
   const entity = readSource('src/pages/entityPage.js');
-  assert.ok(entity.includes("panelClass: 'dialog-panel--kanji-detail'"), 'owned kanji detail requests the wide panel');
+  // v5.1-E detail model: collection detail (incl. kanji) opens in the
+  // contextual drawer (desktop panel / mobile sheet); editing stays an
+  // explicit dialog action. The wide dialog panel is superseded, not broken:
+  // vocabulary/grammar dialogs never used it either.
+  assert.ok(entity.includes('openDrawer('), 'owned detail opens in the drawer');
   assert.ok(!entity.includes('dialog-panel--vocabulary') && !entity.includes('dialog-panel--grammar'), 'vocabulary/grammar dialogs unchanged');
   assert.ok(ui.includes("event.key === 'Escape'") && ui.includes('document.activeElement === first'), 'focus trap + ESC intact');
 });
