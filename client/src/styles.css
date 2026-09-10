@@ -572,18 +572,18 @@ nav .nav-group-label:first-child { margin-top: 0; }
    tests slice from their marker to EOF — E styles must never land inside
    that slice. */
 
-/* Page entrance: route content arrives deliberately (opacity + 6px rise,
-   220ms). CSS-only fallback on first child. Never loops; reduced-motion
-   removes the translate. */
-.page-enter { animation: nt-page-enter var(--nt-motion-page); }
-@keyframes nt-page-enter { from { opacity: 0; transform: translateY(var(--nt-motion-enter-distance)); } to { opacity: 1; transform: none; } }
-#app-content > section:first-child { animation: nt-page-enter var(--nt-motion-page); }
+/* Page entrance: route content arrives deliberately — clearly perceptible
+   but calm (280ms, 12px rise + fade). CSS-only fallback on first child.
+   Never loops; reduced-motion removes the translate. */
+.page-enter { animation: nt-page-enter 280ms ease-out; }
+@keyframes nt-page-enter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+#app-content > section:first-child { animation: nt-page-enter 280ms ease-out; }
 
 /* Section stagger: only explicit .reveal-group children participate, max 3
-   items, 60ms steps. Long lists never stagger (perf + calm). */
-.reveal-group > *:nth-child(1) { animation: nt-page-enter var(--nt-motion-page); }
-.reveal-group > *:nth-child(2) { animation: nt-page-enter var(--nt-motion-page) 60ms backwards; }
-.reveal-group > *:nth-child(3) { animation: nt-page-enter var(--nt-motion-page) 120ms backwards; }
+   items, 70ms steps. Long lists never stagger (perf + calm). */
+.reveal-group > *:nth-child(1) { animation: nt-page-enter 280ms ease-out; }
+.reveal-group > *:nth-child(2) { animation: nt-page-enter 280ms ease-out 70ms backwards; }
+.reveal-group > *:nth-child(3) { animation: nt-page-enter 280ms ease-out 140ms backwards; }
 
 /* Drawer / detail model: desktop right-side contextual panel, mobile
    full-screen sheet. Layered above collection (z-50, same as dialogs;
@@ -630,11 +630,19 @@ nav .nav-group-label:first-child { margin-top: 0; }
   .detail-header, .detail-body, .detail-footer { padding-left: 1rem; padding-right: 1rem; }
 }
 
-/* Card/surface interaction: calm hover lift on linked cards only; plain
-   surfaces stay still so hierarchy stays honest. */
-.metric-link, .collection-card--interactive { transition: box-shadow var(--nt-motion-micro), transform var(--nt-motion-micro), background-color var(--nt-motion-micro); }
-.metric-link:hover, .collection-card--interactive:hover { box-shadow: var(--nt-shadow-md); transform: translateY(-1px); }
-.collection-card { transition: box-shadow var(--nt-motion-micro), background-color var(--nt-motion-micro); }
+/* Card/surface interaction: VISIBLE response on linked/interactive cards —
+   border draws the accent, background warms, elevation lifts. Plain surfaces
+   stay still so hierarchy stays honest. Pressed states are tactile
+   (scale .99, ~100ms); keyboard focus-within mirrors hover. */
+.metric-link, .collection-card--interactive { transition: box-shadow var(--nt-motion-micro), transform var(--nt-motion-micro), background-color var(--nt-motion-micro), border-color var(--nt-motion-micro); }
+.metric-link:hover, .collection-card--interactive:hover { background: color-mix(in srgb, var(--jlt-surface) 70%, var(--jlt-primary-soft)); border-color: color-mix(in srgb, var(--jlt-primary) 30%, transparent); box-shadow: var(--nt-shadow-md); transform: translateY(-1px); }
+.metric-link:active, .collection-card--interactive:active { transform: translateY(0) scale(0.99); }
+.metric-link:focus-within, .collection-card--interactive:focus-within { border-color: color-mix(in srgb, var(--jlt-primary) 30%, transparent); }
+.collection-card { transition: box-shadow var(--nt-motion-micro), background-color var(--nt-motion-micro), border-color var(--nt-motion-micro), transform var(--nt-motion-micro); }
+
+/* Buttons: tactile press (scale .98) on top of the existing color states. */
+.button-primary:active, .button-secondary:active, .button-danger:active, .button-ghost:active { transform: scale(0.98); }
+.button-primary, .button-secondary, .button-danger, .button-ghost { transition: box-shadow 160ms ease, background-color 160ms ease, color 160ms ease, transform 100ms ease; }
 
 /* Collection density: quiet toolbar strip (de-carded filter bar) + dense
    entity rows with PRIMARY (Japanese identity) / SECONDARY (reading-meaning)
@@ -686,14 +694,18 @@ nav .nav-group-label:first-child { margin-top: 0; }
 .metric-card--featured { border-color: color-mix(in srgb, var(--jlt-primary) 32%, transparent); box-shadow: var(--nt-shadow-md); }
 .activity-calendar-day.is-today { outline: 2px solid var(--jlt-primary); outline-offset: 1px; }
 
-/* Analyzer result entrance: sections arrive once (200ms), cards stay still
-   so long lists never stagger. */
-.analyzer-result { animation: nt-page-enter var(--nt-motion-page); }
+/* Analyzer result entrance: sections arrive once with a restrained short
+   stagger (3 chapters max, 70ms steps). Individual lexical cards never
+   stagger. */
+.analyzer-result { animation: nt-page-enter 280ms ease-out; }
+.analyzer-chapter { animation: nt-page-enter 260ms ease-out backwards; }
+.analyzer-chapter:nth-of-type(2) { animation-delay: 70ms; }
+.analyzer-chapter:nth-of-type(3) { animation-delay: 140ms; }
 
 /* Review focus: sticky candidate footer keeps Start visible; thin progress
    track mirrors the announced count; card entrance is a single fade. */
 .review-sticky-footer { position: sticky; bottom: 1rem; z-index: 5; }
-.review-progress-track { height: 6px; overflow: hidden; border-radius: 999px; background: var(--jlt-surface-soft); border: 1px solid var(--nt-border-subtle); }
+.review-progress-track { height: 8px; overflow: hidden; border-radius: 999px; background: var(--jlt-surface-soft); border: 1px solid var(--nt-border-subtle); }
 .review-progress-fill { height: 100%; border-radius: inherit; background: var(--jlt-primary); }
 .review-card { animation: nt-page-enter var(--nt-motion-component); }
 
@@ -710,7 +722,7 @@ nav .nav-group-label:first-child { margin-top: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .analyzer-result, .review-card { animation: none !important; }
+  .analyzer-result, .analyzer-chapter, .review-card { animation: none !important; }
 }
 
 /* v5.1-A.2 first-experience onboarding — calm editorial transitions.

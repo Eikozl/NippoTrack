@@ -169,8 +169,8 @@ export async function renderAnalyzer(container) {
     const filterBar = element('div', { className: 'flex min-w-0 flex-wrap gap-2', attrs: { role: 'group', 'aria-label': 'Filter analyzed kanji' } });
     const grid = element('ul', { className: 'grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3' });
     const importBar = element('div', { className: 'surface flex min-w-0 flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between' });
-    const lexicalSection = element('section', { className: 'surface min-w-0 p-4 sm:p-5', attrs: { 'aria-label': 'Vocabulary analysis' } });
-    const grammarSection = element('section', { className: 'surface min-w-0 p-4 sm:p-5', attrs: { 'aria-label': 'Grammar analysis' } });
+    const lexicalSection = element('section', { className: 'surface analyzer-chapter min-w-0 p-4 sm:p-5', attrs: { 'aria-label': 'Vocabulary analysis' } });
+    const grammarSection = element('section', { className: 'surface analyzer-chapter min-w-0 p-4 sm:p-5', attrs: { 'aria-label': 'Grammar analysis' } });
 
     const renderGrammar = () => {
       grammarSection.replaceChildren(element('h2', { className: 'font-semibold text-ink', text: 'Grammar' }));
@@ -851,7 +851,7 @@ export async function renderAnalyzer(container) {
     // v5.1-E information architecture: Summary → Vocabulary → Grammar →
     // Kanji → quiet reference caption → notice. Usefulness order; the
     // kanji filter/grid/import stay grouped as one Kanji chapter.
-    const kanjiChapter = element('section', { className: 'surface min-w-0 p-4 sm:p-5', attrs: { 'aria-label': 'Kanji analysis' } }, [
+    const kanjiChapter = element('section', { className: 'surface analyzer-chapter min-w-0 p-4 sm:p-5', attrs: { 'aria-label': 'Kanji analysis' } }, [
       element('h2', { className: 'font-semibold text-ink', text: 'Kanji' }),
       element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: `${summary.uniqueKanji} unique · ${summary.totalOccurrences} occurrences · ${summary.inCollection} in collection · ${summary.availableToAdd} available · ${summary.noReferenceData} no reference` }),
       element('div', { className: 'mt-3' }, [filterBar]),

@@ -534,7 +534,7 @@ function recordCard(item, config, onView, onEdit, onDelete) {
   editButton.addEventListener('click', () => onEdit(item));
   deleteButton.addEventListener('click', () => onDelete(item));
 
-  return element('article', { className: 'surface collection-card flex min-h-48 flex-col p-5' }, [
+  return element('article', { className: 'surface collection-card collection-card--interactive flex min-h-48 flex-col p-5' }, [
     element('div', { className: 'flex items-start justify-between gap-4' }, [
       element('div', { className: 'flex min-w-0 items-start gap-3' }, [
         iconTile(iconForTitle(config.title), { className: 'preview-icon shrink-0' }),
@@ -565,7 +565,7 @@ export function renderEntityPage(container, config) {
     ...STATUS_OPTIONS.map((option) => element('option', { text: option.label, attrs: { value: option.value } }))
   ]);
   const results = element('div');
-  const filterBar = element('div', { className: 'toolbar-strip surface mb-5 grid gap-3 p-4 sm:grid-cols-[minmax(14rem,1fr)_10rem_11rem]' }, [search, jlpt, status]);
+  const filterBar = element('div', { className: 'surface mb-5 grid gap-3 p-4 sm:grid-cols-[minmax(14rem,1fr)_10rem_11rem]' }, [search, jlpt, status]);
   const page = element('section', {}, [
     pageHeader({ eyebrow: config.eyebrow, title: config.title, description: config.description, action: addButton }),
     filterBar,
