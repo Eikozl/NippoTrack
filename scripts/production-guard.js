@@ -22,6 +22,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const PRODUCTION_PROJECT_REF = 'milayuvlajmgrcxmrxdg';
+const PRODUCTION_MAINTENANCE_ACKNOWLEDGEMENT = 'I_UNDERSTAND_THIS_TARGETS_PRODUCTION';
 
 const REFUSAL_MESSAGE = 'Refusing to start development server against Production. Use a safe local or integration environment instead.';
 
@@ -200,9 +201,15 @@ function assertSafeDbTarget({ host, user, source = 'explicit target' } = {}) {
 // project ref is supplied, at least one non-secret identity field must resolve
 // to it and no resolvable field may point elsewhere. This is intentionally
 // opt-in so ordinary local development keeps its existing safe-local support.
-function assertExpectedDbTarget({ host, user, expectedRef = process.env.JLT_EXPECTED_SUPABASE_PROJECT_REF, source = 'explicit target' } = {}) {
-  const safe = assertSafeDbTarget({ host, user, source });
+function assertExpectedDbTarget({
+  host,
+  user,
+  expectedRef = process.env.JLT_EXPECTED_SUPABASE_PROJECT_REF,
+  productionMaintenanceAcknowledgement = process.env.JLT_PRODUCTION_MAINTENANCE_ACKNOWLEDGEMENT,
+  source = 'explicit target'
+} = {}) {
   if (expectedRef === undefined || expectedRef === null || String(expectedRef).trim() === '') {
+    const safe = assertSafeDbTarget({ host, user, source });
     return { ...safe, expectedRef: null, resolvedRef: null };
   }
   const expected = String(expectedRef).trim().toLowerCase();
@@ -211,14 +218,25 @@ function assertExpectedDbTarget({ host, user, expectedRef = process.env.JLT_EXPE
   if (!resolved.length) {
     throw new Error(`Refusing database command: could not resolve the expected Supabase project ref '${expected}' from ${source}; refusing before any database connection.`);
   }
+  if (resolved.includes(PRODUCTION_PROJECT_REF) && expected !== PRODUCTION_PROJECT_REF) {
+    assertSafeDbTarget({ host, user, source });
+  }
   if (resolved.length !== 1 || resolved[0] !== expected) {
     throw new Error(`Refusing database command: expected Supabase project ref '${expected}' but resolved '${resolved.join(',')}' from ${source}; refusing before any database connection.`);
   }
+  if (expected === PRODUCTION_PROJECT_REF) {
+    if (productionMaintenanceAcknowledgement !== PRODUCTION_MAINTENANCE_ACKNOWLEDGEMENT) {
+      throw new Error(`Refusing database command: Production project ref '${PRODUCTION_PROJECT_REF}' requires an explicit Production-maintenance acknowledgement before any database connection.`);
+    }
+    return { host: host === undefined ? null : String(host), user: user === undefined ? null : String(user), source, expectedRef: expected, resolvedRef: resolved[0] };
+  }
+  const safe = assertSafeDbTarget({ host, user, source });
   return { ...safe, expectedRef: expected, resolvedRef: resolved[0] };
 }
 
 module.exports = {
   PRODUCTION_PROJECT_REF,
+  PRODUCTION_MAINTENANCE_ACKNOWLEDGEMENT,
   REFUSAL_MESSAGE,
   CLIENT_REFUSAL_MESSAGE,
   MISMATCH_MESSAGE,

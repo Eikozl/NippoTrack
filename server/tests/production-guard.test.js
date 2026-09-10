@@ -285,3 +285,34 @@ test('exact DB target guard requires one resolvable identity equal to the declar
     /Production project ref/
   );
 });
+
+test('Production maintenance requires the exact target and an explicit acknowledgement', () => {
+  const target = {
+    host: 'aws-0-us-east-2.pooler.supabase.com',
+    user: `postgres.${PROD}`,
+    expectedRef: PROD,
+    source: 'production admin config'
+  };
+
+  assert.throws(
+    () => guard.assertExpectedDbTarget(target),
+    /explicit Production-maintenance acknowledgement/
+  );
+  assert.throws(
+    () => guard.assertExpectedDbTarget({ ...target, productionMaintenanceAcknowledgement: 'incorrect' }),
+    /explicit Production-maintenance acknowledgement/
+  );
+  assert.deepEqual(
+    guard.assertExpectedDbTarget({
+      ...target,
+      productionMaintenanceAcknowledgement: guard.PRODUCTION_MAINTENANCE_ACKNOWLEDGEMENT
+    }),
+    {
+      host: target.host,
+      user: target.user,
+      source: target.source,
+      expectedRef: PROD,
+      resolvedRef: PROD
+    }
+  );
+});
