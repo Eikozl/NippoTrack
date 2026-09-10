@@ -70,8 +70,11 @@ const translations = {
     'Strokes': 'Trazos',
     'On’yomi': 'On’yomi',
     'Kun’yomi': 'Kun’yomi',
-    'Examples of use': 'Ejemplos de uso',
-    'Shared reference examples are not available yet. This page currently shows the canonical JLPT reference data for this kanji.': 'Los ejemplos de referencia compartidos aún no están disponibles. Esta página muestra actualmente los datos de referencia JLPT canónicos de este kanji.',
+    'Vocabulary examples': 'Ejemplos de vocabulario',
+    // NOTE: the dictionary provenance label is deliberately untranslated and
+    // therefore has no entry here (frozen provenance rule).
+    'No reference vocabulary examples available.': 'No hay ejemplos de vocabulario de referencia disponibles.',
+    'Reference vocabulary is currently unavailable.': 'El vocabulario de referencia no está disponible en este momento.',
     'This kanji is not present in the shared JLPT reference data.': 'Este kanji no está incluido en los datos de referencia JLPT compartidos.',
     'Matching kanji': 'Kanji coincidentes',
     'Looking up kanji reference…': 'Buscando referencia de kanji…',

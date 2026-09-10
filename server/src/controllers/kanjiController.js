@@ -14,6 +14,7 @@ const {
 const { fetchEntityById, rollbackAndRelease } = require('./helpers');
 const { executePaginatedList } = require('./listHelpers');
 const { findKanjiReferenceId, getKanjiReferenceById, lookupKanjiReference: lookupReference, searchKanjiReferences } = require('../services/kanjiReference');
+const { fetchKanjiVocabularyExamples } = require('../services/kanjiVocabularyExamples');
 const { findUserKanjiByCharacter } = require('../services/kanjiLearning');
 const { getKanjiEncounterSummary } = require('../services/kanjiEncounters');
 
@@ -216,7 +217,11 @@ async function lookupKanjiReference(req, res) {
   try {
     const reference = await lookupReference(req.params.character);
     if (!reference) return res.status(404).json({ error: 'Kanji reference not found.' });
-    return res.json(reference);
+    // Supplementary reference vocabulary: additive only, fail-open. The
+    // core reference identity (character/meanings/readings/JLPT/strokes)
+    // is resolved above and never depends on this.
+    const examples = await fetchKanjiVocabularyExamples(req.params.character);
+    return res.json({ ...reference, vocabularyExamples: examples.examples, vocabularyExamplesStatus: examples.status });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to look up kanji reference.' });
   }

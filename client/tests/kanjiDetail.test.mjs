@@ -201,7 +201,7 @@ test('no info dropped: every pre-B.1 datum still renders from entityPage or the 
     assert.ok(owned.includes(expected), `owned detail keeps "${expected}"`);
   }
   const reference = readSource('src/pages/kanjiReference.js') + '\n' + readSource('src/kanjiDetail.js');
-  for (const expected of ['On’yomi', 'Kun’yomi', 'JLPT level', 'Strokes', 'Not set', 'Examples of use', 'not an official syllabus']) {
+  for (const expected of ['On’yomi', 'Kun’yomi', 'JLPT level', 'Strokes', 'Not set', 'Vocabulary examples', 'not an official syllabus']) {
     assert.ok(reference.includes(expected), `reference page keeps "${expected}"`);
   }
 });

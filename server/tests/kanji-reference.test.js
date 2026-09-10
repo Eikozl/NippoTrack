@@ -71,19 +71,28 @@ test('GET /api/kanji/lookup/:character returns shared reference metadata only', 
     try {
       const response = await fetch(`http://127.0.0.1:${server.address().port}/api/kanji/lookup/%E6%97%A5`);
       assert.equal(response.status, 200);
-      assert.deepEqual(await response.json(), {
-        referenceId: 12,
-        character: '日',
-        jlptLevel: 'N5',
-        onyomi: ['ニチ', 'ジツ'],
-        kunyomi: ['ひ', 'か'],
-        meanings: ['day', 'sun'],
-        strokeCount: 4
-      });
-      assert.equal(calls.length, 1);
+      const body = await response.json();
+      // Frozen core identity semantics (additive examples ride alongside).
+      assert.equal(body.referenceId, 12);
+      assert.equal(body.character, '日');
+      assert.equal(body.jlptLevel, 'N5');
+      assert.deepEqual(body.onyomi, ['ニチ', 'ジツ']);
+      assert.deepEqual(body.kunyomi, ['ひ', 'か']);
+      assert.deepEqual(body.meanings, ['day', 'sun']);
+      assert.equal(body.strokeCount, 4);
+      // The stub answers every query with the reference row, which carries
+      // no JMdict surface — so selection yields zero examples, status ok.
+      assert.deepEqual(body.vocabularyExamples, []);
+      assert.equal(body.vocabularyExamplesStatus, 'ok');
+      // Bounded: reference lookup + one examples query, no N+1, no probe
+      // (probe runs only when the examples query returns zero rows).
+      assert.equal(calls.length, 2);
       assert.match(calls[0].sql, /FROM kanji_reference/i);
       assert.doesNotMatch(calls[0].sql, /\bFROM kanji\b|user_id/i);
       assert.deepEqual(calls[0].params, ['日']);
+      assert.match(calls[1].sql, /jmdict_forms/i);
+      assert.deepEqual(calls[1].params, ['日']);
+      assert.doesNotMatch(calls[1].sql, /\bFROM kanji\b|user_id/i);
     } finally {
       await stopServer(server);
     }
