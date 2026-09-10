@@ -1,10 +1,10 @@
 const { Pool } = require('pg');
-const dotenv = require('dotenv');
+const path = require('node:path');
 const { postgresSslConfig } = require('./postgresSsl');
 const supabaseCa = require('./supabaseCa');
+const { loadRuntimeEnvironment } = require('./runtimeEnvironment');
 
-dotenv.config({ path: process.env.POSTGRES_ENV_FILE || '.env.postgres' });
-dotenv.config({ path: process.env.POSTGRES_RUNTIME_ENV_FILE || '.env.runtime' });
+loadRuntimeEnvironment({ directory: path.resolve(__dirname, '../..') });
 
 function value(name, { allowEmpty = false } = {}) {
   const item = process.env[name];
