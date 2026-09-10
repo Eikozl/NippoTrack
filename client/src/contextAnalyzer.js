@@ -201,7 +201,7 @@ export function truncationNotes(item) {
   const notes = [];
   if (item?.dictionaryMatch?.lookupTruncated === true) notes.push('More dictionary matches exist.');
   if (item?.interpretation?.evaluationTruncated === true) {
-    notes.push('JLT kept this result ambiguous because not every dictionary possibility could be evaluated.');
+    notes.push('NippoTrack kept this result ambiguous because not every dictionary possibility could be evaluated.');
   }
   const remaining = item?.interpretation?.remainingCount || 0;
   if (remaining > 0 && item?.interpretation?.status === 'AMBIGUOUS') notes.push('More meanings exist.');
@@ -253,7 +253,7 @@ export function contextItemModel(item) {
     return {
       kind: 'ambiguous-unique',
       heading: 'Possible meanings',
-      subheading: "JLT couldn't reliably distinguish one meaning from this context.",
+      subheading: "NippoTrack couldn't reliably distinguish one meaning from this context.",
       readings,
       choices: senseChoices(item),
       moreMeanings: (item?.interpretation?.remainingCount || 0) > 0,

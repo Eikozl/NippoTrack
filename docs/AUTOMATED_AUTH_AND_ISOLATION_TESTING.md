@@ -3,8 +3,8 @@
 ## Boundaries
 
 - Use a disposable Supabase integration project or the local Supabase stack only.
-- Never point destructive tests at the existing JLT Supabase DEV project or a future production project.
-- `SUPABASE_INTEGRATION_SECRET_KEY` is an Auth-admin test secret. It is used only by the integration harness, never by JLT's browser or Express runtime.
+- Never point destructive tests at the existing NippoTrack Supabase DEV project or a future production project.
+- `SUPABASE_INTEGRATION_SECRET_KEY` is an Auth-admin test secret. It is used only by the integration harness, never by NippoTrack's browser or Express runtime.
 - The application still reads and writes learning data only through Express and `jlt_runtime`.
 
 ## Automated two-user harness
@@ -75,7 +75,7 @@ npm.cmd run supabase:start
 
 The local stack captures Auth emails rather than sending them externally. Its Mailpit inbox is available on `http://127.0.0.1:54324`, letting you verify confirmation and recovery messages without creating real mailboxes. Supabase documents local email capture through Mailpit and reserves production email for a configured SMTP provider. [Supabase local email testing](https://supabase.com/docs/guides/local-development/cli/testing-and-linting)
 
-Before running JLT against the local stack, apply the existing PostgreSQL baseline/migrations and provision `jlt_runtime` on that **local** database only. Never use `supabase db reset --linked` against JLT DEV or production.
+Before running NippoTrack against the local stack, apply the existing PostgreSQL baseline/migrations and provision `jlt_runtime` on that **local** database only. Never use `supabase db reset --linked` against NippoTrack DEV or production.
 
 ## Production SMTP
 

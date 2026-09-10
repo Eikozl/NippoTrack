@@ -1,6 +1,6 @@
-# Japanese Learning Tracker
+# NippoTrack
 
-Japanese Learning Tracker (JLT) is a web app for recording Japanese study and review activity.
+NippoTrack is a web app for recording Japanese study and review activity.
 
 ## Data Sources / Attribution
 

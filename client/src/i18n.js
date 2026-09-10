@@ -25,7 +25,6 @@ const translations = {
     'Create account': 'Crear cuenta',
     'Forgot password?': '¿Olvidaste tu contraseña?',
     'Back to sign in': 'Volver al inicio de sesión',
-    'Japanese Learning Tracker': 'Japanese Learning Tracker',
     'NippoTrack': 'NippoTrack',
     'Your personal space to build a steady Japanese study practice.': 'Tu espacio personal para crear una práctica constante de japonés.',
     'Confirm your email before accessing your private workspace.': 'Confirma tu correo antes de acceder a tu espacio privado.',

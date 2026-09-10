@@ -66,7 +66,7 @@ const CONF_MODERATE_MIN_TOTAL = 15;
 const CONF_HIGH_MIN_TOTAL = 50;
 const CONF_HIGH_MIN_RETAINED = 25;
 
-const ESTIMATE_DISCLAIMER = 'This is a JLT study estimate based on reviewed kanji only — not an official JLPT assessment, certification, or proof of passing.';
+const ESTIMATE_DISCLAIMER = 'This is a NippoTrack study estimate based on reviewed kanji only — not an official JLPT assessment, certification, or proof of passing.';
 
 function normalizeBand(value) {
   if (typeof value !== 'string') return null;
@@ -192,10 +192,10 @@ function estimateStudyLevel({ bandRows, totals, unclassifiedEligible }) {
 
 function buildLimitations({ unclassified, exposure }) {
   const limitations = [
-    'JLT study estimate only — not an official JLPT assessment, certification, or proof of passing an exam.',
+    'NippoTrack study estimate only — not an official JLPT assessment, certification, or proof of passing an exam.',
     'Reference JLPT classifications come from the community OpenJLPT overlay, not an official JLPT syllabus.',
     'Only reviewed kanji count: imports, collection size, status labels, and pasted Analyzer text are not evidence of knowledge.',
-    'Review results (Again/Hard/Good) carry no pass/fail meaning in JLT, so repetition — not grades — is the retention signal.'
+    'Review results (Again/Hard/Good) carry no pass/fail meaning in NippoTrack, so repetition — not grades — is the retention signal.'
   ];
   if (unclassified > 0) {
     limitations.push(`${unclassified} reviewed kanji have no reference JLPT classification and were excluded from band counts.`);

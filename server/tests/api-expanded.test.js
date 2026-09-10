@@ -449,7 +449,7 @@ test('GET /api/export returns a complete read-only JSON backup contract', async 
       const data = await response.json();
 
       assert.equal(response.status, 200);
-      assert.match(response.headers.get('content-disposition') || '', /^attachment; filename="jlt-backup-\d{4}-\d{2}-\d{2}\.json"$/);
+      assert.match(response.headers.get('content-disposition') || '', /^attachment; filename="nippotrack-backup-\d{4}-\d{2}-\d{2}\.json"$/);
       assert.equal(response.headers.get('cache-control'), 'no-store');
       assert.equal(data.version, 1);
       assert.equal(data.database, 'jlt');

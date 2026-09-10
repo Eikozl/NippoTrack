@@ -381,5 +381,5 @@ test('Phase 9: server payload feeds the client dashboard model directly', async 
   assert.ok(model, 'client model must accept the live server payload');
   assert.equal(model.metricValue, result.body.estimate.level);
   assert.equal(model.disclaimer, result.body.disclaimer);
-  assert.match(model.metricNote, /JLT estimate/);
+  assert.match(model.metricNote, /NippoTrack estimate/);
 });

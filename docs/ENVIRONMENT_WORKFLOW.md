@@ -1,6 +1,6 @@
 # Environment workflow
 
-JLT uses one application codebase with explicit runtime configuration. Authentication
+NippoTrack uses one application codebase with explicit runtime configuration. Authentication
 behavior is identical in every environment; only the configured Supabase and PostgreSQL
 targets change.
 

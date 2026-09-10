@@ -22,13 +22,13 @@ const NOT_USED_LINES = [
   'Reference data availability or other users’ data'
 ];
 
-const FALLBACK_DISCLAIMER = 'This is a JLT study estimate based on reviewed kanji only — not an official JLPT assessment, certification, or proof of passing.';
+const FALLBACK_DISCLAIMER = 'This is a NippoTrack study estimate based on reviewed kanji only — not an official JLPT assessment, certification, or proof of passing.';
 
 const FALLBACK_OPENJLPT_LIMITATION =
   'Reference JLPT classifications come from the community OpenJLPT overlay, not an official JLPT syllabus.';
 
 const INSUFFICIENT_GUIDANCE =
-  'Keep studying and reviewing. JLT needs at least 5 reviewed kanji with a reference JLPT classification before it can estimate your study band.';
+  'Keep studying and reviewing. NippoTrack needs at least 5 reviewed kanji with a reference JLPT classification before it can estimate your study band.';
 
 function bandRows(distribution) {
   const source = distribution && typeof distribution === 'object' ? distribution : {};
@@ -88,7 +88,7 @@ function levelEstimateModel(payload) {
     confidence: estimate.confidence || 'low',
     approachingBand: approaching,
     metricValue: estimate.level,
-    metricNote: `${confidenceLabel} · JLT estimate`,
+    metricNote: `${confidenceLabel} · NippoTrack estimate`,
     headline: `Estimated study level: ${estimate.level}`,
     subline: `Your reviewed-kanji evidence is most consistent with ${estimate.level}-band kanji study (reference bands, kanji only).` +
       (approaching ? ` Approaching ${approaching}.` : ''),

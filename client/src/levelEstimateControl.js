@@ -75,9 +75,9 @@ export function startingPointShortText(starting) {
 }
 
 export function levelControlLabel(model, starting = null) {
-  if (!model) return 'JLT estimated study level';
-  if (model.status === 'estimated' && model.level) return `JLT estimated study level: ${model.level}`;
-  return startingPointLabel(starting) || 'JLT estimated study level: not enough evidence yet';
+  if (!model) return 'NippoTrack estimated study level';
+  if (model.status === 'estimated' && model.level) return `NippoTrack estimated study level: ${model.level}`;
+  return startingPointLabel(starting) || 'NippoTrack estimated study level: not enough evidence yet';
 }
 
 export function levelControlShortText(model, starting = null) {

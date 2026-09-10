@@ -125,7 +125,7 @@ test('Context-Aware analyzer browser integration', { skip: !process.env.JLT_BROW
     assert.match(result, /Possible meanings/);
     assert.match(result, /to go/);
     assert.match(result, /to proceed/);
-    assert.match(result, /JLT couldn't reliably distinguish one meaning/);
+    assert.match(result, /NippoTrack couldn't reliably distinguish one meaning/);
     assert.match(result, /Multiple dictionary matches/);
     assert.match(result, /橋 — bridge/);
     assert.match(result, /JMdict/);

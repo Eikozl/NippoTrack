@@ -84,7 +84,7 @@ test('OpenJLPT overlap takes KANJIDIC2 fields plus JLPT classification', () => {
   assert.deepEqual(report.openjlptOnly, []);
 });
 
-test('legacy KANJIDIC2 jlpt codes never become JLT levels', () => {
+test('legacy KANJIDIC2 jlpt codes never become NippoTrack levels', () => {
   const { references } = buildFixture();
   for (const reference of references) {
     assert.ok(reference.jlpt_level === null || ['N5', 'N4', 'N3', 'N2', 'N1'].includes(reference.jlpt_level));

@@ -582,8 +582,8 @@ const estimatedPayload = () => ({
   evidence: { eligibleKanji: 8, reviewedKanji: 8, collectedKanji: 12 },
   distribution: {},
   reasoning: ['8 reviewed kanji with reference JLPT classifications.'],
-  limitations: ['JLT study estimate only.'],
-  disclaimer: 'This is a JLT study estimate based on reviewed kanji only.'
+  limitations: ['NippoTrack study estimate only.'],
+  disclaimer: 'This is a NippoTrack study estimate based on reviewed kanji only.'
 });
 
 const insufficientPayload = () => ({
@@ -591,8 +591,8 @@ const insufficientPayload = () => ({
   evidence: { eligibleKanji: 2, reviewedKanji: 2, collectedKanji: 10 },
   distribution: {},
   reasoning: ['Only 2 reviewed kanji found (5 needed).'],
-  limitations: ['JLT study estimate only.'],
-  disclaimer: 'This is a JLT study estimate based on reviewed kanji only.'
+  limitations: ['NippoTrack study estimate only.'],
+  disclaimer: 'This is a NippoTrack study estimate based on reviewed kanji only.'
 });
 
 function quizStartingFx() {
@@ -657,7 +657,7 @@ test('header fallback labels are presentation-only and never evidence wording', 
   assert.equal(startingPointShortText({ estimate: 'N2', source: 'self_reported' }), 'N2');
   assert.equal(startingPointShortText(null), null);
   // Legacy signatures keep working without a starting point.
-  assert.equal(levelControlLabel(null), 'JLT estimated study level');
+  assert.equal(levelControlLabel(null), 'NippoTrack estimated study level');
   assert.equal(levelControlShortText(null), '—');
 });
 
@@ -704,7 +704,7 @@ test('header fallback: real evidence always wins over the starting level', async
   const button = face();
   assert.equal(button.querySelector('[data-level-text]').textContent, 'N5');
   assert.equal(button.querySelector('.level-estimate-title').textContent, 'Estimated study level');
-  assert.equal(button.getAttribute('aria-label'), 'JLT estimated study level: N5');
+  assert.equal(button.getAttribute('aria-label'), 'NippoTrack estimated study level: N5');
   click(button);
   const detail = headerTextOf(morph());
   assert.ok(!detail.includes('Starting level'), 'starting level untouched while evidence shows');
@@ -715,7 +715,7 @@ test('header fallback: no starting level keeps the legacy insufficient state', a
   const { control, face } = setupHeader({ starting: null });
   await control.load();
   assert.equal(face().querySelector('[data-level-text]').textContent, '—');
-  assert.equal(face().getAttribute('aria-label'), 'JLT estimated study level: not enough evidence yet');
+  assert.equal(face().getAttribute('aria-label'), 'NippoTrack estimated study level: not enough evidence yet');
   assert.equal(face().querySelector('.level-estimate-title').textContent, 'Estimated study level');
   control.destroy();
 

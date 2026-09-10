@@ -110,7 +110,7 @@ function buildLimitations(unclassified) {
     'Reference Kanji coverage only — not official JLPT completion, exam readiness, or proof of passing an exam.',
     'Reference totals come from the community OpenJLPT overlay and may change as reference data is updated; they are not an official JLPT syllabus.',
     'Only reviewed kanji count as progress: imports, collection size, status labels, encounters, and pasted Analyzer text are not evidence of knowledge.',
-    'Review results (Again/Hard/Good) carry no pass/fail meaning in JLT, so repeated reviews — not grades — are the stronger signal.'
+    'Review results (Again/Hard/Good) carry no pass/fail meaning in NippoTrack, so repeated reviews — not grades — are the stronger signal.'
   ];
   if (unclassified.reviewed > 0) {
     limitations.push(`${unclassified.reviewed} reviewed kanji have no reference JLPT classification and are excluded from band counts.`);

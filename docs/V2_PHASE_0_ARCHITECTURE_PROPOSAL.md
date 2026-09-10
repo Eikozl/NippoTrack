@@ -1,4 +1,4 @@
-# JLT V2 Phase 0: Database Architecture Proposal
+# NippoTrack V2 Phase 0: Database Architecture Proposal
 
 Status: **Phase 0 approved with revisions; schema migrations applied on 2026-08-30**. A verified logical backup was created before the first migration. V2 modules for structured writing, usage examples, goals, content, notes, tags, their approved relationships, review, streaks, and the activity calendar are implemented.
 

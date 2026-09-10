@@ -226,7 +226,7 @@ const estimatedPayload = () => ({
   distribution: { N5: { eligible: 8, retained: 5 }, N4: { eligible: 0, retained: 0 }, N3: { eligible: 0, retained: 0 }, N2: { eligible: 0, retained: 0 }, N1: { eligible: 0, retained: 0 } },
   reasoning: ['8 reviewed kanji with reference JLPT classifications (5 reviewed more than once).'],
   limitations: ['Reference JLPT classifications come from the community OpenJLPT overlay, not an official JLPT syllabus.'],
-  disclaimer: 'This is a JLT study estimate based on reviewed kanji only — not an official JLPT assessment, certification, or proof of passing.'
+  disclaimer: 'This is a NippoTrack study estimate based on reviewed kanji only — not an official JLPT assessment, certification, or proof of passing.'
 });
 
 const insufficientPayload = () => ({
@@ -234,8 +234,8 @@ const insufficientPayload = () => ({
   evidence: { eligibleKanji: 2, retainedKanji: 0, reviewedKanji: 2, exposureKanji: 0, collectedKanji: 10, unreviewedKanji: 8, classifiedEligibleKanji: 2, unclassifiedEligibleKanji: 0 },
   distribution: { N5: { eligible: 2, retained: 0 }, N4: { eligible: 0, retained: 0 }, N3: { eligible: 0, retained: 0 }, N2: { eligible: 0, retained: 0 }, N1: { eligible: 0, retained: 0 } },
   reasoning: ['Only 2 reviewed kanji with a reference JLPT classification found (5 needed for an estimate).'],
-  limitations: ['JLT study estimate only.'],
-  disclaimer: 'This is a JLT study estimate based on reviewed kanji only — not an official JLPT assessment, certification, or proof of passing.'
+  limitations: ['NippoTrack study estimate only.'],
+  disclaimer: 'This is a NippoTrack study estimate based on reviewed kanji only — not an official JLPT assessment, certification, or proof of passing.'
 });
 
 function setup({ payload = estimatedPayload(), reducedMotion = false, narrowViewport = false } = {}) {
@@ -276,7 +276,7 @@ test('Header morph: collapsed state shows the bare level, first in the header gr
   assert.equal(desktopHost.firstElementChild, desktopWrapper, 'level control precedes theme/account controls');
   assert.equal(button.tagName, 'BUTTON');
   assert.equal(button.querySelector('[data-level-text]').textContent, 'N5');
-  assert.equal(button.getAttribute('aria-label'), 'JLT estimated study level: N5');
+  assert.equal(button.getAttribute('aria-label'), 'NippoTrack estimated study level: N5');
   assert.equal(button.getAttribute('aria-expanded'), 'false');
   assert.ok(button.getAttribute('aria-controls'), 'face controls the detail region');
   control.destroy();
@@ -303,8 +303,8 @@ test('Header morph: insufficient evidence renders safely, never as a level', asy
   await control.load();
   const button = face(desktopWrapper);
   assert.equal(button.querySelector('[data-level-text]').textContent, '—');
-  assert.equal(button.getAttribute('aria-label'), 'JLT estimated study level: not enough evidence yet');
-  assert.equal(levelControlLabel(null), 'JLT estimated study level');
+  assert.equal(button.getAttribute('aria-label'), 'NippoTrack estimated study level: not enough evidence yet');
+  assert.equal(levelControlLabel(null), 'NippoTrack estimated study level');
   click(button);
   assert.ok(control.isOpen());
   assert.ok(morph(desktopWrapper).classList.contains('is-open'));

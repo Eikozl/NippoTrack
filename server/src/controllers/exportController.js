@@ -23,7 +23,7 @@ async function exportBackup(req, res) {
     const date = new Date().toISOString().slice(0, 10);
 
     res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Content-Disposition', `attachment; filename="jlt-backup-${date}.json"`);
+    res.setHeader('Content-Disposition', `attachment; filename="nippotrack-backup-${date}.json"`);
     return res.json({
       version: 1,
       database: 'jlt',

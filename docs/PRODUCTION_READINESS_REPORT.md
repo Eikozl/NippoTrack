@@ -1,4 +1,4 @@
-# JLT production-readiness report
+# NippoTrack production-readiness report
 
 Audit date: 2026-08-31
 Scope: deployment hardening after the completed multi-user conversion. No Vercel project, production deployment, domain, or production Supabase setting was changed during this audit.

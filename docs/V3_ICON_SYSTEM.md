@@ -1,6 +1,6 @@
-# JLT V3 Icon System
+# NippoTrack V3 Icon System
 
-JLT uses the `lucide` package for its interface icons. It provides lightweight, outline-based SVG icons and supports importing only the icons used by the application.
+NippoTrack uses the `lucide` package for its interface icons. It provides lightweight, outline-based SVG icons and supports importing only the icons used by the application.
 
 ## Usage rules
 

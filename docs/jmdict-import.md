@@ -1,6 +1,6 @@
 # JMdict Reference Operations (CA-B1)
 
-Offline lifecycle for JLT's global Japanese–English word reference data.
+Offline lifecycle for NippoTrack's global Japanese–English word reference data.
 Companion to the frozen design in `docs/context-aware-ca-architecture.md`.
 
 ## Concepts
@@ -88,13 +88,13 @@ keep the previous snapshot as rollback target, prune older ones explicitly.
 - No `user_id` on reference tables; no user-table FK into them (asserted by
   test and by `postgres:verify-runtime-security`, which allowlists the five
   `<table>_runtime_select` policies).
-- Pasted Analyzer text never leaves JLT infrastructure: no runtime download,
+- Pasted Analyzer text never leaves NippoTrack infrastructure: no runtime download,
   no dictionary API, no external calls anywhere on this path.
 
 ## Reading applicability encoding (`re_nokanji` preserved)
 
 `jmdict-simplified` encodes XML `<re_nokanji/>` as `appliesToKanji: []`
-— it is NOT dropped. JLT maps the three states exactly:
+— it is NOT dropped. NippoTrack maps the three states exactly:
 
 - `appliesToKanji: []` → `jmdict_forms.nokanji = true` (reading applies to
   no keb; a kanji observation can never claim it — H4 direction). The

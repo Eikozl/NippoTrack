@@ -100,7 +100,7 @@ is forbidden in v1.
 Restriction-bearing: 466 entries stagk (625 senses), 805 stagr (1,043),
 4,774 re_restr forms, 6,639 applies-to-none readings. n/adj-na overlap: 3,348
 entries / 3,581 senses. Verb families: v1 3,922 · v5 8,041 · vk 38 · vs
-15,016 entries. 83 distinct POS codes observed; 82 mapped into known JLT
+15,016 entries. 83 distinct POS codes observed; 82 mapped into known NippoTrack
 audit families; 1 intentionally unknown/unclassified: `unc` (must never be
 used as a hard exclusion in CA-B2 — unknown is not incompatible). **maxSensesPerEntry = 27 ≤ 64 valve**
 (valve provably dormant on this snapshot). All 10 integrity checks green;
@@ -237,7 +237,7 @@ trusted, never recomputed).
 - UNIQUE + COMPATIBLE: `Compatible meaning` + same-sense glosses joined
   (`to begin · to start`); dictionary reading shown with `(JMdict)` cue.
 - UNIQUE + AMBIGUOUS: reading kept; `Possible meanings` + sense list +
-  `JLT couldn't reliably distinguish one meaning from this context.` First
+  `NippoTrack couldn't reliably distinguish one meaning from this context.` First
   sense never picked.
 - MULTIPLE: `Multiple dictionary matches` + headword — gloss rows, no
   authoritative reading, no entry election; `More dictionary matches exist.`

@@ -36,7 +36,7 @@ app.use('/api', apiRateLimit, requireAuthentication);
 
 app.get('/api', (req, res) => {
   res.json({
-    name: 'Japanese Learning Tracker API',
+    name: 'NippoTrack API',
     version: '2.0.0',
     endpoints: [
       'GET /api/health',

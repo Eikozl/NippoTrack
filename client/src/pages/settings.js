@@ -203,7 +203,7 @@ function renderAccountSection(slot) {
       const blobUrl = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }));
       const link = document.createElement('a');
       link.href = blobUrl;
-      link.download = `jlt-backup-${backup.exportedAt.slice(0, 10)}.json`;
+      link.download = `nippotrack-backup-${backup.exportedAt.slice(0, 10)}.json`;
       document.body.appendChild(link);
       link.click();
       link.remove();

@@ -9,7 +9,7 @@ Esta entrega implementa el motor de referencia compartido de kanji y las mejoras
 ```text
 JSON local de OpenJLPT (N5…N1)
   -> adaptador normalize-openjlpt-kanji.js
-  -> JSON canónico de JLT
+  -> JSON canónico de NippoTrack
   -> import-kanji-reference.js (idempotente)
   -> kanji_reference (RLS forzado, SELECT para jlt_runtime)
   -> API /api/kanji/reference y /api/kanji/lookup/:character
@@ -36,7 +36,7 @@ El primer conjunto normalizado contiene 2,211 referencias aceptadas:
 
 No se detectaron duplicados fusionados, conflictos entre niveles ni registros rechazados en esa importación inicial.
 
-La procedencia se conserva en cada registro canónico. `THIRD_PARTY_NOTICES.md` documenta que JLT transforma datos de OpenJLPT, conserva la atribución CC BY-SA 4.0 y enlaza el `NOTICE.md` original. Los niveles JLPT son datos comunitarios/de referencia, no un programa oficial del JLPT. El README y Settings muestran la atribución discreta con enlace al aviso de terceros en GitHub.
+La procedencia se conserva en cada registro canónico. `THIRD_PARTY_NOTICES.md` documenta que NippoTrack transforma datos de OpenJLPT, conserva la atribución CC BY-SA 4.0 y enlaza el `NOTICE.md` original. Los niveles JLPT son datos comunitarios/de referencia, no un programa oficial del JLPT. El README y Settings muestran la atribución discreta con enlace al aviso de terceros en GitHub.
 
 ## Funcionalidad visible
 
@@ -44,7 +44,7 @@ La procedencia se conserva en cada registro canónico. `THIRD_PARTY_NOTICES.md` 
 - El nivel JLPT queda bloqueado al crear para evitar incoherencias; al editar, se permite cambiarlo pero aparece una advertencia si se modifican carácter, significado, lecturas o nivel de referencia.
 - Escribir romaji en el selector de kanji muestra todas las coincidencias compartidas y permite elegir la correcta.
 - La búsqueda global consulta también los 2,211 kanji compartidos por carácter, significado, kana o romaji. Cada resultado abre `#kanji-reference/<carácter>`.
-- La página de enciclopedia presenta significado, nivel, trazos y lecturas con el estilo neumórfico y responsive de JLT. Aún no inventa ejemplos ni animaciones de trazos: indica honestamente que los ejemplos compartidos no están disponibles.
+- La página de enciclopedia presenta significado, nivel, trazos y lecturas con el estilo neumórfico y responsive de NippoTrack. Aún no inventa ejemplos ni animaciones de trazos: indica honestamente que los ejemplos compartidos no están disponibles.
 - En formularios de vocabulario, kanji y gramática, los campos destinados a japonés convierten romaji completo al perder foco: hiragana para texto/lecturas kun y katakana para on'yomi. No se alteran `meaning`, traducciones ni notas, para no convertir español o inglés por error.
 
 ## Bypass de autenticación local

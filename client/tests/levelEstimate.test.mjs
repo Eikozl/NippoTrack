@@ -14,8 +14,8 @@ const payload = (overrides = {}) => ({
     N3: { eligible: 2, retained: 0 }, N2: { eligible: 0, retained: 0 }, N1: { eligible: 0, retained: 0 }
   },
   reasoning: ['14 reviewed kanji with reference JLPT classifications (8 reviewed more than once).'],
-  limitations: ['JLT study estimate only.'],
-  disclaimer: 'This is a JLT study estimate based on reviewed kanji only — not an official JLPT assessment, certification, or proof of passing.',
+  limitations: ['NippoTrack study estimate only.'],
+  disclaimer: 'This is a NippoTrack study estimate based on reviewed kanji only — not an official JLPT assessment, certification, or proof of passing.',
   ...overrides
 });
 
@@ -24,10 +24,10 @@ test('Level estimate model: estimated state carries level, confidence, and discl
   assert.equal(model.status, 'estimated');
   assert.equal(model.metricValue, 'N4');
   assert.match(model.metricNote, /Moderate estimate confidence/);
-  assert.match(model.metricNote, /JLT estimate/);
+  assert.match(model.metricNote, /NippoTrack estimate/);
   assert.match(model.subline, /most consistent with N4-band kanji study/);
   assert.match(model.subline, /Approaching N3/);
-  assert.equal(model.disclaimer, 'This is a JLT study estimate based on reviewed kanji only — not an official JLPT assessment, certification, or proof of passing.');
+  assert.equal(model.disclaimer, 'This is a NippoTrack study estimate based on reviewed kanji only — not an official JLPT assessment, certification, or proof of passing.');
   assert.equal(model.bandRows.length, 5);
   assert.deepEqual(model.bandRows[0], { band: 'N5', eligible: 8, retained: 5 });
   assert.ok(model.notUsedLines.includes('Pasted Smart Text Analyzer text'));

@@ -2,7 +2,7 @@
 
 ## Scope
 
-This document prepares JLT for a future Vercel deployment. It does not create a Vercel project, configure Vercel environment variables, set Supabase production redirect URLs, or deploy the application.
+This document prepares NippoTrack for a future Vercel deployment. It does not create a Vercel project, configure Vercel environment variables, set Supabase production redirect URLs, or deploy the application.
 
 ## Runtime shape
 

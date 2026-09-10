@@ -4,7 +4,7 @@ Status: design audit only. No schema, data, Supabase Auth, or application query 
 
 ## Scope and decision
 
-JLT has 25 application tables (excluding `schema_migrations`). None is a global/shared product entity: vocabulary, kanji, grammar, tags, and all learning records are personal study data. Ownership is therefore modelled by a direct `user_id uuid` only on the eight user-owned roots below. All children and junction rows derive ownership through their existing foreign keys. This avoids redundant ownership columns and makes relationship validation explicit.
+NippoTrack has 25 application tables (excluding `schema_migrations`). None is a global/shared product entity: vocabulary, kanji, grammar, tags, and all learning records are personal study data. Ownership is therefore modelled by a direct `user_id uuid` only on the eight user-owned roots below. All children and junction rows derive ownership through their existing foreign keys. This avoids redundant ownership columns and makes relationship validation explicit.
 
 | Table | Class | Direct `user_id` | Ownership path | Existing FK / unique and index facts | Query files / dependencies |
 | --- | --- | --- | --- | --- | --- |
