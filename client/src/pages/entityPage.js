@@ -365,7 +365,9 @@ function enableKanjiReferenceAutofill(content) {
     if (!field) return;
     field.classList.toggle('field-reference-locked', locked);
     field.setAttribute('aria-disabled', String(locked));
-    field.tabIndex = locked ? -1 : 0;
+    // Locked stays keyboard-focusable so the reference value remains
+    // perceivable; editing is still blocked by the guards below.
+    field.tabIndex = 0;
     field.closest('.field')?.classList.toggle('field-reference-locked', locked);
   };
   const clearCandidates = () => {
@@ -397,6 +399,8 @@ function enableKanjiReferenceAutofill(content) {
   ['pointerdown', 'keydown'].forEach((eventName) => {
     fields.jlpt_level?.addEventListener(eventName, (event) => {
       if (!fields.jlpt_level.classList.contains('field-reference-locked')) return;
+      // Never trap focus: Tab/Escape must keep working on the locked field.
+      if (event.type === 'keydown' && (event.key === 'Tab' || event.key === 'Escape')) return;
       event.preventDefault();
     });
   });
@@ -565,7 +569,7 @@ export function renderEntityPage(container, config) {
     ...STATUS_OPTIONS.map((option) => element('option', { text: option.label, attrs: { value: option.value } }))
   ]);
   const results = element('div');
-  const filterBar = element('div', { className: 'surface mb-5 grid gap-3 p-4 sm:grid-cols-[minmax(14rem,1fr)_10rem_11rem]' }, [search, jlpt, status]);
+  const filterBar = element('div', { className: 'surface mb-5 grid gap-3 p-4 md:grid-cols-[minmax(14rem,1fr)_10rem_11rem]' }, [search, jlpt, status]);
   const page = element('section', {}, [
     pageHeader({ eyebrow: config.eyebrow, title: config.title, description: config.description, action: addButton }),
     filterBar,

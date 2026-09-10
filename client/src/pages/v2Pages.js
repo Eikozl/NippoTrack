@@ -147,7 +147,7 @@ function mergeLinkOptions(options, linked, kind) {
 export function renderV2Page(container, kind) {
   const config = CONFIGS[kind];
   const addButton = element('button', { className: 'button-primary', text: `Add ${config.singular}`, attrs: { type: 'button' } });
-  const search = element('input', { className: 'field-control max-w-md', attrs: { type: 'search', placeholder: `Search ${config.title.toLowerCase()}…` } });
+  const search = element('input', { className: 'field-control max-w-md', attrs: { type: 'search', placeholder: `Search ${config.title.toLowerCase()}…`, 'aria-label': `Search ${config.title}` } });
   const records = element('div');
   let page = 1;
 

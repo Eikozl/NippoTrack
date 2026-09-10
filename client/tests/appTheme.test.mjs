@@ -166,7 +166,8 @@ test('theme-init.js migrates legacy pre-paint and keeps landing behavior', () =>
 test('shell brand is wordmark-only with normalized bounds, no duplicated label', () => {
   const html = readSource('index.html');
   assert.ok(html.includes('id="brand-logo"'), 'wordmark hook preserved');
-  assert.ok(html.includes('/src/assets/Logo_Modo_Claro_App.png'), 'normalized light wordmark in shell');
+  assert.ok(!html.includes('/src/assets/'), 'no source-tree asset URL in shell (404s in dist; main.js sets the bundled wordmark at boot)');
+  assert.ok(html.includes('href="/favicon.png"'), 'favicon served from public root in dist');
   assert.ok(html.includes('alt="NippoTrack"'), 'wordmark alt is NippoTrack');
   assert.ok(!html.includes('data-i18n="NippoTrack"'), 'no duplicated NippoTrack text beside the wordmark');
   assert.ok(!html.includes('Study tracker'), 'no duplicate tagline crowding the sidebar header');

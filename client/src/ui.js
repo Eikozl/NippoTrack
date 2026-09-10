@@ -386,7 +386,7 @@ export function openDialog({ title, content, submitLabel = 'Save', submitClassNa
       ...(description ? [element('p', { className: 'text-sm leading-6 text-muted sm:col-span-2', text: description, attrs: { id: 'dialog-description' } })] : []),
       ...content
     ]),
-    ...(showFooter ? [element('footer', { className: 'dialog-footer sticky bottom-0 flex justify-end gap-3 border-t border-stone bg-paper px-5 py-4 sm:px-6' }, [cancelButton, ...(submitButton ? [submitButton] : [])])] : [])
+    ...(showFooter ? [element('footer', { className: 'dialog-footer sticky bottom-0 flex flex-wrap justify-end gap-3 border-t border-stone bg-paper px-5 py-4 sm:px-6' }, [cancelButton, ...(submitButton ? [submitButton] : [])])] : [])
   );
   overlay.appendChild(form);
   claimOverlaySlot(close);

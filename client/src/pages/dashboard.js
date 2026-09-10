@@ -35,7 +35,7 @@ function activityCalendar(items) {
     const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
     const minutes = minutesByDate.get(value) || 0;
     const isToday = value === todayKey;
-    return element('div', { className: `activity-calendar-day grid aspect-square place-items-center rounded-md text-xs font-semibold ${minutes ? 'bg-vermilion' : 'bg-paper'}${isToday ? ' is-today' : ''}`, text: date.getDate(), attrs: { title: `${formatDate(value)} · ${minutes} minutes`, 'aria-label': `${formatDate(value)}: ${minutes ? `${minutes} minutes` : 'no study'}${isToday ? ' (today)' : ''}` } });
+    return element('div', { className: `activity-calendar-day grid aspect-square place-items-center rounded-md text-xs font-semibold ${minutes ? 'bg-vermilion' : 'bg-paper'}${isToday ? ' is-today' : ''}`, text: date.getDate(), attrs: { role: 'img', title: `${formatDate(value)} · ${minutes} minutes`, 'aria-label': `${formatDate(value)}: ${minutes ? `${minutes} minutes` : 'no study'}${isToday ? ' (today)' : ''}` } });
   });
   return element('article', { className: 'surface activity-calendar p-5 sm:p-6' }, [element('div', { className: 'flex items-center gap-3' }, [iconTile('sessions', { className: 'panel-icon' }), element('h2', { className: 'font-semibold text-ink', text: 'Activity calendar' })]), element('p', { className: 'mt-1 text-sm text-muted', text: 'The last 35 days. Highlighted days contain at least one study session.' }), element('div', { className: 'mt-5 grid grid-cols-7 gap-2', attrs: { role: 'group', 'aria-label': 'Daily study activity, last 35 days' } }, days)]);
 }

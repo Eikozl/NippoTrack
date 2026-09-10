@@ -84,7 +84,7 @@ export async function renderReview(container) {
 
   const introBlock = element('div', {}, [
     element('p', { className: 'eyebrow', text: 'Review' }),
-    element('h1', { className: 'mt-2 text-2xl font-semibold tracking-tight text-ink sm:text-3xl', text: 'Want to review your JLPT study?', attrs: { tabindex: '-1' } }),
+    element('h2', { className: 'mt-2 text-2xl font-semibold tracking-tight text-ink sm:text-3xl', text: 'Want to review your JLPT study?', attrs: { tabindex: '-1' } }),
     element('p', { className: 'mt-3 max-w-2xl text-sm leading-6 text-muted', text: 'Revisit recent study activity with focused recall, one item at a time. Use self-assessment to note how each item felt and decide what to look at again.' })
   ]);
   const startWrap = element('div', { className: 'mt-5' });

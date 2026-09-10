@@ -137,10 +137,12 @@ export function buildKanjiIdentity(identity, h) {
   const copy = element('div', { className: 'kanji-identity-copy' }, copyChildren);
 
   // B.2 mount point: `.kanji-stroke-slot` stays empty in B.1 (no animation,
-  // no interaction). The stroke-order affordance will render into it.
+  // no interaction). role="group" (not img): the stroke-order affordance
+  // injects a Replay button into the slot, and interactive content inside
+  // role="img" would be flattened for assistive technology.
   const glyphPanel = element('div', {
     className: 'kanji-identity-glyph kanji-glyph-panel-large kanji-identity-glyph--square',
-    attrs: { role: 'img', 'aria-label': isOwned ? `Selected kanji: ${character}` : `Kanji ${character}` }
+    attrs: { role: 'group', 'aria-label': isOwned ? `Selected kanji: ${character}` : `Kanji ${character}` }
   }, [
     element('span', { className: 'kanji-glyph-large', text: character, attrs: { lang: 'ja' } }),
     element('div', { className: 'kanji-stroke-slot', attrs: { 'data-kanji-stroke-slot': character, 'aria-hidden': 'true' } })

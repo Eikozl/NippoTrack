@@ -51,7 +51,7 @@ export function enableGrammarReferenceAutofill(content, request) {
   });
   const results = element('div', {
     className: 'grammar-reference-results hidden grid gap-2 sm:col-span-2',
-    attrs: { role: 'listbox', 'aria-label': 'Grammar reference matches' }
+    attrs: { role: 'group', 'aria-label': 'Grammar reference matches' }
   });
   // Keep lookup feedback adjacent to the two identifying fields instead of
   // leaving it below notes at the end of the dialog.
@@ -84,7 +84,7 @@ export function enableGrammarReferenceAutofill(content, request) {
       items.forEach((reference) => {
         const button = element('button', {
           className: 'button-secondary min-h-9 justify-start gap-2 px-3 py-1.5 text-left text-sm',
-          attrs: { type: 'button', role: 'option' }
+          attrs: { type: 'button' }
         }, [
           element('span', { className: 'font-jp font-semibold text-ink', text: reference.grammarPoint || query, attrs: { lang: 'ja' } }),
           element('span', { className: 'text-ink/80', text: reference.meaning || 'Meaning not provided' }),

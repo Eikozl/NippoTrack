@@ -153,7 +153,7 @@ test('builder glyph panel is square-hooked with a clean B.2 slot', () => {
   assert.equal(panels.length, 1, 'exactly one glyph panel');
   assert.ok(panels[0].className.includes('kanji-glyph-panel-large'), 'existing surface treatment reused');
   assert.ok(panels[0].className.includes('kanji-identity-glyph--square'), 'square-panel hook present');
-  assert.equal(panels[0].attrs.role, 'img', 'glyph stays labelled as an image');
+  assert.equal(panels[0].attrs.role, 'group', 'panel is a group: B.2 injects a Replay button, which role=img would flatten');
   const slots = findAll(tree, (n) => (n.className || '').includes('kanji-stroke-slot'));
   assert.equal(slots.length, 1, 'exactly one B.2 mount point');
   assert.equal(slots[0].attrs['data-kanji-stroke-slot'], '日', 'slot keyed by character');

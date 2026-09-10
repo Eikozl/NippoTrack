@@ -60,13 +60,13 @@ test('new Grammar dialog keeps reference lookup visible and manual-friendly', { 
 
       await input(point, 'てもいい');
       const japaneseVisible = dialog.textContent.includes('Reference matches') && dialog.textContent.includes('てもいい');
-      const referenceResults = dialog.querySelector('[role="listbox"]');
+      const referenceResults = dialog.querySelector('.grammar-reference-results');
       const notes = dialog.querySelector('[name="notes"]');
-      const firstCandidate = dialog.querySelector('[role="option"]');
+      const firstCandidate = dialog.querySelector('.grammar-reference-results button');
       const grammarReferencePositioned = Boolean(referenceResults && notes && (referenceResults.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING));
       const candidateStructured = Boolean(firstCandidate && firstCandidate.querySelectorAll(':scope > span').length === 3);
       const candidateClean = Boolean(firstCandidate && !/[\u00c2\u00c3\ufffd]/.test(firstCandidate.textContent));
-      [...dialog.querySelectorAll('[role="option"]')][0].click();
+      [...dialog.querySelectorAll('.grammar-reference-results button')][0].click();
       const firstSelection = {
         meaning: meaning.value,
         structure: structure.value,
@@ -82,7 +82,7 @@ test('new Grammar dialog keeps reference lookup visible and manual-friendly', { 
 
       await input(point, 'tai');
       const romajiVisible = dialog.textContent.includes('want to do') && dialog.textContent.includes('たい');
-      [...dialog.querySelectorAll('[role="option"]')][0].click();
+      [...dialog.querySelectorAll('.grammar-reference-results button')][0].click();
       const dirtyPreserved = { meaning: meaning.value, structure: structure.value, example: example.value, level: level.value };
 
       await input(point, 'permission');
@@ -94,7 +94,7 @@ test('new Grammar dialog keeps reference lookup visible and manual-friendly', { 
       const failureVisible = dialog.textContent.includes('Reference lookup unavailable');
 
       await input(point, 'tai');
-      [...dialog.querySelectorAll('[role="option"]')][0].click();
+      [...dialog.querySelectorAll('.grammar-reference-results button')][0].click();
       dialog.querySelector('button[type="submit"]').click();
       await wait(100);
       return {

@@ -252,7 +252,7 @@ function createUserMenu(trigger, index) {
   const email = element('p', { className: 'truncate text-xs text-muted' });
   const identity = element('div', { className: 'user-menu-identity' }, [mark, element('div', { className: 'min-w-0' }, [name, email])]);
   const languageButton = element('button', { className: 'user-menu-item', attrs: { type: 'button', role: 'menuitem', 'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-controls': languagePanelId } }, [element('span', { text: 'Language' }), element('span', { text: '›', attrs: { 'aria-hidden': 'true' } })]);
-  const languagePanel = element('div', { className: 'user-menu-language-panel', attrs: { id: languagePanelId, role: 'group', 'aria-label': 'Language options', hidden: '' } });
+  const languagePanel = element('div', { className: 'user-menu-language-panel', attrs: { id: languagePanelId, role: 'menu', 'aria-label': 'Language options', hidden: '' } });
   const settingsButton = element('button', { className: 'user-menu-item', text: 'Settings', attrs: { type: 'button', role: 'menuitem' } });
   const signOutButton = element('button', { className: 'user-menu-item user-menu-signout', text: 'Sign out', attrs: { type: 'button', role: 'menuitem' } });
   menu.append(identity, element('div', { className: 'user-menu-divider', attrs: { 'aria-hidden': 'true' } }), element('div', { className: 'user-menu-language' }, [languageButton, languagePanel]), settingsButton, signOutButton);
@@ -292,7 +292,17 @@ function createUserMenu(trigger, index) {
     if (event.key === 'ArrowDown') { event.preventDefault(); setOpen(true); settingsButton.focus(); }
   });
   menu.addEventListener('click', (event) => event.stopPropagation());
-  menu.addEventListener('keydown', (event) => { if (event.key === 'Escape') { event.preventDefault(); close(true); } });
+  menu.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') { event.preventDefault(); close(true); return; }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Home' && event.key !== 'End') return;
+    const items = Array.from(menu.querySelectorAll('button')).filter((item) => !item.hidden && !item.closest('[hidden]'));
+    const at = items.indexOf(document.activeElement);
+    if (at === -1) return;
+    event.preventDefault();
+    const next = event.key === 'ArrowDown' ? (at + 1) % items.length : event.key === 'ArrowUp' ? (at - 1 + items.length) % items.length : event.key === 'Home' ? 0 : items.length - 1;
+    items[next]?.focus();
+  });
+  menu.addEventListener('focusout', (event) => { if (!menu.contains(event.relatedTarget)) close(); });
   languageButton.addEventListener('click', () => {
     const open = languagePanel.hidden;
     languagePanel.hidden = !open;
@@ -437,7 +447,7 @@ async function loadSidebarStreak({ force = false } = {}) {
       element('p', { className: 'streak-value text-2xl font-semibold tracking-tight text-ink', text: `${current} ${current === 1 ? 'day' : 'days'}` }),
       element('p', { className: 'mt-1 text-xs text-muted', text: `Current streak · best ${longest} ${longest === 1 ? 'day' : 'days'}` })
     );
-    sidebarStreak.appendChild(element('div', { className: 'streak-week mt-4', attrs: { 'aria-label': 'Study activity for the last seven days' } }, weekDays.map((day) => element('div', { className: 'grid justify-items-center gap-1', attrs: { 'aria-label': day.stateLabel } }, [
+    sidebarStreak.appendChild(element('div', { className: 'streak-week mt-4', attrs: { 'aria-label': 'Study activity for the last seven days' } }, weekDays.map((day) => element('div', { className: 'grid justify-items-center gap-1', attrs: { role: 'img', 'aria-label': day.stateLabel } }, [
       element('span', { className: `streak-day ${day.active ? 'is-active' : ''}`, text: day.active ? '✓' : '', attrs: { 'aria-hidden': 'true' } }),
       element('span', { className: 'text-[10px] font-medium text-muted', text: day.label, attrs: { 'aria-hidden': 'true' } })
     ]))));
@@ -539,7 +549,7 @@ function createSearch(inputEl, resultsEl, { onEscape = null } = {}) {
           counter += 1;
           const id = `${listId}-option-${counter}`;
           const activate = () => { close(true); navigate(page || kanjiReferenceRoute(item.character)); };
-          const button = element('button', { className: 'search-option block w-full rounded-xl px-3 py-2 text-left text-sm text-ink hover:bg-paper', text: text(item), attrs: { type: 'button', role: 'option', id, 'aria-selected': 'false' } });
+          const button = element('button', { className: 'search-option block w-full rounded-xl px-3 py-2 text-left text-sm text-ink hover:bg-paper', text: text(item), attrs: { type: 'button', role: 'option', id, tabindex: '-1', 'aria-selected': 'false' } });
           button.addEventListener('click', activate);
           options.push({ id, activate });
           group.appendChild(button);
@@ -662,7 +672,7 @@ document.getElementById('export-data')?.addEventListener('click', async (event) 
     const blobUrl = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }));
     const link = document.createElement('a');
     link.href = blobUrl;
-    link.download = `jlt-backup-${backup.exportedAt.slice(0, 10)}.json`;
+    link.download = `nippotrack-backup-${backup.exportedAt.slice(0, 10)}.json`;
     document.body.appendChild(link);
     link.click();
     link.remove();

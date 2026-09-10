@@ -56,7 +56,13 @@ function authRedirectUrl(req) {
   if (host === 'japanese-learning-tracker.vercel.app' || host === 'japanese-learning-tracker-yeferson-sena.vercel.app') {
     return productionAuthRedirectUrl;
   }
-  if (host.endsWith('.vercel.app')) return previewAuthRedirectUrl;
+  if (host.endsWith('.vercel.app')) {
+    // Branch previews share one build: prefer the requesting preview host so
+    // email confirm/recovery links return to the preview that sent them. Only
+    // well-formed hostnames are echoed; anything else keeps the pinned URL.
+    if (/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.vercel\.app$/.test(host)) return `https://${host}/`;
+    return previewAuthRedirectUrl;
+  }
 
   const configuredRedirect = process.env.SUPABASE_AUTH_REDIRECT_URL;
   if (configuredRedirect?.trim()) return configuredRedirect.trim();

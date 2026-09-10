@@ -82,7 +82,7 @@ test('desktop sidebar branding remains', () => {
   assert.ok(source.includes('alt="NippoTrack"'), 'sidebar product name is NippoTrack');
   assert.ok(!source.includes('data-i18n="NippoTrack"'), 'no duplicated brand text beside the wordmark');
   assert.ok(!source.includes('JLT_logo-png.png'), 'legacy JLT mark removed from shell');
-  assert.ok(source.includes('Logo_Modo_Claro_App.png'), 'normalized light wordmark wired');
+  assert.ok(!source.includes('/src/assets/'), 'no source-tree asset URL in shell (main.js sets the bundled wordmark at boot)');
 });
 
 test('Settings is reachable from the existing account trigger, not the sidebar', () => {
