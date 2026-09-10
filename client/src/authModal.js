@@ -10,9 +10,10 @@
 // - sign-in / sign-up / forgot / reset submit flows (identical bodies)
 // - confirmation + error messages (identical strings)
 // - per-view autofocus rule (identical)
-// - locale switching via setLocale (identical behavior)
 // What changed vs the retired split screen: centered modal shell, neutral
 // title, in-modal view transitions, post-success check + authorized hold.
+// Language switching is intentionally absent here: locale lives in the
+// authenticated user menu and Settings, never in the Auth modal.
 
 // The modal markup reuses app components/tokens/utilities (.field-control,
 // .button-primary, .auth-*, Tailwind utilities) that live in styles.css —
@@ -26,7 +27,6 @@ import { element } from './ui.js';
 import { icon } from './icons.js';
 import { apiRequest } from './api.js';
 import { authConfigured, supabase } from './authClient.js';
-import { getLocale, setLocale } from './i18n.js';
 
 // Briefly visible success hold after CONFIRMED sign-in (owner-authorized,
 // 400–550ms). The Auth request itself is never delayed.
@@ -100,7 +100,7 @@ export function openAuthModal({
     className: 'auth-card auth-modal-card',
     attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'auth-modal-title' }
   });
-  const closeButton = element('button', { className: 'icon-button auth-modal-close', attrs: { type: 'button', 'aria-label': 'Close authentication' } }, [icon('close', { size: 20 })]);
+  const closeButton = element('button', { className: 'icon-button auth-modal-close', attrs: { type: 'button', 'aria-label': 'Close authentication' } }, [icon('close', { size: 16 })]);
   const body = element('div', { className: 'auth-modal-body', attrs: { 'data-lenis-prevent': '' } });
 
   const focusable = () => [...panel.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')];
@@ -150,28 +150,6 @@ export function openAuthModal({
     overlay.addEventListener('click', (event) => {
       if (event.target === overlay) close('dismiss');
     });
-  }
-
-  function localeControl() {
-    const menu = element('div', { className: 'auth-locale-menu', attrs: { role: 'menu', hidden: '' } }, [
-      ['en', 'English'], ['es', 'Spanish']
-    ].map(([value, label]) => {
-      const option = element('button', { className: 'auth-locale-option', text: label, attrs: { type: 'button', role: 'menuitemradio', 'aria-checked': String(getLocale() === value) } });
-      option.addEventListener('click', () => setLocale(value));
-      return option;
-    }));
-    const toggle = element('button', {
-      className: 'auth-locale-toggle auth-locale-toggle--compact',
-      text: getLocale() === 'es' ? 'ES' : 'EN',
-      attrs: { type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': 'Language', title: 'Language' }
-    });
-    toggle.addEventListener('click', (event) => {
-      event.stopPropagation();
-      const open = menu.hasAttribute('hidden');
-      if (open) menu.removeAttribute('hidden'); else menu.setAttribute('hidden', '');
-      toggle.setAttribute('aria-expanded', String(open));
-    });
-    return element('div', { className: 'auth-locale-control auth-locale-control--modal' }, [toggle, menu]);
   }
 
   function buildFields() {
@@ -343,7 +321,6 @@ export function openAuthModal({
 
   panel.append(
     element('div', { className: 'auth-modal-toprow' }, [
-      localeControl(),
       ...(dismissible ? [closeButton] : [])
     ]),
     body

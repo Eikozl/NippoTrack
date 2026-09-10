@@ -115,7 +115,7 @@ test('frozen focus and copy rules survive the move', () => {
 test('visual system: centered modal, mobile behavior, reduced motion', () => {
   assert.ok(modal.includes("import './styles.css'"), 'modal ships its own stylesheet dependency (Landing never loads app CSS)');
   assert.ok(css.includes('.auth-modal-overlay') && css.includes('.auth-modal-card'), 'modal foundation exists');
-  assert.ok(css.includes('width:min(100%,28rem)'), 'desktop width inside the 420–480 band');
+  assert.ok(css.includes('width:min(100%,32rem)'), 'desktop card widened so register fits without inner scroll');
   assert.ok(css.includes('@media (max-width: 640px)'), 'narrow-viewport rules exist');
   assert.ok(css.includes('.auth-check') && css.includes('@keyframes auth-check-pop'), 'restrained check animation exists');
   assert.ok(css.includes('.auth-swap-out, .auth-swap-in, .auth-check'), 'reduced-motion covers modal motion');
