@@ -2,7 +2,7 @@ import './landing.css';
 import wordmarkLight from '../assets/Logo_Modo_Claro.png';
 import wordmarkDark from '../assets/Logo_Modo_Oscuro.png';
 import { createLandingMarkup } from './sections.js';
-import { initEstimateRotation, initKanjiSequence, initLandingInteractions } from './interactions.js';
+import { initEstimateRotation, initHeroStreak, initKanjiSequence, initLandingInteractions } from './interactions.js';
 import { initLandingSmoothScroll } from './smoothScroll.js';
 
 // Canonical Auth entry: public Sign in/up CTAs open the modal over the
@@ -80,6 +80,7 @@ if (root) {
   initLandingInteractions(root);
   initKanjiSequence(root);
   initEstimateRotation(root);
+  initHeroStreak(root);
   initAuthModalTriggers(root);
   // v5.1-E.3 Lenis: public landing only, fail-open, reduced-motion native.
   try { initLandingSmoothScroll(root)?.catch?.(() => {}); } catch { /* native scroll */ }

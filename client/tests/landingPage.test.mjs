@@ -155,7 +155,7 @@ test('mobile hero is a compact layered constellation, static with bounded overla
   const mobile = mediaBlock('@media (max-width: 640px)');
   assert.ok(mobile.includes('.hero-ecosystem'));
   assert.ok(mobile.includes('display: grid'));
-  assert.ok(mobile.includes('grid-template-columns: 1fr 1fr'));
+  assert.ok(mobile.includes('grid-template-columns: 1.08fr 1fr'));
   // Vocabulary dominates: full-row span, centered, ~88-94% of the row.
   const vocab = ruleBody(mobile, '\\.hero-vocabulary');
   assert.ok(vocab.includes('grid-column: 1 / -1'));
@@ -174,25 +174,22 @@ test('mobile hero is a compact layered constellation, static with bounded overla
   assert.ok(kanji.includes('grid-column: 2') && kanji.includes('grid-row: 1'));
   assert.ok(review.includes('grid-column: 1') && review.includes('grid-row: 3'));
   assert.ok(streak.includes('grid-column: 2') && streak.includes('grid-row: 3'));
-  // Overlap is bounded corner-kissing: every negative margin tucks <= 14px
-  // (inside the 16px satellite / 20px vocab paddings) and every left nudge
-  // stays <= 6px (inside the ~20px page gutter).
-  for (const body of [level, kanji, review, streak]) {
-    for (const tuck of body.match(/margin-(?:top|bottom):\s*-(\d+)px/g) || []) {
-      assert.ok(Number(tuck.replace(/[^0-9]/g, '')) <= 14, 'overlap too deep: ' + tuck);
-    }
-    for (const nudge of body.match(/margin-left:\s*-(\d+)px/g) || []) {
-      assert.ok(Number(nudge.replace(/[^0-9]/g, '')) <= 6, 'left shift too far: ' + nudge);
+  // Overlap is transform staging, never negative margins.
+  // (visual-only translates; negative vertical margins sized tracks badly).
+  // Anchor model: vocab static, neighbors translate toward it (all ≤20px).
+  for (const [name, body] of [['level', level], ['kanji', kanji], ['review', review], ['streak', streak]]) {
+    assert.ok(!/margin-(?:top|bottom):\s*-\d+px/.test(body), name + ' must not use negative vertical margins');
+    for (const nudge of body.match(/translate\([^)]*\)/g) || []) {
+      for (const px of nudge.match(/-?[\d.]+px/g) || []) {
+        assert.ok(Math.abs(Number(px.replace('px', ''))) <= 20, 'staging shift too far in ' + name + ': ' + nudge);
+      }
     }
   }
-  assert.ok(level.includes('margin-bottom: -14px'));
-  assert.ok(kanji.includes('margin-bottom: -14px'));
-  // Review stays peripheral near-touch with a small left shift; streak holds
-  // its tuck but slides left under vocab's bottom-right padding.
-  assert.ok(review.includes('margin-top: -4px'));
-  assert.ok(review.includes('margin-left: -4px'));
-  assert.ok(streak.includes('margin-top: -14px'));
-  assert.ok(streak.includes('margin-left: -6px'));
+  assert.ok(!/translate/.test(vocab.replace(/rotate\([^)]*\)/, '')), 'vocabulary stays put apart from its tilt');
+  assert.ok(level.includes('translateY(18px)'));
+  assert.ok(kanji.includes('translateY(18px)'));
+  assert.ok(review.includes('translate(-10px, -10px)'));
+  assert.ok(streak.includes('translate(-12px, -20px)'));
   // Z-hierarchy: vocab highest, estimate/kanji middle, review/streak lower.
   assert.ok(level.includes('z-index: 2'));
   assert.ok(kanji.includes('z-index: 2'));
@@ -200,7 +197,7 @@ test('mobile hero is a compact layered constellation, static with bounded overla
   assert.ok(streak.includes('z-index: 1'));
   // Streak sits behind vocab (z1 < z3) with only padding overlapped, so the
   // "12" value stays exposed.
-  assert.ok(source.includes('<strong>12</strong>'), 'streak value 12 must stay');
+  assert.ok(source.includes('data-hero-streak="30"'), 'streak counts to its final value');
   // Rotation stays subtle: nothing beyond +/-1deg on mobile.
   for (const match of mobile.matchAll(/rotate\((-?[\d.]+)deg\)/g)) {
     assert.ok(Math.abs(Number(match[1])) <= 1, 'rotation too strong: ' + match[0]);
@@ -218,15 +215,13 @@ test('mobile hero is a compact layered constellation, static with bounded overla
   const narrow = mediaBlock('@media (max-width: 380px)');
   assert.ok(narrow.includes('grid-template-columns: 1fr 1fr'));
   assert.ok(!/grid-template-columns:\s*1fr\s*;/.test(narrow), 'must not collapse to a single column');
-  assert.ok(narrow.includes('transform: none'));
-  assert.ok(narrow.includes('margin-bottom: -6px'));
-  assert.ok(narrow.includes('margin-top: -6px'));
-  // Scaled easing (~50-60%): review stays peripheral with daylight, streak
-  // holds with a smaller left nudge, all inside the 12px/18px paddings.
-  assert.ok(ruleBody(narrow, '\\.hero-ecosystem \\.hero-review').includes('margin-top: -2px'));
-  assert.ok(ruleBody(narrow, '\\.hero-ecosystem \\.hero-review').includes('margin-left: -2px'));
-  assert.ok(ruleBody(narrow, '\\.hero-ecosystem \\.hero-streak').includes('margin-top: -6px'));
-  assert.ok(ruleBody(narrow, '\\.hero-ecosystem \\.hero-streak').includes('margin-left: -3px'));
+  assert.ok(narrow.includes('translateY(8px)'), 'top pair eases toward vocab at tiny widths');
+  assert.ok(narrow.includes('translate(-4px, -4px)'));
+  assert.ok(narrow.includes('translate(-6px, -10px)'));
+  // Scaled easing (~50-60%): review stays peripheral, streak holds behind
+  // vocab with a smaller shift, all inside the card paddings.
+  assert.ok(ruleBody(narrow, '\\.hero-ecosystem \\.hero-review').includes('translate(-4px, -4px)'));
+  assert.ok(ruleBody(narrow, '\\.hero-ecosystem \\.hero-streak').includes('translate(-6px, -10px)'));
   // No new breakpoints were introduced for this fix.
   const breakpoints = [...cssSource.matchAll(/@media\s*\(max-width:\s*(\d+)px\)/g)].map((m) => m[1]);
   assert.deepEqual([...new Set(breakpoints)].sort(), ['1100', '380', '479', '640', '767', '900']);

@@ -2520,16 +2520,18 @@
    breakpoint. At ~640px the absolute overlap becomes a compact layered
    constellation grid so Japanese never clips and the page never scrolls
    horizontally: Starting-estimate | Kanji on the top row, vocabulary
-   dominant full-row in the middle, then Review | Study-streak. Cards stay
-   in flow (position: relative feeds z-index only) with small negative
-   margins so corners kiss on padding — never on 旅行/りょこう/travel, the
-   Context sentence, the 殻 glyph, 約束, or labels/values. Ambient float is
-   disabled so the constellation stays static. Desktop motion and
-   reduced-motion are unchanged. */
+   dominant full-row in the middle, then Review | Study-streak.
+   Staging rule: the grid owns responsive columns/rows ONLY (no negative
+   vertical margins anywhere — they size tracks unpredictably). All overlap
+   is translate transforms (visual only, deterministic): the top pair slides
+   down under vocabulary's top edge while review/streak rise under its
+   bottom edge, with z-order doing the layering. Cards stay in flow with
+   position: relative. Ambient float is disabled so the constellation stays
+   static. Desktop motion and reduced-motion are unchanged. */
 @media (max-width: 640px) {
   .hero-ecosystem {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1.08fr 1fr;
     column-gap: 12px;
     row-gap: 0;
     width: 100%;
@@ -2544,13 +2546,31 @@
 
   .hero-ecosystem .hero-card {
     position: relative;
+    /* Reset the desktop/≤767 absolute coordinates: under position:relative
+       they would act as visual offsets (this leaked +105px under the
+       vocabulary card and +32px under kanji). All staging deltas below are
+       transforms only. */
+    top: auto;
+    left: auto;
+    bottom: auto;
+    right: auto;
     width: auto;
     min-width: 0;
     min-height: 0;
+    margin: 0;
     animation: none;
   }
 
-  /* Dominant vocabulary row: full-row span, centered, ~92% of the row. */
+  /* Satellite labels shrink a step so "STARTING ESTIMATE" fits its column
+     without wrapping into the value; copy itself is unchanged. */
+  .hero-ecosystem .demo-label {
+    font-size: 11px;
+    letter-spacing: 0.09em;
+  }
+
+  /* Dominant vocabulary row: full-row span, centered, ~92% of the row.
+     It is the static anchor — neighbors translate toward it, so it always
+     reads visually highest. z3 above everything. */
   .hero-vocabulary {
     grid-column: 1 / -1;
     grid-row: 2;
@@ -2561,56 +2581,45 @@
     transform: rotate(-1deg);
   }
 
-  /* Top satellite pair: estimate top-left, kanji top-right. Bottom edges
-     tuck 14px (inside the 16px card padding only, ~2px clear of N4 range /
-     shell·husk content minus ~1.5px of 1deg rotation bleed) under the
-     vocabulary row. Both sit middle (z2) below vocabulary (z3). Top tuck is
-     already at its safe max so vocabulary rises relatively via the bottom
-     row easing below. */
+  /* Top satellite pair: estimate top-left, kanji top-right. They translate
+     down 18px so their bottom edges slide under vocabulary's top edge.
+     Both sit middle (z2) below vocabulary (z3). */
   .hero-level {
     grid-column: 1;
     grid-row: 1;
     z-index: 2;
-    margin-bottom: -14px;
-    padding: 16px;
-    transform: rotate(-1deg);
+    padding: 14px;
+    transform: translateY(18px) rotate(-1deg);
   }
 
   .hero-kanji {
     grid-column: 2;
     grid-row: 1;
     z-index: 2;
-    margin-bottom: -14px;
-    padding: 16px;
-    transform: rotate(1deg);
+    padding: 14px;
+    transform: translateY(18px) rotate(1deg);
   }
 
-  /* Bottom satellite pair, asymmetric and peripheral: review drops to a
-     near-touch (margin-top -4px, plus -4px left inside the ~20px page
-     gutter) so READY TO REVIEW + 約束 stay fully exposed; streak holds its
-     14px tuck but slides 6px left so its top edge sits under vocab's
-     bottom-right padding (inside vocab's 20px bottom padding and its own
-     16px top padding, 12/days kept clear). Both sit lower (z1) below
-     vocabulary (z3). Review stays unrotated so the bottom row does not
-     look scrapbooked. */
+  /* Bottom satellite pair, asymmetric and peripheral: review shifts left
+     and tucks lightly under vocabulary so READY TO REVIEW + 約束 stay
+     readable; streak shifts left and tucks deeper so its top sits behind
+     vocabulary's bottom padding while "30 days" stays clear. Both sit
+     lower (z1) below vocabulary (z3). Review stays unrotated so the bottom
+     row does not look scrapbooked. */
   .hero-review {
     grid-column: 1;
     grid-row: 3;
     z-index: 1;
-    margin-top: -4px;
-    margin-left: -4px;
-    padding: 16px;
-    transform: none;
+    padding: 14px;
+    transform: translate(-10px, -10px);
   }
 
   .hero-streak {
     grid-column: 2;
     grid-row: 3;
     z-index: 1;
-    margin-top: -14px;
-    margin-left: -6px;
-    padding: 16px;
-    transform: rotate(1deg);
+    padding: 14px;
+    transform: translate(-12px, -20px) rotate(1deg);
   }
 
   .hero-japanese {
@@ -2632,12 +2641,11 @@
 }
 
 /* Very small widths: keep the layered constellation (no single-column
-   fallback) — just ease it: smaller tucks (~50-60% of the 640px offsets),
-   no rotation, tighter satellite padding, and a real row gap so 320px
-   never covers content. Review stays peripheral (-2px tuck for daylight
-   separation, -2px left); streak holds -6px with a -3px left nudge, both
-   inside the 12px/18px paddings here. Vocabulary dominance survives via
-   the full-row span + ~92% width. */
+   fallback) — just ease it: smaller translate staging (~50-60% of the 640px
+   offsets), tighter satellite padding, and a real row gap so 320px
+   never covers content. transform:none would also kill the staging
+   translates, so each card carries its own explicit (unrotated) transform.
+   Vocabulary dominance survives via the full-row span + ~92% width. */
 @media (max-width: 380px) {
   .hero-ecosystem {
     grid-template-columns: 1fr 1fr;
@@ -2645,28 +2653,23 @@
     row-gap: 10px;
   }
 
-  .hero-ecosystem .hero-card {
-    transform: none;
-  }
-
   .hero-ecosystem .hero-vocabulary {
     width: 92%;
     padding: 18px;
+    transform: none;
   }
 
   .hero-ecosystem .hero-level,
   .hero-ecosystem .hero-kanji {
-    margin-bottom: -6px;
+    transform: translateY(8px);
   }
 
   .hero-ecosystem .hero-review {
-    margin-top: -2px;
-    margin-left: -2px;
+    transform: translate(-4px, -4px);
   }
 
   .hero-ecosystem .hero-streak {
-    margin-top: -6px;
-    margin-left: -3px;
+    transform: translate(-6px, -10px);
   }
 
   .hero-ecosystem .hero-level,
@@ -2691,11 +2694,11 @@
   }
 
   /* Constellation posture inherited from the 640px breakpoint stays static
-     (animation: none inherited): only tighten type and padding here. The
-     10px row gap is absorbed by the bounded negative-margin tucks. No
+     (animation: none inherited): only tighten type and padding here. Row
+     gap stays 0 — staging overlap is transforms, exactly as above. No
      absolute offsets or fixed widths. */
   .hero-ecosystem {
-    gap: 10px;
+    gap: 0 10px;
   }
 
   .hero-vocabulary {
@@ -2710,9 +2713,9 @@
   .hero-streak,
   .hero-kanji,
   .hero-review {
-    /* 16px keeps the 2px padding guard under the 14px constellation tucks
-       (a tighter value would zero the clearance in the 381-479px range). */
-    padding: 16px;
+    /* 14px matches the constellation base so padding never fights the
+       transform staging in the 381-479px range. */
+    padding: 14px;
   }
 
   .analyzer-demo,

@@ -92,7 +92,7 @@ function hero() {
           </article>
           <article class="hero-card hero-streak" data-float="four">
             <span class="demo-label">Study streak</span>
-            <strong>12</strong><span> days</span>
+            <strong data-hero-streak="30">30</strong><span> days</span>
           </article>
           <article class="hero-card hero-review" data-float="five">
             <span class="demo-label">Ready to review</span>
