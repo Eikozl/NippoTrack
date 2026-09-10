@@ -46,14 +46,17 @@ export function enableGrammarReferenceAutofill(content, request) {
 
   const referenceId = element('input', { attrs: { type: 'hidden', name: 'reference_id' } });
   const status = element('p', {
-    className: 'hidden text-xs text-muted sm:col-span-2',
+    className: 'grammar-reference-status hidden text-xs text-muted sm:col-span-2',
     attrs: { role: 'status', 'aria-live': 'polite' }
   });
   const results = element('div', {
-    className: 'hidden grid gap-2 sm:col-span-2',
+    className: 'grammar-reference-results hidden grid gap-2 sm:col-span-2',
     attrs: { role: 'listbox', 'aria-label': 'Grammar reference matches' }
   });
-  content.push(referenceId, status, results);
+  // Keep lookup feedback adjacent to the two identifying fields instead of
+  // leaving it below notes at the end of the dialog.
+  content.splice(2, 0, status, results);
+  content.push(referenceId);
 
   const clearResults = () => {
     results.replaceChildren();
@@ -80,10 +83,13 @@ export function enableGrammarReferenceAutofill(content, request) {
       results.replaceChildren(element('p', { className: 'text-xs font-semibold text-muted', text: 'Reference matches' }));
       items.forEach((reference) => {
         const button = element('button', {
-          className: 'button-secondary min-h-9 justify-start px-3 py-1.5 text-left text-sm',
-          text: `${reference.grammarPoint || query} Â· ${reference.meaning || 'Meaning not provided'} Â· ${reference.jlptLevel || 'JLPT not set'} reference`,
+          className: 'button-secondary min-h-9 justify-start gap-2 px-3 py-1.5 text-left text-sm',
           attrs: { type: 'button', role: 'option' }
-        });
+        }, [
+          element('span', { className: 'font-jp font-semibold text-ink', text: reference.grammarPoint || query, attrs: { lang: 'ja' } }),
+          element('span', { className: 'text-ink/80', text: reference.meaning || 'Meaning not provided' }),
+          element('span', { className: 'text-xs font-semibold text-muted', text: `JLPT ${reference.jlptLevel || 'not set'}` })
+        ]);
         button.addEventListener('click', () => {
           referenceId.value = reference.referenceId === undefined || reference.referenceId === null ? '' : String(reference.referenceId);
           fields.grammar_point.value = reference.grammarPoint || point.value;
@@ -115,7 +121,7 @@ export function enableGrammarReferenceAutofill(content, request) {
       showStatus();
       return;
     }
-    showStatus('Looking up grammar referencesâ€¦');
+    showStatus('Looking up grammar references...');
     timer = setTimeout(() => lookup(query, current), 300);
   });
 }

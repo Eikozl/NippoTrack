@@ -60,6 +60,12 @@ test('new Grammar dialog keeps reference lookup visible and manual-friendly', { 
 
       await input(point, 'てもいい');
       const japaneseVisible = dialog.textContent.includes('Reference matches') && dialog.textContent.includes('てもいい');
+      const referenceResults = dialog.querySelector('[role="listbox"]');
+      const notes = dialog.querySelector('[name="notes"]');
+      const firstCandidate = dialog.querySelector('[role="option"]');
+      const grammarReferencePositioned = Boolean(referenceResults && notes && (referenceResults.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING));
+      const candidateStructured = Boolean(firstCandidate && firstCandidate.querySelectorAll(':scope > span').length === 3);
+      const candidateClean = Boolean(firstCandidate && !/[\u00c2\u00c3\ufffd]/.test(firstCandidate.textContent));
       [...dialog.querySelectorAll('[role="option"]')][0].click();
       const firstSelection = {
         meaning: meaning.value,
@@ -93,6 +99,9 @@ test('new Grammar dialog keeps reference lookup visible and manual-friendly', { 
       await wait(100);
       return {
         japaneseVisible,
+        grammarReferencePositioned,
+        candidateStructured,
+        candidateClean,
         romajiVisible,
         englishVisible,
         noResultVisible,
@@ -106,6 +115,9 @@ test('new Grammar dialog keeps reference lookup visible and manual-friendly', { 
     })()`);
 
     assert.equal(result.japaneseVisible, true);
+    assert.equal(result.grammarReferencePositioned, true);
+    assert.equal(result.candidateStructured, true);
+    assert.equal(result.candidateClean, true);
     assert.equal(result.romajiVisible, true);
     assert.equal(result.englishVisible, true);
     assert.equal(result.noResultVisible, true);
