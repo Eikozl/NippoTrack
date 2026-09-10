@@ -7,24 +7,20 @@ export const HERO_TYPE_MS_PER_CHAR = 28;
 export const HERO_ERASE_MS_PER_CHAR = 9;
 export const HERO_HOLD_MAIN_FIRST = 2200;
 export const HERO_HOLD_ALT_ONE = 1650;
-export const HERO_HOLD_ALT_TWO = 1750;
 export const HERO_HOLD_MAIN = 5000;
 export const HERO_HEADLINES = [
   'Bring your Japanese learning together.',
-  'Learn everywhere. Keep it connected.',
-  'Understand what you encounter. Track what matters.',
+  'Track anywhere.',
 ];
 export const HERO_HOLDS_IN_ORDER = [
   HERO_HOLD_MAIN_FIRST,
   HERO_HOLD_ALT_ONE,
-  HERO_HOLD_ALT_TWO,
   HERO_HOLD_MAIN,
 ];
 
 export function heroHoldForLine(lineIndex, isFirstMain = false) {
   if (lineIndex === 0) return isFirstMain ? HERO_HOLD_MAIN_FIRST : HERO_HOLD_MAIN;
-  if (lineIndex === 1) return HERO_HOLD_ALT_ONE;
-  return HERO_HOLD_ALT_TWO;
+  return HERO_HOLD_ALT_ONE;
 }
 
 // Starting-estimate rotation (landing + how-it-works share this helper).
@@ -389,11 +385,7 @@ export function initHeroTyping(root) {
     // The first main hold differs from every later main hold; mains dominate.
     function showWithCycle() {
       if (stopped) return;
-      const hold =
-        current === 0 && cycleCount === 0 ? HERO_HOLD_MAIN_FIRST
-        : current === 0 ? HERO_HOLD_MAIN
-        : current === 1 ? HERO_HOLD_ALT_ONE
-        : HERO_HOLD_ALT_TWO;
+      const hold = heroHoldForLine(current, cycleCount === 0);
       later(() => {
         if (stopped) return;
         eraseChars(lines[current], fullTexts[current], fullTexts[current].length, () => {

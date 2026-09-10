@@ -50,8 +50,7 @@ export function navbar(wordmarkUrl, themeAssets = {}, options = {}) {
 }
 
 export const HERO_HEADLINE_MAIN = 'Bring your Japanese learning together.';
-export const HERO_HEADLINE_ALT_ONE = 'Learn everywhere. Keep it connected.';
-export const HERO_HEADLINE_ALT_TWO = 'Understand what you encounter. Track what matters.';
+export const HERO_HEADLINE_ALT_ONE = 'Track anywhere.';
 
 function hero() {
   return `
@@ -63,7 +62,6 @@ function hero() {
             <p class="hero-typing" aria-hidden="true" data-hero-typing>
               <span class="hero-typing-line is-active" data-hero-line>${HERO_HEADLINE_MAIN}</span>
               <span class="hero-typing-line" data-hero-line>${HERO_HEADLINE_ALT_ONE}</span>
-              <span class="hero-typing-line" data-hero-line>${HERO_HEADLINE_ALT_TWO}</span>
             </p>
           </div>
           <p class="landing-lede">Organize what you learn, understand Japanese in context, and keep a clear view of your progress.</p>

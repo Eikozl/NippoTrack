@@ -9,7 +9,6 @@ import {
   HERO_HEADLINES,
   HERO_HOLDS_IN_ORDER,
   HERO_HOLD_ALT_ONE,
-  HERO_HOLD_ALT_TWO,
   HERO_HOLD_MAIN,
   HERO_HOLD_MAIN_FIRST,
   HERO_STREAK_MS,
@@ -39,30 +38,27 @@ test('hero typing uses the approved timing constants', () => {
   assert.equal(HERO_ERASE_MS_PER_CHAR, 9);
   assert.equal(HERO_HOLD_MAIN_FIRST, 2200);
   assert.equal(HERO_HOLD_ALT_ONE, 1650);
-  assert.equal(HERO_HOLD_ALT_TWO, 1750);
   assert.equal(HERO_HOLD_MAIN, 5000);
-  assert.deepEqual(HERO_HOLDS_IN_ORDER, [2200, 1650, 1750, 5000]);
+  assert.deepEqual(HERO_HOLDS_IN_ORDER, [2200, 1650, 5000]);
 });
 
-test('hero headlines keep canonical order with main-dominated holds', () => {
+test('hero headlines keep the approved two-line cycle with main-dominated holds', () => {
   assert.deepEqual(HERO_HEADLINES, [
     'Bring your Japanese learning together.',
-    'Learn everywhere. Keep it connected.',
-    'Understand what you encounter. Track what matters.',
+    'Track anywhere.',
   ]);
   assert.ok(HERO_HOLD_MAIN > HERO_HOLD_ALT_ONE);
-  assert.ok(HERO_HOLD_MAIN > HERO_HOLD_ALT_TWO);
   assert.ok(HERO_HOLD_MAIN > HERO_HOLD_MAIN_FIRST);
   assert.ok(HERO_HOLD_MAIN_FIRST > HERO_HOLD_ALT_ONE);
-  assert.ok(HERO_HOLD_MAIN_FIRST > HERO_HOLD_ALT_TWO);
   assert.equal(heroHoldForLine(0, true), 2200);
   assert.equal(heroHoldForLine(0, false), 5000);
   assert.equal(heroHoldForLine(1), 1650);
-  assert.equal(heroHoldForLine(2), 1750);
   const first = sectionsSource.indexOf('Bring your Japanese learning together.');
-  const second = sectionsSource.indexOf('Learn everywhere. Keep it connected.');
-  const third = sectionsSource.indexOf('Understand what you encounter. Track what matters.');
-  assert.ok(first > -1 && second > first && third > second);
+  const second = sectionsSource.indexOf('Track anywhere.');
+  assert.ok(first > -1 && second > first);
+  assert.equal((sectionsSource.match(/data-hero-line/g) || []).length, 2);
+  assert.ok(!sectionsSource.includes('Learn everywhere. Keep it connected.'));
+  assert.ok(!sectionsSource.includes('Understand what you encounter. Track what matters.'));
 });
 
 test('canonical H1 stays single with an aria-hidden visual layer and no live region', () => {
@@ -78,9 +74,11 @@ test('canonical H1 stays single with an aria-hidden visual layer and no live reg
   assert.ok(!sectionsSource.includes('aria-live'));
 });
 
-test('hero typing reserves layout with zero CLS and cleans up timers', () => {
+test('hero typing reserves the full main headline box on mobile and cleans up timers', () => {
   assert.ok(cssSource.includes('.hero-title-stack'));
   assert.ok(cssSource.includes('grid-area: 1 / 1'));
+  assert.ok(cssSource.includes('position: absolute'));
+  assert.ok(cssSource.includes('inset: 0'));
   assert.ok(cssSource.includes('.hero-typing-line'));
   assert.ok(cssSource.includes('visibility: hidden'));
   assert.ok(cssSource.includes('.landing-js .hero-title-stack.is-typing > h1'));

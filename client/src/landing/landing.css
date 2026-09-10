@@ -410,15 +410,17 @@
 .hero-title-stack {
   display: grid;
   max-width: 620px;
+  position: relative;
 }
 
-.hero-title-stack > h1,
-.hero-title-stack > .hero-typing {
+.hero-title-stack > h1 {
   grid-area: 1 / 1;
 }
 
 .hero-typing {
   display: none;
+  position: absolute;
+  inset: 0;
   margin: 0;
   font-family: "Plus Jakarta Sans", Inter, sans-serif;
   font-size: clamp(56px, 5vw, 64px);
