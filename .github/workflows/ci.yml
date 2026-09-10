@@ -41,7 +41,6 @@ jobs:
           npm --prefix client audit --omit=dev --audit-level=high
 
   multi-user-integration:
-    if: ${{ secrets.SUPABASE_INTEGRATION_URL != '' && secrets.SUPABASE_INTEGRATION_PROJECT_REF != '' && secrets.SUPABASE_INTEGRATION_PUBLISHABLE_KEY != '' && secrets.SUPABASE_INTEGRATION_SECRET_KEY != '' && secrets.POSTGRES_RUNTIME_HOST != '' && secrets.POSTGRES_RUNTIME_PORT != '' && secrets.POSTGRES_RUNTIME_USER != '' && secrets.POSTGRES_RUNTIME_PASSWORD != '' && secrets.POSTGRES_RUNTIME_DB != '' && secrets.POSTGRES_RUNTIME_SSL_CA != '' }}
     needs: test-and-build
     runs-on: ubuntu-latest
     env:
@@ -61,10 +60,38 @@ jobs:
       POSTGRES_RUNTIME_POOL_MAX: '2'
       POSTGRES_TIMEZONE: America/Santo_Domingo
     steps:
+      - name: Determine Integration availability
+        id: integration_gate
+        shell: bash
+        run: |
+          required_variables=(
+            SUPABASE_INTEGRATION_URL
+            SUPABASE_INTEGRATION_PROJECT_REF
+            SUPABASE_INTEGRATION_PUBLISHABLE_KEY
+            SUPABASE_INTEGRATION_SECRET_KEY
+            POSTGRES_RUNTIME_HOST
+            POSTGRES_RUNTIME_PORT
+            POSTGRES_RUNTIME_USER
+            POSTGRES_RUNTIME_PASSWORD
+            POSTGRES_RUNTIME_DB
+            POSTGRES_RUNTIME_SSL_CA
+          )
+
+          for variable_name in "${required_variables[@]}"; do
+            if [ -z "${!variable_name}" ]; then
+              echo "run_integration=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+
+          echo "run_integration=true" >> "$GITHUB_OUTPUT"
+
       - name: Check out repository
+        if: steps.integration_gate.outputs.run_integration == 'true'
         uses: actions/checkout@v4
 
       - name: Set up Node.js
+        if: steps.integration_gate.outputs.run_integration == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -72,15 +99,19 @@ jobs:
           cache-dependency-path: server/package-lock.json
 
       - name: Install server dependencies
+        if: steps.integration_gate.outputs.run_integration == 'true'
         run: npm ci --prefix server
 
       - name: Run authentication flow harness
+        if: steps.integration_gate.outputs.run_integration == 'true'
         run: npm --prefix server run postgres:test-auth-flows
 
       - name: Run two-user isolation harness
+        if: steps.integration_gate.outputs.run_integration == 'true'
         run: npm --prefix server run postgres:test-multi-user-isolation
 
       - name: Run authenticated PostgreSQL runtime harness
+        if: steps.integration_gate.outputs.run_integration == 'true'
         env:
           JLT_RUN_POSTGRES_INTEGRATION: 'true'
         run: npm --prefix server run postgres:test-runtime
