@@ -14,6 +14,14 @@
 // What changed vs the retired split screen: centered modal shell, neutral
 // title, in-modal view transitions, post-success check + authorized hold.
 
+// The modal markup reuses app components/tokens/utilities (.field-control,
+// .button-primary, .auth-*, Tailwind utilities) that live in styles.css —
+// which the /app bundle loads statically but the Landing never does. This
+// import makes the stylesheet a dependency of this async chunk, so Vite
+// loads it on demand when the modal opens over the Landing. No class
+// collisions: the Landing uses only landing-*/demo-* class names.
+import './styles.css';
+
 import { element } from './ui.js';
 import { icon } from './icons.js';
 import { apiRequest } from './api.js';
