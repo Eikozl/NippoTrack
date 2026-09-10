@@ -15,6 +15,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const https = require('node:https');
 const pool = require('../src/config/postgres');
+const { assertExpectedDbTarget } = require('../../scripts/production-guard');
 const {
   IMPORT_BATCH_SIZE,
   JmdictImportError,
@@ -167,6 +168,7 @@ async function importCommand(options) {
 }
 
 async function main() {
+  assertExpectedDbTarget({ host: process.env.POSTGRES_HOST, user: process.env.POSTGRES_USER, source: process.env.POSTGRES_ENV_FILE || '.env.postgres' });
   const { command, options } = parseArgs(process.argv.slice(2));
   const client = await pool.connect();
   try {
