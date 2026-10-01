@@ -28,6 +28,20 @@ const JLPT_OPTIONS = [
 ];
 const STATUS_OPTIONS = ['New', 'Learning', 'Familiar', 'Mastered'].map((value) => ({ value, label: value }));
 
+// Shared SRS date formatters for every entity detail (kanji keeps its own
+// local copies inside a richer layout; vocabulary/grammar reuse these).
+function formatSrsDate(iso) {
+  if (!iso) return '—';
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function formatSrsDateTime(iso) {
+  if (!iso) return '—';
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
 export const ENTITY_CONFIGS = {
   vocabulary: {
     endpoint: '/api/vocabulary',
@@ -52,16 +66,6 @@ export const ENTITY_CONFIGS = {
       const kanjiNotice = readingContext?.notice || VOCAB_READING_NOTICE;
       // SRS state (same shape as kanji detail, presentation only).
       const review = item.review || null;
-      const formatSrsDate = (iso) => {
-        if (!iso) return '—';
-        const d = new Date(iso);
-        return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-      };
-      const formatSrsDateTime = (iso) => {
-        if (!iso) return '—';
-        const d = new Date(iso);
-        return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-      };
       const srsSection = element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'aria-label': 'SRS review state' } }, [
         element('h3', { className: 'font-semibold text-ink', text: 'SRS Review' }),
         review ? element('dl', { className: 'mt-3 grid gap-3 text-sm sm:grid-cols-2' }, [
@@ -295,16 +299,6 @@ renderDetail: (item) => {
     renderDetail: (item) => {
       // SRS state (same shape as kanji detail, presentation only).
       const grammarReview = item.review || null;
-      const formatGrammarDate = (iso) => {
-        if (!iso) return '—';
-        const d = new Date(iso);
-        return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-      };
-      const formatGrammarDateTime = (iso) => {
-        if (!iso) return '—';
-        const d = new Date(iso);
-        return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-      };
       return element('div', { className: 'sm:col-span-2' }, [
       element('dl', { className: 'grid gap-3 text-sm sm:grid-cols-2' }, [
         element('div', {}, [element('dt', { className: 'text-muted', text: 'Grammar point' }), element('dd', { className: 'mt-1 font-jp font-medium text-ink', text: item.grammar_point })]),
@@ -315,9 +309,9 @@ renderDetail: (item) => {
       element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'aria-label': 'SRS review state' } }, [
         element('h3', { className: 'font-semibold text-ink', text: 'SRS Review' }),
         grammarReview ? element('dl', { className: 'mt-3 grid gap-3 text-sm sm:grid-cols-2' }, [
-          element('div', {}, [element('dt', { className: 'text-muted', text: 'Next Review' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatGrammarDate(grammarReview.dueOn) })]),
+          element('div', {}, [element('dt', { className: 'text-muted', text: 'Next Review' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatSrsDate(grammarReview.dueOn) })]),
           element('div', {}, [element('dt', { className: 'text-muted', text: 'Interval' }), element('dd', { className: 'mt-1 font-medium text-ink', text: `${grammarReview.intervalDays || 0} days` })]),
-          element('div', {}, [element('dt', { className: 'text-muted', text: 'Last Reviewed' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatGrammarDateTime(grammarReview.lastReviewedAt) })]),
+          element('div', {}, [element('dt', { className: 'text-muted', text: 'Last Reviewed' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatSrsDateTime(grammarReview.lastReviewedAt) })]),
           element('div', {}, [element('dt', { className: 'text-muted', text: 'Last Result' }), element('dd', { className: 'mt-1 font-medium text-ink', text: grammarReview.lastResult || '—' })])
         ]) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No review scheduled' })
       ]),

@@ -77,11 +77,12 @@ function goalsPreview(items, showAll) {
 }
 
 function isEmptyDashboardSnapshot(data) {
-  // v5.1-A.4 first-use pre-check (mirrors getFirstUseActionStates' durable-
-  // data half): one cheap decision so a learner with a FULLY completed
-  // checklist never pays for the extra first-experience fetch below.
-  // Partial progress (any action incomplete) still fetches so the checklist
-  // can render with per-action states.
+  // Despite the legacy name, this is NOT an "empty dashboard" check: it
+  // answers "is the post-onboarding checklist incomplete?" (mirrors
+  // getFirstUseActionStates' durable-data half). One cheap decision so a
+  // learner with a FULLY completed checklist never pays for the extra
+  // first-experience fetch below. Partial progress (any action incomplete)
+  // still fetches so the checklist can render with per-action states.
   if (!data || typeof data !== 'object') return false;
   const hasVocabulary = Number(data.vocabularyCount) > 0;
   const hasCollection = hasVocabulary || Number(data.kanjiCount) > 0 || Number(data.grammarCount) > 0;
