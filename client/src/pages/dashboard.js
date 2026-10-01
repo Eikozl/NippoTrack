@@ -77,14 +77,17 @@ function goalsPreview(items, showAll) {
 }
 
 function isEmptyDashboardSnapshot(data) {
-  // v5.1-A.4 first-use pre-check (mirrors shouldShowFirstUseDashboard's
-  // durable-data half): one cheap decision so an active learner never pays
-  // for the extra first-experience fetch below.
+  // v5.1-A.4 first-use pre-check (mirrors getFirstUseActionStates' durable-
+  // data half): one cheap decision so a learner with a FULLY completed
+  // checklist never pays for the extra first-experience fetch below.
+  // Partial progress (any action incomplete) still fetches so the checklist
+  // can render with per-action states.
   if (!data || typeof data !== 'object') return false;
-  if (Number(data.vocabularyCount) !== 0) return false;
-  if (Number(data.kanjiCount) !== 0) return false;
-  if (Number(data.grammarCount) !== 0) return false;
-  return Array.isArray(data.recentSessions) && data.recentSessions.length === 0;
+  const hasVocabulary = Number(data.vocabularyCount) > 0;
+  const hasCollection = hasVocabulary || Number(data.kanjiCount) > 0 || Number(data.grammarCount) > 0;
+  const hasSession = Array.isArray(data.recentSessions) && data.recentSessions.length > 0;
+  if (hasVocabulary && hasCollection && hasSession) return false;
+  return true;
 }
 
 export async function renderDashboard(container) {
