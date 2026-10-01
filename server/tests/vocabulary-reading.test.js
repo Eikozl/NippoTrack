@@ -194,6 +194,11 @@ test('Phase 5: GET /api/vocabulary/:id exposes full-word readingContext with bou
       ]];
     }
     if (/FROM usage_examples/i.test(sql)) return [[]];
+    if (/FROM review_items ri\s+JOIN vocabulary/i.test(sql)) {
+      // Owned SRS state: single bounded lookup, strictly user-scoped.
+      assert.deepEqual(params, [77, TEST_USER]);
+      return [[]];
+    }
     return [[]];
   };
   const server = app.listen(0);
@@ -219,10 +224,12 @@ test('Phase 5: GET /api/vocabulary/:id exposes full-word readingContext with bou
     assert.equal(kon.reference.contextualOnly, true);
     assert.equal(kon.userKanji.idKanji, 1);
     // Bounded query count: entry + links + user-kanji + reference + examples
-    // regardless of how many Han characters the word contains (no N+1).
-    assert.ok(seen.length <= 5, `expected at most 5 queries, saw ${seen.length}`);
+    // + owned review state regardless of how many Han characters the word
+    // contains (no N+1).
+    assert.ok(seen.length <= 6, `expected at most 6 queries, saw ${seen.length}`);
     assert.equal(seen.filter(({ sql }) => /FROM kanji k WHERE/i.test(sql)).length, 1);
     assert.equal(seen.filter(({ sql }) => /FROM kanji_reference/i.test(sql)).length, 1);
+    assert.equal(seen.filter(({ sql }) => /FROM review_items ri\s+JOIN vocabulary/i.test(sql)).length, 1);
   } finally {
     await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
     pool.execute = originalExecute;
