@@ -130,6 +130,16 @@ async function getGrammar(req, res) {
     if (!entry) return res.status(404).json({ error: 'grammar point not found' });
     let reference = null;
     try { if (entry.reference_id) reference = await getGrammarReferenceById(entry.reference_id); } catch (_) { /* fail open for user record */ }
+    // Managed usage examples (mirrors vocabulary examples, newest first).
+    // Fail-open: the grammar record never depends on this table.
+    let examples = [];
+    try {
+      const [exampleRows] = await pool.execute(
+        'SELECT id_grammar_example, sentence, translation, notes FROM grammar_examples WHERE id_grammar = ? ORDER BY id_grammar_example DESC',
+        [id]
+      );
+      examples = exampleRows || [];
+    } catch (_) { /* examples table unavailable: legacy example column still served */ }
     // SRS state (same shape as kanji detail): owned review row if graded, else null.
     let review = null;
     try {
@@ -150,7 +160,7 @@ async function getGrammar(req, res) {
         };
       }
     } catch (_) { /* fail open: grammar record never depends on SRS */ }
-    return res.json({ ...entry, reference, review });
+    return res.json({ ...entry, reference, review, examples });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load grammar point.' });
   }
@@ -236,8 +246,77 @@ async function getGrammarVocabularyContext(req, res) {
     const id = parseIdParam(req, 'grammar point');
     const entry = await fetchEntityById('grammar', id, req.user.id);
     if (!entry) return res.status(404).json({ error: 'grammar point not found' });
-    return res.json(await analyzeVocabularyInGrammarExample({ userId: req.user.id, sentence: entry.example, pool }));
+    // Every managed example is analyzed (bounded by the service); entries
+    // without managed rows fall back to the legacy single example column.
+    let sentences = [];
+    try {
+      const [exampleRows] = await pool.execute(
+        'SELECT sentence FROM grammar_examples WHERE id_grammar = ? ORDER BY id_grammar_example DESC LIMIT 12',
+        [id]
+      );
+      sentences = (exampleRows || []).map((row) => row.sentence).filter(Boolean);
+    } catch (_) { /* fall back to the legacy column below */ }
+    if (!sentences.length && entry.example) sentences = [entry.example];
+    const seen = new Map();
+    for (const sentence of sentences) {
+      const context = await analyzeVocabularyInGrammarExample({ userId: req.user.id, sentence, pool });
+      if (context.unavailable) return res.json({ items: [], unavailable: true });
+      for (const item of context.items || []) {
+        const previous = seen.get(item.canonical);
+        seen.set(item.canonical, { canonical: item.canonical, inVocabulary: Boolean(previous?.inVocabulary || item.inVocabulary) });
+      }
+    }
+    return res.json({ items: [...seen.values()] });
   } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to analyze vocabulary in grammar example.' }); }
+}
+
+function grammarExampleValues(body, { partial = false } = {}) {
+  const allowed = ['sentence', 'translation', 'notes'];
+  validateWriteFields(body, allowed);
+  if (!partial && body.sentence === undefined) throw new ValidationError('sentence is required.');
+  const sentence = body.sentence === undefined ? undefined : normalizeText(body.sentence, 2000, 'sentence');
+  if (!partial && !sentence) throw new ValidationError('sentence is required.');
+  if (body.sentence !== undefined && !sentence) throw new ValidationError('sentence is required.');
+  return { sentence, translation: body.translation === undefined ? undefined : normalizeText(body.translation, 2000, 'translation'), notes: body.notes === undefined ? undefined : normalizeText(body.notes, 1500, 'notes') };
+}
+
+async function createGrammarExample(req, res) {
+  try {
+    const grammarId = parseIdParam(req, 'grammar point');
+    if (!await fetchEntityById('grammar', grammarId, req.user.id)) return res.status(404).json({ error: 'grammar point not found' });
+    const values = grammarExampleValues(req.body || {});
+    const [result] = await pool.execute('INSERT INTO grammar_examples (id_grammar, sentence, translation, notes) VALUES (?, ?, ?, ?)', [grammarId, values.sentence, values.translation, values.notes]);
+    const [rows] = await pool.execute('SELECT id_grammar_example, sentence, translation, notes FROM grammar_examples WHERE id_grammar_example = ? AND id_grammar = ?', [result.insertId, grammarId]);
+    return res.status(201).json(rows[0]);
+  } catch (error) { return sendRouteError(res, error, { defaultMessage: 'Unable to create grammar example.' }); }
+}
+
+async function updateGrammarExample(req, res) {
+  try {
+    const grammarId = parseIdParam(req, 'grammar point');
+    const exampleId = Number(req.params.exampleId);
+    if (!Number.isInteger(exampleId) || exampleId <= 0) throw new ValidationError('grammar example id must be a positive integer');
+    if (!await fetchEntityById('grammar', grammarId, req.user.id)) return res.status(404).json({ error: 'grammar point not found' });
+    const [existing] = await pool.execute('SELECT id_grammar_example, sentence, translation, notes FROM grammar_examples WHERE id_grammar_example = ? AND id_grammar = ?', [exampleId, grammarId]);
+    if (!existing[0]) return res.status(404).json({ error: 'grammar example not found' });
+    const values = grammarExampleValues(req.body || {}, { partial: true });
+    const current = existing[0];
+    await pool.execute('UPDATE grammar_examples SET sentence = ?, translation = ?, notes = ? WHERE id_grammar_example = ? AND id_grammar = ?', [values.sentence ?? current.sentence, values.translation ?? current.translation, values.notes ?? current.notes, exampleId, grammarId]);
+    const [rows] = await pool.execute('SELECT id_grammar_example, sentence, translation, notes FROM grammar_examples WHERE id_grammar_example = ? AND id_grammar = ?', [exampleId, grammarId]);
+    return res.json(rows[0]);
+  } catch (error) { return sendRouteError(res, error, { defaultMessage: 'Unable to update grammar example.' }); }
+}
+
+async function deleteGrammarExample(req, res) {
+  try {
+    const grammarId = parseIdParam(req, 'grammar point');
+    const exampleId = Number(req.params.exampleId);
+    if (!Number.isInteger(exampleId) || exampleId <= 0) throw new ValidationError('grammar example id must be a positive integer');
+    if (!await fetchEntityById('grammar', grammarId, req.user.id)) return res.status(404).json({ error: 'grammar point not found' });
+    const [result] = await pool.execute('DELETE FROM grammar_examples WHERE id_grammar_example = ? AND id_grammar = ?', [exampleId, grammarId]);
+    if (!result.affectedRows) return res.status(404).json({ error: 'grammar example not found' });
+    return res.json({ success: true, deletedId: exampleId });
+  } catch (error) { return sendRouteError(res, error, { defaultMessage: 'Unable to delete grammar example.' }); }
 }
 
 async function deleteGrammar(req, res) {
@@ -251,4 +330,4 @@ async function deleteGrammar(req, res) {
   }
 }
 
-module.exports = { createGrammar, deleteGrammar, getGrammar, getGrammarVocabularyContext, listGrammar, listGrammarOptions, listGrammarReferences, updateGrammar };
+module.exports = { createGrammar, createGrammarExample, deleteGrammar, deleteGrammarExample, getGrammar, getGrammarVocabularyContext, listGrammar, listGrammarOptions, listGrammarReferences, updateGrammar, updateGrammarExample };

@@ -32,6 +32,7 @@ export const ENTITY_CONFIGS = {
   vocabulary: {
     endpoint: '/api/vocabulary',
     idKey: 'id_vocabulary',
+    exampleIdKey: 'id_usage_example',
     eyebrow: 'Lexicon',
     title: 'Vocabulary',
     singular: 'vocabulary entry',
@@ -280,6 +281,7 @@ renderDetail: (item) => {
   grammar: {
     endpoint: '/api/grammar',
     idKey: 'id_grammar',
+    exampleIdKey: 'id_grammar_example',
     eyebrow: 'Patterns',
     title: 'Grammar',
     singular: 'grammar point',
@@ -321,6 +323,14 @@ renderDetail: (item) => {
       ]),
       ...(item.structure ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Structure' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: item.structure })])] : []),
       ...(item.example ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Example' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: item.example })])] : []),
+      element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [
+        element('div', { className: 'flex items-center justify-between gap-3' }, [element('h3', { className: 'font-semibold text-ink', text: 'Examples' }), element('button', { className: 'button-secondary min-h-9 px-3 py-1.5', text: 'Add example', attrs: { type: 'button', 'data-example-action': 'add' } })]),
+        item.examples?.length ? element('div', { className: 'mt-3 grid gap-3' }, item.examples.map((example) => element('article', { className: 'rounded-md bg-paper p-3' }, [
+          element('p', { className: 'whitespace-pre-wrap text-sm leading-6 text-ink', text: example.sentence }),
+          ...(example.translation ? [element('p', { className: 'mt-2 text-sm text-muted', text: example.translation })] : []),
+          element('button', { className: 'button-secondary mt-3 min-h-9 px-3 py-1.5', text: 'Edit example', attrs: { type: 'button', 'data-example-action': 'edit', 'data-example-id': example.id_grammar_example } })
+        ]))) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No examples recorded yet.' })
+      ]),
       ...(item.notes ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Notes' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: item.notes })])] : []),
       element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'data-vocabulary-example-context': 'true' } }, [
         element('h3', { className: 'font-semibold text-ink', text: 'Vocabulary in this example' }),
@@ -747,7 +757,8 @@ export function renderEntityPage(container, config) {
         submitLabel: example ? 'Save example' : 'Add example',
         onSubmit: async (form, close) => {
           const data = new FormData(form);
-          const path = example ? `${config.endpoint}/${record[config.idKey]}/examples/${example.id_usage_example}` : `${config.endpoint}/${record[config.idKey]}/examples`;
+          const exampleId = example?.[config.exampleIdKey];
+          const path = example ? `${config.endpoint}/${record[config.idKey]}/examples/${exampleId}` : `${config.endpoint}/${record[config.idKey]}/examples`;
           await apiRequest(path, { method: example ? 'PUT' : 'POST', body: { sentence: data.get('sentence'), translation: data.get('translation'), notes: data.get('notes') } });
           close();
           showToast(example ? 'Usage example updated.' : 'Usage example added.');
@@ -756,7 +767,7 @@ export function renderEntityPage(container, config) {
       });
       const content = config.renderDetail ? config.renderDetail(record, { openExampleForm }) : element('div', { className: 'sm:col-span-2 text-sm text-muted', text: 'A detailed preview is not available for this record yet.' });
       content.querySelector('[data-example-action="add"]')?.addEventListener('click', () => openExampleForm());
-      content.querySelectorAll('[data-example-action="edit"]').forEach((button) => button.addEventListener('click', () => openExampleForm(record.examples.find((example) => example.id_usage_example === Number(button.dataset.exampleId)))));
+      content.querySelectorAll('[data-example-action="edit"]').forEach((button) => button.addEventListener('click', () => openExampleForm((record.examples || []).find((example) => example[config.exampleIdKey] === Number(button.dataset.exampleId)))));
       // Phase 5 enhancement (vocabulary only): explicit per-kanji import.
       // Uses the existing kanji creation endpoint (which resolves
       // reference_id, enforces ownership and duplicate rules), then
