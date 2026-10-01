@@ -1,6 +1,7 @@
 const pool = require('../config/db');
 const { ValidationError, sendRouteError } = require('../errors/http');
 const { parseIdParam, isValidDateString, validateAllowedValues } = require('../validation');
+const { parsePagination, paginationPayload } = require('../pagination');
 const { getReviewCandidates } = require('../services/reviewCandidates');
 
 const INTERVALS = { Again: 1, Hard: 3, Good: 7 };
@@ -369,4 +370,105 @@ async function listCandidates(req, res) {
   }
 }
 
-module.exports = { createReviewItem, listDueReviews, recordReview, createReviewSession, completeReviewSession, gradeEntity, listCandidates };
+// Read-only history over already-persisted sessions + events. No analytics,
+// no new writes: paginated session summaries plus one bounded item listing.
+async function listReviewSessions(req, res) {
+  try {
+    const { page, limit, offset } = parsePagination(req.query);
+    const [[totalRow]] = await pool.execute(
+      'SELECT COUNT(*) AS total FROM review_sessions WHERE user_id = ?',
+      [req.user.id]
+    );
+    const total = Number(totalRow?.total || 0);
+    const [rows] = await pool.execute(
+      `SELECT rs.id_review_session AS id,
+        rs.source_from AS "sourceFrom", rs.source_to AS "sourceTo",
+        rs.started_at AS "startedAt", rs.completed_at AS "completedAt",
+        COUNT(re.id_review_event) AS total,
+        COUNT(*) FILTER (WHERE ri.id_kanji IS NOT NULL) AS kanji,
+        COUNT(*) FILTER (WHERE ri.id_vocabulary IS NOT NULL) AS vocabulary,
+        COUNT(*) FILTER (WHERE ri.id_grammar IS NOT NULL) AS grammar,
+        COUNT(*) FILTER (WHERE re.result = 'Again') AS again,
+        COUNT(*) FILTER (WHERE re.result = 'Hard') AS hard,
+        COUNT(*) FILTER (WHERE re.result = 'Good') AS good
+       FROM review_sessions rs
+       LEFT JOIN review_events re ON re.id_review_session = rs.id_review_session
+       LEFT JOIN review_items ri ON ri.id_review_item = re.id_review_item
+       WHERE rs.user_id = ?
+       GROUP BY rs.id_review_session
+       ORDER BY rs.started_at DESC, rs.id_review_session DESC
+       LIMIT ? OFFSET ?`,
+      [req.user.id, limit, offset]
+    );
+    const items = (rows || []).map((row) => ({
+      id: Number(row.id),
+      sourceFrom: row.sourceFrom,
+      sourceTo: row.sourceTo,
+      startedAt: row.startedAt,
+      completedAt: row.completedAt || null,
+      total: Number(row.total || 0),
+      byType: {
+        kanji: Number(row.kanji || 0),
+        vocabulary: Number(row.vocabulary || 0),
+        grammar: Number(row.grammar || 0)
+      },
+      byResult: {
+        Again: Number(row.again || 0),
+        Hard: Number(row.hard || 0),
+        Good: Number(row.good || 0)
+      }
+    }));
+    return res.json(paginationPayload(items, total, page, limit));
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load review history.' });
+  }
+}
+
+async function getReviewSession(req, res) {
+  try {
+    const id = parseIdParam(req, 'review session');
+    const [sessions] = await pool.execute(
+      `SELECT id_review_session AS id, source_from AS "sourceFrom", source_to AS "sourceTo",
+        started_at AS "startedAt", completed_at AS "completedAt"
+       FROM review_sessions WHERE id_review_session = ? AND user_id = ?`,
+      [id, req.user.id]
+    );
+    const session = sessions && sessions[0];
+    if (!session) return res.status(404).json({ error: 'review session not found' });
+    const [items] = await pool.execute(
+      `SELECT re.reviewed_at AS "reviewedAt", re.result,
+        CASE WHEN ri.id_kanji IS NOT NULL THEN 'kanji'
+             WHEN ri.id_vocabulary IS NOT NULL THEN 'vocabulary'
+             ELSE 'grammar' END AS "entityType",
+        COALESCE(v.word, k.character_kanji, g.grammar_point) AS display,
+        v.reading AS reading,
+        COALESCE(v.meaning, k.meaning, g.meaning) AS meaning
+       FROM review_events re
+       JOIN review_items ri ON ri.id_review_item = re.id_review_item
+       LEFT JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary AND v.user_id = ?
+       LEFT JOIN kanji k ON k.id_kanji = ri.id_kanji AND k.user_id = ?
+       LEFT JOIN grammar_points g ON g.id_grammar = ri.id_grammar AND g.user_id = ?
+       WHERE re.id_review_session = ?
+       AND EXISTS (SELECT 1 FROM review_sessions rs WHERE rs.id_review_session = re.id_review_session AND rs.user_id = ?)
+       ORDER BY re.reviewed_at ASC, re.id_review_event ASC
+       LIMIT 500`,
+      [req.user.id, req.user.id, req.user.id, id, req.user.id]
+    );
+    const summary = await getSessionSummary(pool, id, req.user.id);
+    return res.json({
+      session: {
+        id: Number(session.id),
+        sourceFrom: session.sourceFrom,
+        sourceTo: session.sourceTo,
+        startedAt: session.startedAt,
+        completedAt: session.completedAt || null
+      },
+      items: items || [],
+      ...summary
+    });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load review session.' });
+  }
+}
+
+module.exports = { createReviewItem, listDueReviews, recordReview, createReviewSession, completeReviewSession, gradeEntity, listCandidates, listReviewSessions, getReviewSession };

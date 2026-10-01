@@ -67,6 +67,7 @@ export async function renderReview(container) {
   let revealed = false;
   let sessionId = null;
   let gradeButtons = [];
+  let graded = [];
   let localDetach = null;
 
   function detachKeys() {
@@ -192,14 +193,50 @@ export async function renderReview(container) {
   const completeBlock = element('div');
   completeBlock.hidden = true;
 
+  // History over already-persisted sessions + events (read-only, fail-open).
+  const historyBlock = element('section', { className: 'surface mt-4 p-5 sm:p-6', attrs: { 'aria-label': 'Recent review sessions' } });
+  historyBlock.hidden = true;
+
   container.replaceChildren(element('section', {}, [
     pageHeader({ eyebrow: 'Recall', title: 'Review', description: 'Choose recent activity and review it at a steady pace.' }),
     heroSurface,
     summaryBar,
     candidatesBlock,
     reviewingBlock,
-    completeBlock
+    completeBlock,
+    historyBlock
   ]));
+
+  async function loadHistory() {
+    try {
+      const data = await apiRequest('/api/review/sessions?limit=10');
+      const items = Array.isArray(data?.items) ? data.items : [];
+      if (!items.length) {
+        historyBlock.hidden = true;
+        historyBlock.replaceChildren();
+        return;
+      }
+      historyBlock.replaceChildren(
+        element('h2', { className: 'font-semibold text-ink', text: 'Recent review sessions' }),
+        element('p', { className: 'mt-1 text-sm text-muted', text: 'When you studied, how much you reviewed, and how it felt.' }),
+        element('ul', { className: 'mt-4 grid gap-2' }, items.map((session) => {
+          const date = String(session.startedAt || '').slice(0, 10);
+          const results = session.byResult || {};
+          const types = session.byType || {};
+          const summary = `${Number(session.total || 0)} items · ${Number(results.Good || 0)} comfortable · ${Number(results.Hard || 0)} difficult · ${Number(results.Again || 0)} revisit`;
+          const scope = `Kanji ${Number(types.kanji || 0)} · Vocabulary ${Number(types.vocabulary || 0)} · Grammar ${Number(types.grammar || 0)}`;
+          return element('li', { className: 'rounded-xl border border-stone bg-paper px-3 py-2.5 text-sm' }, [
+            element('p', { className: 'font-semibold text-ink', text: `${date || 'Session'}${session.completedAt ? '' : ' · in progress'}` }),
+            element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: summary }),
+            element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: scope })
+          ]);
+        }))
+      );
+      historyBlock.hidden = false;
+    } catch {
+      historyBlock.hidden = true;
+    }
+  }
 
   function currentPreset() {
     const checked = setupForm.querySelector('input[name="review-preset"]:checked');
@@ -255,6 +292,9 @@ export async function renderReview(container) {
     candidatesBlock.hidden = next !== 'CANDIDATES';
     reviewingBlock.hidden = next !== 'REVIEWING';
     completeBlock.hidden = next !== 'COMPLETE';
+    // History visibility is driven by loadHistory (fail-open: hidden when
+    // empty or unavailable); leaving INTRO only ever hides it.
+    if (next !== 'INTRO') historyBlock.hidden = true;
     if (next !== 'REVIEWING') detachKeys();
   }
 
@@ -510,6 +550,7 @@ export async function renderReview(container) {
         queue = picked;
         currentIndex = 0;
         revealed = false;
+        graded = [];
         activeReview = { sessionId, selected: picked };
         setStage('REVIEWING');
         renderCard();
@@ -593,6 +634,7 @@ export async function renderReview(container) {
               method: 'POST',
               body: { entityType: item.entityType, entityId: item.entityId, result, reviewSessionId: sessionId }
             });
+            graded.push({ ...item, result });
             if (currentIndex + 1 < total) {
               currentIndex += 1;
               renderCard();
@@ -638,6 +680,9 @@ export async function renderReview(container) {
     const goodCount = Number(byResult.Good || 0);
     const hardCount = Number(byResult.Hard || 0);
     const againCount = Number(byResult.Again || 0);
+    // Retry uses this session's own graded items (Again/Hard only), so the
+    // repeat set is exactly what felt difficult — no parallel bookkeeping.
+    const failed = graded.filter((entry) => entry.result === 'Again' || entry.result === 'Hard');
 
     const heading = element('h1', { className: 'text-2xl font-semibold tracking-tight text-ink sm:text-3xl', text: 'Review complete', attrs: { tabindex: '-1' } });
     const card = element('div', { className: 'surface p-5 sm:p-8' }, [
@@ -655,10 +700,36 @@ export async function renderReview(container) {
       ]),
       element('div', { className: 'mt-6 flex flex-col gap-2 sm:flex-row' }, [
         element('button', { className: 'button-primary', text: 'Back to Review', attrs: { type: 'button' } }),
+        ...(failed.length ? [element('button', { className: 'button-secondary', text: `Repeat failed (${failed.length})`, attrs: { type: 'button' } })] : []),
         element('a', { className: 'button-secondary', text: 'Go to Dashboard', attrs: { href: '#dashboard' } })
       ])
     ]);
-    const resetButton = card.querySelector('button');
+    const buttons = card.querySelectorAll('button');
+    const resetButton = buttons[0];
+    const repeatButton = failed.length ? buttons[1] : null;
+    if (repeatButton) {
+      repeatButton.addEventListener('click', () => {
+        if (!lastSearch || !failed.length) return;
+        // A fresh session groups the retry (the completed one is closed);
+        // items are the already-graded failed subset — no duplicates.
+        withPendingAction(repeatButton, async () => {
+          const session = await apiRequest('/api/review/sessions', {
+            method: 'POST',
+            body: { sourceFrom: lastSearch.from, sourceTo: lastSearch.to }
+          });
+          sessionId = session.id;
+          queue = failed.map(({ result, ...rest }) => rest);
+          currentIndex = 0;
+          revealed = false;
+          graded = [];
+          activeReview = { sessionId, selected: queue };
+          setStage('REVIEWING');
+          renderCard();
+        }, { pendingLabel: 'Starting…' }).catch((error) => {
+          showToast(error?.message || 'Unable to start the review.', 'error');
+        });
+      });
+    }
     resetButton.addEventListener('click', () => {
       // Reset to a fresh INTRO so a new round starts from defaults.
       setupForm.querySelector('input[name="review-preset"][value="last3"]').checked = true;
@@ -673,16 +744,19 @@ export async function renderReview(container) {
       currentIndex = 0;
       revealed = false;
       sessionId = null;
+      graded = [];
       selectedKeys = new Set();
       candidatesByKey = new Map();
       activeReview = { sessionId: null, selected: [] };
       candidatesBlock.replaceChildren();
       reviewingBlock.replaceChildren();
       setStage('INTRO');
+      loadHistory();
     });
     completeBlock.appendChild(card);
     heading.focus({ preventScroll: true });
   }
 
   setStage('INTRO');
+  loadHistory();
 }
