@@ -130,7 +130,27 @@ async function getGrammar(req, res) {
     if (!entry) return res.status(404).json({ error: 'grammar point not found' });
     let reference = null;
     try { if (entry.reference_id) reference = await getGrammarReferenceById(entry.reference_id); } catch (_) { /* fail open for user record */ }
-    return res.json({ ...entry, reference });
+    // SRS state (same shape as kanji detail): owned review row if graded, else null.
+    let review = null;
+    try {
+      const [reviewRows] = await pool.execute(
+        `SELECT ri.id_review_item, ri.due_on, ri.interval_days, ri.last_reviewed_at, ri.last_result
+         FROM review_items ri
+         JOIN grammar_points g ON g.id_grammar = ri.id_grammar
+         WHERE ri.id_grammar = ? AND g.user_id = ?`,
+        [id, req.user.id]
+      );
+      if (reviewRows[0]) {
+        review = {
+          idReviewItem: reviewRows[0].id_review_item,
+          dueOn: reviewRows[0].due_on,
+          intervalDays: Number(reviewRows[0].interval_days || 0),
+          lastReviewedAt: reviewRows[0].last_reviewed_at || null,
+          lastResult: reviewRows[0].last_result || null
+        };
+      }
+    } catch (_) { /* fail open: grammar record never depends on SRS */ }
+    return res.json({ ...entry, reference, review });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load grammar point.' });
   }

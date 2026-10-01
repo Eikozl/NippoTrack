@@ -169,8 +169,17 @@ async function getVocabulary(req, res) {
       'SELECT id_usage_example, sentence, translation, notes FROM usage_examples WHERE id_vocabulary = ? ORDER BY id_usage_example DESC',
       [id]
     );
-    const [[legacyKanji], [userKanjiRows], [referenceRows], [examples]] = await Promise.all([
-      legacyKanjiPromise, userKanjiPromise, referencePromise, examplesPromise
+    // SRS state (same shape as kanji detail): owned review row if the entry
+    // was ever graded, else null. Read-only, no lazy enrollment here.
+    const reviewPromise = pool.execute(
+      `SELECT ri.id_review_item, ri.due_on, ri.interval_days, ri.last_reviewed_at, ri.last_result
+       FROM review_items ri
+       JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary
+       WHERE ri.id_vocabulary = ? AND v.user_id = ?`,
+      [id, req.user.id]
+    );
+    const [[legacyKanji], [userKanjiRows], [referenceRows], [examples], [reviewRows]] = await Promise.all([
+      legacyKanjiPromise, userKanjiPromise, referencePromise, examplesPromise, reviewPromise
     ]);
     // Legacy `kanji` projection kept byte-identical for API compatibility.
     const kanji = legacyKanji.map((row) => ({
@@ -181,7 +190,14 @@ async function getVocabulary(req, res) {
       status: row.status
     }));
     const readingContext = buildFullVocabularyReadingContext(entry, wordChars, userKanjiRows, referenceRows);
-    return res.json({ ...entry, kanji, readingContext, examples });
+    const review = reviewRows[0] ? {
+      idReviewItem: reviewRows[0].id_review_item,
+      dueOn: reviewRows[0].due_on,
+      intervalDays: Number(reviewRows[0].interval_days || 0),
+      lastReviewedAt: reviewRows[0].last_reviewed_at || null,
+      lastResult: reviewRows[0].last_result || null
+    } : null;
+    return res.json({ ...entry, kanji, readingContext, examples, review });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load vocabulary entry.' });
   }
