@@ -446,10 +446,24 @@ export async function renderAnalyzer(container) {
       // primaryGloss-only. The ONLY network call allowed here is an explicit
       // entry expansion via fetchAutofillEntry under the cached item pin.
       const rawContextItem = findContextItem(view.key);
+      // Per-item pins are never emitted by the server diet; the context
+      // block-level dictionary IS the same pinned snapshot the analysis ran
+      // under, so it is a valid expansion anchor for entry drilling.
+      const contextDictionaryPin = (() => {
+        const dictionary = analysis?.lexical?.context?.dictionary;
+        if (!dictionary || dictionary.sourceId == null) return null;
+        return {
+          sourceId: String(dictionary.sourceId),
+          sourceName: dictionary.source ?? null,
+          converter: dictionary.converter ?? null,
+          converterVersion: dictionary.version ?? null,
+          fileDate: dictionary.fileDate ?? null
+        };
+      })();
       // addSuggestion-compatible identity check (kept for stale semantics).
       const suggestion = rawContextItem ? addSuggestion(rawContextItem) : null;
       const hasContextSuggestion = !!(suggestion && suggestion.sourceKey === view.key);
-      const prefill = analyzerPrefillFromContext(candidate, hasContextSuggestion ? rawContextItem : null)
+      const prefill = analyzerPrefillFromContext(candidate, hasContextSuggestion ? rawContextItem : null, contextDictionaryPin)
         || { word: candidate.lemma || candidate.canonical, reading: candidate.lemmaReading || '', readingProvenance: null, meaning: '', meaningChoices: [], moreMeanings: false, requiresChoice: false, entryRows: [], pin: null, glossMeta: null };
       const identityWord = prefill.word;
       // Analyzer reading fallback preserves the pre-VAF behavior: cached
