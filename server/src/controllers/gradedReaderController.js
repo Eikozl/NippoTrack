@@ -9,6 +9,7 @@ const {
   createUserReadingText,
   getReadingText,
   listReadingLibrary,
+  listReadingProgress,
   syncReadingSources,
   upsertReadingProgress
 } = require('../services/gradedReader');
@@ -130,6 +131,20 @@ async function updateProgress(req, res) {
   }
 }
 
+async function listProgress(req, res) {
+  try {
+    const query = req.query || {};
+    const page = parseQueryInteger(query.page, 'page', 1);
+    const limit = parseQueryInteger(query.limit, 'limit', 20, MAX_LIBRARY_LIMIT);
+    const offset = (page - 1) * limit;
+    if (!Number.isSafeInteger(offset)) throw new ValidationError('page is too large.');
+    const result = await listReadingProgress(pool, req.user.id, { page, limit, offset });
+    return res.json(result);
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load reading progress.' });
+  }
+}
+
 async function importSources(req, res) {
   try {
     const body = bodyObject(req.body);
@@ -153,5 +168,6 @@ module.exports = {
   getText,
   importSources,
   listLibrary,
+  listProgress,
   updateProgress
 };

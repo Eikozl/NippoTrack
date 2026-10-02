@@ -8,6 +8,7 @@ const translations = {
     'Kanji': 'Kanji',
     'Text Analyzer': 'Analizador de texto',
     'Immersion': 'Inmersión',
+    'Reading': 'Lectura',
     'Grammar': 'Gramática',
     'Goals': 'Objetivos',
     'Content Log': 'Registro de contenido',

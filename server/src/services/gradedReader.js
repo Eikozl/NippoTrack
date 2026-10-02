@@ -535,6 +535,46 @@ async function upsertReadingProgress(executor, userId, textId, {
   };
 }
 
+// User-scoped reading progress listing (library/stats feed). Joins text
+// metadata + source type so the client can aggregate without extra round
+// trips; foreign rows are never visible because the query starts from the
+// user's own progress rows.
+async function listReadingProgress(executor, userId, { page, limit, offset } = {}) {
+  const [countRows] = await executor.execute(
+    'SELECT COUNT(*) AS total FROM user_reading_progress WHERE user_id = ?',
+    [userId]
+  );
+  const total = Number(countRows?.[0]?.total || 0);
+  const [rows] = await executor.execute(
+    `SELECT p.text_id AS "textId",
+       t.title, t.level,
+       length(t.text) AS "characters",
+       s.type AS "sourceType",
+       p.position, p.completed_at AS "completedAt",
+       p.time_spent_seconds AS "timeSpentSeconds",
+       p.updated_at AS "updatedAt"
+      FROM user_reading_progress p
+      JOIN reading_texts t ON t.id_reading_text = p.text_id
+      LEFT JOIN reading_sources s ON s.id_reading_source = t.source_id
+      WHERE p.user_id = ?
+      ORDER BY p.updated_at DESC, p.text_id DESC
+      LIMIT ? OFFSET ?`,
+    [userId, limit, offset]
+  );
+  const items = (rows || []).map((row) => ({
+    textId: Number(row.textId),
+    title: row.title,
+    level: row.level || null,
+    characters: Number(row.characters || 0),
+    sourceType: row.sourceType || null,
+    position: Number(row.position || 0),
+    completedAt: row.completedAt || null,
+    timeSpentSeconds: Number(row.timeSpentSeconds || 0),
+    updatedAt: row.updatedAt || null
+  }));
+  return { items, total, page, limit, totalPages: total ? Math.ceil(total / limit) : 0 };
+}
+
 function decodeEntities(value) {
   return String(value || '').replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos|nbsp);/gi, (match, entity) => {
     const key = entity.toLowerCase();
@@ -829,6 +869,7 @@ module.exports = {
   loadAozoraSources,
   loadNHKEasySources,
   listReadingLibrary,
+  listReadingProgress,
   normalizeReadingText,
   normalizeAnalysisText,
   normalizeTitle,

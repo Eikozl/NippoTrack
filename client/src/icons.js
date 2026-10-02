@@ -1,7 +1,7 @@
 import {
   BookOpen, BookOpenText, CalendarDays, CalendarRange, ChartNoAxesCombined, Check, Circle, CircleUserRound,
   Clock, createElement, FileText, Flame, History, LayoutDashboard, Library, Languages,
-  Menu, MessagesSquare, Moon, PieChart, RefreshCw, ScanText, Search, Settings, Sun, Tag, Target, X, Zap
+  Menu, MessagesSquare, Moon, Newspaper, PieChart, RefreshCw, ScanText, Search, Settings, Sun, Tag, Target, X, Zap
 } from 'lucide';
 
 const ICONS = {
@@ -17,6 +17,7 @@ const ICONS = {
   tags: Tag,
   review: RefreshCw,
   immersion: BookOpenText,
+  reading: Newspaper,
   statistics: ChartNoAxesCombined,
   settings: Settings,
   today: CalendarDays,
@@ -50,6 +51,7 @@ const TITLES = {
   tags: 'tags',
   review: 'review',
   immersion: 'immersion',
+  reading: 'reading',
   statistics: 'statistics',
   settings: 'settings'
 };
@@ -77,5 +79,5 @@ export function iconForTitle(title) {
 }
 
 export const moduleIconMap = Object.freeze({
-  dashboard: 'dashboard', sessions: 'sessions', vocabulary: 'vocabulary', kanji: 'kanji', analyzer: 'analyzer', immersion: 'immersion', grammar: 'grammar', goals: 'goals', content: 'content', notes: 'notes', tags: 'tags', review: 'review', statistics: 'statistics', settings: 'settings', search: 'search'
+  dashboard: 'dashboard', sessions: 'sessions', vocabulary: 'vocabulary', kanji: 'kanji', analyzer: 'analyzer', immersion: 'immersion', reading: 'reading', grammar: 'grammar', goals: 'goals', content: 'content', notes: 'notes', tags: 'tags', review: 'review', statistics: 'statistics', settings: 'settings', search: 'search'
 });

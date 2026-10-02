@@ -271,3 +271,53 @@ test('source import has fixed-host parsing and reports fetch failures as unavail
   assert.equal(response.status(), 200);
   assert.deepEqual(response.body(), { status: 'unavailable', reason: 'Source request failed.' });
 });
+
+test('reading progress listing is user-scoped, joined with text metadata, and paginated', async () => {
+  const calls = [];
+  await withPoolStubs({ execute: async (sql, params = []) => {
+    calls.push({ sql, params });
+    if (/SELECT COUNT\(\*\) AS total FROM user_reading_progress WHERE user_id = \?/i.test(sql)) {
+      assert.deepEqual(params, [USER_ID]);
+      return [[{ total: '2' }]];
+    }
+    if (/FROM user_reading_progress p/i.test(sql)) {
+      assert.match(sql, /JOIN reading_texts t ON t\.id_reading_text = p\.text_id/i);
+      assert.match(sql, /WHERE p\.user_id = \?/i);
+      assert.equal(params[0], USER_ID);
+      assert.deepEqual(params.slice(1), [20, 0]);
+      return [[
+        { textId: '31', title: 'First steps', level: 'N5', characters: '120', sourceType: 'nhk', position: '120', completedAt: '2026-10-01T10:00:00Z', timeSpentSeconds: '300', updatedAt: '2026-10-01T10:05:00Z' },
+        { textId: '32', title: 'Second steps', level: null, characters: '80', sourceType: null, position: '10', completedAt: null, timeSpentSeconds: '0', updatedAt: '2026-09-30T09:00:00Z' }
+      ]];
+    }
+    throw new Error(`Unexpected progress listing SQL: ${sql}`);
+  } }, async () => {
+    const response = mockRes();
+    await controller.listProgress({ query: {}, user: { id: USER_ID } }, response.res);
+    assert.equal(response.status(), 200);
+    const body = response.body();
+    assert.equal(body.total, 2);
+    assert.equal(body.page, 1);
+    assert.equal(body.limit, 20);
+    assert.equal(body.totalPages, 1);
+    assert.equal(body.items.length, 2);
+    assert.equal(body.items[0].textId, 31);
+    assert.equal(body.items[0].title, 'First steps');
+    assert.equal(body.items[0].level, 'N5');
+    assert.equal(body.items[0].characters, 120);
+    assert.equal(body.items[0].sourceType, 'nhk');
+    assert.equal(body.items[0].position, 120);
+    assert.equal(body.items[0].completedAt, '2026-10-01T10:00:00Z');
+    assert.equal(body.items[0].timeSpentSeconds, 300);
+    assert.equal(body.items[1].level, null);
+    assert.equal(body.items[1].completedAt, null);
+    assert.ok(calls.every(({ params }) => !params.length || params[0] === USER_ID || params[0] === 20));
+  });
+
+  const badPage = mockRes();
+  await controller.listProgress({ query: { page: 'zero' }, user: { id: USER_ID } }, badPage.res);
+  assert.equal(badPage.status(), 400);
+  const tooLarge = mockRes();
+  await controller.listProgress({ query: { limit: '999' }, user: { id: USER_ID } }, tooLarge.res);
+  assert.equal(tooLarge.status(), 400);
+});

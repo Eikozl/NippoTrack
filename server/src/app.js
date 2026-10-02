@@ -65,6 +65,7 @@ app.get('/api', (req, res) => {
       'POST /api/immersion/create-session',
       'GET /api/immersion/history',
       'GET /api/reading/library',
+      'GET /api/reading/progress',
       'GET /api/reading/text/:id',
       'POST /api/reading/analyze',
       'POST /api/reading/user-text',

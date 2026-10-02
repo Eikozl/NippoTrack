@@ -60,6 +60,35 @@ export function listImmersionHistory({ page, limit, from, to, level } = {}) {
   return apiRequest(`/api/immersion/history${queryString({ page, limit, from, to, level })}`);
 }
 
+// V5.3a — Graded reading library + reader. Thin wrappers so pages never
+// hand-build endpoint URLs or drift from the API contract.
+export function listReadingLibrary({ level, source, date, page, limit } = {}) {
+  return apiRequest(`/api/reading/library${queryString({ level, source, date, page, limit })}`);
+}
+
+export function getReadingText(id) {
+  return apiRequest(`/api/reading/text/${encodeURIComponent(id)}`);
+}
+
+export function createUserReadingText({ text, title } = {}) {
+  return apiRequest('/api/reading/user-text', { method: 'POST', body: { text, title } });
+}
+
+export function updateReadingProgress(id, { position, timeSpentSeconds, completed } = {}) {
+  return apiRequest(`/api/reading/text/${encodeURIComponent(id)}/progress`, {
+    method: 'PUT',
+    body: { position, ...(timeSpentSeconds !== undefined ? { timeSpentSeconds } : {}), ...(completed !== undefined ? { completed } : {}) }
+  });
+}
+
+export function importReadingSources(sourceType) {
+  return apiRequest('/api/reading/import', { method: 'POST', body: { sourceType } });
+}
+
+export function listReadingProgress({ page, limit } = {}) {
+  return apiRequest(`/api/reading/progress${queryString({ page, limit })}`);
+}
+
 export function queryString(values) {
   const params = new URLSearchParams();
 
