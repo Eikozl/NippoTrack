@@ -2,7 +2,7 @@ const postgresPool = require('./postgresRuntime');
 
 const ID_COLUMNS = {
   vocabulary: 'id_vocabulary', kanji: 'id_kanji', grammar_points: 'id_grammar', study_sessions: 'id_session',
-  session_writings: 'id_session_writing', usage_examples: 'id_usage_example', goals: 'id_goal',
+  session_writings: 'id_session_writing', usage_examples: 'id_usage_example', grammar_examples: 'id_grammar_example', goals: 'id_goal',
   content_entries: 'id_content_entry', notes: 'id_note', tags: 'id_tag', review_items: 'id_review_item', review_events: 'id_review_event'
 };
 
@@ -47,5 +47,9 @@ module.exports = {
   async execute(sql, params = []) { const client = await postgresPool.connect(); try { return await wrap(client).execute(sql, params); } finally { client.release(); } },
   async query(sql, params = []) { const client = await postgresPool.connect(); try { return await wrap(client).query(sql, params); } finally { client.release(); } },
   async getConnection() { return wrap(await postgresPool.connect(), { release: true }); },
-  end() { return postgresPool.end(); }
+  end() { return postgresPool.end(); },
+  // Exposed for regression tests: every user-insertable table with an
+  // identity PK must map here or bare INSERTs lose their insertId on
+  // Postgres (see reviewController's RETURNING note for the exception).
+  ID_COLUMNS
 };

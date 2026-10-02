@@ -47,6 +47,15 @@ test('Migration 020 creates grammar_examples with legacy backfill and runtime gr
   assert.doesNotMatch(migration, /DROP COLUMN/i);
 });
 
+test('Postgres adapter maps grammar_examples so bare INSERTs keep insertId', () => {
+  // Regression: without this mapping the adapter skips auto-RETURNING and
+  // createGrammarExample returns 201 with an empty body on real Postgres
+  // (stubs always returned insertId, hiding it). Mirrors usage_examples.
+  const { ID_COLUMNS } = require('../src/config/db');
+  assert.equal(ID_COLUMNS.grammar_examples, 'id_grammar_example');
+  assert.equal(ID_COLUMNS.usage_examples, 'id_usage_example');
+});
+
 test('GET grammar detail returns managed examples alongside the legacy column', async () => {
   await withExecuteStub(async (sql, params) => {
     if (/FROM grammar_points WHERE id_grammar = \? AND user_id = \?/i.test(sql)) {
