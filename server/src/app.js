@@ -18,6 +18,7 @@ const levelRoutes = require('./routes/level');
 const firstExperienceRoutes = require('./routes/firstExperience');
 const profileRoutes = require('./routes/profile');
 const gradedReaderRoutes = require('./routes/gradedReader');
+const smartGoalsRoutes = require('./routes/smartGoals');
 const authRoutes = require('./routes/auth');
 const { requireAuthentication } = require('./middleware/authentication');
 const { createRateLimiter } = require('./middleware/rateLimit');
@@ -64,6 +65,9 @@ app.get('/api', (req, res) => {
       'GET /api/review/types',
       'GET /api/review/patterns',
       'PUT /api/review/preferences',
+      'GET /api/goals/smart',
+      'PUT /api/goals/smart/preferences',
+      'POST /api/goals/smart/adjust',
       'POST /api/analyze/text',
       'POST /api/immersion/analyze',
       'POST /api/immersion/create-session',
@@ -102,6 +106,7 @@ app.use('/api/review', reviewRoutes);
 app.use('/api/analyze', analyzeRoutes);
 app.use('/api/immersion', immersionRoutes);
 app.use('/api/reading', gradedReaderRoutes);
+app.use('/api/goals', smartGoalsRoutes);
 app.use('/api/level', levelRoutes);
 app.use('/api/first-experience', firstExperienceRoutes);
 app.use('/api/profile', profileRoutes);

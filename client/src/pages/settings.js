@@ -3,6 +3,7 @@ import { icon } from '../icons';
 import { profileStore, MAX_DISPLAY_NAME_LENGTH, normalizeDisplayName } from '../accountProfile.js';
 import { element, loadingState, pageHeader, showToast, withPendingAction } from '../ui';
 import { applyAppThemeAttributes, isAllowedAppTheme, persistAppTheme } from '../appTheme';
+import { smartGoalsSettingsSection } from '../smartGoals.js';
 import { enterPlacement, placementResultFromState, placementResultNode, selfReportResultNode } from '../firstExperience.js';
 import { targetLevelOptions } from '../jlptTarget.js';
 
@@ -181,7 +182,7 @@ async function renderLearningSection(slot) {
   if (targetError) targetChildren.push(element('p', { className: 'text-sm text-muted', text: 'Target level is unavailable right now.' }));
   const targetSection = sectionSurface('Learning', 'Keep your study target and historical Japanese starting point together.', targetChildren);
   const placement = startingPointBlock(firstExperiencePromise.catch(() => null));
-  slot.replaceChildren(element('div', { className: 'grid gap-5' }, [targetSection, placement]));
+  slot.replaceChildren(element('div', { className: 'grid gap-5' }, [targetSection, smartGoalsSettingsSection(), placement]));
 }
 
 function renderAppearanceSection(slot) {
