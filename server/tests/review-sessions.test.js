@@ -251,20 +251,26 @@ function makeGradeConnection({ calls, entityTable = 'kanji', entityId = 5, sessi
         return [[{ id_review_item: reviewItemId }]];
       }
       if (step === 5) {
+        // V5.3a: interval resolution reads preferences first; empty row keeps
+        // engine_mode='fixed' (frozen 1/3/7 curve).
+        assert.match(sql, /FROM user_review_preferences WHERE user_id = \?/);
+        return [[]];
+      }
+      if (step === 6) {
         assert.match(sql, /FROM review_items ri/);
         const row = { id_review_item: reviewItemId, interval_days: intervalDays, id_vocabulary: null, id_kanji: null, id_grammar: null };
         row[fkColumn] = entityId;
         return [[row]];
       }
-      if (step === 6) {
+      if (step === 7) {
         assert.match(sql, /AND user_id = \?/);
         return [[{ 1: 1 }]];
       }
-      if (step === 7) {
+      if (step === 8) {
         assert.match(sql, /INSERT INTO review_events/i);
         return [{ affectedRows: 1 }];
       }
-      if (step === 8) {
+      if (step === 9) {
         assert.match(sql, /UPDATE review_items/i);
         return [{ affectedRows: 1 }];
       }
@@ -298,7 +304,7 @@ test('gradeEntity first grade enrolls review item then records event with sessio
     // Ownership checks carry the requesting user id.
     assert.ok(calls[0].params.includes(USER_ID));
     assert.ok(calls[1].params.includes(USER_ID));
-    assert.ok(calls[5].params.includes(USER_ID));
+    assert.ok(calls[6].params.includes(USER_ID));
   } finally { pool.getConnection = original; }
 });
 
@@ -420,10 +426,11 @@ test('legacy recordReview still works with NULL session id', async () => {
     async execute(sql, params = []) {
       calls.push({ sql, params });
       step += 1;
-      if (step === 1) return [[{ id_review_item: 99, interval_days: 2, id_vocabulary: null, id_kanji: 11, id_grammar: null }]];
-      if (step === 2) return [[{ 1: 1 }]];
-      if (step === 3) return [{ affectedRows: 1 }];
+      if (step === 1) return [[]];
+      if (step === 2) return [[{ id_review_item: 99, interval_days: 2, id_vocabulary: null, id_kanji: 11, id_grammar: null }]];
+      if (step === 3) return [[{ 1: 1 }]];
       if (step === 4) return [{ affectedRows: 1 }];
+      if (step === 5) return [{ affectedRows: 1 }];
       throw new Error(`Unexpected step ${step}`);
     },
     async commit() {},
@@ -453,10 +460,11 @@ test('interval mapping Again 1 Hard 3 Good 7 via stubbed flows', async () => {
       async execute(sql, params = []) {
         calls.push({ sql, params });
         step += 1;
-        if (step === 1) return [[{ id_review_item: 99, interval_days: 0, id_vocabulary: 8, id_kanji: null, id_grammar: null }]];
-        if (step === 2) return [[{ 1: 1 }]];
-        if (step === 3) return [{ affectedRows: 1 }];
+        if (step === 1) return [[]];
+        if (step === 2) return [[{ id_review_item: 99, interval_days: 0, id_vocabulary: 8, id_kanji: null, id_grammar: null }]];
+        if (step === 3) return [[{ 1: 1 }]];
         if (step === 4) return [{ affectedRows: 1 }];
+        if (step === 5) return [{ affectedRows: 1 }];
         throw new Error('unexpected');
       },
       async commit() {},
@@ -560,10 +568,11 @@ test('HTTP POST /api/review/grade records entity grade with session', async () =
       if (step === 2) return [[{ id_review_session: 9, completed_at: null }]];
       if (step === 3) return [{ affectedRows: 1 }];
       if (step === 4) return [[{ id_review_item: 55 }]];
-      if (step === 5) return [[{ id_review_item: 55, interval_days: 1, id_vocabulary: null, id_kanji: 5, id_grammar: null }]];
-      if (step === 6) return [[{ 1: 1 }]];
-      if (step === 7) return [{ affectedRows: 1 }];
+      if (step === 5) return [[]];
+      if (step === 6) return [[{ id_review_item: 55, interval_days: 1, id_vocabulary: null, id_kanji: 5, id_grammar: null }]];
+      if (step === 7) return [[{ 1: 1 }]];
       if (step === 8) return [{ affectedRows: 1 }];
+      if (step === 9) return [{ affectedRows: 1 }];
       throw new Error(`Unexpected ${sql}`);
     },
     async commit() {},

@@ -3,6 +3,14 @@ const { ValidationError, sendRouteError } = require('../errors/http');
 const { parseIdParam, isValidDateString, validateAllowedValues } = require('../validation');
 const { parsePagination, paginationPayload } = require('../pagination');
 const { getReviewCandidates } = require('../services/reviewCandidates');
+const {
+  CARD_TYPES,
+  ENTITY_CARD_TYPES,
+  getUserReviewPreferences,
+  upsertUserReviewPreferences,
+  detectAndStoreReviewPatterns,
+  resolveIntervalDays
+} = require('../services/reviewEngine');
 
 const INTERVALS = { Again: 1, Hard: 3, Good: 7 };
 
@@ -57,7 +65,12 @@ function extractInsertId(first) {
 // Returns null on missing-or-foreign review item so callers can keep the
 // legacy exact behavior (rollback + 404 {error:'review item not found'}).
 // On success returns { result, nextIntervalDays }.
+// V5.3a: interval resolution is the FIRST statement in the transaction. The
+// default engine_mode='fixed' keeps the frozen 1/3/7 curve byte-identical
+// (one bounded preferences read per grade); the opt-in 'dynamic' mode applies
+// the spec-verbatim facility formula from the item's recent events.
 async function applyGrade(connection, { reviewItemId, result, sessionId, userId }) {
+  const intervalResolution = await resolveIntervalDays(connection, userId, reviewItemId, result);
   const [rows] = await connection.execute(`SELECT ri.id_review_item, ri.interval_days, ri.id_vocabulary, ri.id_kanji, ri.id_grammar
       FROM review_items ri
       WHERE ri.id_review_item = ? FOR UPDATE`, [reviewItemId]);
@@ -76,7 +89,7 @@ async function applyGrade(connection, { reviewItemId, result, sessionId, userId 
   }
   if (!isOwner) return null;
   const previousInterval = Number(reviewItem.interval_days || 0);
-  const nextInterval = INTERVALS[result];
+  const nextInterval = intervalResolution.intervalDays;
   await connection.execute(
     'INSERT INTO review_events (id_review_item, reviewed_at, result, previous_interval_days, next_interval_days, id_review_session) VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?, ?)',
     [reviewItemId, result, previousInterval, nextInterval, sessionId || null]
@@ -139,33 +152,102 @@ async function getSessionSummary(executor, sessionId, userId) {
   };
 }
 
+// Exactly one FK per row is enforced by chk_review_items_one_target, so three
+// owned INNER JOIN branches UNION ALLed are equivalent to the old
+// LEFT JOIN + OR ownership filter, while letting each branch use its
+// (user_id, id) index instead of scanning every due row three times.
+// Inert = auto-enrolled but never actually reviewed; new items enroll lazily on first grade.
+const DUE_REVIEWS_SQL = `SELECT ri.id_review_item, ri.due_on, ri.interval_days, ri.last_reviewed_at, ri.last_result,
+  'Vocabulary' AS item_type, v.word AS title, v.meaning AS meaning, v.reading
+  FROM review_items ri
+  JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary
+  WHERE ri.due_on <= CURRENT_DATE AND ri.id_vocabulary IS NOT NULL AND ri.id_kanji IS NULL AND ri.id_grammar IS NULL AND v.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)
+  UNION ALL
+  SELECT ri.id_review_item, ri.due_on, ri.interval_days, ri.last_reviewed_at, ri.last_result,
+  'Kanji' AS item_type, k.character_kanji AS title, k.meaning AS meaning, NULL AS reading
+  FROM review_items ri
+  JOIN kanji k ON k.id_kanji = ri.id_kanji
+  WHERE ri.due_on <= CURRENT_DATE AND ri.id_kanji IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_grammar IS NULL AND k.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)
+  UNION ALL
+  SELECT ri.id_review_item, ri.due_on, ri.interval_days, ri.last_reviewed_at, ri.last_result,
+  'Grammar' AS item_type, g.grammar_point AS title, g.meaning AS meaning, NULL AS reading
+  FROM review_items ri
+  JOIN grammar_points g ON g.id_grammar = ri.id_grammar
+  WHERE ri.due_on <= CURRENT_DATE AND ri.id_grammar IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_kanji IS NULL AND g.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)
+  ORDER BY due_on ASC, id_review_item ASC`;
+
 async function listDueReviews(req, res) {
   try {
-    // Exactly one FK per row is enforced by chk_review_items_one_target, so three
-    // owned INNER JOIN branches UNION ALLed are equivalent to the old
-    // LEFT JOIN + OR ownership filter, while letting each branch use its
-    // (user_id, id) index instead of scanning every due row three times.
-    // Inert = auto-enrolled but never actually reviewed; new items enroll lazily on first grade.
-    const [items] = await pool.execute(`SELECT ri.id_review_item, ri.due_on, ri.interval_days, ri.last_reviewed_at, ri.last_result,
-      'Vocabulary' AS item_type, v.word AS title, v.meaning AS meaning, v.reading
-      FROM review_items ri
-      JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary
-      WHERE ri.due_on <= CURRENT_DATE AND ri.id_vocabulary IS NOT NULL AND ri.id_kanji IS NULL AND ri.id_grammar IS NULL AND v.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)
-      UNION ALL
-      SELECT ri.id_review_item, ri.due_on, ri.interval_days, ri.last_reviewed_at, ri.last_result,
-      'Kanji' AS item_type, k.character_kanji AS title, k.meaning AS meaning, NULL AS reading
-      FROM review_items ri
-      JOIN kanji k ON k.id_kanji = ri.id_kanji
-      WHERE ri.due_on <= CURRENT_DATE AND ri.id_kanji IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_grammar IS NULL AND k.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)
-      UNION ALL
-      SELECT ri.id_review_item, ri.due_on, ri.interval_days, ri.last_reviewed_at, ri.last_result,
-      'Grammar' AS item_type, g.grammar_point AS title, g.meaning AS meaning, NULL AS reading
-      FROM review_items ri
-      JOIN grammar_points g ON g.id_grammar = ri.id_grammar
-      WHERE ri.due_on <= CURRENT_DATE AND ri.id_grammar IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_kanji IS NULL AND g.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)
-      ORDER BY due_on ASC, id_review_item ASC`, [req.user.id, req.user.id, req.user.id]);
+    const [items] = await pool.execute(DUE_REVIEWS_SQL, [req.user.id, req.user.id, req.user.id]);
     return res.json({ items });
   } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load reviews.' }); }
+}
+
+// V5.3a Review 2.0: due listing enriched with the card types each entity
+// supports, optionally filtered to items that support at least one of the
+// requested types. Read-only; the frozen /due rows themselves are unchanged.
+async function listDueReviewCards(req, res) {
+  try {
+    const rawTypes = req.query?.types;
+    let requestedTypes;
+    if (rawTypes === undefined || rawTypes === null || rawTypes === '') {
+      requestedTypes = null;
+    } else {
+      const parts = String(rawTypes).split(',').map((part) => part.trim()).filter(Boolean);
+      if (!parts.length) throw new ValidationError('types must be a comma-separated subset of: recognition, recall, cloze, audio');
+      for (const part of parts) {
+        if (!CARD_TYPES.includes(part)) {
+          throw new ValidationError('types must be a comma-separated subset of: recognition, recall, cloze, audio');
+        }
+      }
+      requestedTypes = [...new Set(parts)];
+    }
+    const [rows] = await pool.execute(DUE_REVIEWS_SQL, [req.user.id, req.user.id, req.user.id]);
+    const items = (rows || [])
+      .map((row) => {
+        const entityType = String(row.item_type || '').toLowerCase() === 'vocabulary'
+          ? 'vocabulary'
+          : String(row.item_type || '').toLowerCase() === 'kanji' ? 'kanji' : 'grammar';
+        return { ...row, entityType, cardTypes: [...(ENTITY_CARD_TYPES[entityType] || ['recognition'])] };
+      })
+      .filter((row) => !requestedTypes || row.cardTypes.some((type) => requestedTypes.includes(type)));
+    return res.json({ items });
+  } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load review cards.' }); }
+}
+
+// V5.3a Review 2.0: available card types + the user's stored preferences.
+async function getReviewTypes(req, res) {
+  try {
+    const userPreferences = await getUserReviewPreferences(pool, req.user.id);
+    return res.json({ availableTypes: [...CARD_TYPES], userPreferences });
+  } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load review types.' }); }
+}
+
+// V5.3a Review 2.0: upsert the user's card-type preferences.
+async function putReviewPreferences(req, res) {
+  try {
+    const body = req.body || {};
+    const allowed = ['cardTypes', 'weights', 'engineMode'];
+    const unknown = Object.keys(body).filter((key) => !allowed.includes(key));
+    if (unknown.length) throw new ValidationError(`Unexpected field(s): ${unknown.join(', ')}.`);
+    if (!Array.isArray(body.cardTypes)) throw new ValidationError('cardTypes is required and must be an array.');
+    const saved = await upsertUserReviewPreferences(pool, req.user.id, {
+      cardTypes: body.cardTypes,
+      weights: body.weights,
+      engineMode: body.engineMode
+    });
+    return res.json({ userPreferences: saved });
+  } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to save review preferences.' }); }
+}
+
+// V5.3a Review 2.0: run the pattern detector (heuristic, user-scoped, last 50
+// events) and return the fresh pattern set. Detection replaces the stored
+// rows so the panel and the API can never disagree.
+async function getReviewPatterns(req, res) {
+  try {
+    const items = await detectAndStoreReviewPatterns(pool, req.user.id);
+    return res.json({ items });
+  } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load review patterns.' }); }
 }
 
 async function recordReview(req, res) {
@@ -526,4 +608,4 @@ async function listDifficultItems(req, res) {
   }
 }
 
-module.exports = { createReviewItem, listDueReviews, recordReview, createReviewSession, completeReviewSession, gradeEntity, listCandidates, listReviewSessions, getReviewSession, listDifficultItems };
+module.exports = { createReviewItem, listDueReviews, listDueReviewCards, recordReview, createReviewSession, completeReviewSession, gradeEntity, listCandidates, listReviewSessions, getReviewSession, listDifficultItems, getReviewTypes, putReviewPreferences, getReviewPatterns };
