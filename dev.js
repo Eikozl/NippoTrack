@@ -37,41 +37,27 @@ try {
   return;
 }
 
-let shuttingDown = false;
-const children = [];
-
-function stop(exitCode = 0) {
-  if (shuttingDown) return;
-  shuttingDown = true;
-
-  for (const child of children) {
-    if (!child.killed) child.kill();
-  }
-
-  setTimeout(() => process.exit(exitCode), 250).unref();
-}
-
+// Option A — detached spawn (CI/automation friendly): the parent validates
+// the environment above, launches both long-running servers in background,
+// and exits immediately so the launcher never hangs. Verify with
+// `curl http://localhost:5173` and the API health endpoint; stop background
+// servers via Task Manager / `taskkill` (Windows) or `kill` (POSIX). Because
+// stdio is detached, use `npm run dev:server` / `npm run dev:client` in
+// separate terminals when you need live logs and crash output.
 for (const service of services) {
-  console.log(`Starting ${service.name} from ./${service.directory}...`);
+  console.log(`Starting ${service.name} from ./${service.directory} in background...`);
   const child = spawn(npmExecutable, service.npmArguments, {
     cwd: path.join(__dirname, service.directory),
     env: { ...process.env, ...service.environment },
-    stdio: 'inherit',
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
     shell: process.platform === 'win32'
   });
 
-  children.push(child);
   child.on('error', (error) => {
     console.error(`Unable to start ${service.name}: ${error.message}`);
-    stop(1);
+    process.exitCode = 1;
   });
-  child.on('exit', (code, signal) => {
-    if (shuttingDown) return;
-    const reason = signal ? `signal ${signal}` : `code ${code}`;
-    console.error(`${service.name} stopped unexpectedly (${reason}).`);
-    stop(code || 1);
-  });
+  child.unref();
 }
-
-process.on('SIGINT', () => stop(0));
-process.on('SIGTERM', () => stop(0));
