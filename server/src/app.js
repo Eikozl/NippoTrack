@@ -17,6 +17,7 @@ const immersionRoutes = require('./routes/immersion');
 const levelRoutes = require('./routes/level');
 const firstExperienceRoutes = require('./routes/firstExperience');
 const profileRoutes = require('./routes/profile');
+const gradedReaderRoutes = require('./routes/gradedReader');
 const authRoutes = require('./routes/auth');
 const { requireAuthentication } = require('./middleware/authentication');
 const { createRateLimiter } = require('./middleware/rateLimit');
@@ -63,6 +64,12 @@ app.get('/api', (req, res) => {
       'POST /api/immersion/analyze',
       'POST /api/immersion/create-session',
       'GET /api/immersion/history',
+      'GET /api/reading/library',
+      'GET /api/reading/text/:id',
+      'POST /api/reading/analyze',
+      'POST /api/reading/user-text',
+      'PUT /api/reading/text/:id/progress',
+      'POST /api/reading/import',
       'GET /api/level/estimate',
       'GET /api/level/progress',
       'GET /api/level/target',
@@ -89,6 +96,7 @@ app.use('/api', v2Routes);
 app.use('/api/review', reviewRoutes);
 app.use('/api/analyze', analyzeRoutes);
 app.use('/api/immersion', immersionRoutes);
+app.use('/api/reading', gradedReaderRoutes);
 app.use('/api/level', levelRoutes);
 app.use('/api/first-experience', firstExperienceRoutes);
 app.use('/api/profile', profileRoutes);

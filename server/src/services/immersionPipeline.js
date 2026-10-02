@@ -591,7 +591,13 @@ async function listImmersionSessions(pool, userId, { from, to, level, page, limi
 module.exports = {
   MAX_IMMERSION_TEXT_LENGTH,
   analyzeTextForImmersion,
+  // Reused by the graded-reading service (V5.3a Prompt 2A) so the kanji
+  // level heuristic, JMdict gloss lookup, JLPT normalization, and code-point
+  // truncation stay single-sourced.
+  attachVocabularyGlosses,
   createImmersionSession,
   estimateDifficultyLevel,
-  listImmersionSessions
+  listImmersionSessions,
+  normalizeJlpt,
+  truncateCodePoints
 };
