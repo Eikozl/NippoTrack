@@ -62,17 +62,19 @@ async function importGrammarReferences(client, catalog = loadGrammarCatalog()) {
   return { upserted };
 }
 
-async function hydrateGrammarMatches(userId, matches) {
+// Optional executor keeps this reusable from services with an injected pool
+// (e.g. the immersion pipeline unit tests); default is the module pool.
+async function hydrateGrammarMatches(userId, matches, executor = pool) {
   const list = Array.isArray(matches) ? matches : [];
   const slugs = [...new Set(list.flatMap((match) => match.status === 'AMBIGUOUS' ? match.sourceSlugs : [match.sourceSlug]).filter(Boolean))];
   if (!slugs.length) return [];
   const placeholders = slugs.map(() => '?').join(', ');
-  const [references] = await pool.execute(`SELECT * FROM grammar_reference WHERE source = 'nihongo-mono' AND source_slug IN (${placeholders})`, slugs);
+  const [references] = await executor.execute(`SELECT * FROM grammar_reference WHERE source = 'nihongo-mono' AND source_slug IN (${placeholders})`, slugs);
   const bySlug = new Map(references.map((row) => [row.source_slug, serializeReference(row)]));
   const ids = references.map((row) => row.id_grammar_reference);
   const owned = new Map();
   if (ids.length) {
-    const [rows] = await pool.execute(`SELECT id_grammar, reference_id FROM grammar_points WHERE user_id = ? AND reference_id IN (${ids.map(() => '?').join(', ')})`, [userId, ...ids]);
+    const [rows] = await executor.execute(`SELECT id_grammar, reference_id FROM grammar_points WHERE user_id = ? AND reference_id IN (${ids.map(() => '?').join(', ')})`, [userId, ...ids]);
     rows.forEach((row) => owned.set(Number(row.reference_id), Number(row.id_grammar)));
   }
   return list.map((match) => {

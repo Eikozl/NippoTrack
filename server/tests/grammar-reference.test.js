@@ -44,8 +44,8 @@ test('English summary terms remain searchable for reference selection', () => {
   assert.ok(matches.some((item) => item.summary?.toLocaleLowerCase('en').includes('permission')));
 });
 
-test('runtime security verifier counts 38 application tables after migration 020', () => {
+test('runtime security verifier counts 40 application tables after migration 021', () => {
   const verifier = fs.readFileSync(path.join(__dirname, '../scripts/verify-postgres-runtime-security.js'), 'utf8');
   assert.match(verifier, /'grammar_reference'/);
-  assert.match(verifier, /tables\.length !== 38/);
+  assert.match(verifier, /tables\.length !== 40/);
 });

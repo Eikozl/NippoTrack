@@ -13,6 +13,7 @@ const exportRoutes = require('./routes/export');
 const v2Routes = require('./routes/v2');
 const reviewRoutes = require('./routes/review');
 const analyzeRoutes = require('./routes/analyze');
+const immersionRoutes = require('./routes/immersion');
 const levelRoutes = require('./routes/level');
 const firstExperienceRoutes = require('./routes/firstExperience');
 const profileRoutes = require('./routes/profile');
@@ -59,6 +60,9 @@ app.get('/api', (req, res) => {
       'GET /api/review/sessions',
       'GET /api/review/sessions/:id',
       'POST /api/analyze/text',
+      'POST /api/immersion/analyze',
+      'POST /api/immersion/create-session',
+      'GET /api/immersion/history',
       'GET /api/level/estimate',
       'GET /api/level/progress',
       'GET /api/level/target',
@@ -84,6 +88,7 @@ app.use('/api/export', exportRoutes);
 app.use('/api', v2Routes);
 app.use('/api/review', reviewRoutes);
 app.use('/api/analyze', analyzeRoutes);
+app.use('/api/immersion', immersionRoutes);
 app.use('/api/level', levelRoutes);
 app.use('/api/first-experience', firstExperienceRoutes);
 app.use('/api/profile', profileRoutes);
