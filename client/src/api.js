@@ -46,6 +46,20 @@ export async function apiRequest(path, { method = 'GET', body, signal, notifyAut
   return data;
 }
 
+// V5.3a — Immersion reading pipeline. Thin wrappers over apiRequest so pages
+// never hand-build endpoint URLs.
+export function analyzeImmersionText(text) {
+  return apiRequest('/api/immersion/analyze', { method: 'POST', body: { text } });
+}
+
+export function createImmersionSession(payload) {
+  return apiRequest('/api/immersion/create-session', { method: 'POST', body: payload });
+}
+
+export function listImmersionHistory({ page, limit, from, to, level } = {}) {
+  return apiRequest(`/api/immersion/history${queryString({ page, limit, from, to, level })}`);
+}
+
 export function queryString(values) {
   const params = new URLSearchParams();
 

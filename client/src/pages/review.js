@@ -44,6 +44,18 @@ function isWeak(item) {
   return item.evidenceStrength === 'weak';
 }
 
+// Immersion hand-off: create-session redirects to `#review?reviewSessionId=…`.
+function reviewSessionIdFromHash() {
+  try {
+    const hash = typeof window !== 'undefined' && window.location ? window.location.hash || '' : '';
+    const queryIndex = hash.indexOf('?');
+    if (queryIndex === -1) return null;
+    return new URLSearchParams(hash.slice(queryIndex + 1)).get('reviewSessionId');
+  } catch {
+    return null;
+  }
+}
+
 function itemKey(item) {
   return `${item.entityType}:${item.entityId}`;
 }
@@ -88,6 +100,20 @@ export async function renderReview(container) {
     element('h2', { className: 'mt-2 text-2xl font-semibold tracking-tight text-ink sm:text-3xl', text: 'Want to review your JLPT study?', attrs: { tabindex: '-1' } }),
     element('p', { className: 'mt-3 max-w-2xl text-sm leading-6 text-muted', text: 'Revisit recent study activity with focused recall, one item at a time. Use self-assessment to note how each item felt and decide what to look at again.' })
   ]);
+  // Immersion hand-off banner: when mounted via a create-session redirect,
+  // announce the enrollment and let the normal flow take over. This page
+  // intentionally does NOT bind grading to the redirected session id — its
+  // sessions are created per search, and the Today range already surfaces
+  // the freshly enrolled items, so nothing extra is routed anywhere.
+  const fromImmersionId = reviewSessionIdFromHash();
+  if (fromImmersionId) {
+    introBlock.appendChild(element('p', {
+      className: 'mt-4 rounded-xl border border-stone bg-paper px-3 py-2 text-sm leading-6 text-ink',
+      text: 'Session created from your text — its items are enrolled for today. Start a review for Today to study them.',
+      attrs: { role: 'status' }
+    }));
+  }
+
   const startWrap = element('div', { className: 'mt-5' });
   const startButton = element('button', { className: 'button-primary', text: 'Start review', attrs: { type: 'button' } });
   startWrap.appendChild(startButton);
@@ -120,6 +146,15 @@ export async function renderReview(container) {
     presetOptions.appendChild(pill);
   });
   presetFieldset.appendChild(presetOptions);
+
+  // Immersion entry: text-driven selection lives on the Immersion page; this
+  // link only routes there (returnUrl lets that page link back to Review).
+  const fromTextLink = element('a', {
+    className: 'button-secondary min-h-9 px-3 py-1.5 text-sm',
+    text: 'From text',
+    attrs: { href: '#immersion?returnUrl=/review' }
+  });
+  presetFieldset.appendChild(element('div', { className: 'mt-1 flex flex-wrap items-center gap-2' }, [fromTextLink]));
 
   // Custom From/To inputs.
   const fromInput = element('input', {
