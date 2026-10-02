@@ -197,6 +197,54 @@ export async function renderReview(container) {
   const historyBlock = element('section', { className: 'surface mt-4 p-5 sm:p-6', attrs: { 'aria-label': 'Recent review sessions' } });
   historyBlock.hidden = true;
 
+  // Per-session item detail, fetched lazily on first toggle and cached until
+  // the next loadHistory (sessions are append-only once listed).
+  const sessionDetailCache = new Map();
+  // History speaks in the same result vocabulary as the completion summary.
+  const RESULT_LABEL = { Good: 'comfortable', Hard: 'difficult', Again: 'revisit' };
+
+  function renderSessionItem(item) {
+    const reviewedAt = String(item.reviewedAt || '');
+    const time = reviewedAt.slice(11, 16);
+    const resultLabel = RESULT_LABEL[item.result] || item.result || '';
+    const status = [resultLabel, time].filter(Boolean).join(' · ');
+    // Compact row: display first; reading/meaning only when present.
+    return element('li', { className: 'rounded-lg border border-stone px-2.5 py-2 text-xs' }, [
+      element('p', { className: 'break-words font-jp font-medium text-ink', text: item.display }),
+      ...(item.reading ? [element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: item.reading })] : []),
+      ...(item.meaning ? [element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: item.meaning })] : []),
+      element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: status })
+    ]);
+  }
+
+  async function toggleSessionItems(session, toggle, detail) {
+    if (!detail.hidden) {
+      detail.hidden = true;
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.textContent = 'View items';
+      return;
+    }
+    toggle.disabled = true;
+    try {
+      let items = sessionDetailCache.get(session.id);
+      if (!items) {
+        const data = await apiRequest(`/api/review/sessions/${session.id}`);
+        items = Array.isArray(data?.items) ? data.items : [];
+        sessionDetailCache.set(session.id, items);
+      }
+      detail.replaceChildren(...(items.length
+        ? items.map(renderSessionItem)
+        : [element('li', { className: 'text-xs leading-5 text-muted', text: 'No items recorded in this session.' })]));
+      detail.hidden = false;
+      toggle.setAttribute('aria-expanded', 'true');
+      toggle.textContent = 'Hide items';
+    } catch {
+      showToast('Could not load session items.', 'error');
+    } finally {
+      toggle.disabled = false;
+    }
+  }
+
   // Frequently difficult items (>=2 Again events each, read-only, fail-open).
   const difficultBlock = element('section', { className: 'surface mt-4 p-5 sm:p-6', attrs: { 'aria-label': 'Frequently difficult' } });
   difficultBlock.hidden = true;
@@ -214,6 +262,7 @@ export async function renderReview(container) {
 
   async function loadHistory() {
     try {
+      sessionDetailCache.clear();
       const data = await apiRequest('/api/review/sessions?limit=10');
       const items = Array.isArray(data?.items) ? data.items : [];
       if (!items.length) {
@@ -230,10 +279,22 @@ export async function renderReview(container) {
           const types = session.byType || {};
           const summary = `${Number(session.total || 0)} items · ${Number(results.Good || 0)} comfortable · ${Number(results.Hard || 0)} difficult · ${Number(results.Again || 0)} revisit`;
           const scope = `Kanji ${Number(types.kanji || 0)} · Vocabulary ${Number(types.vocabulary || 0)} · Grammar ${Number(types.grammar || 0)}`;
+          const detailId = `session-items-${session.id}`;
+          const detail = element('ul', { className: 'mt-2 grid gap-1.5 border-t border-stone pt-2', attrs: { id: detailId } });
+          detail.hidden = true;
+          const toggle = element('button', {
+            className: 'button-secondary min-h-8 px-2.5 py-1 text-xs',
+            text: 'View items',
+            attrs: { type: 'button', 'aria-expanded': 'false', 'aria-controls': detailId, 'aria-label': `View items for session ${date || session.id}` }
+          });
+          toggle.addEventListener('click', () => { toggleSessionItems(session, toggle, detail); });
           return element('li', { className: 'rounded-xl border border-stone bg-paper px-3 py-2.5 text-sm' }, [
             element('p', { className: 'font-semibold text-ink', text: `${date || 'Session'}${session.completedAt ? '' : ' · in progress'}` }),
             element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: summary }),
-            element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: scope })
+            element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: scope }),
+            Number(session.total || 0) > 0
+              ? element('div', { className: 'mt-2' }, [toggle, detail])
+              : element('div', { className: 'mt-2' }, [element('p', { className: 'text-xs leading-5 text-muted', text: 'No items recorded in this session.' })])
           ]);
         }))
       );

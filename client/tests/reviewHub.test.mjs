@@ -297,7 +297,7 @@ function makeUi(doc, toasts) {
   return { element, pageHeader, loadingState, emptyState, errorState, showToast, withPendingAction };
 }
 
-function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, completePayload, gradeReject } = {}) {
+function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, completePayload, gradeReject, historyPayload, sessionDetailPayload } = {}) {
   const doc = new FakeDocument();
   const toasts = [];
   const apiCalls = [];
@@ -310,6 +310,18 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
     }
     if (url === '/api/review/sessions' && (opts.method || 'GET') === 'POST') {
       return { id: sessionId };
+    }
+    if (url === '/api/review/difficult' && (opts.method || 'GET') === 'GET') {
+      return { items: [] };
+    }
+    if (url.startsWith('/api/review/sessions?') && (opts.method || 'GET') === 'GET') {
+      if (historyPayload === undefined) throw new Error(`unexpected apiRequest ${url}`);
+      return typeof historyPayload === 'function' ? historyPayload(url) : historyPayload;
+    }
+    const detailMatch = url.match(/^\/api\/review\/sessions\/(\d+)$/);
+    if (detailMatch && (opts.method || 'GET') === 'GET') {
+      if (sessionDetailPayload === undefined) throw new Error(`unexpected apiRequest ${url}`);
+      return typeof sessionDetailPayload === 'function' ? sessionDetailPayload(detailMatch[1], url) : sessionDetailPayload;
     }
     if (url === '/api/review/grade' && (opts.method || 'GET') === 'POST') {
       if (gradeReject) throw gradeReject;
@@ -1063,4 +1075,132 @@ test('Review Hub endpoints: uses candidates/sessions/grade/complete contracts on
   assert.match(reviewSource, /body:\s*\{\s*sourceFrom:\s*lastSearch\.from,\s*sourceTo:\s*lastSearch\.to\s*\}/);
   // No legacy auto-enroll references on the client.
   assert.ok(!reviewSource.includes('createReviewItem'), 'no createReviewItem reference on client');
+});
+
+// ---------------------------------------------------------------- HISTORY items
+
+function historySessionFixture(overrides = {}) {
+  return {
+    id: 55,
+    sourceFrom: '2026-09-01',
+    sourceTo: '2026-09-01',
+    startedAt: '2026-09-01T10:00:00Z',
+    completedAt: '2026-09-01T10:05:00Z',
+    total: 2,
+    byType: { kanji: 1, vocabulary: 0, grammar: 1 },
+    byResult: { Good: 1, Hard: 0, Again: 1 },
+    ...overrides
+  };
+}
+
+function historyDetailFixture() {
+  return {
+    items: [
+      { reviewedAt: '2026-09-01T10:01:00Z', result: 'Good', entityType: 'grammar', display: 'TEMO-GRAMMAR', reading: null, meaning: 'even if' },
+      { reviewedAt: '2026-09-01T10:02:00Z', result: 'Again', entityType: 'kanji', display: 'NICHI-KANJI', reading: 'nichi', meaning: 'day' }
+    ]
+  };
+}
+
+function findByAttr(root, name, value) {
+  const queue = [root];
+  while (queue.length) {
+    const n = queue.shift();
+    if (n.getAttribute && n.getAttribute(name) === value) return n;
+    queue.push(...(n.children || []));
+  }
+  return null;
+}
+
+test('Review Hub HISTORY: View items expands detail lazily, labels results, collapses without refetch', async () => {
+  const harness = loadReviewModule({
+    candidatesPayload: { groups: {} },
+    historyPayload: { items: [historySessionFixture()], total: 1, page: 1, limit: 10 },
+    sessionDetailPayload: historyDetailFixture()
+  });
+  const { doc, renderReview, apiCalls } = harness;
+  const container = doc.createElement('div');
+  doc.body.appendChild(container);
+  await renderReview(container);
+  await sleep(15);
+
+  const toggle = visibleButtonsByText(container, 'View items')[0];
+  assert.ok(toggle, 'history rows expose a View items toggle');
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+  const detail = findByAttr(container, 'id', 'session-items-55');
+  assert.ok(detail, 'detail list exists with id matching aria-controls');
+  assert.ok(!isVisible(detail), 'detail hidden before expansion');
+
+  await clickAndSettle(toggle);
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+  assert.equal(textOf(toggle), 'Hide items', 'toggle flips to Hide items');
+  assert.ok(isVisible(detail), 'detail visible after expansion');
+  const detailText = textOf(detail);
+  assert.match(detailText, /TEMO-GRAMMAR/, 'grammar display shown');
+  assert.match(detailText, /even if/, 'meaning shown');
+  assert.match(detailText, /comfortable/, 'Good renders as comfortable');
+  assert.match(detailText, /NICHI-KANJI/, 'kanji display shown');
+  assert.match(detailText, /nichi/, 'reading shown when present');
+  assert.match(detailText, /revisit/, 'Again renders as revisit');
+  assert.equal(apiCalls.filter((c) => c.url === '/api/review/sessions/55').length, 1, 'detail fetched exactly once');
+
+  await clickAndSettle(toggle);
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false', 'second click collapses');
+  assert.ok(!isVisible(detail), 'collapsed again');
+  await clickAndSettle(toggle);
+  assert.equal(apiCalls.filter((c) => c.url === '/api/review/sessions/55').length, 1, 're-expand reuses the cache');
+});
+
+test('Review Hub HISTORY: detail fetch failure keeps the toggle usable and toasts an error', async () => {
+  const harness = loadReviewModule({
+    candidatesPayload: { groups: {} },
+    historyPayload: { items: [historySessionFixture()], total: 1, page: 1, limit: 10 },
+    sessionDetailPayload: () => { throw new Error('offline'); }
+  });
+  const { doc, renderReview, toasts } = harness;
+  const container = doc.createElement('div');
+  doc.body.appendChild(container);
+  await renderReview(container);
+  await sleep(15);
+
+  const toggle = visibleButtonsByText(container, 'View items')[0];
+  assert.ok(toggle);
+  await clickAndSettle(toggle);
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false', 'stays collapsed on error');
+  assert.ok(!toggle.disabled, 'toggle re-enabled after failure');
+  const detail = findByAttr(container, 'id', 'session-items-55');
+  assert.ok(!isVisible(detail), 'detail never becomes visible');
+  assert.ok(toasts.some((t) => /Could not load session items/.test(t.message)), 'error toast surfaced');
+
+  // A later click retries (no poisoned cache).
+  const callsBefore = harness.apiCalls.filter((c) => c.url === '/api/review/sessions/55').length;
+  await clickAndSettle(toggle);
+  assert.ok(harness.apiCalls.filter((c) => c.url === '/api/review/sessions/55').length > callsBefore, 'error path retries instead of caching');
+});
+
+test('Review Hub HISTORY: session with zero items shows no toggle; empty detail informs politely', async () => {
+  const harness = loadReviewModule({
+    candidatesPayload: { groups: {} },
+    historyPayload: {
+      items: [historySessionFixture({ id: 56, total: 0, byType: { kanji: 0, vocabulary: 0, grammar: 0 }, byResult: { Good: 0, Hard: 0, Again: 0 } }), historySessionFixture({ id: 57 })],
+      total: 2,
+      page: 1,
+      limit: 10
+    },
+    sessionDetailPayload: { items: [] }
+  });
+  const { doc, renderReview } = harness;
+  const container = doc.createElement('div');
+  doc.body.appendChild(container);
+  await renderReview(container);
+  await sleep(15);
+
+  assert.ok(!findByAttr(container, 'id', 'session-items-56'), 'zero-item session gets no toggle/detail');
+  assert.equal(visibleButtonsByText(container, 'View items').length, 1, 'only the non-empty session exposes the toggle');
+
+  const toggle = visibleButtonsByText(container, 'View items')[0];
+  await clickAndSettle(toggle);
+  const detail = findByAttr(container, 'id', 'session-items-57');
+  assert.ok(isVisible(detail), 'empty payload still expands');
+  assert.match(textOf(detail), /No items recorded in this session\./, 'empty state explains itself');
 });
