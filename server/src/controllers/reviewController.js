@@ -471,4 +471,59 @@ async function getReviewSession(req, res) {
   }
 }
 
-module.exports = { createReviewItem, listDueReviews, recordReview, createReviewSession, completeReviewSession, gradeEntity, listCandidates, listReviewSessions, getReviewSession };
+// "Frequently difficult" = a review item with >= DIFFICULT_THRESHOLD
+// 'Again' events in its history (reuses the existing Again result; no leech
+// system, no ML, no second review classification). Read-only, one bounded
+// query, no N+1.
+const DIFFICULT_THRESHOLD = 2;
+const DIFFICULT_LIMIT = 10;
+
+async function listDifficultItems(req, res) {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT ri.id_review_item AS id,
+        CASE WHEN ri.id_kanji IS NOT NULL THEN 'kanji'
+             WHEN ri.id_vocabulary IS NOT NULL THEN 'vocabulary'
+             ELSE 'grammar' END AS "entityType",
+        COALESCE(v.word, k.character_kanji, g.grammar_point) AS display,
+        v.reading AS reading,
+        COALESCE(v.meaning, k.meaning, g.meaning) AS meaning,
+        COUNT(*) FILTER (WHERE re.result = 'Again') AS "againCount",
+        COUNT(re.id_review_event) AS "totalEvents",
+        MAX(re.reviewed_at) AS "lastReviewedAt"
+       FROM review_items ri
+       LEFT JOIN review_events re ON re.id_review_item = ri.id_review_item
+       LEFT JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary AND v.user_id = ?
+       LEFT JOIN kanji k ON k.id_kanji = ri.id_kanji AND k.user_id = ?
+       LEFT JOIN grammar_points g ON g.id_grammar = ri.id_grammar AND g.user_id = ?
+       WHERE (v.user_id = ? OR k.user_id = ? OR g.user_id = ?)
+       GROUP BY ri.id_review_item,
+         CASE WHEN ri.id_kanji IS NOT NULL THEN 'kanji'
+              WHEN ri.id_vocabulary IS NOT NULL THEN 'vocabulary'
+              ELSE 'grammar' END,
+         COALESCE(v.word, k.character_kanji, g.grammar_point),
+         v.reading,
+         COALESCE(v.meaning, k.meaning, g.meaning)
+       HAVING COUNT(*) FILTER (WHERE re.result = 'Again') >= ${DIFFICULT_THRESHOLD}
+       ORDER BY "againCount" DESC, "lastReviewedAt" DESC NULLS LAST
+       LIMIT ${DIFFICULT_LIMIT}`,
+      [req.user.id, req.user.id, req.user.id, req.user.id, req.user.id, req.user.id]
+    );
+    return res.json({
+      items: (rows || []).map((row) => ({
+        idReviewItem: Number(row.id),
+        entityType: row.entityType,
+        display: row.display,
+        reading: row.reading || null,
+        meaning: row.meaning || null,
+        againCount: Number(row.againCount || 0),
+        totalEvents: Number(row.totalEvents || 0),
+        lastReviewedAt: row.lastReviewedAt || null
+      }))
+    });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load difficult items.' });
+  }
+}
+
+module.exports = { createReviewItem, listDueReviews, recordReview, createReviewSession, completeReviewSession, gradeEntity, listCandidates, listReviewSessions, getReviewSession, listDifficultItems };

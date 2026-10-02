@@ -197,6 +197,10 @@ export async function renderReview(container) {
   const historyBlock = element('section', { className: 'surface mt-4 p-5 sm:p-6', attrs: { 'aria-label': 'Recent review sessions' } });
   historyBlock.hidden = true;
 
+  // Frequently difficult items (>=2 Again events each, read-only, fail-open).
+  const difficultBlock = element('section', { className: 'surface mt-4 p-5 sm:p-6', attrs: { 'aria-label': 'Frequently difficult' } });
+  difficultBlock.hidden = true;
+
   container.replaceChildren(element('section', {}, [
     pageHeader({ eyebrow: 'Recall', title: 'Review', description: 'Choose recent activity and review it at a steady pace.' }),
     heroSurface,
@@ -204,7 +208,8 @@ export async function renderReview(container) {
     candidatesBlock,
     reviewingBlock,
     completeBlock,
-    historyBlock
+    historyBlock,
+    difficultBlock
   ]));
 
   async function loadHistory() {
@@ -235,6 +240,35 @@ export async function renderReview(container) {
       historyBlock.hidden = false;
     } catch {
       historyBlock.hidden = true;
+    }
+  }
+
+  async function loadDifficult() {
+    try {
+      const data = await apiRequest('/api/review/difficult');
+      const items = Array.isArray(data?.items) ? data.items : [];
+      if (!items.length) {
+        difficultBlock.hidden = true;
+        difficultBlock.replaceChildren();
+        return;
+      }
+      difficultBlock.replaceChildren(
+        element('h2', { className: 'font-semibold text-ink', text: 'Frequently difficult' }),
+        element('p', { className: 'mt-1 text-sm text-muted', text: 'Items you have marked Again at least twice — worth another look.' }),
+        element('ul', { className: 'mt-4 grid gap-2' }, items.map((item) => {
+          const date = String(item.lastReviewedAt || '').slice(0, 10);
+          const tally = `${Number(item.againCount || 0)} again of ${Number(item.totalEvents || 0)} reviews`;
+          return element('li', { className: 'rounded-xl border border-stone bg-paper px-3 py-2.5 text-sm' }, [
+            element('p', { className: 'break-words font-jp font-semibold text-ink', text: item.display }),
+            ...(item.reading ? [element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: item.reading })] : []),
+            ...(item.meaning ? [element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: item.meaning })] : []),
+            element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: date ? `${tally} · last reviewed ${date}` : tally })
+          ]);
+        }))
+      );
+      difficultBlock.hidden = false;
+    } catch {
+      difficultBlock.hidden = true;
     }
   }
 
@@ -292,9 +326,13 @@ export async function renderReview(container) {
     candidatesBlock.hidden = next !== 'CANDIDATES';
     reviewingBlock.hidden = next !== 'REVIEWING';
     completeBlock.hidden = next !== 'COMPLETE';
-    // History visibility is driven by loadHistory (fail-open: hidden when
-    // empty or unavailable); leaving INTRO only ever hides it.
-    if (next !== 'INTRO') historyBlock.hidden = true;
+    // History and difficult visibility is driven by loadHistory/loadDifficult
+    // (fail-open: hidden when empty or unavailable); leaving INTRO only
+    // ever hides them.
+    if (next !== 'INTRO') {
+      historyBlock.hidden = true;
+      difficultBlock.hidden = true;
+    }
     if (next !== 'REVIEWING') detachKeys();
   }
 
@@ -752,6 +790,7 @@ export async function renderReview(container) {
       reviewingBlock.replaceChildren();
       setStage('INTRO');
       loadHistory();
+      loadDifficult();
     });
     completeBlock.appendChild(card);
     heading.focus({ preventScroll: true });
@@ -759,4 +798,5 @@ export async function renderReview(container) {
 
   setStage('INTRO');
   loadHistory();
+  loadDifficult();
 }
