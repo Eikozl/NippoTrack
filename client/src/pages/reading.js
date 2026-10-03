@@ -22,6 +22,7 @@
 // duplicating that computation.
 
 import { apiRequest, listReadingLibrary, getReadingText, createUserReadingText, deleteReadingText, updateReadingProgress, importReadingSources, listReadingProgress } from '../api';
+import { icon } from '../icons';
 import { element, pageHeader, showToast, withPendingAction, paginationControls, openDetailModal, confirmDialog, emptyState, errorState, loadingState } from '../ui';
 
 const LIBRARY_PAGE_SIZE = 12;
@@ -105,9 +106,14 @@ async function renderLibraryView(container) {
     }
     gridWrap.replaceChildren(element('div', { className: 'grid gap-3 sm:grid-cols-2 xl:grid-cols-3' }, items.map((item) => {
       const known = Number(item.knownKanjiPct || 0);
-      const openButton = element('button', {
-        className: 'surface flex h-full flex-col gap-2 p-4 text-left transition-colors hover:border-ink/40',
-        attrs: { type: 'button', 'aria-label': `Open ${item.title}` }
+      const isOwner = item.sourceType === 'user' && item?.id !== undefined && item?.id !== null;
+      const openCard = () => {
+        if (item?.id === undefined || item?.id === null) return;
+        window.location.hash = `#reading?id=${encodeURIComponent(item.id)}`;
+      };
+      const card = element('article', {
+        className: 'surface relative flex h-full cursor-pointer flex-col gap-2 p-4 pb-12 transition-colors hover:border-ink/40',
+        attrs: { role: 'button', tabindex: '0', 'aria-label': `Open ${item.title}` }
       }, [
         element('div', { className: 'flex items-center justify-between gap-2' }, [
           element('span', { className: 'text-xs uppercase tracking-wide text-muted', text: item.sourceType || 'user' }),
@@ -116,11 +122,34 @@ async function renderLibraryView(container) {
         element('p', { className: 'font-semibold text-ink', text: item.title }),
         element('p', { className: 'text-xs leading-5 text-muted', text: `${Number(item.characterCount || 0).toLocaleString()} characters · you know ${known}% of its kanji` })
       ]);
-      openButton.addEventListener('click', () => {
-        if (item?.id === undefined || item?.id === null) return;
-        window.location.hash = `#reading?id=${encodeURIComponent(item.id)}`;
+      card.addEventListener('click', openCard);
+      card.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openCard(); }
       });
-      return openButton;
+      // Owner-only delete sits bottom-right of the card, Trash icon, with the
+      // same confirm pattern as the kanji/vocabulary CRUDs. Shared (imported)
+      // texts are read-only and get no button; the API 404s non-owned ids.
+      if (isOwner) {
+        const trashButton = element('button', {
+          className: 'icon-button icon-button--danger absolute bottom-3 right-3',
+          attrs: { type: 'button', title: `Delete ${item.title}`, 'aria-label': `Delete ${item.title}` }
+        }, [icon('trash', { size: 18, label: `Delete ${item.title}` })]);
+        trashButton.addEventListener('click', (event) => {
+          event.stopPropagation();
+          confirmDialog({
+            title: 'Delete reading text?',
+            description: `This will permanently delete “${item.title}” and its reading progress. This cannot be undone.`,
+            confirmLabel: 'Delete',
+            onConfirm: async () => {
+              await deleteReadingText(item.id);
+              showToast('Reading text deleted.');
+              refresh(1);
+            }
+          });
+        });
+        card.appendChild(trashButton);
+      }
+      return card;
     })));
     const pagination = paginationControls({ page: currentPage, totalPages: Number(data?.totalPages || 0) }, (nextPage) => refresh(nextPage));
     if (pagination) pageWrap.replaceChildren(pagination);
@@ -523,32 +552,8 @@ async function renderReader(container, textId) {
   window.addEventListener('scroll', onScroll, { passive: true });
   cleanupReader = () => window.removeEventListener('scroll', onScroll);
 
-  // Owner-only delete with the same confirm pattern as the kanji/vocabulary
-  // CRUDs. Shared (imported) library texts are read-only and get no button;
-  // the API 404s any non-owned id either way.
-  const deleteButton = element('button', {
-    className: 'button-danger min-h-9 px-3 py-1.5 text-xs',
-    text: 'Delete text',
-    attrs: { type: 'button', 'aria-label': `Delete ${data.title}` }
-  });
-  deleteButton.addEventListener('click', () => {
-    confirmDialog({
-      title: 'Delete reading text?',
-      description: `This will permanently delete “${data.title}” and its reading progress. This cannot be undone.`,
-      confirmLabel: 'Delete',
-      onConfirm: async () => {
-        await deleteReadingText(textId);
-        showToast('Reading text deleted.');
-        window.location.hash = '#reading';
-      }
-    });
-  });
-
   container.replaceChildren(element('section', { className: 'mx-auto w-full max-w-3xl' }, [
-    element('div', { className: 'flex items-center justify-between gap-3' }, [
-      element('a', { className: 'text-sm font-medium text-muted underline-offset-4 hover:text-ink hover:underline', text: '← Back to library', attrs: { href: '#reading' } }),
-      ...(data.sourceType === 'user' ? [deleteButton] : [])
-    ]),
+    element('a', { className: 'text-sm font-medium text-muted underline-offset-4 hover:text-ink hover:underline', text: '← Back to library', attrs: { href: '#reading' } }),
     element('header', { className: 'mt-2 flex flex-wrap items-center gap-x-3 gap-y-2' }, [
       element('h1', { className: 'min-w-0 flex-1 break-words text-xl font-semibold text-ink', text: data.title }),
       levelBadge(data.level) || element('span', { className: 'text-xs text-muted', text: data.sourceType || 'user' })

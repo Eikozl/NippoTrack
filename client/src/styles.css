@@ -90,6 +90,10 @@
   .icon-button:active { box-shadow:var(--shadow-inset-sm); }
   .icon-button:focus-visible { outline:2px solid var(--nt-focus-ring); outline-offset:2px; }
   .icon-button:disabled { box-shadow:none; }
+  /* Danger icon action (e.g. per-card delete): muted-red tint on the same
+     icon-button footprint so destructive affordances read instantly. */
+  .icon-button--danger { color:var(--jlt-danger); }
+  .icon-button--danger:hover { color:var(--jlt-danger); border-color:color-mix(in srgb,var(--jlt-danger) 40%,transparent); background:var(--jlt-danger-soft); }
   /* Cards/panels: 16px default, subtle token border + minimal shadow.
      Prominent surfaces (charts, dialogs, heroes) use 20px via their own
      classes below. No new wrappers — existing .surface markup only. */
