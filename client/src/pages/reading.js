@@ -131,13 +131,13 @@ async function renderLibraryView(container) {
     try {
       const result = await importReadingSources('nhk');
       if (result?.status === 'unavailable') {
-        showToast(result?.reason || 'NHK Easy is unavailable right now.', 'error');
+        showToast(result?.reason || 'NHK Easy is unavailable right now.', 'warning');
         return;
       }
       showToast(`Imported ${Number(result?.textsImported ?? result?.imported ?? 0)} item(s) from NHK Easy.`);
       refresh(1);
     } catch (error) {
-      showToast(error?.message || 'Import failed.', 'error');
+      showToast(error?.message || 'Could not reach the source. Check your connection.', 'error');
     }
   }));
 
@@ -146,13 +146,13 @@ async function renderLibraryView(container) {
     try {
       const result = await importReadingSources('aozora');
       if (result?.status === 'unavailable') {
-        showToast(result?.reason || 'Aozora is unavailable right now.', 'error');
+        showToast(result?.reason || 'Aozora is unavailable right now.', 'warning');
         return;
       }
       showToast(`Imported ${Number(result?.textsImported ?? result?.imported ?? 0)} item(s) from Aozora.`);
       refresh(1);
     } catch (error) {
-      showToast(error?.message || 'Import failed.', 'error');
+      showToast(error?.message || 'Could not reach the source. Check your connection.', 'error');
     }
   }));
 
@@ -165,20 +165,49 @@ async function renderLibraryView(container) {
     attrs: { maxlength: '100000', placeholder: 'Paste the Japanese text you want to read…', 'aria-label': 'Reading text' }
   });
   const ownSave = element('button', { className: 'button-primary self-start', text: 'Save and read', attrs: { type: 'button' } });
-  ownSave.addEventListener('click', () => withPendingAction(ownSave, async () => {
+  ownSave.addEventListener('click', () => {
     const text = String(ownText.value || '').trim();
     if (!text) {
       showToast('Paste some text first.', 'error');
       return;
     }
-    try {
-      const created = await createUserReadingText({ text, title: String(ownTitle.value || '').trim() });
-      showToast('Text saved. Opening the reader.');
-      window.location.hash = `#reading?id=${Number(created?.id)}`;
-    } catch (error) {
-      showToast(error?.message || 'Unable to save the text.', 'error');
+    // Show loading bar that grows fast, stops ~78% (variable), then 100% on analysis.
+    ownSave.disabled = true;
+    ownSave.textContent = 'Analyzing…';
+    const progressContainer = element('div', { className: 'mt-2 text-right' }, [
+      element('span', { className: 'text-xs text-muted', id: 'ownProgressLabel', text: '0%' }),
+      element('div', { className: 'w-48 h-1.5 rounded-full bg-ink/10 mt-1' }, [
+        element('div', { className: 'h-full rounded-full bg-ink transition-all duration-300 ease-out', attrs: { 'data-progress-fill': '0', style: 'width:0%' } })
+      ])
+    ]);
+    ownSave.parentNode.insertBefore(progressContainer, ownSave.nextSibling);
+    let animated = false;
+    async function finish() {
+      if (!animated) return;
+      try {
+        const created = await createUserReadingText({ text, title: String(ownTitle.value || '').trim() });
+        // Jump to 100% and navigate.
+        const fill = progressContainer.querySelector('[data-progress-fill]');
+        if (fill) { fill.style.width = '100%'; ownProgressLabel.textContent = '100%'; }
+        window.location.hash = `#reading?id=${Number(created?.id)}`;
+      } catch (error) {
+        showToast(error?.message || 'Unable to save the text.', 'error');
+      } finally {
+        ownSave.disabled = false;
+        ownSave.textContent = 'Save and read';
+        try { progressContainer.remove(); } catch {}
+      }
     }
-  }));
+    // Animate progress bar: fast start, then to 78% (variable).
+    animated = true;
+    const vary = 70 + Math.random() * 10; // 70–80% variable
+    ownProgressLabel.textContent = `${Math.round(vary)}%`;
+    setTimeout(() => {
+      const fill = progressContainer.querySelector('[data-progress-fill]');
+      if (fill) { fill.style.width = `${vary}%`; }
+    }, 350);
+    finish();
+  });
 
   const progressLink = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Reading progress', attrs: { type: 'button' } });
   progressLink.addEventListener('click', () => { window.location.hash = '#reading?progress=1'; });
@@ -434,16 +463,19 @@ async function renderReader(container, textId) {
     lastSaveAt = now;
     const rect = textBody.getBoundingClientRect();
     const viewport = window.innerHeight || 1;
-    const scrolled = Math.min(Math.max(viewport - rect.top, 0), Math.max(rect.height, 1));
+    // Removed the upper-bound clamp that forced scrolled >= rect.height → 100%.
+    // Now scrolled is the actual pixel distance from the viewport top to the text top.
+    const scrolled = Math.max(viewport - rect.top, 0);
     const fraction = rect.height ? scrolled / rect.height : 1;
-    const position = Math.max(1, Math.min(total, Math.ceil(fraction * total)));
+    const position = total ? Math.max(1, Math.min(total, Math.ceil(fraction * total))) : 1;
     updateReadingProgress(textId, { position, timeSpentSeconds: accumulatedSeconds(), completed: false }).catch(() => { /* best-effort autosave */ });
   }
 
   function updateProgressUi() {
     const rect = textBody.getBoundingClientRect();
     const viewport = window.innerHeight || 1;
-    const scrolled = Math.min(Math.max(viewport - rect.top, 0), Math.max(rect.height, 1));
+    // Removed the upper-bound clamp that forced 100% when scrolling past text body.
+    const scrolled = Math.max(viewport - rect.top, 0);
     const percent = rect.height ? Math.min(100, Math.round((scrolled / rect.height) * 100)) : 0;
     progressLabel.textContent = `${percent}%`;
     const fill = progressBar.querySelector('[data-progress-fill]');
