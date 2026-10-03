@@ -319,6 +319,82 @@ test('import preview lists selectable works without fetching articles', async ()
   assert.equal(down.body().status, 'unavailable');
 });
 
+test('import preview switches kana indexes and rejects unknown ones', async () => {
+  const fetched = [];
+  const ka = mockRes();
+  await controller.previewImports({ query: { source: 'aozora', index: 'ka' }, user: { id: USER_ID }, app: { locals: { readingFetch: async (url) => {
+    fetched.push(String(url));
+    return { ok: true, headers: { get: () => '10' }, text: async () => '<a href="/cards/1/card1.html">かきくけこ</a>' };
+  } } } }, ka.res);
+  assert.equal(ka.status(), 200);
+  assert.equal(ka.body().status, 'ok');
+  assert.equal(ka.body().index, 'ka');
+  assert.deepEqual(fetched, ['https://www.aozora.gr.jp/index_pages/sakuhin_ka1.html']);
+  assert.equal(ka.body().items.length, 1);
+
+  const badIndex = mockRes();
+  await controller.previewImports({ query: { index: 'zzz' }, user: { id: USER_ID } }, badIndex.res);
+  assert.equal(badIndex.status(), 400);
+  assert.match(badIndex.body().error, /index must be one of/);
+});
+
+test('pasted-link import validates shape and stores the extracted work', async () => {
+  for (const url of [undefined, '', 'not-a-url', 'http://www.aozora.gr.jp/cards/1/card1.html', 'https://evil.test/cards/1/card1.html', 'https://www.aozora.gr.jp/index_pages/sakuhin_a1.html']) {
+    const response = mockRes();
+    await controller.importFromUrl({ body: { url }, user: { id: USER_ID } }, response.res);
+    assert.equal(response.status(), 400, `url rejected: ${JSON.stringify(url)}`);
+    assert.match(response.body().error, /Aozora work page URL/);
+  }
+  const extra = mockRes();
+  await controller.importFromUrl({ body: { url: 'https://www.aozora.gr.jp/cards/1/card1.html', extra: 1 }, user: { id: USER_ID } }, extra.res);
+  assert.equal(extra.status(), 400);
+
+  const cardUrl = 'https://www.aozora.gr.jp/cards/000007/card7.html';
+  const pages = new Map([
+    [cardUrl, '<html><head><title>図書カード：貼り付け物語</title></head><body><a href="./files/7_1.html">7_1.html</a></body></html>'],
+    ['https://www.aozora.gr.jp/cards/000007/files/7_1.html', '<div class="main_text"><p>学ぶ。</p></div>']
+  ]);
+  const fetchStub = async (url) => {
+    const page = pages.get(String(url));
+    if (!page) throw new Error(`unexpected source URL: ${url}`);
+    return { ok: true, headers: { get: () => String(Buffer.byteLength(page)) }, text: async () => page };
+  };
+  const analyze = analysisPool();
+  const calls = [];
+  const connection = {
+    async beginTransaction() {},
+    async commit() {},
+    async rollback() {},
+    release() {},
+    async execute(sql, params = []) {
+      calls.push({ sql, params });
+      if (/pg_advisory_xact_lock/i.test(sql)) return [[]];
+      if (/FROM reading_sources WHERE type/i.test(sql)) return [[]];
+      if (/INSERT INTO reading_sources/i.test(sql)) return [{ insertId: 81 }];
+      if (/FROM reading_texts WHERE source_id/i.test(sql)) return [[]];
+      if (/INSERT INTO reading_texts/i.test(sql)) return [{ insertId: 82 }];
+      return analyze(sql, params);
+    }
+  };
+  const result = await gradedReader.importAozoraUrl({ execute: (sql, params) => analyze(sql, params), getConnection: async () => connection }, USER_ID, cardUrl, { fetch: fetchStub });
+  assert.equal(result.status, 'ok');
+  assert.equal(result.textsImported, 1);
+  const textInsert = calls.find(({ sql }) => /INSERT INTO reading_texts/i.test(sql));
+  assert.ok(textInsert.params.includes('貼り付け物語'), 'stored title comes from the card page');
+
+  const noTitle = await gradedReader.importAozoraUrl({ execute: (sql, params) => analyze(sql, params), getConnection: async () => connection }, USER_ID, cardUrl, {
+    fetch: async () => ({ ok: true, headers: { get: () => '10' }, text: async () => '<html><head></head><body></body></html>' })
+  });
+  assert.equal(noTitle.status, 'unavailable');
+
+  const accepted = mockRes();
+  await controller.importFromUrl({ body: { url: cardUrl }, user: { id: USER_ID }, app: { locals: { readingFetch: async () => { throw new Error('offline'); } } } }, accepted.res);
+  assert.equal(accepted.status(), 202);
+  assert.deepEqual(accepted.body(), { status: 'accepted' });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+});
+
 test('selective import analyzes and stores only the requested urls', async () => {
   const pages = new Map([
     [gradedReader.AOZORA_LISTING_URL, '<a href="/cards/000001/card1.html">One</a><a href="/cards/000002/card2.html">Two</a>'],

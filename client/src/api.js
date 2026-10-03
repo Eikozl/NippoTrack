@@ -89,8 +89,12 @@ export function importReadingSources(sourceType, { urls } = {}) {
   return apiRequest('/api/reading/import', { method: 'POST', body: { sourceType, ...(urls !== undefined ? { urls } : {}) } });
 }
 
-export function previewReadingImport(sourceType) {
-  return apiRequest(`/api/reading/import/preview${queryString({ source: sourceType })}`);
+export function previewReadingImport(sourceType, index) {
+  return apiRequest(`/api/reading/import/preview${queryString({ source: sourceType, index })}`);
+}
+
+export function importReadingUrl(url) {
+  return apiRequest('/api/reading/import/url', { method: 'POST', body: { url } });
 }
 
 export function listReadingProgress({ page, limit } = {}) {

@@ -11,5 +11,6 @@ router.post('/analyze', controller.analyzeText);
 router.post('/user-text', controller.createUserText);
 router.put('/text/:id/progress', controller.updateProgress);
 router.post('/import', controller.importSources);
+router.post('/import/url', controller.importFromUrl);
 
 module.exports = router;

@@ -80,6 +80,7 @@ app.get('/api', (req, res) => {
       'POST /api/reading/user-text',
       'PUT /api/reading/text/:id/progress',
       'POST /api/reading/import',
+      'POST /api/reading/import/url',
       'GET /api/reading/import/preview',
       'GET /api/level/estimate',
       'GET /api/level/progress',

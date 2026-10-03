@@ -9,6 +9,7 @@ const {
   createUserReadingText,
   deleteUserReadingText,
   getReadingText,
+  importAozoraUrl,
   listReadingLibrary,
   listReadingProgress,
   previewAozoraSources,
@@ -164,14 +165,57 @@ async function previewImports(req, res) {
     if (query.source !== undefined && query.source !== '' && query.source !== 'aozora') {
       throw new ValidationError('source must be aozora.');
     }
+    if (query.index !== undefined && query.index !== '' && !['a', 'ka', 'sa', 'ta', 'na', 'ha', 'ma', 'ya', 'ra', 'wa'].includes(query.index)) {
+      throw new ValidationError('index must be one of: a, ka, sa, ta, na, ha, ma, ya, ra, wa.');
+    }
     // fetch is injectable through app.locals for offline tests/operators; the
     // service still pins every request to its fixed, allowlisted host.
     const fetchImpl = req.app?.locals?.readingFetch || globalThis.fetch;
-    const result = await previewAozoraSources(fetchImpl);
+    const result = await previewAozoraSources(fetchImpl, { index: query.index || 'a' });
     return res.json(result);
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to preview reading sources.' });
   }
+}
+
+async function importFromUrl(req, res) {
+  try {
+    const body = bodyObject(req.body);
+    rejectUnknownFields(body, ['url']);
+    if (typeof body.url !== 'string' || !body.url.trim()) {
+      throw new ValidationError('url must be an Aozora work page URL (https://www.aozora.gr.jp/cards/…/card….html).');
+    }
+    // Shape-checked synchronously so malformed input 400s immediately; the
+    // service re-checks before fetching. Analysis takes ~a minute, so like
+    // bulk import this enqueues and answers 202 while the client polls.
+    const url = String(body.url.trim());
+    assertAozoraCardUrlShape(url);
+    const userId = req.user.id;
+    const fetchImpl = req.app?.locals?.readingFetch || globalThis.fetch;
+    setImmediate(() => {
+      importAozoraUrl(pool, userId, url, { fetch: fetchImpl }).catch((error) => {
+        console.error('[reading-import] background pasted-link import failed:', error?.message || error);
+      });
+    });
+    return res.status(202).json({ status: 'accepted' });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to import reading link.' });
+  }
+}
+
+function assertAozoraCardUrlShape(value) {
+  const message = 'url must be an Aozora work page URL (https://www.aozora.gr.jp/cards/…/card….html).';
+  let parsed = null;
+  try {
+    parsed = new URL(String(value || '').trim());
+  } catch (_) {
+    throw new ValidationError(message);
+  }
+  if (parsed.protocol !== 'https:' || parsed.hostname !== 'www.aozora.gr.jp' || parsed.port || parsed.username || parsed.password) {
+    throw new ValidationError(message);
+  }
+  if (!/^\/cards\/\d+\/card\d+\.html$/i.test(parsed.pathname)) throw new ValidationError(message);
+  return parsed.href;
 }
 
 async function importSources(req, res) {
@@ -231,6 +275,7 @@ module.exports = {
   createUserText,
   deleteText,
   getText,
+  importFromUrl,
   importSources,
   listLibrary,
   listProgress,

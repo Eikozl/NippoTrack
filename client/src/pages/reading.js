@@ -21,7 +21,7 @@
 // page (existing /api/level/progress data); this page links there instead of
 // duplicating that computation.
 
-import { apiRequest, listReadingLibrary, getReadingText, createUserReadingText, deleteReadingText, updateReadingProgress, importReadingSources, previewReadingImport, listReadingProgress } from '../api';
+import { apiRequest, listReadingLibrary, getReadingText, createUserReadingText, deleteReadingText, updateReadingProgress, importReadingSources, importReadingUrl, previewReadingImport, listReadingProgress } from '../api';
 import { icon } from '../icons';
 import { element, pageHeader, showToast, withPendingAction, paginationControls, openDetailModal, openDialog, confirmDialog, emptyState, errorState, loadingState } from '../ui';
 
@@ -61,7 +61,7 @@ function levelBadge(level) {
 // ---------------------------------------------------------------- library
 
 async function renderLibraryView(container) {
-  const gridWrap = element('div');
+  const gridWrap = element('div', { className: 'mt-4' });
   const pageWrap = element('div');
 
   const levelWrapper = selectControl({
@@ -195,37 +195,118 @@ async function renderLibraryView(container) {
       showToast('Aozora could not be reached from this network. Check your connection and try again.', 'warning');
       return;
     }
-    openImportPickerDialog(works);
+    openImportPickerDialog(works, 'a');
   }, { pendingLabel: 'Loading works…' }));
 
-  // Picker: choose WHAT to import. Selection posts exact card URLs; the
-  // server intersects them with the live listing, imports in the background,
-  // and the library poll below picks up rows as they land.
-  function openImportPickerDialog(works) {
-    const boxes = works.map((work) => {
-      const checkbox = element('input', {
-        className: 'mt-1 size-4 shrink-0 accent-vermilion',
-        attrs: { type: 'checkbox', value: work.url, 'aria-label': `Import ${work.title}` }
-      });
-      const row = element('label', { className: 'flex cursor-pointer items-start gap-3 rounded-xl border border-stone bg-paper px-3 py-2.5 text-sm transition hover:border-ink/40' }, [
-        checkbox,
-        element('span', { className: 'min-w-0' }, [
-          element('span', { className: 'block break-words font-medium text-ink', text: work.title }),
-          element('span', { className: 'mt-0.5 block break-words text-xs leading-5 text-muted', text: work.url })
-        ])
-      ]);
-      return { checkbox, row };
+  // Pasted-link import: the user brings their own Aozora work page. The link
+  // is shape-checked here for instant feedback and re-checked server-side;
+  // analysis still takes ~a minute, so this enqueues like bulk import.
+  const linkInput = element('input', {
+    className: 'field-control',
+    attrs: { type: 'url', inputmode: 'url', placeholder: 'Paste an Aozora work link…', 'aria-label': 'Aozora work link' }
+  });
+  const linkButton = element('button', { className: 'button-secondary min-h-9 shrink-0 px-3 py-1.5 text-xs', text: 'Add link', attrs: { type: 'button' } });
+  linkButton.addEventListener('click', () => withPendingAction(linkButton, async () => {
+    const found = String(linkInput.value || '').match(/https:\/\/www\.aozora\.gr\.jp\/cards\/\d+\/card\d+\.html/i);
+    if (!found) {
+      showToast('Paste an Aozora work page link (…/cards/…/card….html).', 'error');
+      return;
+    }
+    try {
+      const before = await listReadingLibrary({ source: 'aozora', page: 1, limit: 1 }).catch(() => null);
+      const result = await importReadingUrl(found[0]);
+      if (result?.status !== 'accepted') {
+        showToast('Import did not start. Please try again.', 'error');
+        return;
+      }
+      linkInput.value = '';
+      showToast('Import started — the text will appear below when ready.');
+      pollLibraryForImports(Number(before?.total || 0));
+    } catch (error) {
+      showToast(error?.message || 'Could not reach the API. Check your connection.', 'error');
+    }
+  }, { pendingLabel: 'Adding…' }));
+
+  // Picker: choose WHAT to import. Kana groups switch the work index (so
+  // repeated imports surface different works), the search box filters titles
+  // locally, and selection posts exact card URLs; the server intersects them
+  // with the live listing, imports in the background, and the library poll
+  // picks up rows as they land.
+  const KANA_GROUPS = [
+    { value: 'a', label: 'あ' }, { value: 'ka', label: 'か' }, { value: 'sa', label: 'さ' },
+    { value: 'ta', label: 'た' }, { value: 'na', label: 'な' }, { value: 'ha', label: 'は' },
+    { value: 'ma', label: 'ま' }, { value: 'ya', label: 'や' }, { value: 'ra', label: 'ら' },
+    { value: 'wa', label: 'わ' }
+  ];
+  function openImportPickerDialog(initialWorks, initialIndex = 'a') {
+    let boxes = [];
+    const listWrap = element('div', { className: 'grid gap-2 sm:col-span-2' });
+    const countNote = element('p', { className: 'text-xs text-muted sm:col-span-2', attrs: { 'aria-live': 'polite' } });
+    const searchInput = element('input', {
+      className: 'field-control sm:col-span-2',
+      attrs: { type: 'search', placeholder: 'Search by title…', 'aria-label': 'Search works by title' }
     });
+    function applySearch() {
+      const query = String(searchInput.value || '').trim().toLowerCase();
+      boxes.forEach(({ row, title }) => { row.hidden = Boolean(query) && !title.includes(query); });
+    }
+    searchInput.addEventListener('input', applySearch);
+    const kanaSelect = element('select', {
+      className: 'field-control sm:col-span-2',
+      attrs: { 'aria-label': 'Works starting with' }
+    }, KANA_GROUPS.map((group) => element('option', {
+      text: `Works starting with ${group.label}`,
+      attrs: { value: group.value, ...(group.value === initialIndex ? { selected: '' } : {}) }
+    })));
+    kanaSelect.addEventListener('change', async () => {
+      kanaSelect.disabled = true;
+      try {
+        const preview = await previewReadingImport('aozora', kanaSelect.value);
+        const works = Array.isArray(preview?.items) ? preview.items : [];
+        if (preview?.status !== 'ok' || !works.length) {
+          showToast('Could not load those works. Try another group.', 'warning');
+          return;
+        }
+        searchInput.value = '';
+        renderWorks(works);
+      } catch (error) {
+        showToast(error?.message || 'Could not load those works.', 'error');
+      } finally {
+        kanaSelect.disabled = false;
+      }
+    });
+    function renderWorks(works) {
+      boxes = works.map((work) => {
+        const checkbox = element('input', {
+          className: 'mt-1 size-4 shrink-0 accent-vermilion',
+          attrs: { type: 'checkbox', value: work.url, 'aria-label': `Import ${work.title}` }
+        });
+        const row = element('label', { className: 'flex cursor-pointer items-start gap-3 rounded-xl border border-stone bg-paper px-3 py-2.5 text-sm transition hover:border-ink/40' }, [
+          checkbox,
+          element('span', { className: 'min-w-0' }, [
+            element('span', { className: 'block break-words font-medium text-ink', text: work.title }),
+            element('span', { className: 'mt-0.5 block break-words text-xs leading-5 text-muted', text: work.url })
+          ])
+        ]);
+        return { checkbox, row, title: String(work.title || '').toLowerCase() };
+      });
+      listWrap.replaceChildren(...boxes.map(({ row }) => row));
+      countNote.textContent = `${boxes.length} work(s) in this group. Tick what to import.`;
+      applySearch();
+    }
     const selectAll = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Select all', attrs: { type: 'button' } });
     const clear = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Clear', attrs: { type: 'button' } });
-    selectAll.addEventListener('click', () => { boxes.forEach(({ checkbox }) => { checkbox.checked = true; }); });
+    selectAll.addEventListener('click', () => { boxes.forEach(({ checkbox, row }) => { if (!row.hidden) checkbox.checked = true; }); });
     clear.addEventListener('click', () => { boxes.forEach(({ checkbox }) => { checkbox.checked = false; }); });
     openDialog({
       title: 'Import from Aozora',
       description: 'Choose the works to import. Each one is classified and added to your library in the background.',
       content: [
+        kanaSelect,
+        searchInput,
         element('div', { className: 'flex flex-wrap gap-2 sm:col-span-2' }, [selectAll, clear]),
-        element('div', { className: 'grid gap-2 sm:col-span-2' }, boxes.map(({ row }) => row))
+        listWrap,
+        countNote
       ],
       submitLabel: 'Import selected',
       pendingLabel: 'Starting…',
@@ -246,6 +327,7 @@ async function renderLibraryView(container) {
         pollLibraryForImports(Number(before?.total || 0));
       }
     });
+    renderWorks(initialWorks);
   }
 
   const ownTitle = element('input', {
@@ -324,7 +406,14 @@ async function renderLibraryView(container) {
       applyButton,
       element('div', { className: 'grid gap-2 border-t border-stone pt-3' }, [
         element('p', { className: 'text-xs font-medium text-muted', text: 'More texts' }),
-        element('div', { className: 'grid grid-cols-1 gap-2 sm:grid-cols-2' }, [importAozora, progressLink])
+        element('div', { className: 'grid grid-cols-1 gap-2 sm:grid-cols-2' }, [importAozora, progressLink]),
+        element('div', { className: 'grid gap-2' }, [
+          element('p', { className: 'text-xs font-medium text-muted', text: 'Or paste a work link' }),
+          element('div', { className: 'flex flex-col gap-2 sm:flex-row' }, [
+            element('div', { className: 'min-w-0 flex-1' }, [linkInput]),
+            linkButton
+          ])
+        ])
       ])
     ]),
     gridWrap,

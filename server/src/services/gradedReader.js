@@ -34,8 +34,14 @@ const MAX_DATABASE_IN_VALUES = 1000;
 const SOURCE_TIMEOUT_MS = 8000;
 // Aozora's old works index (sakuhin_top.html) was retired; the per-kana work
 // indexes (e.g. sakuhin_a1.html) carry the same /cards/N/cardN.html links the
-// listing parser accepts. One fixed index keeps the import bounded.
-const AOZORA_LISTING_URL = 'https://www.aozora.gr.jp/index_pages/sakuhin_a1.html';
+// listing parser accepts. One fixed index per request keeps the import
+// bounded; the picker cycles kana groups for variety.
+const AOZORA_KANA_INDEXES = Object.freeze(['a', 'ka', 'sa', 'ta', 'na', 'ha', 'ma', 'ya', 'ra', 'wa']);
+function aozoraListingUrl(index = 'a') {
+  const group = AOZORA_KANA_INDEXES.includes(index) ? index : 'a';
+  return `https://www.aozora.gr.jp/index_pages/sakuhin_${group}1.html`;
+}
+const AOZORA_LISTING_URL = aozoraListingUrl('a');
 const LEVEL_RANK = Object.freeze({ N5: 1, N4: 2, N3: 3, N2: 4, N1: 5 });
 const LEVEL_BY_RANK = Object.freeze(['N5', 'N4', 'N3', 'N2', 'N1']);
 
@@ -816,13 +822,14 @@ async function loadAozoraSources(fetchImpl = globalThis.fetch) {
   }
 }
 
-// Preview-only listing: titles + card URLs from the fixed work index, no
+// Preview-only listing: titles + card URLs from one fixed work index, no
 // article fetching and no database writes. Powers the import picker so users
 // choose WHAT to import instead of a blind bulk pull.
-async function previewAozoraSources(fetchImpl = globalThis.fetch) {
+async function previewAozoraSources(fetchImpl = globalThis.fetch, { index = 'a' } = {}) {
   try {
-    const html = await fetchFixedText(fetchImpl, AOZORA_LISTING_URL, 'www.aozora.gr.jp', 2 * 1024 * 1024);
-    return { status: 'ok', items: aozoraListingItems(html, 20) };
+    const listingUrl = aozoraListingUrl(index);
+    const html = await fetchFixedText(fetchImpl, listingUrl, 'www.aozora.gr.jp', 2 * 1024 * 1024);
+    return { status: 'ok', index: AOZORA_KANA_INDEXES.includes(index) ? index : 'a', items: aozoraListingItems(html, 20) };
   } catch (error) {
     return { status: 'unavailable', reason: error?.message === 'response_too_large' ? 'Source response exceeded the size limit.' : 'Source request failed.' };
   }
@@ -869,49 +876,7 @@ async function syncReadingSources(executor, userId, sourceType, { fetch: fetchIm
       }
       await connection.beginTransaction();
       try {
-        // Migration 022 intentionally has no UNIQUE(type,url). A transaction
-        // advisory lock serializes check/insert for this stable key without
-        // requiring an unreviewed database change.
-        await connection.execute('SELECT pg_advisory_xact_lock(hashtext(?), hashtext(?))', [sourceType, item.url]);
-        const [existingRows] = await connection.execute(
-          'SELECT id_reading_source FROM reading_sources WHERE type = ? AND url = ? ORDER BY id_reading_source LIMIT 1',
-          [sourceType, item.url]
-        );
-        let sourceId = Number(existingRows?.[0]?.id_reading_source) || null;
-        const metadata = JSON.stringify({ date: item.date || null, audio: item.audio || null });
-        if (sourceId) {
-          await connection.execute(
-            'UPDATE reading_sources SET title = ?, metadata = ?::jsonb, fetched_at = CURRENT_TIMESTAMP WHERE id_reading_source = ?',
-            [item.title, metadata, sourceId]
-          );
-        } else {
-          const [insertResult] = await connection.execute(
-            'INSERT INTO reading_sources (type, url, title, metadata, fetched_at) VALUES (?, ?, ?, ?::jsonb, CURRENT_TIMESTAMP) RETURNING id_reading_source AS insertId',
-            [sourceType, item.url, item.title, metadata]
-          );
-          sourceId = extractInsertId(insertResult);
-          if (!sourceId) throw new Error('Failed to save reading source.');
-        }
-        if (text) {
-          const [existingTextRows] = await connection.execute(
-            'SELECT id_reading_text FROM reading_texts WHERE source_id = ? AND user_id IS NULL ORDER BY id_reading_text LIMIT 1',
-            [sourceId]
-          );
-          const existingTextId = Number(existingTextRows?.[0]?.id_reading_text) || null;
-          if (existingTextId) {
-            await connection.execute(
-              "UPDATE reading_texts SET text = ?, title = ?, level = ?, annotations_json = '[]'::jsonb WHERE id_reading_text = ? AND user_id IS NULL",
-              [text, item.title, analysis.level, existingTextId]
-            );
-          } else {
-            const [textResult] = await connection.execute(
-              "INSERT INTO reading_texts (source_id, user_id, text, title, level, annotations_json) VALUES (?, NULL, ?, ?, ?, '[]'::jsonb) RETURNING id_reading_text AS insertId",
-              [sourceId, text, item.title, analysis.level]
-            );
-            if (!extractInsertId(textResult)) throw new Error('Failed to save reading text.');
-          }
-          textsImported += 1;
-        }
+        textsImported += await persistImportItem(connection, sourceType, item, text, analysis);
         await connection.commit();
       } catch (error) {
         await connection.rollback().catch(() => {});
@@ -920,6 +885,113 @@ async function syncReadingSources(executor, userId, sourceType, { fetch: fetchIm
     return { status: 'ok', imported: items.length, textsImported };
   } finally {
     connection.release();
+  }
+}
+
+// Single-item persist shared by bulk sync and pasted-link import: source
+// upsert always, text upsert only when readable text exists. Returns 1 when a
+// text row was stored or refreshed, else 0. The caller owns the transaction.
+async function persistImportItem(connection, sourceType, item, text, analysis) {
+  // Migration 022 intentionally has no UNIQUE(type,url). A transaction
+  // advisory lock serializes check/insert for this stable key without
+  // requiring an unreviewed database change.
+  await connection.execute('SELECT pg_advisory_xact_lock(hashtext(?), hashtext(?))', [sourceType, item.url]);
+  const [existingRows] = await connection.execute(
+    'SELECT id_reading_source FROM reading_sources WHERE type = ? AND url = ? ORDER BY id_reading_source LIMIT 1',
+    [sourceType, item.url]
+  );
+  let sourceId = Number(existingRows?.[0]?.id_reading_source) || null;
+  const metadata = JSON.stringify({ date: item.date || null, audio: item.audio || null });
+  if (sourceId) {
+    await connection.execute(
+      'UPDATE reading_sources SET title = ?, metadata = ?::jsonb, fetched_at = CURRENT_TIMESTAMP WHERE id_reading_source = ?',
+      [item.title, metadata, sourceId]
+    );
+  } else {
+    const [insertResult] = await connection.execute(
+      'INSERT INTO reading_sources (type, url, title, metadata, fetched_at) VALUES (?, ?, ?, ?::jsonb, CURRENT_TIMESTAMP) RETURNING id_reading_source AS insertId',
+      [sourceType, item.url, item.title, metadata]
+    );
+    sourceId = extractInsertId(insertResult);
+    if (!sourceId) throw new Error('Failed to save reading source.');
+  }
+  if (!text) return 0;
+  const [existingTextRows] = await connection.execute(
+    'SELECT id_reading_text FROM reading_texts WHERE source_id = ? AND user_id IS NULL ORDER BY id_reading_text LIMIT 1',
+    [sourceId]
+  );
+  const existingTextId = Number(existingTextRows?.[0]?.id_reading_text) || null;
+  if (existingTextId) {
+    await connection.execute(
+      "UPDATE reading_texts SET text = ?, title = ?, level = ?, annotations_json = '[]'::jsonb WHERE id_reading_text = ? AND user_id IS NULL",
+      [text, item.title, analysis.level, existingTextId]
+    );
+  } else {
+    const [textResult] = await connection.execute(
+      "INSERT INTO reading_texts (source_id, user_id, text, title, level, annotations_json) VALUES (?, NULL, ?, ?, ?, '[]'::jsonb) RETURNING id_reading_text AS insertId",
+      [sourceId, text, item.title, analysis.level]
+    );
+    if (!extractInsertId(textResult)) throw new Error('Failed to save reading text.');
+  }
+  return 1;
+}
+
+function assertAozoraCardUrl(value) {
+  const message = 'url must be an Aozora work page URL (https://www.aozora.gr.jp/cards/…/card….html).';
+  let url = null;
+  try {
+    url = new URL(String(value || '').trim());
+  } catch (_) {
+    throw new ValidationError(message);
+  }
+  if (url.protocol !== 'https:' || url.hostname !== 'www.aozora.gr.jp' || url.port || url.username || url.password) {
+    throw new ValidationError(message);
+  }
+  if (!/^\/cards\/\d+\/card\d+\.html$/i.test(url.pathname)) throw new ValidationError(message);
+  return url.toString();
+}
+
+function extractAozoraCardTitle(cardHtml) {
+  const match = String(cardHtml || '').match(/<title\b[^>]*>([\s\S]*?)<\/title\s*>/i);
+  if (!match) return null;
+  const title = truncateCodePoints(
+    plainTextFromMarkup(match[1]).replace(/^図書カード\s*[:：]\s*/u, '').replace(/\s*[-－—]\s*青空文庫\s*$/u, '').trim(),
+    MAX_READING_TITLE_LENGTH
+  );
+  return title || null;
+}
+
+// Pasted-link import: one user-chosen Aozora work page, analyzed and stored.
+// Same guards as bulk sync (fixed host, card path, byte caps, timeouts) plus
+// the shared persist path, so a pasted link cannot reach anywhere the picker
+// could not.
+async function importAozoraUrl(executor, userId, rawUrl, { fetch: fetchImpl = globalThis.fetch } = {}) {
+  const cardUrl = assertAozoraCardUrl(rawUrl);
+  try {
+    const card = await fetchFixedText(fetchImpl, cardUrl, 'www.aozora.gr.jp', 2 * 1024 * 1024);
+    const title = extractAozoraCardTitle(card);
+    if (!title) return { status: 'unavailable', reason: 'Could not read that work page.' };
+    const enriched = await loadAozoraArticle(fetchImpl, { title, url: cardUrl, date: null, text: null, audio: null });
+    const text = typeof enriched.text === 'string' && enriched.text.trim()
+      ? truncateCodePoints(enriched.text.trim(), MAX_READING_TEXT_LENGTH)
+      : null;
+    if (!text) return { status: 'unavailable', reason: 'Could not extract readable text from that page.' };
+    const analysis = await analyzeReading(executor, userId, text);
+    const connection = await executor.getConnection();
+    try {
+      await connection.beginTransaction();
+      const stored = await persistImportItem(connection, 'aozora', { title, url: cardUrl, date: null, audio: null }, text, analysis);
+      await connection.commit();
+      return { status: 'ok', imported: 1, textsImported: stored };
+    } catch (error) {
+      await connection.rollback().catch(() => {});
+      throw error;
+    } finally {
+      connection.release();
+    }
+  } catch (error) {
+    if (error instanceof ValidationError) throw error;
+    return { status: 'unavailable', reason: 'Source request failed.' };
   }
 }
 
@@ -937,6 +1009,7 @@ module.exports = {
   deleteUserReadingText,
   extractAozoraText,
   getReadingText,
+  importAozoraUrl,
   loadAozoraSources,
   listReadingLibrary,
   listReadingProgress,
