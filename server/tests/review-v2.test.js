@@ -258,6 +258,19 @@ test('PUT /api/review/preferences round-trips autoPick scoped to req.user.id', a
   });
 });
 
+test('PUT /api/review/preferences saves reported card-type payload with autoPick:true (no 400 Unexpected field)', async () => {
+  await withPoolExecute(async () => [{ affectedRows: 1 }], async () => {
+    const response = mockRes();
+    await controller.putReviewPreferences({
+      user: { id: USER_ID },
+      body: { cardTypes: ['recognition', 'recall'], weights: { recognition: 50, recall: 50 }, autoPick: true }
+    }, response.res);
+    assert.equal(response.status(), 200);
+    assert.equal(response.body().userPreferences.autoPick, true);
+    assert.deepEqual(response.body().userPreferences.cardTypes, ['recognition', 'recall']);
+  });
+});
+
 test('GET /api/review/types defaults autoPick to true for missing or legacy rows', async () => {
   // No stored row at all.
   await withPoolExecute(async (sql, params) => {

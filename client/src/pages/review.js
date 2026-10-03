@@ -29,6 +29,77 @@ const DEFAULT_CARD_PREFERENCES = { cardTypes: ['recognition'], weights: {}, engi
 let activeReview = { sessionId: null, selected: [] };
 let detachReviewKeys = null;
 
+// Audio playback defenses (Web Speech API pitfalls):
+// - Keep a live utterance reference so Chrome cannot collect it mid-speech.
+// - Warm the voice list (getVoices is empty until voiceschanged fires).
+// - Defer speak after cancel so the utterance is not dropped.
+// - Surface a missing Japanese voice with guidance instead of silence.
+let activeUtterance = null;
+let cachedVoices = null;
+let voicesWarmAttached = false;
+let pendingSpeakTimer = null;
+
+function warmCachedVoices() {
+  try {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    const synthesis = window.speechSynthesis;
+    try {
+      const initial = typeof synthesis.getVoices === 'function' ? synthesis.getVoices() : [];
+      if (Array.isArray(initial) && initial.length) cachedVoices = initial.slice();
+    } catch { /* initial read is best-effort */ }
+    if (voicesWarmAttached) return;
+    voicesWarmAttached = true;
+    const refresh = () => {
+      try {
+        const voices = typeof synthesis.getVoices === 'function' ? synthesis.getVoices() : [];
+        if (Array.isArray(voices) && voices.length) cachedVoices = voices.slice();
+      } catch { /* refresh is best-effort */ }
+    };
+    try {
+      if (typeof synthesis.addEventListener === 'function') {
+        synthesis.addEventListener('voiceschanged', refresh, { once: true });
+      } else if (synthesis && typeof synthesis.onvoiceschanged !== 'undefined') {
+        const prev = synthesis.onvoiceschanged;
+        try {
+          synthesis.onvoiceschanged = (...args) => {
+            try { if (typeof prev === 'function') prev(...args); } catch { /* prior handler is best-effort */ }
+            refresh();
+          };
+        } catch { /* attach is best-effort */ }
+      }
+    } catch { /* listener attach is best-effort */ }
+  } catch { /* warm-up never blocks review */ }
+}
+
+function readVoices(synthesis) {
+  try {
+    if (Array.isArray(cachedVoices) && cachedVoices.length) return cachedVoices;
+  } catch { /* cache read is best-effort */ }
+  try {
+    const live = typeof synthesis.getVoices === 'function' ? synthesis.getVoices() : [];
+    if (Array.isArray(live) && live.length) {
+      try { cachedVoices = live.slice(); } catch { /* cache store is best-effort */ }
+      return live;
+    }
+    return Array.isArray(live) ? live : [];
+  } catch { return Array.isArray(cachedVoices) ? cachedVoices : []; }
+}
+
+function findJapaneseVoice(voices) {
+  try {
+    const list = Array.isArray(voices) ? voices : [];
+    return list.find((voice) => String(voice?.lang || '').toLowerCase().replace('_', '-').startsWith('ja')) || null;
+  } catch { return null; }
+}
+
+function hasJapaneseVoice(voices) {
+  return Boolean(findJapaneseVoice(voices));
+}
+
+function japaneseVoiceGuidance() {
+  return 'No Japanese voice found on this device — install one in your system settings to hear audio.';
+}
+
 function toISODate(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -81,6 +152,7 @@ export async function renderReview(container) {
     detachReviewKeys = null;
   }
   activeReview = { sessionId: null, selected: [] };
+  try { warmCachedVoices(); } catch { /* warm-up is best-effort */ }
 
   const today = todayISO();
   const defaultFrom = daysAgoISO(3);
@@ -759,17 +831,67 @@ const CARD_TYPE_DESCRIPTIONS = {
         return;
       }
       const synthesis = window.speechSynthesis;
+      try { warmCachedVoices(); } catch { /* warm-up is best-effort */ }
       const utterance = new window.SpeechSynthesisUtterance(text);
+      activeUtterance = utterance;
       utterance.lang = 'ja-JP';
       utterance.rate = 0.9;
+      let picked = null;
       try {
-        const voices = typeof synthesis.getVoices === 'function' ? synthesis.getVoices() : [];
-        const japanese = voices.find((voice) => String(voice?.lang || '').toLowerCase().replace('_', '-').startsWith('ja'));
-        if (japanese) utterance.voice = japanese;
+        const voices = readVoices(synthesis);
+        picked = findJapaneseVoice(voices);
+        if (picked) utterance.voice = picked;
       } catch { /* voice picking is best-effort; lang still guides the platform */ }
-      utterance.onerror = () => { showToast('Audio playback is unavailable on this device right now.', 'error'); };
-      synthesis.cancel();
-      synthesis.speak(utterance);
+      if (!picked) {
+        try {
+          const check = readVoices(synthesis);
+          if (!hasJapaneseVoice(check)) {
+            showToast(japaneseVoiceGuidance(), 'error');
+          }
+        } catch { /* guidance is best-effort */ }
+      }
+      const clearIfCurrent = () => { if (activeUtterance === utterance) activeUtterance = null; };
+      try {
+        utterance.onend = () => { clearIfCurrent(); };
+      } catch { /* handler attach is best-effort */ }
+      try {
+        utterance.onerror = () => {
+          clearIfCurrent();
+          try {
+            const voices = readVoices(synthesis);
+            if (!hasJapaneseVoice(voices)) {
+              showToast(japaneseVoiceGuidance(), 'error');
+            } else {
+              showToast('Audio playback is unavailable on this device right now.', 'error');
+            }
+          } catch {
+            showToast('Audio playback is unavailable on this device right now.', 'error');
+          }
+        };
+      } catch { /* handler attach is best-effort */ }
+      try { synthesis.cancel(); } catch { /* stop is best-effort */ }
+      try {
+        if (pendingSpeakTimer !== null && pendingSpeakTimer !== undefined) {
+          try {
+            if (typeof window !== 'undefined' && window && typeof window.clearTimeout === 'function') window.clearTimeout(pendingSpeakTimer);
+            else if (typeof clearTimeout === 'function') clearTimeout(pendingSpeakTimer);
+          } catch { /* timer clear is best-effort */ }
+          pendingSpeakTimer = null;
+        }
+      } catch { /* timer clear is best-effort */ }
+      const schedule = (typeof window !== 'undefined' && window && typeof window.setTimeout === 'function')
+        ? window.setTimeout.bind(window)
+        : setTimeout;
+      pendingSpeakTimer = schedule(() => {
+        pendingSpeakTimer = null;
+        if (activeUtterance !== utterance) return;
+        try {
+          synthesis.speak(utterance);
+        } catch {
+          clearIfCurrent();
+          showToast('Audio playback is unavailable on this device right now.', 'error');
+        }
+      }, 80);
     } catch {
       showToast('Audio playback is unavailable on this device right now.', 'error');
     }

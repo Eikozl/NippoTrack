@@ -297,13 +297,15 @@ function makeUi(doc, toasts) {
   return { element, pageHeader, loadingState, emptyState, errorState, showToast, withPendingAction };
 }
 
-function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, completePayload, gradeReject, historyPayload, sessionDetailPayload, sessionItemsPayload, typesPayload, preferencesImpl, preferencesPayload, vocabDetail, grammarDetail, clozeSentence } = {}) {
+function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, completePayload, gradeReject, historyPayload, sessionDetailPayload, sessionItemsPayload, typesPayload, preferencesImpl, preferencesPayload, vocabDetail, grammarDetail, clozeSentence, speechVoices } = {}) {
   const doc = new FakeDocument();
   const toasts = [];
   const apiCalls = [];
   const dialogs = [];
   const openDialogCalls = [];
   const speechCalls = [];
+  const speechCancelCalls = [];
+  const speechListeners = new Map();
   const ui = makeUi(doc, toasts);
   const apiRequest = async (url, opts = {}) => {
     apiCalls.push({ url, options: opts });
@@ -431,15 +433,27 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
     setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (id) => clearTimeout(id),
     SpeechSynthesisUtterance: function (text) { this.text = text; this.lang = ''; this.rate = 1; },
     speechSynthesis: {
-      cancel() {},
-      getVoices() { return [{ lang: 'ja-JP' }]; },
-      speak(utter) { speechCalls.push(utter); }
+      cancel() { speechCancelCalls.push(1); },
+      getVoices() {
+        if (speechVoices !== undefined) {
+          return typeof speechVoices === 'function' ? speechVoices() : speechVoices;
+        }
+        return [{ lang: 'ja-JP' }];
+      },
+      speak(utter) { speechCalls.push(utter); },
+      addEventListener(type, handler) {
+        if (!speechListeners.has(type)) speechListeners.set(type, []);
+        speechListeners.get(type).push(handler);
+      },
+      removeEventListener(type, handler) {
+        speechListeners.set(type, (speechListeners.get(type) || []).filter((fn) => fn !== handler));
+      }
     }
   };
   const { renderReview } = factory(
     apiRequest, queryString, kanjiReferenceRoute, icon, ui.element, ui.emptyState, ui.errorState, ui.loadingState, openDetailModal, openDialog, ui.pageHeader, setActionPending, ui.showToast, ui.withPendingAction, doc, fakeWindow
   );
-  return { doc, toasts, apiCalls, dialogs, renderReview, ui, openDialogCalls, speechCalls, fakeWindow };
+  return { doc, toasts, apiCalls, dialogs, renderReview, ui, openDialogCalls, speechCalls, speechCancelCalls, speechListeners, fakeWindow };
 }
 
 // ---------------------------------------------------------------- fixtures
@@ -1501,6 +1515,7 @@ test('Review 3.0 audio: speaker icon in front and after reveal, click speaks, no
   assert.ok(speakers.length >= 1, 'speaker present in front');
   const beforeRef = speakers[0];
   await clickAndSettle(beforeRef);
+  await sleep(120);
   assert.equal(harness.speechCalls.length, 1, 'front speaker click speaks');
   assert.match(String(harness.speechCalls[0]?.text || harness.speechCalls[0] || ''), /水/, 'speaks display text');
   await clickAndSettle(findFirstButtonByText(container, 'Reveal answer'));
@@ -1509,6 +1524,7 @@ test('Review 3.0 audio: speaker icon in front and after reveal, click speaks, no
   assert.ok(speakers.length >= 1, 'speaker still present after reveal');
   assert.equal(speakers[0], beforeRef, 'same speaker node survives reveal (never destroyed)');
   await clickAndSettle(speakers[0]);
+  await sleep(120);
   assert.equal(harness.speechCalls.length, 2, 'answer speaker still replays');
 });
 
@@ -1635,4 +1651,61 @@ test('Review 3.0 lifecycle: front and answer are hidden-toggled containers, cont
   assert.ok(findFirstButtonByText(container, 'Good') && isVisible(findFirstButtonByText(container, 'Good')), 'grades visible after reveal');
   assert.ok(isVisible(speakerButtons(container)[0]), 'speaker still visible after reveal');
   assert.equal(speakerButtons(container).filter(isVisible)[0], speakerBefore, 'speaker node identity preserved');
+});
+
+test('Review audio hardening: rapid double-play keeps single live utterance (no GC/drop)', async () => {
+  assert.match(reviewSource, /let activeUtterance/, 'module retains utterance');
+  assert.match(reviewSource, /activeUtterance\s*=\s*utterance/, 'every speak retains');
+  assert.match(reviewSource, /utterance\.onend/, 'clears on end');
+  assert.match(reviewSource, /utterance\.onerror/, 'clears on error');
+  assert.match(reviewSource, /pendingSpeakTimer/, 'defers after cancel');
+  assert.match(reviewSource, /, 80\)/, '80ms defer');
+  const item = candidateItem({ entityType: 'vocabulary', entityId: 71, display: '水', reading: 'みず', meaning: 'water', strength: 'strong' });
+  const { harness, container } = await startWithSingleItem({
+    item,
+    typesPayload: { availableTypes: ['recognition', 'recall', 'cloze', 'audio'], userPreferences: { cardTypes: ['audio'], weights: {}, engineMode: 'fixed', autoPick: true } }
+  });
+  const speaker = speakerButtons(container).filter(isVisible)[0];
+  assert.ok(speaker, 'speaker present');
+  const cancelsBefore = harness.speechCancelCalls.length;
+  speaker.click();
+  speaker.click();
+  await sleep(150);
+  assert.equal(harness.speechCalls.length, 1, 'rapid double-play coalesces to single speak (not dropped, not doubled)');
+  assert.match(String(harness.speechCalls[0]?.text || ''), /水/, 'live utterance carries display text');
+  assert.equal(typeof harness.speechCalls[0]?.onend, 'function', 'retained utterance has onend');
+  assert.equal(typeof harness.speechCalls[0]?.onerror, 'function', 'retained utterance has onerror');
+  assert.ok(harness.speechCancelCalls.length >= cancelsBefore + 2, 'each play cancels before defer');
+});
+
+test('Review audio hardening: preview with zero Japanese voices surfaces guidance', async () => {
+  assert.match(reviewSource, /voiceschanged/, 'warms voices');
+  assert.match(reviewSource, /cachedVoices|readVoices/, 'prefers warmed cache');
+  assert.match(reviewSource, /hasJapaneseVoice|findJapaneseVoice/, 'picks ja voice');
+  assert.match(reviewSource, /No Japanese voice/, 'explicit guidance present');
+  const harness = loadReviewModule({
+    candidatesPayload: { groups: {} },
+    typesPayload: allTypesPreferences(true),
+    speechVoices: [{ lang: 'en-US' }]
+  });
+  const container = await gotoSetup(harness);
+  assert.ok((harness.speechListeners.get('voiceschanged') || []).length >= 1, 'voiceschanged warmup attached');
+  const edit = container.querySelector('button[aria-label="Edit card types"]') || findFirstButtonByText(container, 'Edit');
+  assert.ok(edit, 'Edit card types control exists');
+  await clickAndSettle(edit);
+  assert.equal(harness.openDialogCalls.length, 1, 'preferences dialog opened');
+  const { form } = harness.openDialogCalls[0];
+  const preview = findFirstButtonByText(form, 'Preview Japanese voice');
+  assert.ok(preview, 'preview button present');
+  preview.click();
+  await sleep(150);
+  const guidance = harness.toasts.filter((t) => /No Japanese voice/.test(t.message));
+  assert.ok(guidance.length >= 1, 'preview with no ja voice toasts guidance');
+  assert.ok(/system settings/.test(guidance[0].message), 'guidance points to system settings');
+  assert.equal(harness.speechCalls.length, 1, 'preview still attempts speak (not silent drop)');
+  const countBefore = harness.toasts.length;
+  assert.equal(typeof harness.speechCalls[0]?.onerror, 'function', 'utterance carries onerror');
+  harness.speechCalls[0].onerror();
+  assert.ok(harness.toasts.length > countBefore, 'onerror toasts');
+  assert.ok(/No Japanese voice/.test(harness.toasts[harness.toasts.length - 1].message), 'onerror with no ja voice uses guidance');
 });
