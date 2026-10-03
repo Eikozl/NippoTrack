@@ -21,9 +21,9 @@
 // page (existing /api/level/progress data); this page links there instead of
 // duplicating that computation.
 
-import { apiRequest, listReadingLibrary, getReadingText, createUserReadingText, deleteReadingText, updateReadingProgress, importReadingSources, listReadingProgress } from '../api';
+import { apiRequest, listReadingLibrary, getReadingText, createUserReadingText, deleteReadingText, updateReadingProgress, importReadingSources, previewReadingImport, listReadingProgress } from '../api';
 import { icon } from '../icons';
-import { element, pageHeader, showToast, withPendingAction, paginationControls, openDetailModal, confirmDialog, emptyState, errorState, loadingState } from '../ui';
+import { element, pageHeader, showToast, withPendingAction, paginationControls, openDetailModal, openDialog, confirmDialog, emptyState, errorState, loadingState } from '../ui';
 
 const LIBRARY_PAGE_SIZE = 12;
 const LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1'];
@@ -183,20 +183,70 @@ async function renderLibraryView(container) {
 
   const importAozora = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Import Aozora', attrs: { type: 'button' } });
   importAozora.addEventListener('click', () => withPendingAction(importAozora, async () => {
+    let preview = null;
     try {
-      const before = await listReadingLibrary({ source: 'aozora', page: 1, limit: 1 }).catch(() => null);
-      const baseline = Number(before?.total || 0);
-      const result = await importReadingSources('aozora');
-      if (result?.status !== 'accepted') {
-        showToast('Import did not start. Please try again.', 'error');
-        return;
-      }
-      showToast('Import started — new texts will appear below as they arrive.');
-      pollLibraryForImports(baseline);
+      preview = await previewReadingImport('aozora');
     } catch (error) {
-      showToast(error?.message || 'Could not reach the API. Check your connection.', 'error');
+      showToast(error?.message || 'Could not reach Aozora. Check your connection.', 'error');
+      return;
     }
-  }));
+    const works = Array.isArray(preview?.items) ? preview.items : [];
+    if (preview?.status !== 'ok' || !works.length) {
+      showToast('Aozora could not be reached from this network. Check your connection and try again.', 'warning');
+      return;
+    }
+    openImportPickerDialog(works);
+  }, { pendingLabel: 'Loading works…' }));
+
+  // Picker: choose WHAT to import. Selection posts exact card URLs; the
+  // server intersects them with the live listing, imports in the background,
+  // and the library poll below picks up rows as they land.
+  function openImportPickerDialog(works) {
+    const boxes = works.map((work) => {
+      const checkbox = element('input', {
+        className: 'mt-1 size-4 shrink-0 accent-vermilion',
+        attrs: { type: 'checkbox', value: work.url, 'aria-label': `Import ${work.title}` }
+      });
+      const row = element('label', { className: 'flex cursor-pointer items-start gap-3 rounded-xl border border-stone bg-paper px-3 py-2.5 text-sm transition hover:border-ink/40' }, [
+        checkbox,
+        element('span', { className: 'min-w-0' }, [
+          element('span', { className: 'block break-words font-medium text-ink', text: work.title }),
+          element('span', { className: 'mt-0.5 block break-words text-xs leading-5 text-muted', text: work.url })
+        ])
+      ]);
+      return { checkbox, row };
+    });
+    const selectAll = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Select all', attrs: { type: 'button' } });
+    const clear = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Clear', attrs: { type: 'button' } });
+    selectAll.addEventListener('click', () => { boxes.forEach(({ checkbox }) => { checkbox.checked = true; }); });
+    clear.addEventListener('click', () => { boxes.forEach(({ checkbox }) => { checkbox.checked = false; }); });
+    openDialog({
+      title: 'Import from Aozora',
+      description: 'Choose the works to import. Each one is classified and added to your library in the background.',
+      content: [
+        element('div', { className: 'flex flex-wrap gap-2 sm:col-span-2' }, [selectAll, clear]),
+        element('div', { className: 'grid gap-2 sm:col-span-2' }, boxes.map(({ row }) => row))
+      ],
+      submitLabel: 'Import selected',
+      pendingLabel: 'Starting…',
+      onSubmit: async (form, close) => {
+        const selected = [...form.querySelectorAll('input[type="checkbox"]:checked')].map((node) => node.value).filter(Boolean);
+        if (!selected.length) {
+          showToast('Select at least one work.', 'error');
+          return;
+        }
+        const before = await listReadingLibrary({ source: 'aozora', page: 1, limit: 1 }).catch(() => null);
+        const result = await importReadingSources('aozora', { urls: selected });
+        if (result?.status !== 'accepted') {
+          showToast('Import did not start. Please try again.', 'error');
+          return;
+        }
+        close();
+        showToast('Import started — new texts will appear below as they arrive.');
+        pollLibraryForImports(Number(before?.total || 0));
+      }
+    });
+  }
 
   const ownTitle = element('input', {
     className: 'field-control',

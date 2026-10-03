@@ -1,6 +1,6 @@
 import { apiRequest, queryString } from '../api';
 import { kanjiReferenceRoute } from '../kanjiReference';
-import { element, emptyState, errorState, loadingState, openDetailModal, openDialog, pageHeader, showToast, withPendingAction } from '../ui';
+import { element, emptyState, errorState, loadingState, openDetailModal, openDialog, pageHeader, setActionPending, showToast, withPendingAction } from '../ui';
 
 const TYPE_ORDER = ['kanji', 'vocabulary', 'grammar'];
 const TYPE_LABEL = { kanji: 'Kanji', vocabulary: 'Vocabulary', grammar: 'Grammar' };
@@ -473,6 +473,8 @@ const CARD_TYPE_DESCRIPTIONS = {
 };
 
   function openCardTypeDialog() {
+    const previewVoiceButton = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Preview Japanese voice', attrs: { type: 'button', 'aria-label': 'Preview how audio cards sound on this device' } });
+    previewVoiceButton.addEventListener('click', () => { speakDisplay('日本語のテストです。よろしくおねがいします。'); });
     const rows = CARD_TYPES.map((type) => {
       const checked = reviewPreferences.cardTypes.includes(type);
       const weight = Math.round(Number(reviewPreferences.weights?.[type] ?? 50));
@@ -495,9 +497,15 @@ const CARD_TYPE_DESCRIPTIONS = {
     openDialog({
       title: 'Card types',
       description: 'Pick how cards are presented and weight the rotation. Weights are relative; disabled types never appear. Some types only fit some materials: kanji supports recognition and recall, audio needs vocabulary and a Japanese voice on your device — anything unsupported falls back to recognition.',
-      content: rows,
+      content: [
+        element('div', { className: 'grid gap-1 sm:col-span-2' }, [
+          previewVoiceButton,
+          element('p', { className: 'text-xs leading-5 text-muted', text: 'Hear how audio cards sound on this device. If nothing plays, install a Japanese voice in your system settings.' })
+        ]),
+        ...rows
+      ],
       submitLabel: 'Save',
-      onSubmit: async () => {
+      onSubmit: async (form, close) => {
         const cardTypes = [];
         const weights = {};
         for (const type of CARD_TYPES) {
@@ -506,8 +514,10 @@ const CARD_TYPE_DESCRIPTIONS = {
           if (checkbox?.checked) cardTypes.push(type);
           if (slider) weights[type] = Number(slider.value) || 0;
         }
+        const submitButton = form.querySelector('button[type="submit"]');
         if (!cardTypes.length) {
           showToast('Pick at least one card type.', 'error');
+          if (submitButton) setActionPending(submitButton, false);
           return;
         }
         const saved = await apiRequest('/api/review/preferences', { method: 'PUT', body: { cardTypes, weights } });
@@ -521,6 +531,16 @@ const CARD_TYPE_DESCRIPTIONS = {
         }
         renderCardTypeSummary();
         showToast('Card type preferences saved.');
+        // Release the Saving… state, flash confirmation on the button itself,
+        // then close — the button must never spin forever.
+        if (submitButton) {
+          setActionPending(submitButton, false);
+          submitButton.disabled = true;
+          submitButton.textContent = '✓ Saved';
+          window.setTimeout(() => { close(); }, 1000);
+        } else {
+          close();
+        }
       }
     });
   }

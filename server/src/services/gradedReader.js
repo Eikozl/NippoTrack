@@ -741,11 +741,11 @@ async function fetchFixedText(fetchImpl, rawUrl, host, maxBytes) {
 // client-rendered shell with no machine-readable article source), so there is
 // no fixed, allowlisted NHK endpoint left to fetch. Aozora remains.
 
-function aozoraListingItems(html) {
+function aozoraListingItems(html, maxItems = 10) {
   const items = [];
   const anchors = /<a\b[^>]*\bhref\s*=\s*(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a\s*>/gi;
   let match;
-  while ((match = anchors.exec(html)) && items.length < 10) {
+  while ((match = anchors.exec(html)) && items.length < maxItems) {
     let resolved;
     try { resolved = new URL(decodeEntities(match[2]), AOZORA_LISTING_URL); } catch (_) { continue; }
     const url = safeExternalUrl(resolved.toString(), 'www.aozora.gr.jp');
@@ -816,12 +816,36 @@ async function loadAozoraSources(fetchImpl = globalThis.fetch) {
   }
 }
 
-async function syncReadingSources(executor, userId, sourceType, { fetch: fetchImpl = globalThis.fetch } = {}) {
+// Preview-only listing: titles + card URLs from the fixed work index, no
+// article fetching and no database writes. Powers the import picker so users
+// choose WHAT to import instead of a blind bulk pull.
+async function previewAozoraSources(fetchImpl = globalThis.fetch) {
+  try {
+    const html = await fetchFixedText(fetchImpl, AOZORA_LISTING_URL, 'www.aozora.gr.jp', 2 * 1024 * 1024);
+    return { status: 'ok', items: aozoraListingItems(html, 20) };
+  } catch (error) {
+    return { status: 'unavailable', reason: error?.message === 'response_too_large' ? 'Source response exceeded the size limit.' : 'Source request failed.' };
+  }
+}
+
+async function syncReadingSources(executor, userId, sourceType, { fetch: fetchImpl = globalThis.fetch, urls = null } = {}) {
   if (sourceType !== 'aozora') throw new ValidationError('sourceType must be aozora.');
   const sourceResult = await loadAozoraSources(fetchImpl);
   if (sourceResult.status !== 'ok') return sourceResult;
-  const items = sourceResult.items.slice(0, MAX_IMPORT_ITEMS);
-  if (!items.length) return { status: 'ok', imported: 0, textsImported: 0 };
+  let items = sourceResult.items.slice(0, MAX_IMPORT_ITEMS);
+  if (urls !== null && urls !== undefined) {
+    // Selective import: keep only the requested entries, matched by
+    // normalized URL. Anything not present in the live listing is ignored,
+    // so forged or stale URLs can never inject arbitrary fetches — every
+    // fetched URL still passes the fixed-host + card-path guards downstream.
+    const wanted = new Set(
+      urls.filter((entry) => typeof entry === 'string').map((entry) => {
+        try { return new URL(entry).href; } catch (_) { return null; }
+      }).filter(Boolean)
+    );
+    items = items.filter((item) => wanted.has(new URL(item.url).href));
+    if (!items.length) return { status: 'ok', imported: 0, textsImported: 0 };
+  }
 
   // Texts land one by one: analyze, then commit that item immediately, so a
   // minutes-long import is visible incrementally and a late failure (or a
@@ -916,9 +940,10 @@ module.exports = {
   loadAozoraSources,
   listReadingLibrary,
   listReadingProgress,
-  normalizeReadingText,
   normalizeAnalysisText,
+  normalizeReadingText,
   normalizeTitle,
+  previewAozoraSources,
   syncReadingSources,
   upsertReadingProgress
 };

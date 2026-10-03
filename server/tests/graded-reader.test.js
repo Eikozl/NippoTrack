@@ -298,6 +298,90 @@ test('source import reads the fixed Aozora work index and reports fetch failures
   assert.match(retired.body().error, /sourceType must be aozora/i);
 });
 
+test('import preview lists selectable works without fetching articles', async () => {
+  const listing = '<a href="https://attacker.test/cards/9/card9.html">No</a><a href="/cards/000001/card1.html">短い物語</a>';
+  const response = mockRes();
+  await controller.previewImports({ query: { source: 'aozora' }, user: { id: USER_ID }, app: { locals: { readingFetch: async (url) => {
+    assert.equal(String(url), gradedReader.AOZORA_LISTING_URL);
+    return { ok: true, headers: { get: () => String(Buffer.byteLength(listing)) }, text: async () => listing };
+  } } } }, response.res);
+  assert.equal(response.status(), 200);
+  assert.equal(response.body().status, 'ok');
+  assert.deepEqual(response.body().items, [{ title: '短い物語', url: 'https://www.aozora.gr.jp/cards/000001/card1.html', date: null, text: null, audio: null }]);
+
+  const badSource = mockRes();
+  await controller.previewImports({ query: { source: 'nhk' }, user: { id: USER_ID } }, badSource.res);
+  assert.equal(badSource.status(), 400);
+
+  const down = mockRes();
+  await controller.previewImports({ query: {}, user: { id: USER_ID }, app: { locals: { readingFetch: async () => { throw new Error('offline'); } } } }, down.res);
+  assert.equal(down.status(), 200);
+  assert.equal(down.body().status, 'unavailable');
+});
+
+test('selective import analyzes and stores only the requested urls', async () => {
+  const pages = new Map([
+    [gradedReader.AOZORA_LISTING_URL, '<a href="/cards/000001/card1.html">One</a><a href="/cards/000002/card2.html">Two</a>'],
+    ['https://www.aozora.gr.jp/cards/000001/card1.html', '<a href="/files/1_1.html">file</a>'],
+    ['https://www.aozora.gr.jp/files/1_1.html', '<div class="main_text"><p>学ぶ。</p></div>'],
+    ['https://www.aozora.gr.jp/cards/000002/card2.html', '<a href="./files/2_1.html">2_1.html</a>'],
+    ['https://www.aozora.gr.jp/cards/000002/files/2_1.html', '<div class="main_text"><p>読む。</p></div>']
+  ]);
+  const fetchStub = async (url) => {
+    const page = pages.get(String(url));
+    if (!page) throw new Error(`unlisted source URL: ${url}`);
+    return { ok: true, headers: { get: () => String(Buffer.byteLength(page)) }, text: async () => page };
+  };
+  const analyze = analysisPool();
+  const calls = [];
+  const flow = [];
+  const connection = {
+    async beginTransaction() { flow.push('BEGIN'); },
+    async commit() { flow.push('COMMIT'); },
+    async rollback() { flow.push('ROLLBACK'); },
+    release() {},
+    async execute(sql, params = []) {
+      calls.push({ sql, params });
+      if (/pg_advisory_xact_lock/i.test(sql)) return [[]];
+      if (/FROM reading_sources WHERE type/i.test(sql)) return [[]];
+      if (/INSERT INTO reading_sources/i.test(sql)) return [{ insertId: 71 }];
+      if (/FROM reading_texts WHERE source_id/i.test(sql)) return [[]];
+      if (/INSERT INTO reading_texts/i.test(sql)) return [{ insertId: 72 }];
+      throw new Error(`Unexpected import SQL: ${sql}`);
+    }
+  };
+  const executor = { execute: (sql, params) => analyze(sql, params), getConnection: async () => connection };
+  const result = await gradedReader.syncReadingSources(executor, USER_ID, 'aozora', {
+    fetch: fetchStub,
+    urls: ['https://www.aozora.gr.jp/cards/000002/card2.html', 'https://attacker.test/cards/9/card9.html']
+  });
+  assert.equal(result.status, 'ok');
+  assert.equal(result.imported, 1, 'only the listed + requested url is imported');
+  assert.equal(result.textsImported, 1);
+  const textInserts = calls.filter(({ sql }) => /INSERT INTO reading_texts/i.test(sql));
+  assert.equal(textInserts.length, 1);
+  assert.ok(textInserts[0].params.includes('Two'), 'stored title belongs to the selected work');
+  assert.ok(!calls.some(({ params }) => params.some((param) => typeof param === 'string' && param.includes('card1.html'))), 'unselected work never touches the database');
+  assert.deepEqual(flow.filter((phase) => phase === 'ROLLBACK'), [], 'no rollback on the happy path');
+});
+
+test('import rejects malformed url selections', async () => {
+  for (const urls of [
+    'not-an-array',
+    [],
+    new Array(21).fill('https://www.aozora.gr.jp/cards/1/card1.html'),
+    ['http://www.aozora.gr.jp/cards/1/card1.html'],
+    ['https://evil.test/cards/1/card1.html'],
+    ['https://www.aozora.gr.jp/index_pages/sakuhin_a1.html'],
+    [42]
+  ]) {
+    const response = mockRes();
+    await controller.importSources({ body: { sourceType: 'aozora', urls }, user: { id: USER_ID } }, response.res);
+    assert.equal(response.status(), 400, `urls rejected: ${JSON.stringify(urls)?.slice(0, 60)}`);
+    assert.match(response.body().error, /urls must be an array of 1 to 20 source URLs/);
+  }
+});
+
 test('legacy source bytes transcode from the declared charset instead of mojibake', async () => {
   // '<a>' + あ (U+3042: EUC-JP A4A2) + '</a>' with an euc-jp meta declaration.
   const eucJp = Buffer.concat([

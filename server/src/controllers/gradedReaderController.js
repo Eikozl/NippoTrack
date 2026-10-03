@@ -11,6 +11,7 @@ const {
   getReadingText,
   listReadingLibrary,
   listReadingProgress,
+  previewAozoraSources,
   syncReadingSources,
   upsertReadingProgress
 } = require('../services/gradedReader');
@@ -157,12 +158,53 @@ async function deleteText(req, res) {
   }
 }
 
+async function previewImports(req, res) {
+  try {
+    const query = req.query || {};
+    if (query.source !== undefined && query.source !== '' && query.source !== 'aozora') {
+      throw new ValidationError('source must be aozora.');
+    }
+    // fetch is injectable through app.locals for offline tests/operators; the
+    // service still pins every request to its fixed, allowlisted host.
+    const fetchImpl = req.app?.locals?.readingFetch || globalThis.fetch;
+    const result = await previewAozoraSources(fetchImpl);
+    return res.json(result);
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to preview reading sources.' });
+  }
+}
+
 async function importSources(req, res) {
   try {
     const body = bodyObject(req.body);
-    rejectUnknownFields(body, ['sourceType']);
+    rejectUnknownFields(body, ['sourceType', 'urls']);
     if (body.sourceType !== 'aozora') {
       throw new ValidationError('sourceType must be aozora.');
+    }
+    // Optional selective import: a bounded list of exact card URLs, each
+    // re-validated below (https + Aozora host + /cards/N/cardN.html) and then
+    // intersected with the live listing, so only listed works can be pulled.
+    let urls = null;
+    if (body.urls !== undefined) {
+      if (!Array.isArray(body.urls) || body.urls.length < 1 || body.urls.length > 20) {
+        throw new ValidationError('urls must be an array of 1 to 20 source URLs.');
+      }
+      urls = body.urls.map((entry) => {
+        if (typeof entry !== 'string') throw new ValidationError('urls must be an array of 1 to 20 source URLs.');
+        let parsed;
+        try {
+          parsed = new URL(entry.trim());
+        } catch (_) {
+          throw new ValidationError('urls must be an array of 1 to 20 source URLs.');
+        }
+        if (parsed.protocol !== 'https:' || parsed.hostname !== 'www.aozora.gr.jp' || parsed.port || parsed.username || parsed.password) {
+          throw new ValidationError('urls must be an array of 1 to 20 source URLs.');
+        }
+        if (!/^\/cards\/\d+\/card\d+\.html$/i.test(parsed.pathname)) {
+          throw new ValidationError('urls must be an array of 1 to 20 source URLs.');
+        }
+        return parsed.href;
+      });
     }
     // A real import fetches up to ten articles and runs the full classifier
     // per text — minutes of pooler round-trips, far beyond any HTTP header
@@ -174,7 +216,7 @@ async function importSources(req, res) {
     const userId = req.user.id;
     const fetchImpl = req.app?.locals?.readingFetch || globalThis.fetch;
     setImmediate(() => {
-      syncReadingSources(pool, userId, body.sourceType, { fetch: fetchImpl }).catch((error) => {
+      syncReadingSources(pool, userId, body.sourceType, { fetch: fetchImpl, urls }).catch((error) => {
         console.error(`[reading-import] background ${body.sourceType} import failed:`, error?.message || error);
       });
     });
@@ -192,5 +234,6 @@ module.exports = {
   importSources,
   listLibrary,
   listProgress,
+  previewImports,
   updateProgress
 };
