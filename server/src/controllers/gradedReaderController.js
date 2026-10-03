@@ -10,9 +10,11 @@ const {
   deleteUserReadingText,
   getReadingText,
   importAozoraUrl,
+  importHukuUrl,
   listReadingLibrary,
   listReadingProgress,
   previewAozoraSources,
+  previewHukuSources,
   syncReadingSources,
   upsertReadingProgress
 } = require('../services/gradedReader');
@@ -159,23 +161,60 @@ async function deleteText(req, res) {
   }
 }
 
+const READING_SOURCES = ['aozora', 'hukumusume'];
+const AOZORA_INDEXES = ['a', 'ka', 'sa', 'ta', 'na', 'ha', 'ma', 'ya', 'ra', 'wa'];
+const HUKU_INDEXES = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'];
+
 async function previewImports(req, res) {
   try {
     const query = req.query || {};
-    if (query.source !== undefined && query.source !== '' && query.source !== 'aozora') {
-      throw new ValidationError('source must be aozora.');
-    }
-    if (query.index !== undefined && query.index !== '' && !['a', 'ka', 'sa', 'ta', 'na', 'ha', 'ma', 'ya', 'ra', 'wa'].includes(query.index)) {
-      throw new ValidationError('index must be one of: a, ka, sa, ta, na, ha, ma, ya, ra, wa.');
+    const source = query.source === undefined || query.source === '' ? 'aozora' : query.source;
+    if (!READING_SOURCES.includes(source)) {
+      throw new ValidationError('source must be aozora or hukumusume.');
     }
     // fetch is injectable through app.locals for offline tests/operators; the
     // service still pins every request to its fixed, allowlisted host.
     const fetchImpl = req.app?.locals?.readingFetch || globalThis.fetch;
-    const result = await previewAozoraSources(fetchImpl, { index: query.index || 'a' });
-    return res.json(result);
+    if (source === 'hukumusume') {
+      if (query.index !== undefined && query.index !== '' && !HUKU_INDEXES.includes(query.index)) {
+        throw new ValidationError('index must be one of: 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12.');
+      }
+      return res.json(await previewHukuSources(fetchImpl, { index: query.index || '01' }));
+    }
+    if (query.index !== undefined && query.index !== '' && !AOZORA_INDEXES.includes(query.index)) {
+      throw new ValidationError('index must be one of: a, ka, sa, ta, na, ha, ma, ya, ra, wa.');
+    }
+    return res.json(await previewAozoraSources(fetchImpl, { index: query.index || 'a' }));
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to preview reading sources.' });
   }
+}
+
+function assertImportUrls(sourceType, urls) {
+  if (urls === undefined) return null;
+  if (!Array.isArray(urls) || urls.length < 1 || urls.length > 20) {
+    throw new ValidationError('urls must be an array of 1 to 20 source URLs.');
+  }
+  const shape = sourceType === 'hukumusume'
+    ? /^\/douwa\/pc\/jap\/\d\d\/\d+\.htm$/i
+    : /^\/cards\/\d+\/card\d+\.html$/i;
+  const host = sourceType === 'hukumusume' ? 'hukumusume.com' : 'www.aozora.gr.jp';
+  return urls.map((entry) => {
+    if (typeof entry !== 'string') throw new ValidationError('urls must be an array of 1 to 20 source URLs.');
+    let parsed = null;
+    try {
+      parsed = new URL(entry.trim());
+    } catch (_) {
+      throw new ValidationError('urls must be an array of 1 to 20 source URLs.');
+    }
+    if (parsed.protocol !== 'https:' || parsed.hostname !== host || parsed.port || parsed.username || parsed.password) {
+      throw new ValidationError('urls must be an array of 1 to 20 source URLs.');
+    }
+    if (!shape.test(parsed.pathname)) {
+      throw new ValidationError('urls must be an array of 1 to 20 source URLs.');
+    }
+    return parsed.href;
+  });
 }
 
 async function importFromUrl(req, res) {
@@ -183,24 +222,48 @@ async function importFromUrl(req, res) {
     const body = bodyObject(req.body);
     rejectUnknownFields(body, ['url']);
     if (typeof body.url !== 'string' || !body.url.trim()) {
-      throw new ValidationError('url must be an Aozora work page URL (https://www.aozora.gr.jp/cards/…/card….html).');
+      throw new ValidationError('url must be an Aozora work page or Hukumusume story page URL.');
     }
     // Shape-checked synchronously so malformed input 400s immediately; the
     // service re-checks before fetching. Analysis takes ~a minute, so like
     // bulk import this enqueues and answers 202 while the client polls.
-    const url = String(body.url.trim());
-    assertAozoraCardUrlShape(url);
+    const raw = String(body.url.trim());
+    let sourceType = null;
+    let url = null;
+    try {
+      url = assertAozoraCardUrlShape(raw);
+      sourceType = 'aozora';
+    } catch (_) {
+      url = assertHukuStoryUrlShape(raw);
+      sourceType = 'hukumusume';
+    }
     const userId = req.user.id;
     const fetchImpl = req.app?.locals?.readingFetch || globalThis.fetch;
+    const importSingle = sourceType === 'hukumusume' ? importHukuUrl : importAozoraUrl;
     setImmediate(() => {
-      importAozoraUrl(pool, userId, url, { fetch: fetchImpl }).catch((error) => {
+      importSingle(pool, userId, url, { fetch: fetchImpl }).catch((error) => {
         console.error('[reading-import] background pasted-link import failed:', error?.message || error);
       });
     });
-    return res.status(202).json({ status: 'accepted' });
+    return res.status(202).json({ status: 'accepted', sourceType });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to import reading link.' });
   }
+}
+
+function assertHukuStoryUrlShape(value) {
+  const message = 'url must be a Hukumusume story page URL (https://hukumusume.com/douwa/pc/jap/…/….htm).';
+  let parsed = null;
+  try {
+    parsed = new URL(String(value || '').trim());
+  } catch (_) {
+    throw new ValidationError(message);
+  }
+  if (parsed.protocol !== 'https:' || parsed.hostname !== 'hukumusume.com' || parsed.port || parsed.username || parsed.password) {
+    throw new ValidationError(message);
+  }
+  if (!/^\/douwa\/pc\/jap\/\d\d\/\d+\.htm$/i.test(parsed.pathname)) throw new ValidationError(message);
+  return parsed.href;
 }
 
 function assertAozoraCardUrlShape(value) {
@@ -221,46 +284,29 @@ function assertAozoraCardUrlShape(value) {
 async function importSources(req, res) {
   try {
     const body = bodyObject(req.body);
-    rejectUnknownFields(body, ['sourceType', 'urls']);
-    if (body.sourceType !== 'aozora') {
-      throw new ValidationError('sourceType must be aozora.');
+    rejectUnknownFields(body, ['sourceType', 'urls', 'index']);
+    if (!READING_SOURCES.includes(body.sourceType)) {
+      throw new ValidationError('sourceType must be aozora or hukumusume.');
     }
-    // Optional selective import: a bounded list of exact card URLs, each
-    // re-validated below (https + Aozora host + /cards/N/cardN.html) and then
+    const allowedIndexes = body.sourceType === 'hukumusume' ? HUKU_INDEXES : AOZORA_INDEXES;
+    if (body.index !== undefined && body.index !== null && body.index !== '' && !allowedIndexes.includes(body.index)) {
+      throw new ValidationError(`index must be one of: ${allowedIndexes.join(', ')}.`);
+    }
+    // Optional selective import: a bounded list of exact page URLs, each
+    // re-validated below (https + source host + story path) and then
     // intersected with the live listing, so only listed works can be pulled.
-    let urls = null;
-    if (body.urls !== undefined) {
-      if (!Array.isArray(body.urls) || body.urls.length < 1 || body.urls.length > 20) {
-        throw new ValidationError('urls must be an array of 1 to 20 source URLs.');
-      }
-      urls = body.urls.map((entry) => {
-        if (typeof entry !== 'string') throw new ValidationError('urls must be an array of 1 to 20 source URLs.');
-        let parsed;
-        try {
-          parsed = new URL(entry.trim());
-        } catch (_) {
-          throw new ValidationError('urls must be an array of 1 to 20 source URLs.');
-        }
-        if (parsed.protocol !== 'https:' || parsed.hostname !== 'www.aozora.gr.jp' || parsed.port || parsed.username || parsed.password) {
-          throw new ValidationError('urls must be an array of 1 to 20 source URLs.');
-        }
-        if (!/^\/cards\/\d+\/card\d+\.html$/i.test(parsed.pathname)) {
-          throw new ValidationError('urls must be an array of 1 to 20 source URLs.');
-        }
-        return parsed.href;
-      });
-    }
+    const urls = assertImportUrls(body.sourceType, body.urls);
     // A real import fetches up to ten articles and runs the full classifier
     // per text — minutes of pooler round-trips, far beyond any HTTP header
     // timeout. So the request only validates and enqueues: the work runs
     // detached right after the 202, and texts land in the library as they
-    // finish (syncReadingSources commits per item batch and is retry-safe via
+    // finish (syncReadingSources commits per item and is retry-safe via
     // its advisory lock + existing-row checks). Failures go to the server log;
     // the client polls the library until new rows arrive.
     const userId = req.user.id;
     const fetchImpl = req.app?.locals?.readingFetch || globalThis.fetch;
     setImmediate(() => {
-      syncReadingSources(pool, userId, body.sourceType, { fetch: fetchImpl, urls }).catch((error) => {
+      syncReadingSources(pool, userId, body.sourceType, { fetch: fetchImpl, urls, index: body.index || null }).catch((error) => {
         console.error(`[reading-import] background ${body.sourceType} import failed:`, error?.message || error);
       });
     });

@@ -187,3 +187,8 @@ donde el prompt de V5.3a asumÃ­a otra cosa se marca como [DESVIACIÃ“N].
 - Import por link: POST /api/reading/import/url {url} (202 + background + poll). La URL se valida en controlador y servicio (solo card pages https del host); el título sale del <title> de la card ('?????:X'). Verificado live: 400 a host ajeno, 202 válido, texto real N1 sin mojibake.
 - Persistencia compartida: el loop de sync extraído a persistImportItem (bulk y link usan el mismo commit por item).
 - Docs de endpoints: catálogo en app.js con preview + import/url + DELETE text.
+- Filtro por nivel verificado live: 2 textos (N2+N1) filtran exacto por level + 400 ante N9. El filtro de biblioteca N5-N1 funciona; en el picker no puede existir (cada nivel cuesta ~1min de análisis).
+- Hukumusume añadido junto a Aozora (migración 025 ensancha chk_reading_sources_type): índice mensual, extracción con scan balanceado del td, trim por título+????, transcodificación heredada. Picker con switch de fuente + meses + búsqueda; paste-link acepta ambas; validaciones por fuente.
+- Import resiliente: reintento 1x (análisis) y commit por item con reintento ante fallos de transporte del pooler; ParserError excluido del reintento. Hallazgo: CHECK 23514 tumbaba los inserts (sin migración no hay fuente nueva).
+- Live: cuento real importa punta a punta (N1, 1662 chars, 0 mojibake). Nota honesta: el clasificador es estricto (hasta ?????? sale N2), así que los cuentos también salen N1; el valor de Hukumusume es variedad + sitio conocido, no facilidad.
+- Separación visual biblioteca (mt-4): no hay márgenes negativos en el código; era apilado sin aire.

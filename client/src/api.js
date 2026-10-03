@@ -85,8 +85,11 @@ export function updateReadingProgress(id, { position, timeSpentSeconds, complete
   });
 }
 
-export function importReadingSources(sourceType, { urls } = {}) {
-  return apiRequest('/api/reading/import', { method: 'POST', body: { sourceType, ...(urls !== undefined ? { urls } : {}) } });
+export function importReadingSources(sourceType, { urls, index } = {}) {
+  return apiRequest('/api/reading/import', {
+    method: 'POST',
+    body: { sourceType, ...(urls !== undefined ? { urls } : {}), ...(index ? { index } : {}) }
+  });
 }
 
 export function previewReadingImport(sourceType, index) {

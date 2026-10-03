@@ -295,7 +295,24 @@ test('source import reads the fixed Aozora work index and reports fetch failures
   const retired = mockRes();
   await controller.importSources({ body: { sourceType: 'nhk' }, user: { id: USER_ID } }, retired.res);
   assert.equal(retired.status(), 400);
-  assert.match(retired.body().error, /sourceType must be aozora/i);
+  assert.match(retired.body().error, /sourceType must be aozora or hukumusume/i);
+
+  const hukuAccepted = mockRes();
+  await controller.importSources(
+    { body: { sourceType: 'hukumusume', urls: ['https://hukumusume.com/douwa/pc/jap/01/01.htm'], index: '01' }, user: { id: USER_ID }, app: { locals: { readingFetch: async () => { throw new Error('offline'); } } } },
+    hukuAccepted.res
+  );
+  assert.equal(hukuAccepted.status(), 202);
+  assert.deepEqual(hukuAccepted.body(), { status: 'accepted', sourceType: 'hukumusume' });
+
+  const badHukuIndex = mockRes();
+  await controller.importSources(
+    { body: { sourceType: 'hukumusume', index: '99' }, user: { id: USER_ID } },
+    badHukuIndex.res
+  );
+  assert.equal(badHukuIndex.status(), 400);
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setTimeout(resolve, 50));
 });
 
 test('import preview lists selectable works without fetching articles', async () => {
@@ -338,12 +355,82 @@ test('import preview switches kana indexes and rejects unknown ones', async () =
   assert.match(badIndex.body().error, /index must be one of/);
 });
 
+test('hukumusume preview lists month stories and imports a pasted link', async () => {
+  const monthHtml = '<a href="https://attacker.test/evil.html">No</a><a href="../01/01.htm">placeholder-title</a>';
+  const preview = mockRes();
+  await controller.previewImports({ query: { source: 'hukumusume', index: '05' }, user: { id: USER_ID }, app: { locals: { readingFetch: async (url) => {
+    assert.equal(String(url), 'https://hukumusume.com/douwa/pc/jap/itiran/05gatu.htm');
+    return { ok: true, headers: { get: () => String(Buffer.byteLength(monthHtml)) }, text: async () => monthHtml };
+  } } } }, preview.res);
+  assert.equal(preview.status(), 200);
+  assert.equal(preview.body().status, 'ok');
+  assert.equal(preview.body().index, '05');
+  assert.deepEqual(preview.body().items, [{ title: 'placeholder-title', url: 'https://hukumusume.com/douwa/pc/jap/01/01.htm', date: null, text: null, audio: null }]);
+
+  const badMonth = mockRes();
+  await controller.previewImports({ query: { source: 'hukumusume', index: '13' }, user: { id: USER_ID } }, badMonth.res);
+  assert.equal(badMonth.status(), 400);
+  assert.match(badMonth.body().error, /index must be one of/);
+
+  // Pasted-link shape validation covers both hosts.
+  for (const url of ['https://hukumusume.com/douwa/pc/jap/01/01.htm.evil', 'https://hukumusume.com/other/page.html', 'https://www.aozora.gr.jp/cards/1/card1.html ']) {
+    const probe = mockRes();
+    await controller.importFromUrl({ body: { url }, user: { id: USER_ID } }, probe.res);
+    if (url.trim().startsWith('https://www.aozora.gr.jp/cards/1/card1.html')) {
+      assert.equal(probe.status(), 202, 'aozora card link still accepted');
+    } else {
+      assert.equal(probe.status(), 400, `url rejected: ${url}`);
+    }
+  }
+
+  // Happy path: card title extracted, story trimmed at おしまい, stored.
+  const storyUrl = 'https://hukumusume.com/douwa/pc/jap/01/01.htm';
+  // Nested inner table: a lazy first-</td> match would stop inside the
+  // header junk and lose the tale; the balanced scan must span it.
+  const cardHtml = '<html><head><title>ネコがネズミを追いかける訳 ＜福娘童話集 きょうの日本昔話＞</title></head>'
+    + '<body><table><tr><td width="619" valign="top"><p>福娘童話集 &gt; きょうの日本昔話 &gt; ネコがネズミを追いかける訳</p>'
+    + '<table><tr><td>ヘッダー画像</td></tr></table>'
+    + '<p>ネコがネズミを追いかける訳</p><p>むかしむかし、あるところに学ぶ子どもがいました。</p>'
+    + '<p>おしまい</p><p>隠しキャラの正解は秘密です</p></td></tr></table></body></html>';
+  const fetchStub = async (url) => {
+    assert.equal(String(url), storyUrl);
+    return { ok: true, headers: { get: () => String(Buffer.byteLength(cardHtml)) }, text: async () => cardHtml };
+  };
+  const analyze = analysisPool();
+  const calls = [];
+  const connection = {
+    async beginTransaction() {},
+    async commit() {},
+    async rollback() {},
+    release() {},
+    async execute(sql, params = []) {
+      calls.push({ sql, params });
+      if (/pg_advisory_xact_lock/i.test(sql)) return [[]];
+      if (/FROM reading_sources WHERE type/i.test(sql)) return [[]];
+      if (/INSERT INTO reading_sources/i.test(sql)) return [{ insertId: 91 }];
+      if (/FROM reading_texts WHERE source_id/i.test(sql)) return [[]];
+      if (/INSERT INTO reading_texts/i.test(sql)) return [{ insertId: 92 }];
+      return analyze(sql, params);
+    }
+  };
+  const executor = { execute: (sql, params) => analyze(sql, params), getConnection: async () => connection };
+  const result = await gradedReader.importHukuUrl(executor, USER_ID, storyUrl, { fetch: fetchStub });
+  assert.equal(result.status, 'ok');
+  assert.equal(result.textsImported, 1);
+  const textInsert = calls.find(({ sql }) => /INSERT INTO reading_texts/i.test(sql));
+  assert.ok(textInsert.params.includes('ネコがネズミを追いかける訳'), 'title without the collection suffix');
+  const storedText = textInsert.params.find((param) => typeof param === 'string' && param.includes('むかしむかし'));
+  assert.ok(storedText, 'story body stored');
+  assert.ok(!storedText.includes('隠しキャラ'), 'post-ending bonus content trimmed');
+  assert.ok(!storedText.includes('福娘童話集 >'), 'header chrome trimmed');
+});
+
 test('pasted-link import validates shape and stores the extracted work', async () => {
   for (const url of [undefined, '', 'not-a-url', 'http://www.aozora.gr.jp/cards/1/card1.html', 'https://evil.test/cards/1/card1.html', 'https://www.aozora.gr.jp/index_pages/sakuhin_a1.html']) {
     const response = mockRes();
     await controller.importFromUrl({ body: { url }, user: { id: USER_ID } }, response.res);
     assert.equal(response.status(), 400, `url rejected: ${JSON.stringify(url)}`);
-    assert.match(response.body().error, /Aozora work page URL/);
+    assert.match(response.body().error, /work page URL|story page URL/);
   }
   const extra = mockRes();
   await controller.importFromUrl({ body: { url: 'https://www.aozora.gr.jp/cards/1/card1.html', extra: 1 }, user: { id: USER_ID } }, extra.res);
@@ -390,7 +477,7 @@ test('pasted-link import validates shape and stores the extracted work', async (
   const accepted = mockRes();
   await controller.importFromUrl({ body: { url: cardUrl }, user: { id: USER_ID }, app: { locals: { readingFetch: async () => { throw new Error('offline'); } } } }, accepted.res);
   assert.equal(accepted.status(), 202);
-  assert.deepEqual(accepted.body(), { status: 'accepted' });
+  assert.deepEqual(accepted.body(), { status: 'accepted', sourceType: 'aozora' });
   await new Promise((resolve) => setImmediate(resolve));
   await new Promise((resolve) => setTimeout(resolve, 50));
 });
@@ -456,6 +543,58 @@ test('import rejects malformed url selections', async () => {
     assert.equal(response.status(), 400, `urls rejected: ${JSON.stringify(urls)?.slice(0, 60)}`);
     assert.match(response.body().error, /urls must be an array of 1 to 20 source URLs/);
   }
+});
+
+test('import analysis retries once on transport failures, never on logic errors', async () => {
+  assert.equal(gradedReader.isTransientDbError(null), false);
+  assert.equal(gradedReader.isTransientDbError(new Error('boom')), false);
+  assert.equal(gradedReader.isTransientDbError(Object.assign(new Error('x'), { code: 'ECONNRESET' })), true);
+  assert.equal(gradedReader.isTransientDbError(new Error('Connection terminated due to connection timeout')), true);
+  assert.equal(gradedReader.isTransientDbError(new Error('canceling statement due to statement timeout')), true);
+  assert.equal(gradedReader.isTransientDbError(Object.assign(new Error('Japanese parser engine initialization timed out.'), { name: 'ParserError', code: 'PARSER_INIT_FAILED' })), false);
+  assert.equal(gradedReader.isTransientDbError(new Error('position must be a positive integer within the text length.')), false);
+
+  // One transient blip mid-analysis: the import recovers and stores the text.
+  const pages = new Map([
+    [gradedReader.AOZORA_LISTING_URL, '<a href="/cards/000009/card9.html">Nine</a>'],
+    ['https://www.aozora.gr.jp/cards/000009/card9.html', '<a href="/files/9_1.html">file</a>'],
+    ['https://www.aozora.gr.jp/files/9_1.html', '<div class="main_text"><p>学ぶ。</p></div>']
+  ]);
+  const fetchStub = async (url) => {
+    const page = pages.get(String(url));
+    if (!page) throw new Error(`unexpected source URL: ${url}`);
+    return { ok: true, headers: { get: () => String(Buffer.byteLength(page)) }, text: async () => page };
+  };
+  const analyze = analysisPool();
+  let analysisCalls = 0;
+  let blipped = false;
+  const flakyAnalyze = async (sql, params = []) => {
+    analysisCalls += 1;
+    if (!blipped && analysisCalls === 3) {
+      blipped = true;
+      throw Object.assign(new Error('Connection terminated due to connection timeout'), { code: 'ECONNRESET' });
+    }
+    return analyze(sql, params);
+  };
+  const connection = {
+    async beginTransaction() {},
+    async commit() {},
+    async rollback() {},
+    release() {},
+    async execute(sql, params = []) {
+      if (/pg_advisory_xact_lock/i.test(sql)) return [[]];
+      if (/FROM reading_sources WHERE type/i.test(sql)) return [[]];
+      if (/INSERT INTO reading_sources/i.test(sql)) return [{ insertId: 95 }];
+      if (/FROM reading_texts WHERE source_id/i.test(sql)) return [[]];
+      if (/INSERT INTO reading_texts/i.test(sql)) return [{ insertId: 96 }];
+      return flakyAnalyze(sql, params);
+    }
+  };
+  const executor = { execute: (sql, params) => flakyAnalyze(sql, params), getConnection: async () => connection };
+  const result = await gradedReader.syncReadingSources(executor, USER_ID, 'aozora', { fetch: fetchStub });
+  assert.equal(result.status, 'ok');
+  assert.equal(result.textsImported, 1, 'transient blip retried, text stored');
+  assert.ok(blipped, 'the blip actually fired');
 });
 
 test('legacy source bytes transcode from the declared charset instead of mojibake', async () => {

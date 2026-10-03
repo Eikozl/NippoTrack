@@ -42,6 +42,14 @@ function aozoraListingUrl(index = 'a') {
   return `https://www.aozora.gr.jp/index_pages/sakuhin_${group}1.html`;
 }
 const AOZORA_LISTING_URL = aozoraListingUrl('a');
+// Hukumusume fairy tales (きょうの日本昔話): monthly indexes listing story
+// pages. One fixed month per request keeps the import bounded; the picker
+// cycles months for variety, exactly like the Aozora kana groups.
+const HUKU_MONTHS = Object.freeze(['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12']);
+function hukuListingUrl(month = '01') {
+  const group = HUKU_MONTHS.includes(month) ? month : '01';
+  return `https://hukumusume.com/douwa/pc/jap/itiran/${group}gatu.htm`;
+}
 const LEVEL_RANK = Object.freeze({ N5: 1, N4: 2, N3: 3, N2: 4, N1: 5 });
 const LEVEL_BY_RANK = Object.freeze(['N5', 'N4', 'N3', 'N2', 'N1']);
 
@@ -807,9 +815,10 @@ async function loadAozoraArticle(fetchImpl, item) {
 // work-index listing, accepts only same-host card URLs, and fetches at most
 // ten card/article pairs; unavailable or differently structured pages remain
 // metadata-only instead of guessing at site markup.
-async function loadAozoraSources(fetchImpl = globalThis.fetch) {
+async function loadAozoraSources(fetchImpl = globalThis.fetch, { index = 'a' } = {}) {
   try {
-    const html = await fetchFixedText(fetchImpl, AOZORA_LISTING_URL, 'www.aozora.gr.jp', 2 * 1024 * 1024);
+    const listingUrl = aozoraListingUrl(index);
+    const html = await fetchFixedText(fetchImpl, listingUrl, 'www.aozora.gr.jp', 2 * 1024 * 1024);
     const items = aozoraListingItems(html);
     const enriched = [];
     for (let index = 0; index < items.length; index += 3) {
@@ -835,9 +844,40 @@ async function previewAozoraSources(fetchImpl = globalThis.fetch, { index = 'a' 
   }
 }
 
-async function syncReadingSources(executor, userId, sourceType, { fetch: fetchImpl = globalThis.fetch, urls = null } = {}) {
-  if (sourceType !== 'aozora') throw new ValidationError('sourceType must be aozora.');
-  const sourceResult = await loadAozoraSources(fetchImpl);
+async function loadHukuArticle(fetchImpl, item) {
+  try {
+    const page = await fetchFixedText(fetchImpl, item.url, 'hukumusume.com', 2 * 1024 * 1024);
+    const text = extractHukuStory(page, item.title);
+    return { ...item, text: text || null };
+  } catch (_) {
+    return item;
+  }
+}
+
+// Hukumusume has no API. This loader reads one fixed monthly story index,
+// accepts only same-host story URLs, and enriches at most ten stories;
+// pages with unexpected markup stay metadata-only instead of guessing.
+async function loadHukuSources(fetchImpl = globalThis.fetch, { index = '01' } = {}) {
+  try {
+    const listingUrl = hukuListingUrl(index);
+    const html = await fetchFixedText(fetchImpl, listingUrl, 'hukumusume.com', 2 * 1024 * 1024);
+    const items = hukuListingItems(html, 10);
+    const enriched = [];
+    for (let position = 0; position < items.length; position += 3) {
+      const group = await Promise.all(items.slice(position, position + 3).map((item) => loadHukuArticle(fetchImpl, item)));
+      enriched.push(...group);
+    }
+    return { status: 'ok', index: HUKU_MONTHS.includes(index) ? index : '01', items: enriched };
+  } catch (error) {
+    return { status: 'unavailable', reason: error?.message === 'response_too_large' ? 'Source response exceeded the size limit.' : 'Source request failed.' };
+  }
+}
+
+async function syncReadingSources(executor, userId, sourceType, { fetch: fetchImpl = globalThis.fetch, urls = null, index = null } = {}) {
+  if (!['aozora', 'hukumusume'].includes(sourceType)) throw new ValidationError('sourceType must be aozora or hukumusume.');
+  const sourceResult = sourceType === 'hukumusume'
+    ? await loadHukuSources(fetchImpl, { index: index || '01' })
+    : await loadAozoraSources(fetchImpl, { index: index || 'a' });
   if (sourceResult.status !== 'ok') return sourceResult;
   let items = sourceResult.items.slice(0, MAX_IMPORT_ITEMS);
   if (urls !== null && urls !== undefined) {
@@ -859,38 +899,89 @@ async function syncReadingSources(executor, userId, sourceType, { fetch: fetchIm
   // restart) keeps everything saved so far. A failing item rolls back only
   // itself and the loop continues; re-running the import resumes safely
   // because the advisory lock + existing-row checks make items idempotent.
-  const connection = await executor.getConnection();
   let textsImported = 0;
-  try {
-    for (const item of items) {
-      let text = null;
-      let analysis = null;
-      try {
-        const raw = typeof item.text === 'string' && item.text.trim()
-          ? truncateCodePoints(item.text.trim(), MAX_READING_TEXT_LENGTH)
-          : null;
+  for (const item of items) {
+    let text = null;
+    let analysis = null;
+    try {
+      const raw = typeof item.text === 'string' && item.text.trim()
+        ? truncateCodePoints(item.text.trim(), MAX_READING_TEXT_LENGTH)
+        : null;
         text = raw;
-        analysis = text ? await analyzeReading(executor, userId, text) : null;
-      } catch (_) {
-        continue;
-      }
-      await connection.beginTransaction();
-      try {
-        textsImported += await persistImportItem(connection, sourceType, item, text, analysis);
-        await connection.commit();
-      } catch (error) {
-        await connection.rollback().catch(() => {});
-      }
+        // Background job, no HTTP clock: afford up to three attempts so two
+        // consecutive pooler blips still cannot sink a minutes-long import.
+        analysis = text ? await analyzeImportText(executor, userId, text, 3) : null;
+    } catch (_) {
+      continue;
     }
-    return { status: 'ok', imported: items.length, textsImported };
-  } finally {
-    connection.release();
+    try {
+      textsImported += await persistImportItemWithRetry(executor, sourceType, item, text, analysis);
+    } catch (_) {
+      // Per-item failure: the helper already rolled back; keep going.
+    }
   }
+  return { status: 'ok', imported: items.length, textsImported };
 }
 
 // Single-item persist shared by bulk sync and pasted-link import: source
 // upsert always, text upsert only when readable text exists. Returns 1 when a
-// text row was stored or refreshed, else 0. The caller owns the transaction.
+// text row was stored or refreshed, else 0.
+function isTransientDbError(error) {
+  if (!error || typeof error !== 'object') return false;
+  // Parser engine failures are never retried here: a cold dictionary build
+  // has its own 15s budget and retrying it just burns another 15s+.
+  if (error.name === 'ParserError' || error.code === 'PARSER_INIT_FAILED') return false;
+  if (/^(ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNREFUSED|EPIPE)$/i.test(String(error.code || ''))) return true;
+  return /terminated|statement timeout|ECONNRESET|ETIMEDOUT|socket hang up|ENOTFOUND|EAI_AGAIN|EPIPE|connection reset/i.test(String(error.message || ''));
+}
+
+async function analyzeImportText(executor, userId, text, attempts = 2) {
+  let lastError = null;
+  const rounds = Math.max(1, attempts);
+  for (let attempt = 1; attempt <= rounds; attempt += 1) {
+    try {
+      return await analyzeReading(executor, userId, text);
+    } catch (error) {
+      lastError = error;
+      if (attempt < rounds && isTransientDbError(error)) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError;
+}
+
+// Persist with the same transient-only retry: a pooler blip during the few
+// commit-phase queries must not discard a just-finished minute of analysis.
+// Idempotent via advisory lock + existing-row checks, so a repeated commit is
+// safe; non-transient errors throw immediately.
+async function persistImportItemWithRetry(executor, sourceType, item, text, analysis, attempts = 2) {
+  let lastError = null;
+  const rounds = Math.max(1, attempts);
+  for (let attempt = 1; attempt <= rounds; attempt += 1) {
+    const connection = await executor.getConnection();
+    try {
+      await connection.beginTransaction();
+      const stored = await persistImportItem(connection, sourceType, item, text, analysis);
+      await connection.commit();
+      return stored;
+    } catch (error) {
+      await connection.rollback().catch(() => {});
+      lastError = error;
+      if (attempt < rounds && isTransientDbError(error)) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        continue;
+      }
+      throw error;
+    } finally {
+      try { connection.release(); } catch (_) { /* release is best-effort */ }
+    }
+  }
+  throw lastError;
+}
+
 async function persistImportItem(connection, sourceType, item, text, analysis) {
   // Migration 022 intentionally has no UNIQUE(type,url). A transaction
   // advisory lock serializes check/insert for this stable key without
@@ -961,6 +1052,133 @@ function extractAozoraCardTitle(cardHtml) {
   return title || null;
 }
 
+function hukuListingItems(html, maxItems = 20) {
+  const items = [];
+  const anchors = /<a\b[^>]*\bhref\s*=\s*(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a\s*>/gi;
+  let match;
+  while ((match = anchors.exec(html)) && items.length < maxItems) {
+    let resolved;
+    try { resolved = new URL(decodeEntities(match[2]), hukuListingUrl('01')); } catch (_) { continue; }
+    const url = safeExternalUrl(resolved.toString(), 'hukumusume.com');
+    // Story pages only: /douwa/pc/jap/<month>/<story>.htm. Index, English and
+    // special pages never match, so navigation links are skipped by shape.
+    if (!url || !/^\/douwa\/pc\/jap\/\d\d\/\d+\.htm$/i.test(url.pathname)) continue;
+    const title = truncateCodePoints(plainTextFromMarkup(match[3]), MAX_READING_TITLE_LENGTH);
+    if (!title) continue;
+    if (!items.some((item) => item.url === url.toString())) items.push({ title, url: url.toString(), date: null, text: null, audio: null });
+  }
+  return items;
+}
+
+function extractHukuColumn(html) {
+  // The story column is a <td width="619"> that itself contains nested
+  // tables, so a lazy regex would stop at the first inner </td>. Scan
+  // balanced open/close td tags from the column start instead.
+  const source = String(html || '');
+  const open = source.match(/<td\b[^>]*\bwidth\s*=\s*["']?619["']?[^>]*>/i);
+  if (!open || open.index === undefined) return null;
+  const tagPattern = /<\/?td\b[^>]*>/gi;
+  tagPattern.lastIndex = open.index;
+  let depth = 0;
+  let match = null;
+  while ((match = tagPattern.exec(source))) {
+    const tag = match[0];
+    if (tag[1] === '/') {
+      depth -= 1;
+      if (depth === 0) return source.slice(open.index + open[0].length, match.index);
+    } else if (!/\/>$/.test(tag)) {
+      depth += 1;
+    }
+  }
+  return null;
+}
+
+function extractHukuStory(html, workTitle) {
+  // Main column first: the centered 969 table's 619-wide cell holds the
+  // story; header/footer chrome lives outside it. Falls back to the whole
+  // page rather than returning nothing.
+  const column = extractHukuColumn(html);
+  const cleaned = plainTextFromMarkup(column === null ? String(html || '') : column);
+  if (!cleaned) return null;
+  let text = cleaned;
+  // Head trim: the column opens with breadcrumb, credits and quizzes before
+  // the story head repeats the work title. Cut at the last title occurrence
+  // within the opening stretch so a mid-story repeat can never eat the tale.
+  if (workTitle) {
+    const indices = [];
+    let from = 0;
+    let found = text.indexOf(workTitle, from);
+    while (found !== -1 && found < 2000) {
+      indices.push(found);
+      from = found + workTitle.length;
+      found = text.indexOf(workTitle, from);
+    }
+    if (indices.length) text = text.slice(indices[indices.length - 1]);
+  }
+  // Tail trim: おしまい ("the end") closes every tale; answers, reader
+  // illustrations and comments follow and are not reading content.
+  const end = text.indexOf('おしまい');
+  if (end !== -1) text = text.slice(0, end + 'おしまい'.length);
+  text = text.replace(/\n{3,}/g, '\n\n').trim();
+  return truncateCodePoints(text, MAX_READING_TEXT_LENGTH) || null;
+}
+
+function extractHukuTitle(storyHtml, fallback) {
+  const match = String(storyHtml || '').match(/<title\b[^>]*>([\s\S]*?)<\/title\s*>/i);
+  if (match) {
+    const title = truncateCodePoints(
+      plainTextFromMarkup(match[1]).replace(/\s*[＜<][^＞>]*[＞>]\s*$/u, '').trim(),
+      MAX_READING_TITLE_LENGTH
+    );
+    if (title) return title;
+  }
+  return typeof fallback === 'string' && fallback.trim()
+    ? truncateCodePoints(fallback.trim(), MAX_READING_TITLE_LENGTH)
+    : null;
+}
+
+function assertHukuStoryUrl(value) {
+  const message = 'url must be a Hukumusume story page URL (https://hukumusume.com/douwa/pc/jap/…/….htm).';
+  let url = null;
+  try {
+    url = new URL(String(value || '').trim());
+  } catch (_) {
+    throw new ValidationError(message);
+  }
+  if (url.protocol !== 'https:' || url.hostname !== 'hukumusume.com' || url.port || url.username || url.password) {
+    throw new ValidationError(message);
+  }
+  if (!/^\/douwa\/pc\/jap\/\d\d\/\d+\.htm$/i.test(url.pathname)) throw new ValidationError(message);
+  return url.toString();
+}
+
+async function previewHukuSources(fetchImpl = globalThis.fetch, { index = '01' } = {}) {
+  try {
+    const listingUrl = hukuListingUrl(index);
+    const html = await fetchFixedText(fetchImpl, listingUrl, 'hukumusume.com', 2 * 1024 * 1024);
+    return { status: 'ok', index: HUKU_MONTHS.includes(index) ? index : '01', items: hukuListingItems(html, 20) };
+  } catch (error) {
+    return { status: 'unavailable', reason: error?.message === 'response_too_large' ? 'Source response exceeded the size limit.' : 'Source request failed.' };
+  }
+}
+
+async function importHukuUrl(executor, userId, rawUrl, { fetch: fetchImpl = globalThis.fetch } = {}) {
+  const storyUrl = assertHukuStoryUrl(rawUrl);
+  try {
+    const page = await fetchFixedText(fetchImpl, storyUrl, 'hukumusume.com', 2 * 1024 * 1024);
+    const title = extractHukuTitle(page, storyUrl);
+    if (!title) return { status: 'unavailable', reason: 'Could not read that story page.' };
+    const text = extractHukuStory(page, title);
+    if (!text) return { status: 'unavailable', reason: 'Could not extract readable text from that page.' };
+    const analysis = await analyzeImportText(executor, userId, text, 3);
+    const stored = await persistImportItemWithRetry(executor, 'hukumusume', { title, url: storyUrl, date: null, audio: null }, text, analysis);
+    return { status: 'ok', imported: 1, textsImported: stored };
+  } catch (error) {
+    if (error instanceof ValidationError) throw error;
+    return { status: 'unavailable', reason: 'Source request failed.' };
+  }
+}
+
 // Pasted-link import: one user-chosen Aozora work page, analyzed and stored.
 // Same guards as bulk sync (fixed host, card path, byte caps, timeouts) plus
 // the shared persist path, so a pasted link cannot reach anywhere the picker
@@ -976,19 +1194,9 @@ async function importAozoraUrl(executor, userId, rawUrl, { fetch: fetchImpl = gl
       ? truncateCodePoints(enriched.text.trim(), MAX_READING_TEXT_LENGTH)
       : null;
     if (!text) return { status: 'unavailable', reason: 'Could not extract readable text from that page.' };
-    const analysis = await analyzeReading(executor, userId, text);
-    const connection = await executor.getConnection();
-    try {
-      await connection.beginTransaction();
-      const stored = await persistImportItem(connection, 'aozora', { title, url: cardUrl, date: null, audio: null }, text, analysis);
-      await connection.commit();
-      return { status: 'ok', imported: 1, textsImported: stored };
-    } catch (error) {
-      await connection.rollback().catch(() => {});
-      throw error;
-    } finally {
-      connection.release();
-    }
+    const analysis = await analyzeImportText(executor, userId, text, 3);
+    const stored = await persistImportItemWithRetry(executor, 'aozora', { title, url: cardUrl, date: null, audio: null }, text, analysis);
+    return { status: 'ok', imported: 1, textsImported: stored };
   } catch (error) {
     if (error instanceof ValidationError) throw error;
     return { status: 'unavailable', reason: 'Source request failed.' };
@@ -1008,15 +1216,21 @@ module.exports = {
   createUserReadingText,
   deleteUserReadingText,
   extractAozoraText,
+  extractHukuStory,
+  extractHukuTitle,
   getReadingText,
   importAozoraUrl,
+  importHukuUrl,
+  isTransientDbError,
   loadAozoraSources,
+  loadHukuSources,
   listReadingLibrary,
   listReadingProgress,
   normalizeAnalysisText,
   normalizeReadingText,
   normalizeTitle,
   previewAozoraSources,
+  previewHukuSources,
   syncReadingSources,
   upsertReadingProgress
 };

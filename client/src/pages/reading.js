@@ -29,6 +29,7 @@ const LIBRARY_PAGE_SIZE = 12;
 const LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1'];
 const SOURCES = [
   { value: 'aozora', label: 'Aozora Bunko' },
+  { value: 'hukumusume', label: 'Hukumusume' },
   { value: 'user', label: 'My texts' }
 ];
 
@@ -163,7 +164,7 @@ async function renderLibraryView(container) {
   // Imports run in the background (a full import classifies every text and
   // takes minutes), so this polls the library until the new rows land.
   let importPollTimer = null;
-  async function pollLibraryForImports(baseline, attempt = 0) {
+  async function pollLibraryForImports(sourceType, baseline, attempt = 0) {
     if (importPollTimer) window.clearTimeout(importPollTimer);
     importPollTimer = null;
     if (attempt >= 24) {
@@ -171,97 +172,133 @@ async function renderLibraryView(container) {
       return;
     }
     try {
-      const data = await listReadingLibrary({ source: 'aozora', page: 1, limit: 1 });
+      const data = await listReadingLibrary({ source: sourceType, page: 1, limit: 1 });
       if (Number(data?.total || 0) > baseline) {
         refresh(1);
-        showToast('Aozora import finished.');
+        showToast('Import finished — new texts are in your library.');
         return;
       }
     } catch { /* transient failures must not stop the poll */ }
-    importPollTimer = window.setTimeout(() => { pollLibraryForImports(baseline, attempt + 1); }, 15000);
+    importPollTimer = window.setTimeout(() => { pollLibraryForImports(sourceType, baseline, attempt + 1); }, 15000);
   }
 
-  const importAozora = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Import Aozora', attrs: { type: 'button' } });
-  importAozora.addEventListener('click', () => withPendingAction(importAozora, async () => {
+  const importTexts = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Import texts', attrs: { type: 'button' } });
+  importTexts.addEventListener('click', () => withPendingAction(importTexts, async () => {
     let preview = null;
     try {
-      preview = await previewReadingImport('aozora');
+      preview = await previewReadingImport('aozora', 'a');
     } catch (error) {
-      showToast(error?.message || 'Could not reach Aozora. Check your connection.', 'error');
+      showToast(error?.message || 'Could not reach the sources. Check your connection.', 'error');
       return;
     }
     const works = Array.isArray(preview?.items) ? preview.items : [];
     if (preview?.status !== 'ok' || !works.length) {
-      showToast('Aozora could not be reached from this network. Check your connection and try again.', 'warning');
+      showToast('No importable texts right now. Check your connection and try again.', 'warning');
       return;
     }
-    openImportPickerDialog(works, 'a');
+    openImportPickerDialog('aozora', 'a', works);
   }, { pendingLabel: 'Loading works…' }));
 
-  // Pasted-link import: the user brings their own Aozora work page. The link
-  // is shape-checked here for instant feedback and re-checked server-side;
-  // analysis still takes ~a minute, so this enqueues like bulk import.
+  // Pasted-link import: the user brings their own work page (Aozora card or
+  // Hukumusume story). The link is shape-checked here for instant feedback
+  // and re-checked server-side; analysis still takes ~a minute, so this
+  // enqueues like bulk import.
   const linkInput = element('input', {
     className: 'field-control',
-    attrs: { type: 'url', inputmode: 'url', placeholder: 'Paste an Aozora work link…', 'aria-label': 'Aozora work link' }
+    attrs: { type: 'url', inputmode: 'url', placeholder: 'Paste a work link…', 'aria-label': 'Work page link' }
   });
   const linkButton = element('button', { className: 'button-secondary min-h-9 shrink-0 px-3 py-1.5 text-xs', text: 'Add link', attrs: { type: 'button' } });
   linkButton.addEventListener('click', () => withPendingAction(linkButton, async () => {
-    const found = String(linkInput.value || '').match(/https:\/\/www\.aozora\.gr\.jp\/cards\/\d+\/card\d+\.html/i);
-    if (!found) {
-      showToast('Paste an Aozora work page link (…/cards/…/card….html).', 'error');
+    const pasted = String(linkInput.value || '').trim();
+    const aozoraMatch = pasted.match(/https:\/\/www\.aozora\.gr\.jp\/cards\/\d+\/card\d+\.html/i);
+    const hukuMatch = pasted.match(/https:\/\/hukumusume\.com\/douwa\/pc\/jap\/\d\d\/\d+\.htm/i);
+    if (!aozoraMatch && !hukuMatch) {
+      showToast('Paste an Aozora card link or a Hukumusume story link.', 'error');
       return;
     }
+    const sourceType = aozoraMatch ? 'aozora' : 'hukumusume';
     try {
-      const before = await listReadingLibrary({ source: 'aozora', page: 1, limit: 1 }).catch(() => null);
-      const result = await importReadingUrl(found[0]);
+      const before = await listReadingLibrary({ source: sourceType, page: 1, limit: 1 }).catch(() => null);
+      const result = await importReadingUrl((aozoraMatch || hukuMatch)[0]);
       if (result?.status !== 'accepted') {
         showToast('Import did not start. Please try again.', 'error');
         return;
       }
       linkInput.value = '';
       showToast('Import started — the text will appear below when ready.');
-      pollLibraryForImports(Number(before?.total || 0));
+      pollLibraryForImports(sourceType, Number(before?.total || 0));
     } catch (error) {
       showToast(error?.message || 'Could not reach the API. Check your connection.', 'error');
     }
   }, { pendingLabel: 'Adding…' }));
 
-  // Picker: choose WHAT to import. Kana groups switch the work index (so
-  // repeated imports surface different works), the search box filters titles
-  // locally, and selection posts exact card URLs; the server intersects them
-  // with the live listing, imports in the background, and the library poll
-  // picks up rows as they land.
-  const KANA_GROUPS = [
-    { value: 'a', label: 'あ' }, { value: 'ka', label: 'か' }, { value: 'sa', label: 'さ' },
-    { value: 'ta', label: 'た' }, { value: 'na', label: 'な' }, { value: 'ha', label: 'は' },
-    { value: 'ma', label: 'ま' }, { value: 'ya', label: 'や' }, { value: 'ra', label: 'ら' },
-    { value: 'wa', label: 'わ' }
+  // Picker: choose WHAT to import, from either source. Group selects switch
+  // the work index (kana groups for Aozora, months for Hukumusume) so
+  // repeated imports surface different works; the search box filters titles
+  // locally. Selection posts exact page URLs plus the shown index, and the
+  // server imports in the background while the library poll picks up rows.
+  const IMPORT_SOURCES = [
+    {
+      value: 'aozora', label: 'Aozora Bunko', groupLabel: 'Works starting with',
+      groups: [
+        { value: 'a', label: 'あ' }, { value: 'ka', label: 'か' }, { value: 'sa', label: 'さ' },
+        { value: 'ta', label: 'た' }, { value: 'na', label: 'な' }, { value: 'ha', label: 'は' },
+        { value: 'ma', label: 'ま' }, { value: 'ya', label: 'や' }, { value: 'ra', label: 'ら' },
+        { value: 'wa', label: 'わ' }
+      ]
+    },
+    {
+      value: 'hukumusume', label: 'Hukumusume fairy tales', groupLabel: 'Tales of',
+      groups: [
+        { value: '01', label: 'January' }, { value: '02', label: 'February' }, { value: '03', label: 'March' },
+        { value: '04', label: 'April' }, { value: '05', label: 'May' }, { value: '06', label: 'June' },
+        { value: '07', label: 'July' }, { value: '08', label: 'August' }, { value: '09', label: 'September' },
+        { value: '10', label: 'October' }, { value: '11', label: 'November' }, { value: '12', label: 'December' }
+      ]
+    }
   ];
-  function openImportPickerDialog(initialWorks, initialIndex = 'a') {
+  function openImportPickerDialog(initialSource, initialIndex, initialWorks) {
+    let currentSource = initialSource;
+    let currentIndex = initialIndex;
     let boxes = [];
+    const sourceSelect = element('select', {
+      className: 'field-control sm:col-span-2',
+      attrs: { 'aria-label': 'Story source' }
+    }, IMPORT_SOURCES.map((source) => element('option', {
+      text: source.label,
+      attrs: { value: source.value, ...(source.value === currentSource ? { selected: '' } : {}) }
+    })));
+    const groupSelect = element('select', {
+      className: 'field-control sm:col-span-2',
+      attrs: { 'aria-label': 'Work group' }
+    });
     const listWrap = element('div', { className: 'grid gap-2 sm:col-span-2' });
     const countNote = element('p', { className: 'text-xs text-muted sm:col-span-2', attrs: { 'aria-live': 'polite' } });
     const searchInput = element('input', {
       className: 'field-control sm:col-span-2',
       attrs: { type: 'search', placeholder: 'Search by title…', 'aria-label': 'Search works by title' }
     });
+    function sourceConfig() {
+      return IMPORT_SOURCES.find((source) => source.value === currentSource) || IMPORT_SOURCES[0];
+    }
     function applySearch() {
       const query = String(searchInput.value || '').trim().toLowerCase();
       boxes.forEach(({ row, title }) => { row.hidden = Boolean(query) && !title.includes(query); });
     }
     searchInput.addEventListener('input', applySearch);
-    const kanaSelect = element('select', {
-      className: 'field-control sm:col-span-2',
-      attrs: { 'aria-label': 'Works starting with' }
-    }, KANA_GROUPS.map((group) => element('option', {
-      text: `Works starting with ${group.label}`,
-      attrs: { value: group.value, ...(group.value === initialIndex ? { selected: '' } : {}) }
-    })));
-    kanaSelect.addEventListener('change', async () => {
-      kanaSelect.disabled = true;
+    function renderGroupOptions() {
+      const config = sourceConfig();
+      groupSelect.replaceChildren(...config.groups.map((group) => element('option', {
+        text: `${config.groupLabel} ${group.label}`,
+        attrs: { value: group.value, ...(group.value === currentIndex ? { selected: '' } : {}) }
+      })));
+      groupSelect.setAttribute('aria-label', config.groupLabel);
+    }
+    async function reloadPreview() {
+      groupSelect.disabled = true;
+      sourceSelect.disabled = true;
       try {
-        const preview = await previewReadingImport('aozora', kanaSelect.value);
+        const preview = await previewReadingImport(currentSource, currentIndex);
         const works = Array.isArray(preview?.items) ? preview.items : [];
         if (preview?.status !== 'ok' || !works.length) {
           showToast('Could not load those works. Try another group.', 'warning');
@@ -272,8 +309,19 @@ async function renderLibraryView(container) {
       } catch (error) {
         showToast(error?.message || 'Could not load those works.', 'error');
       } finally {
-        kanaSelect.disabled = false;
+        groupSelect.disabled = false;
+        sourceSelect.disabled = false;
       }
+    }
+    sourceSelect.addEventListener('change', () => {
+      currentSource = sourceSelect.value;
+      currentIndex = sourceConfig().groups[0].value;
+      renderGroupOptions();
+      reloadPreview();
+    });
+    groupSelect.addEventListener('change', () => {
+      currentIndex = groupSelect.value;
+      reloadPreview();
     });
     function renderWorks(works) {
       boxes = works.map((work) => {
@@ -299,10 +347,11 @@ async function renderLibraryView(container) {
     selectAll.addEventListener('click', () => { boxes.forEach(({ checkbox, row }) => { if (!row.hidden) checkbox.checked = true; }); });
     clear.addEventListener('click', () => { boxes.forEach(({ checkbox }) => { checkbox.checked = false; }); });
     openDialog({
-      title: 'Import from Aozora',
-      description: 'Choose the works to import. Each one is classified and added to your library in the background.',
+      title: 'Import texts',
+      description: 'Pick a source and group, then choose the works to import. Each one is classified and added to your library in the background.',
       content: [
-        kanaSelect,
+        sourceSelect,
+        groupSelect,
         searchInput,
         element('div', { className: 'flex flex-wrap gap-2 sm:col-span-2' }, [selectAll, clear]),
         listWrap,
@@ -316,17 +365,18 @@ async function renderLibraryView(container) {
           showToast('Select at least one work.', 'error');
           return;
         }
-        const before = await listReadingLibrary({ source: 'aozora', page: 1, limit: 1 }).catch(() => null);
-        const result = await importReadingSources('aozora', { urls: selected });
+        const before = await listReadingLibrary({ source: currentSource, page: 1, limit: 1 }).catch(() => null);
+        const result = await importReadingSources(currentSource, { urls: selected, index: currentIndex });
         if (result?.status !== 'accepted') {
           showToast('Import did not start. Please try again.', 'error');
           return;
         }
         close();
         showToast('Import started — new texts will appear below as they arrive.');
-        pollLibraryForImports(Number(before?.total || 0));
+        pollLibraryForImports(currentSource, Number(before?.total || 0));
       }
     });
+    renderGroupOptions();
     renderWorks(initialWorks);
   }
 
@@ -406,7 +456,7 @@ async function renderLibraryView(container) {
       applyButton,
       element('div', { className: 'grid gap-2 border-t border-stone pt-3' }, [
         element('p', { className: 'text-xs font-medium text-muted', text: 'More texts' }),
-        element('div', { className: 'grid grid-cols-1 gap-2 sm:grid-cols-2' }, [importAozora, progressLink]),
+        element('div', { className: 'grid grid-cols-1 gap-2 sm:grid-cols-2' }, [importTexts, progressLink]),
         element('div', { className: 'grid gap-2' }, [
           element('p', { className: 'text-xs font-medium text-muted', text: 'Or paste a work link' }),
           element('div', { className: 'flex flex-col gap-2 sm:flex-row' }, [
