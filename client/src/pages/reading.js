@@ -107,7 +107,7 @@ async function renderLibraryView(container) {
     }
     gridWrap.replaceChildren(element('div', { className: 'grid gap-3 sm:grid-cols-2 xl:grid-cols-3' }, items.map((item) => {
       const known = Number(item.knownKanjiPct || 0);
-      return element('button', {
+      const openButton = element('button', {
         className: 'surface flex h-full flex-col gap-2 p-4 text-left transition-colors hover:border-ink/40',
         attrs: { type: 'button', 'aria-label': `Open ${item.title}` }
       }, [
@@ -118,6 +118,11 @@ async function renderLibraryView(container) {
         element('p', { className: 'font-semibold text-ink', text: item.title }),
         element('p', { className: 'text-xs leading-5 text-muted', text: `${Number(item.characterCount || 0).toLocaleString()} characters · you know ${known}% of its kanji` })
       ]);
+      openButton.addEventListener('click', () => {
+        if (item?.id === undefined || item?.id === null) return;
+        window.location.hash = `#reading?id=${encodeURIComponent(item.id)}`;
+      });
+      return openButton;
     })));
     const pagination = paginationControls({ page: currentPage, totalPages: Number(data?.totalPages || 0) }, (nextPage) => refresh(nextPage));
     if (pagination) pageWrap.replaceChildren(pagination);
@@ -126,12 +131,21 @@ async function renderLibraryView(container) {
   const applyButton = element('button', { className: 'button-secondary self-end', text: 'Apply filters', attrs: { type: 'button' } });
   applyButton.addEventListener('click', () => refresh(1));
 
+  function importUnavailableMessage(reason, sourceName) {
+    // The API reports fetch-level failures as "Source request failed." — tell
+    // the user what that actually means instead of echoing the raw reason.
+    if (!reason || /request failed/i.test(reason)) {
+      return `${sourceName} could not be reached from this network. Check your connection and try again.`;
+    }
+    return reason;
+  }
+
   const importNhk = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Import NHK Easy', attrs: { type: 'button' } });
   importNhk.addEventListener('click', () => withPendingAction(importNhk, async () => {
     try {
       const result = await importReadingSources('nhk');
       if (result?.status === 'unavailable') {
-        showToast(result?.reason || 'NHK Easy is unavailable right now.', 'warning');
+        showToast(importUnavailableMessage(result?.reason, 'NHK Easy'), 'warning');
         return;
       }
       showToast(`Imported ${Number(result?.textsImported ?? result?.imported ?? 0)} item(s) from NHK Easy.`);
@@ -146,7 +160,7 @@ async function renderLibraryView(container) {
     try {
       const result = await importReadingSources('aozora');
       if (result?.status === 'unavailable') {
-        showToast(result?.reason || 'Aozora is unavailable right now.', 'warning');
+        showToast(importUnavailableMessage(result?.reason, 'Aozora'), 'warning');
         return;
       }
       showToast(`Imported ${Number(result?.textsImported ?? result?.imported ?? 0)} item(s) from Aozora.`);
@@ -171,42 +185,48 @@ async function renderLibraryView(container) {
       showToast('Paste some text first.', 'error');
       return;
     }
-    // Show loading bar that grows fast, stops ~78% (variable), then 100% on analysis.
+    if (ownSave.disabled) return;
+    // Artificial progress: jumps fast at first, eases toward a variable cap
+    // (~72–80%, never the same twice), then snaps to 100% when analysis
+    // actually finishes. The API call starts immediately in parallel.
     ownSave.disabled = true;
     ownSave.textContent = 'Analyzing…';
-    const progressContainer = element('div', { className: 'mt-2 text-right' }, [
-      element('span', { className: 'text-xs text-muted', id: 'ownProgressLabel', text: '0%' }),
-      element('div', { className: 'w-48 h-1.5 rounded-full bg-ink/10 mt-1' }, [
-        element('div', { className: 'h-full rounded-full bg-ink transition-all duration-300 ease-out', attrs: { 'data-progress-fill': '0', style: 'width:0%' } })
-      ])
+    const progressLabel = element('span', { className: 'text-xs text-muted', text: '0%' });
+    const progressFill = element('div', {
+      className: 'h-full rounded-full bg-ink transition-all duration-300 ease-out',
+      attrs: { style: 'width:0%' }
+    });
+    const progressContainer = element('div', { className: 'mt-2' }, [
+      progressLabel,
+      element('div', { className: 'h-1.5 w-48 overflow-hidden rounded-full bg-ink/10' }, [progressFill])
     ]);
     ownSave.parentNode.insertBefore(progressContainer, ownSave.nextSibling);
-    let animated = false;
-    async function finish() {
-      if (!animated) return;
-      try {
-        const created = await createUserReadingText({ text, title: String(ownTitle.value || '').trim() });
-        // Jump to 100% and navigate.
-        const fill = progressContainer.querySelector('[data-progress-fill]');
-        if (fill) { fill.style.width = '100%'; ownProgressLabel.textContent = '100%'; }
-        window.location.hash = `#reading?id=${Number(created?.id)}`;
-      } catch (error) {
-        showToast(error?.message || 'Unable to save the text.', 'error');
-      } finally {
-        ownSave.disabled = false;
-        ownSave.textContent = 'Save and read';
-        try { progressContainer.remove(); } catch {}
-      }
-    }
-    // Animate progress bar: fast start, then to 78% (variable).
-    animated = true;
-    const vary = 70 + Math.random() * 10; // 70–80% variable
-    ownProgressLabel.textContent = `${Math.round(vary)}%`;
-    setTimeout(() => {
-      const fill = progressContainer.querySelector('[data-progress-fill]');
-      if (fill) { fill.style.width = `${vary}%`; }
-    }, 350);
-    finish();
+    const cap = 72 + Math.random() * 8;
+    let shown = 0;
+    const tick = () => {
+      // Fast start, then ease toward the cap: big steps early, tiny near cap.
+      const remaining = cap - shown;
+      if (remaining <= 0.5) return;
+      shown += Math.max(0.6, remaining * 0.22);
+      const value = Math.min(cap, shown);
+      progressFill.style.width = `${value}%`;
+      progressLabel.textContent = `${Math.round(value)}%`;
+      progressTimer = window.setTimeout(tick, 120);
+    };
+    let progressTimer = window.setTimeout(tick, 60);
+    createUserReadingText({ text, title: String(ownTitle.value || '').trim() }).then((created) => {
+      window.clearTimeout(progressTimer);
+      progressFill.style.width = '100%';
+      progressLabel.textContent = '100%';
+      showToast('Text saved. Opening the reader.');
+      window.location.hash = `#reading?id=${Number(created?.id)}`;
+    }).catch((error) => {
+      window.clearTimeout(progressTimer);
+      showToast(error?.message || 'Unable to save the text.', 'error');
+      ownSave.disabled = false;
+      ownSave.textContent = 'Save and read';
+      try { progressContainer.remove(); } catch { /* container is best-effort */ }
+    });
   });
 
   const progressLink = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Reading progress', attrs: { type: 'button' } });

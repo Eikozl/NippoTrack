@@ -1,5 +1,6 @@
 import { apiRequest, queryString } from '../api';
-import { element, emptyState, errorState, loadingState, openDialog, pageHeader, showToast, withPendingAction } from '../ui';
+import { kanjiReferenceRoute } from '../kanjiReference';
+import { element, emptyState, errorState, loadingState, openDetailModal, openDialog, pageHeader, showToast, withPendingAction } from '../ui';
 
 const TYPE_ORDER = ['kanji', 'vocabulary', 'grammar'];
 const TYPE_LABEL = { kanji: 'Kanji', vocabulary: 'Vocabulary', grammar: 'Grammar' };
@@ -298,43 +299,11 @@ export async function renderReview(container) {
     return 'Mixed';
   }
 
-  function renderSessionSummary(session) {
-    const date = String(session.startedAt || '').slice(0, 10);
-    const results = session.byResult || {};
-    const types = session.byType || {};
-    const summary = `${Number(session.total || 0)} items · ${Number(results.Good || 0)} comfortable · ${Number(results.Hard || 0)} difficult · ${Number(results.Again || 0)} revisit`;
-    const scope = `Kanji ${Number(types.kanji || 0)} · Vocabulary ${Number(types.vocabulary || 0)} · Grammar ${Number(types.grammar || 0)}`;
-    return element('div', { className: 'session-summary collapsed' }, [
-      element('div', { className: 'session-header cursor-pointer' }, [
-        element('p', { className: 'font-semibold text-ink', text: `${date || 'Session'}${session.completedAt ? ' · completed' : ' · in progress'}` }),
-        element('p', { className: 'mt-0.5 text-xs text-muted', text: summary }),
-        element('p', { className: 'mt-0.5 text-xs text-muted', text: scope })
-      ])
-    ]);
-  }
-
-  function renderSessionItemsDetail(items) {
-    const resultLabel = RESULT_LABEL;
-    return element('ul', { className: 'mt-3 grid gap-1.5 text-xs leading-relaxed' }, items.map((it) => {
-      const kanjiClick = it.entityType === 'kanji'
-        ? element('a', { className: 'underline text-stone hover:text-ink', href: `https://kanjialive.com/${it.display}/stroke`, target: '_blank', rel: 'noopener', text: it.display })
-        : element('span', { className: 'text-stone', text: it.display });
-      return element('li', {}, [
-        kanjiClick,
-        ...(it.reading ? [element('span', { className: 'mx-2 text-muted', text: '· ' + it.reading })] : []),
-        ...(it.meaning ? [element('span', { className: 'text-muted', text: ' — ' + it.meaning })] : [])
-      ]);
-    }));
-  }
-
-  async function openSessionModal(sessionId) {
-    // Return early if already open.
-    if (document.body.classList.contains('session-modal-open')) return;
-    const cached = sessionModalCache.get(sessionId);
-    let items;
-    if (cached) {
-      items = cached;
-    } else {
+  async function openSessionModal(session) {
+    const sessionId = session?.id;
+    if (sessionId === undefined || sessionId === null) return;
+    let items = sessionModalCache.get(sessionId);
+    if (!items) {
       try {
         const data = await apiRequest(`/api/review/sessions/${sessionId}`);
         items = Array.isArray(data?.items) ? data.items : [];
@@ -349,33 +318,41 @@ export async function renderReview(container) {
       return;
     }
 
-    // Determine type and date for title.
+    // Title: "<Type> Review Session • <Month D, YYYY>" from the session row,
+    // falling back to the first graded item when the row lacks a date.
     const type = sessionTypeLabel(items);
-    const date = items[0]?.reviewedAt ? new Date(items[0].reviewedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : formattedDate(items[0]?.session?.startedAt);
+    const rawDate = session.startedAt || items[0]?.reviewedAt || null;
+    const date = formattedDate(rawDate);
 
-    // Build modal HTML.
-    const modal = element('div', { className: 'session-modal opaque-overlay' }, [
-      element('div', { className: 'session-modal-content surface p-6 sm:p-8' }, [
-        element('button', {
-          className: 'session-modal-close absolute top-3 right-3 text-muted hover:text-ink',
-          'aria-label': 'Close session modal',
-          innerHTML: '×'
-        }),
-        element('h2', { className: 'text-2xl font-semibold tracking-tight text-ink sm:text-3xl', text: `${type} Review Session • ${date}` }),
-        renderSessionItemsDetail(items)
-      ])
-    ]);
-
-    document.body.appendChild(modal);
-    document.body.classList.add('session-modal-open');
-
-    // Close on esc or click outside.
-    function closeModal() {
-      try { document.body.removeChild(modal); } catch {}
-      document.body.classList.remove('session-modal-open');
-    }
-    window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
-    modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+    const list = element('ul', { className: 'grid gap-2' }, items.map((item) => {
+      // Kanji entries link straight to their reference page (stroke order
+      // animation + readings). Multi-character displays stay plain text.
+      const referenceHash = item.entityType === 'kanji' && typeof item.display === 'string'
+        ? kanjiReferenceRoute(item.display)
+        : null;
+      const display = referenceHash
+        ? element('a', {
+          className: 'font-jp text-lg font-semibold text-ink underline decoration-stone underline-offset-4 hover:text-vermilion',
+          text: item.display,
+          attrs: { href: `#${referenceHash}`, 'aria-label': `Open kanji reference for ${item.display} (stroke order)` }
+        })
+        : element('p', { className: 'break-words font-jp font-medium text-ink', text: item.display });
+      const reviewedAt = String(item.reviewedAt || '');
+      const time = reviewedAt.slice(11, 16);
+      const resultLabel = RESULT_LABEL[item.result] || item.result || '';
+      const status = [resultLabel, time].filter(Boolean).join(' · ');
+      return element('li', { className: 'rounded-xl border border-stone bg-paper px-3 py-2.5 text-sm' }, [
+        display,
+        ...(item.reading ? [element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: item.reading })] : []),
+        ...(item.meaning ? [element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: item.meaning })] : []),
+        ...(status ? [element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: status })] : [])
+      ]);
+    }));
+    openDetailModal({
+      title: `${type} Review Session • ${date}`,
+      subtitle: `${items.length} item${items.length === 1 ? '' : 's'} reviewed`,
+      content: [list]
+    });
   }
 
   async function loadHistory() {
@@ -394,11 +371,16 @@ export async function renderReview(container) {
           const date = String(session.startedAt || '').slice(0, 10);
           const summary = `${Number(session.total || 0)} items · ${Number(session.byResult?.Good || 0)} comfortable · ${Number(session.byResult?.Hard || 0)} difficult · ${Number(session.byResult?.Again || 0)} revisit`;
           const scope = `Kanji ${Number(session.byType?.kanji || 0)} · Vocabulary ${Number(session.byType?.vocabulary || 0)} · Grammar ${Number(session.byType?.grammar || 0)}`;
-          return element('li', { className: 'rounded-xl border border-stone bg-paper px-3 py-2.5 text-sm cursor-pointer', onClick: () => openSessionModal(session.id) }, [
+          const row = element('li', { className: 'cursor-pointer rounded-xl border border-stone bg-paper px-3 py-2.5 text-sm transition hover:border-vermilion', attrs: { role: 'button', tabindex: '0', 'aria-label': `Open details for session ${date || session.id}` } }, [
             element('p', { className: 'font-semibold text-ink', text: `${date || 'Session'}${session.completedAt ? ' · completed' : ' · in progress'}` }),
             element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: summary }),
             element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: scope })
           ]);
+          row.addEventListener('click', () => { openSessionModal(session); });
+          row.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openSessionModal(session); }
+          });
+          return row;
         }))
       );
       historyBlock.hidden = false;
@@ -427,50 +409,6 @@ export async function renderReview(container) {
     difficultBlock,
     patternsBlock
   ]));
-
-  async function loadHistory() {
-    try {
-      sessionDetailCache.clear();
-      const data = await apiRequest('/api/review/sessions?limit=10');
-      const items = Array.isArray(data?.items) ? data.items : [];
-      if (!items.length) {
-        historyBlock.hidden = true;
-        historyBlock.replaceChildren();
-        return;
-      }
-      historyBlock.replaceChildren(
-        element('h2', { className: 'font-semibold text-ink', text: 'Recent review sessions' }),
-        element('p', { className: 'mt-1 text-sm text-muted', text: 'When you studied, how much you reviewed, and how it felt.' }),
-        element('ul', { className: 'mt-4 grid gap-2' }, items.map((session) => {
-          const date = String(session.startedAt || '').slice(0, 10);
-          const results = session.byResult || {};
-          const types = session.byType || {};
-          const summary = `${Number(session.total || 0)} items · ${Number(results.Good || 0)} comfortable · ${Number(results.Hard || 0)} difficult · ${Number(results.Again || 0)} revisit`;
-          const scope = `Kanji ${Number(types.kanji || 0)} · Vocabulary ${Number(types.vocabulary || 0)} · Grammar ${Number(types.grammar || 0)}`;
-          const detailId = `session-items-${session.id}`;
-          const detail = element('ul', { className: 'mt-2 grid gap-1.5 border-t border-stone pt-2', attrs: { id: detailId } });
-          detail.hidden = true;
-          const toggle = element('button', {
-            className: 'button-secondary min-h-8 px-2.5 py-1 text-xs',
-            text: 'View items',
-            attrs: { type: 'button', 'aria-expanded': 'false', 'aria-controls': detailId, 'aria-label': `View items for session ${date || session.id}` }
-          });
-          toggle.addEventListener('click', () => { toggleSessionItems(session, toggle, detail); });
-          return element('li', { className: 'rounded-xl border border-stone bg-paper px-3 py-2.5 text-sm' }, [
-            element('p', { className: 'font-semibold text-ink', text: `${date || 'Session'}${session.completedAt ? '' : ' · in progress'}` }),
-            element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: summary }),
-            element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: scope }),
-            Number(session.total || 0) > 0
-              ? element('div', { className: 'mt-2' }, [toggle, detail])
-              : element('div', { className: 'mt-2' }, [element('p', { className: 'text-xs leading-5 text-muted', text: 'No items recorded in this session.' })])
-          ]);
-        }))
-      );
-      historyBlock.hidden = false;
-    } catch {
-      historyBlock.hidden = true;
-    }
-  }
 
   async function loadDifficult() {
     try {
@@ -826,12 +764,13 @@ export async function renderReview(container) {
     const startReviewBtn = element('button', { className: 'button-primary', text: 'Start review', attrs: { type: 'button', disabled: '' } });
     // Start immersed review button: opens the immersion page to create a review from user text.
     const startImmersedReviewBtn = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-sm', text: 'Start immersed review', attrs: { type: 'button', 'aria-label': 'Start a review from user text' } });
-    footer.append(countNote, startReviewBtn, startImmersedReviewBtn);
+    const startActions = element('div', { className: 'flex flex-col gap-2 sm:flex-row sm:items-center' }, [startReviewBtn, startImmersedReviewBtn]);
+    footer.append(countNote, startActions);
 
     function refreshFooter() {
       countNote.textContent = `${selectedKeys.size} selected`;
-      if (selectedKeys.size > 0) beginButton.removeAttribute('disabled');
-      else beginButton.setAttribute('disabled', '');
+      if (selectedKeys.size > 0) startReviewBtn.removeAttribute('disabled');
+      else startReviewBtn.setAttribute('disabled', '');
     }
 
     function registerCheckbox(checkbox, item) {
@@ -950,7 +889,7 @@ export async function renderReview(container) {
     candidatesBlock.appendChild(footer);
     refreshFooter();
 
-    beginButton.addEventListener('click', () => {
+    startReviewBtn.addEventListener('click', () => {
       if (!selectedKeys.size) return;
       const picked = [];
       TYPE_ORDER.forEach((type) => {
@@ -968,7 +907,7 @@ export async function renderReview(container) {
         });
       });
       if (!picked.length) return;
-      withPendingAction(beginButton, async () => {
+      withPendingAction(startReviewBtn, async () => {
         const session = await apiRequest('/api/review/sessions', {
           method: 'POST',
           body: { sourceFrom: lastSearch.from, sourceTo: lastSearch.to }

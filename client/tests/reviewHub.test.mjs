@@ -301,6 +301,7 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
   const doc = new FakeDocument();
   const toasts = [];
   const apiCalls = [];
+  const dialogs = [];
   const ui = makeUi(doc, toasts);
   const apiRequest = async (url, opts = {}) => {
     apiCalls.push({ url, options: opts });
@@ -337,11 +338,21 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
   };
   let code = reviewSource
     .replace(/import\s*\{[^}]+\}\s*from\s*['"]\.\.\/api['"];?/, '')
+    .replace(/import\s*\{[^}]+\}\s*from\s*['"]\.\.\/kanjiReference['"];?/, '')
     .replace(/import\s*\{[^}]+\}\s*from\s*['"]\.\.\/ui['"];?/, '')
     .replace(/export\s+async\s+function\s+renderReview/, 'async function renderReview');
   code += '\nreturn { renderReview };';
+  const openDetailModal = ({ title, subtitle, content } = {}) => {
+    dialogs.push({ title: title === undefined ? '' : String(title), subtitle, content });
+    return () => {};
+  };
+  const kanjiReferenceRoute = (character) => (
+    typeof character === 'string' && /^\p{Script=Han}$/u.test(character)
+      ? `kanji-reference/${encodeURIComponent(character)}`
+      : null
+  );
   const factory = new Function(
-    'apiRequest', 'queryString', 'element', 'emptyState', 'errorState', 'loadingState', 'pageHeader', 'showToast', 'withPendingAction', 'document', 'window',
+    'apiRequest', 'queryString', 'kanjiReferenceRoute', 'element', 'emptyState', 'errorState', 'loadingState', 'openDetailModal', 'pageHeader', 'showToast', 'withPendingAction', 'document', 'window',
     code
   );
   const fakeWindow = {
@@ -349,9 +360,9 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
     setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (id) => clearTimeout(id)
   };
   const { renderReview } = factory(
-    apiRequest, queryString, ui.element, ui.emptyState, ui.errorState, ui.loadingState, ui.pageHeader, ui.showToast, ui.withPendingAction, doc, fakeWindow
+    apiRequest, queryString, kanjiReferenceRoute, ui.element, ui.emptyState, ui.errorState, ui.loadingState, openDetailModal, ui.pageHeader, ui.showToast, ui.withPendingAction, doc, fakeWindow
   );
-  return { doc, toasts, apiCalls, renderReview, ui };
+  return { doc, toasts, apiCalls, dialogs, renderReview, ui };
 }
 
 // ---------------------------------------------------------------- fixtures
@@ -1112,73 +1123,77 @@ function findByAttr(root, name, value) {
   return null;
 }
 
-test('Review Hub HISTORY: View items expands detail lazily, labels results, collapses without refetch', async () => {
+function historyRows(root) {
+  const rows = [];
+  const queue = [root];
+  while (queue.length) {
+    const n = queue.shift();
+    if (n.tagName === 'LI' && n.getAttribute && n.getAttribute('role') === 'button') rows.push(n);
+    queue.push(...(n.children || []));
+  }
+  return rows;
+}
+
+test('Review Hub HISTORY: clicking a row opens the session modal with title, items and result labels, fetching detail once', async () => {
   const harness = loadReviewModule({
     candidatesPayload: { groups: {} },
     historyPayload: { items: [historySessionFixture()], total: 1, page: 1, limit: 10 },
     sessionDetailPayload: historyDetailFixture()
   });
-  const { doc, renderReview, apiCalls } = harness;
+  const { doc, renderReview, apiCalls, dialogs } = harness;
   const container = doc.createElement('div');
   doc.body.appendChild(container);
   await renderReview(container);
   await sleep(15);
 
-  const toggle = visibleButtonsByText(container, 'View items')[0];
-  assert.ok(toggle, 'history rows expose a View items toggle');
-  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
-  const detail = findByAttr(container, 'id', 'session-items-55');
-  assert.ok(detail, 'detail list exists with id matching aria-controls');
-  assert.ok(!isVisible(detail), 'detail hidden before expansion');
+  const rows = historyRows(container);
+  assert.equal(rows.length, 1, 'history renders one clickable row');
+  assert.match(textOf(rows[0]), /2026-09-01/, 'row shows the session date');
 
-  await clickAndSettle(toggle);
-  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
-  assert.equal(textOf(toggle), 'Hide items', 'toggle flips to Hide items');
-  assert.ok(isVisible(detail), 'detail visible after expansion');
-  const detailText = textOf(detail);
-  assert.match(detailText, /TEMO-GRAMMAR/, 'grammar display shown');
-  assert.match(detailText, /even if/, 'meaning shown');
-  assert.match(detailText, /comfortable/, 'Good renders as comfortable');
-  assert.match(detailText, /NICHI-KANJI/, 'kanji display shown');
-  assert.match(detailText, /nichi/, 'reading shown when present');
-  assert.match(detailText, /revisit/, 'Again renders as revisit');
+  await clickAndSettle(rows[0]);
+  assert.equal(dialogs.length, 1, 'click opens the session modal');
+  assert.match(dialogs[0].title, /^Mixed Review Session • /, 'mixed session gets the Mixed title');
+  assert.match(dialogs[0].title, /2026/, 'title carries the session year');
+  const modalText = dialogs[0].content.map(textOf).join(' ');
+  assert.match(modalText, /TEMO-GRAMMAR/, 'grammar display shown');
+  assert.match(modalText, /even if/, 'meaning shown');
+  assert.match(modalText, /comfortable/, 'Good renders as comfortable');
+  assert.match(modalText, /NICHI-KANJI/, 'kanji display shown');
+  assert.match(modalText, /nichi/, 'reading shown when present');
+  assert.match(modalText, /revisit/, 'Again renders as revisit');
   assert.equal(apiCalls.filter((c) => c.url === '/api/review/sessions/55').length, 1, 'detail fetched exactly once');
 
-  await clickAndSettle(toggle);
-  assert.equal(toggle.getAttribute('aria-expanded'), 'false', 'second click collapses');
-  assert.ok(!isVisible(detail), 'collapsed again');
-  await clickAndSettle(toggle);
-  assert.equal(apiCalls.filter((c) => c.url === '/api/review/sessions/55').length, 1, 're-expand reuses the cache');
+  await clickAndSettle(rows[0]);
+  assert.equal(dialogs.length, 2, 'second click re-opens the modal');
+  assert.equal(apiCalls.filter((c) => c.url === '/api/review/sessions/55').length, 1, 're-open reuses the cache');
 });
 
-test('Review Hub HISTORY: detail fetch failure keeps the toggle usable and toasts an error', async () => {
+test('Review Hub HISTORY: detail fetch failure toasts an error and opens no modal', async () => {
   const harness = loadReviewModule({
     candidatesPayload: { groups: {} },
     historyPayload: { items: [historySessionFixture()], total: 1, page: 1, limit: 10 },
     sessionDetailPayload: () => { throw new Error('offline'); }
   });
-  const { doc, renderReview, toasts } = harness;
+  const { doc, renderReview, toasts, dialogs } = harness;
   const container = doc.createElement('div');
   doc.body.appendChild(container);
   await renderReview(container);
   await sleep(15);
 
-  const toggle = visibleButtonsByText(container, 'View items')[0];
-  assert.ok(toggle);
-  await clickAndSettle(toggle);
-  assert.equal(toggle.getAttribute('aria-expanded'), 'false', 'stays collapsed on error');
-  assert.ok(!toggle.disabled, 'toggle re-enabled after failure');
-  const detail = findByAttr(container, 'id', 'session-items-55');
-  assert.ok(!isVisible(detail), 'detail never becomes visible');
+  const rows = historyRows(container);
+  assert.equal(rows.length, 1);
+  await clickAndSettle(rows[0]);
+  assert.equal(dialogs.length, 0, 'no modal on fetch failure');
   assert.ok(toasts.some((t) => /Could not load session items/.test(t.message)), 'error toast surfaced');
 
   // A later click retries (no poisoned cache).
   const callsBefore = harness.apiCalls.filter((c) => c.url === '/api/review/sessions/55').length;
-  await clickAndSettle(toggle);
+  await clickAndSettle(rows[0]);
   assert.ok(harness.apiCalls.filter((c) => c.url === '/api/review/sessions/55').length > callsBefore, 'error path retries instead of caching');
+  assert.equal(dialogs.length, 0, 'still no modal while the fetch keeps failing');
 });
 
-test('Review Hub HISTORY: session with zero items shows no toggle; empty detail informs politely', async () => {
+test('Review Hub HISTORY: session with zero items informs politely without a modal', async () => {
   const harness = loadReviewModule({
     candidatesPayload: { groups: {} },
     historyPayload: {
@@ -1189,18 +1204,18 @@ test('Review Hub HISTORY: session with zero items shows no toggle; empty detail 
     },
     sessionDetailPayload: { items: [] }
   });
-  const { doc, renderReview } = harness;
+  const { doc, renderReview, toasts, dialogs } = harness;
   const container = doc.createElement('div');
   doc.body.appendChild(container);
   await renderReview(container);
   await sleep(15);
 
-  assert.ok(!findByAttr(container, 'id', 'session-items-56'), 'zero-item session gets no toggle/detail');
-  assert.equal(visibleButtonsByText(container, 'View items').length, 1, 'only the non-empty session exposes the toggle');
+  const rows = historyRows(container);
+  assert.equal(rows.length, 2, 'both sessions render as rows');
+  const emptyRow = rows.find((row) => /0 items/.test(textOf(row)));
+  assert.ok(emptyRow, 'zero-item session row is identifiable');
 
-  const toggle = visibleButtonsByText(container, 'View items')[0];
-  await clickAndSettle(toggle);
-  const detail = findByAttr(container, 'id', 'session-items-57');
-  assert.ok(isVisible(detail), 'empty payload still expands');
-  assert.match(textOf(detail), /No items recorded in this session\./, 'empty state explains itself');
+  await clickAndSettle(emptyRow);
+  assert.equal(dialogs.length, 0, 'empty session opens no modal');
+  assert.ok(toasts.some((t) => /No items recorded in this session/.test(t.message)), 'empty state explains itself via toast');
 });
