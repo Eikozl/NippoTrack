@@ -216,6 +216,8 @@ async function listDueReviewCards(req, res) {
 }
 
 // V5.3a Review 2.0: available card types + the user's stored preferences.
+// Review 3.0: userPreferences also carries autoPick (default true for users
+// who never saved it; resolved in the engine's preferencesFromRow).
 async function getReviewTypes(req, res) {
   try {
     const userPreferences = await getUserReviewPreferences(pool, req.user.id);
@@ -224,17 +226,21 @@ async function getReviewTypes(req, res) {
 }
 
 // V5.3a Review 2.0: upsert the user's card-type preferences.
+// Review 3.0: accepts an OPTIONAL autoPick boolean (absent/null defaults to
+// true in the engine; any other non-boolean rejects with 400 via
+// normalizeAutoPick). engineMode behavior unchanged.
 async function putReviewPreferences(req, res) {
   try {
     const body = req.body || {};
-    const allowed = ['cardTypes', 'weights', 'engineMode'];
+    const allowed = ['cardTypes', 'weights', 'engineMode', 'autoPick'];
     const unknown = Object.keys(body).filter((key) => !allowed.includes(key));
     if (unknown.length) throw new ValidationError(`Unexpected field(s): ${unknown.join(', ')}.`);
     if (!Array.isArray(body.cardTypes)) throw new ValidationError('cardTypes is required and must be an array.');
     const saved = await upsertUserReviewPreferences(pool, req.user.id, {
       cardTypes: body.cardTypes,
       weights: body.weights,
-      engineMode: body.engineMode
+      engineMode: body.engineMode,
+      autoPick: body.autoPick
     });
     return res.json({ userPreferences: saved });
   } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to save review preferences.' }); }

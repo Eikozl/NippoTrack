@@ -297,14 +297,49 @@ function makeUi(doc, toasts) {
   return { element, pageHeader, loadingState, emptyState, errorState, showToast, withPendingAction };
 }
 
-function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, completePayload, gradeReject, historyPayload, sessionDetailPayload, sessionItemsPayload } = {}) {
+function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, completePayload, gradeReject, historyPayload, sessionDetailPayload, sessionItemsPayload, typesPayload, preferencesImpl, preferencesPayload, vocabDetail, grammarDetail, clozeSentence } = {}) {
   const doc = new FakeDocument();
   const toasts = [];
   const apiCalls = [];
   const dialogs = [];
+  const openDialogCalls = [];
+  const speechCalls = [];
   const ui = makeUi(doc, toasts);
   const apiRequest = async (url, opts = {}) => {
     apiCalls.push({ url, options: opts });
+    if (url === '/api/review/types' && (opts.method || 'GET') === 'GET') {
+      if (typesPayload !== undefined) {
+        return typeof typesPayload === 'function' ? typesPayload(url) : typesPayload;
+      }
+      throw new Error(`unexpected apiRequest ${url}`);
+    }
+    if (url === '/api/review/preferences' && (opts.method || 'GET') === 'PUT') {
+      if (typeof preferencesImpl === 'function') return preferencesImpl(url, opts);
+      if (preferencesPayload !== undefined) return preferencesPayload;
+      const body = opts.body || {};
+      return {
+        userPreferences: {
+          cardTypes: body.cardTypes || ['recognition'],
+          weights: body.weights || {},
+          engineMode: 'fixed',
+          autoPick: body.autoPick !== undefined ? Boolean(body.autoPick) : true
+        }
+      };
+    }
+    const vocabMatch = url.match(/^\/api\/vocabulary\/(\d+)$/);
+    if (vocabMatch && (opts.method || 'GET') === 'GET') {
+      if (typeof vocabDetail === 'function') return vocabDetail(vocabMatch[1], url);
+      if (vocabDetail !== undefined) return vocabDetail;
+      if (clozeSentence !== undefined) return { examples: [{ sentence: clozeSentence }] };
+      throw new Error(`unexpected apiRequest ${url}`);
+    }
+    const grammarMatch = url.match(/^\/api\/grammar\/(\d+)$/);
+    if (grammarMatch && (opts.method || 'GET') === 'GET') {
+      if (typeof grammarDetail === 'function') return grammarDetail(grammarMatch[1], url);
+      if (grammarDetail !== undefined) return grammarDetail;
+      if (clozeSentence !== undefined) return { examples: [{ sentence: clozeSentence }] };
+      throw new Error(`unexpected apiRequest ${url}`);
+    }
     if (url.startsWith('/api/review/candidates')) {
       if (typeof candidatesPayload === 'function') return candidatesPayload(url);
       return candidatesPayload ?? { groups: {} };
@@ -344,6 +379,7 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
   let code = reviewSource
     .replace(/import\s*\{[^}]+\}\s*from\s*['"]\.\.\/api['"];?/, '')
     .replace(/import\s*\{[^}]+\}\s*from\s*['"]\.\.\/kanjiReference['"];?/, '')
+    .replace(/import\s*\{[^}]+\}\s*from\s*['"]\.\.\/icons['"];?/, '')
     .replace(/import\s*\{[^}]+\}\s*from\s*['"]\.\.\/ui['"];?/, '')
     .replace(/export\s+async\s+function\s+renderReview/, 'async function renderReview');
   code += '\nreturn { renderReview };';
@@ -355,28 +391,62 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
     doc.body.appendChild(hook);
     return () => { try { hook.remove(); } catch { /* already gone */ } };
   };
+  const openDialog = ({ title, description, content, submitLabel, onSubmit } = {}) => {
+    dialogs.push({ title: title === undefined ? '' : String(title), description, content, submitLabel, onSubmit });
+    const form = doc.createElement('form');
+    for (const c of content || []) if (c) form.appendChild(c);
+    const submitBtn = doc.createElement('button');
+    submitBtn.setAttribute('type', 'submit');
+    submitBtn.textContent = submitLabel || 'Save';
+    form.appendChild(submitBtn);
+    const hook = doc.createElement('div');
+    hook.setAttribute('data-test-dialog', '');
+    hook.appendChild(form);
+    doc.body.appendChild(hook);
+    openDialogCalls.push({ title, description, content, submitLabel, onSubmit, form, hook });
+    return () => { try { hook.remove(); } catch { /* already gone */ } };
+  };
+  const setActionPending = (button, pending) => {
+    if (button) button.disabled = Boolean(pending);
+    return true;
+  };
+  const icon = (name, { size = 20 } = {}) => {
+    const n = doc.createElement('span');
+    n.setAttribute('data-icon', String(name));
+    n.setAttribute('aria-hidden', 'true');
+    n.textContent = String(name);
+    return n;
+  };
   const kanjiReferenceRoute = (character) => (
     typeof character === 'string' && /^\p{Script=Han}$/u.test(character)
       ? `kanji-reference/${encodeURIComponent(character)}`
       : null
   );
   const factory = new Function(
-    'apiRequest', 'queryString', 'kanjiReferenceRoute', 'element', 'emptyState', 'errorState', 'loadingState', 'openDetailModal', 'pageHeader', 'showToast', 'withPendingAction', 'document', 'window',
+    'apiRequest', 'queryString', 'kanjiReferenceRoute', 'icon', 'element', 'emptyState', 'errorState', 'loadingState', 'openDetailModal', 'openDialog', 'pageHeader', 'setActionPending', 'showToast', 'withPendingAction', 'document', 'window',
     code
   );
   const fakeWindow = {
     dispatchEvent() {}, addEventListener() {}, removeEventListener() {},
-    setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (id) => clearTimeout(id)
+    setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (id) => clearTimeout(id),
+    SpeechSynthesisUtterance: function (text) { this.text = text; this.lang = ''; this.rate = 1; },
+    speechSynthesis: {
+      cancel() {},
+      getVoices() { return [{ lang: 'ja-JP' }]; },
+      speak(utter) { speechCalls.push(utter); }
+    }
   };
   const { renderReview } = factory(
-    apiRequest, queryString, kanjiReferenceRoute, ui.element, ui.emptyState, ui.errorState, ui.loadingState, openDetailModal, ui.pageHeader, ui.showToast, ui.withPendingAction, doc, fakeWindow
+    apiRequest, queryString, kanjiReferenceRoute, icon, ui.element, ui.emptyState, ui.errorState, ui.loadingState, openDetailModal, openDialog, ui.pageHeader, setActionPending, ui.showToast, ui.withPendingAction, doc, fakeWindow
   );
-  return { doc, toasts, apiCalls, dialogs, renderReview, ui };
+  return { doc, toasts, apiCalls, dialogs, renderReview, ui, openDialogCalls, speechCalls, fakeWindow };
 }
 
 // ---------------------------------------------------------------- fixtures
-function candidateItem({ entityType, entityId, display, reading = null, meaning = 'meaning', jlpt = 'N5', strength = 'strong' }) {
-  return { entityType, entityId, display, reading, meaning, jlpt, evidenceStrength: strength, sources: [{ label: 'Study session', context: 'Reading' }] };
+function candidateItem({ entityType, entityId, display, reading = null, meaning = 'meaning', jlpt = 'N5', strength = 'strong', lastResult } = {}) {
+  const item = { entityType, entityId, display, reading, meaning, jlpt, evidenceStrength: strength, sources: [{ label: 'Study session', context: 'Reading' }] };
+  if (lastResult !== undefined) item.lastResult = lastResult;
+  return item;
 }
 
 function defaultCandidates() {
@@ -1299,4 +1369,270 @@ test('Review Hub HISTORY: Retake resumes the same session with only ungraded ite
   const visible = textOf(container);
   assert.match(visible, /TODO-VOCAB/, 'reviewing resumes with the ungraded item');
   assert.ok(toasts.some((t) => /Resumed with 1 remaining item/.test(t.message)), 'resume toasted');
+});
+
+// ---------------------------------------------------------------- Review 3.0 client
+function allTypesPreferences(autoPick = true) {
+  return {
+    availableTypes: ['recognition', 'recall', 'cloze', 'audio'],
+    userPreferences: { cardTypes: ['recognition', 'recall', 'cloze', 'audio'], weights: {}, engineMode: 'fixed', autoPick }
+  };
+}
+function pillText(container) {
+  const queue = [container];
+  while (queue.length) {
+    const n = queue.shift();
+    if (n.getAttribute && typeof n.getAttribute('aria-label') === 'string' && n.getAttribute('aria-label').startsWith('Card type')) {
+      return textOf(n);
+    }
+    queue.push(...(n.children || []));
+  }
+  return '';
+}
+function speakerButtons(container) {
+  const found = [];
+  const queue = [container];
+  while (queue.length) {
+    const n = queue.shift();
+    if (n.tagName === 'BUTTON') {
+      const label = n.getAttribute ? n.getAttribute('aria-label') : null;
+      if (label && /Play/.test(label)) found.push(n);
+    }
+    queue.push(...(n.children || []));
+  }
+  return found;
+}
+function answerInputOf(container) {
+  const all = findInputs(container, (n) => n.getAttribute('aria-label') === 'Type the answer');
+  return all[0] || null;
+}
+async function startWithSingleItem({ item, typesPayload, clozeSentence, sessionId = 101 }) {
+  const groups = {
+    kanji: { items: [], total: 0, truncated: false },
+    vocabulary: { items: [], total: 0, truncated: false },
+    grammar: { items: [], total: 0, truncated: false }
+  };
+  if (item.entityType === 'kanji') { groups.kanji = { items: [item], total: 1, truncated: false }; }
+  else if (item.entityType === 'vocabulary') { groups.vocabulary = { items: [item], total: 1, truncated: false }; }
+  else { groups.grammar = { items: [item], total: 1, truncated: false }; }
+  const harness = loadReviewModule({
+    candidatesPayload: { groups },
+    typesPayload,
+    clozeSentence,
+    sessionId,
+    completePayload: { total: 1, byType: { kanji: 0, vocabulary: 0, grammar: 0 }, byResult: { Good: 0, Hard: 0, Again: 0 } }
+  });
+  const container = await gotoSetup(harness);
+  await gotoCandidates(harness, container);
+  const boxes = findInputs(container, (n) => n.getAttribute('type') === 'checkbox');
+  assert.ok(boxes.length >= 1, 'candidate checkbox present');
+  for (const b of boxes) { b.checked = true; b.dispatchEvent({ type: 'change', target: b }); }
+  await sleep(5);
+  const starts = visibleButtonsByText(container, 'Start review');
+  await clickAndSettle(starts[starts.length - 1]);
+  await sleep(15);
+  await sleep(15);
+  return { harness, container };
+}
+
+test('Review 3.0 auto-pick: needing-work item picks recall', async () => {
+  const item = candidateItem({ entityType: 'vocabulary', entityId: 21, display: '学校', reading: 'がっこう', meaning: 'school', strength: 'strong', lastResult: 'Again' });
+  const { container } = await startWithSingleItem({ item, typesPayload: allTypesPreferences(true) });
+  assert.match(pillText(container), /Recall/, 'Again vocab at index 0 picks recall');
+});
+
+test('Review 3.0 auto-pick: fresh item picks recognition', async () => {
+  const item = candidateItem({ entityType: 'vocabulary', entityId: 22, display: '水', reading: 'みず', meaning: 'water', strength: 'strong' });
+  const { container } = await startWithSingleItem({ item, typesPayload: allTypesPreferences(true) });
+  assert.match(pillText(container), /Recognition/, 'fresh vocab picks recognition');
+});
+
+test('Review 3.0 auto-pick: grammar with history picks cloze', async () => {
+  const item = candidateItem({ entityType: 'grammar', entityId: 31, display: '〜ても', reading: null, meaning: 'even if', strength: 'strong', lastResult: 'Good' });
+  const { container } = await startWithSingleItem({ item, typesPayload: allTypesPreferences(true), clozeSentence: '雨が降っても行く。' });
+  await sleep(15);
+  assert.match(pillText(container), /Cloze/, 'known grammar picks cloze');
+});
+
+test('Review 3.0 auto-pick: disabled-only and unsupported fall back to recognition', async () => {
+  const item = candidateItem({ entityType: 'kanji', entityId: 41, display: '日', reading: 'ニチ', meaning: 'day', strength: 'strong' });
+  const { container } = await startWithSingleItem({
+    item,
+    typesPayload: { availableTypes: ['recognition', 'recall', 'cloze', 'audio'], userPreferences: { cardTypes: ['cloze'], weights: {}, engineMode: 'fixed', autoPick: true } }
+  });
+  assert.match(pillText(container), /Recognition/, 'kanji with only cloze enabled falls back to recognition');
+});
+
+test('Review 3.0 auto-pick: deterministic same inputs twice', async () => {
+  const make = () => candidateItem({ entityType: 'vocabulary', entityId: 51, display: '学校', reading: 'がっこう', meaning: 'school', strength: 'strong', lastResult: 'Again' });
+  const first = await startWithSingleItem({ item: make(), typesPayload: allTypesPreferences(true), sessionId: 201 });
+  const second = await startWithSingleItem({ item: make(), typesPayload: allTypesPreferences(true), sessionId: 202 });
+  assert.equal(pillText(first.container), pillText(second.container), 'same queue/index/preferences gives same type');
+  assert.match(pillText(first.container), /Recall/);
+});
+
+test('Review 3.0 auto-pick: autoPick false uses legacy rotation', async () => {
+  const item = candidateItem({ entityType: 'vocabulary', entityId: 61, display: '学校', reading: 'がっこう', meaning: 'school', strength: 'strong', lastResult: 'Again' });
+  const { container } = await startWithSingleItem({
+    item,
+    typesPayload: { availableTypes: ['recognition', 'recall', 'cloze', 'audio'], userPreferences: { cardTypes: ['recognition', 'recall', 'cloze', 'audio'], weights: {}, engineMode: 'fixed', autoPick: false } }
+  });
+  // Legacy pool with default weights at index 0 gives recognition, not rule recall.
+  assert.match(pillText(container), /Recognition/, 'opt-out keeps blind rotation');
+});
+
+test('Review 3.0 auto-pick: engine is weight-aware and anti-repeat guarded (static)', async () => {
+  assert.match(reviewSource, /weightFactor/, 'weight factor helper present');
+  assert.match(reviewSource, /Math\.round\(.*\/ 50/, 'weights multiply rule slots via /50');
+  assert.match(reviewSource, /3 \* weightFactor/, 'rule slots base 3 times factor');
+  assert.match(reviewSource, /lastPickedByKey/, 'per-item last-type map present');
+  assert.match(reviewSource, /autoPick !== false|autoPick === false/, 'autoPick flag branches legacy vs auto');
+});
+
+test('Review 3.0 audio: speaker icon in front and after reveal, click speaks, no Play audio button', async () => {
+  const item = candidateItem({ entityType: 'vocabulary', entityId: 71, display: '水', reading: 'みず', meaning: 'water', strength: 'strong' });
+  const { harness, container } = await startWithSingleItem({
+    item,
+    typesPayload: { availableTypes: ['recognition', 'recall', 'cloze', 'audio'], userPreferences: { cardTypes: ['audio'], weights: {}, engineMode: 'fixed', autoPick: true } }
+  });
+  assert.match(pillText(container), /Audio/);
+  assert.equal(findButtonsByText(container, 'Play audio').length, 0, 'legacy Play audio button replaced');
+  let speakers = speakerButtons(container).filter(isVisible);
+  assert.ok(speakers.length >= 1, 'speaker present in front');
+  const beforeRef = speakers[0];
+  await clickAndSettle(beforeRef);
+  assert.equal(harness.speechCalls.length, 1, 'front speaker click speaks');
+  assert.match(String(harness.speechCalls[0]?.text || harness.speechCalls[0] || ''), /水/, 'speaks display text');
+  await clickAndSettle(findFirstButtonByText(container, 'Reveal answer'));
+  await sleep(10);
+  speakers = speakerButtons(container).filter(isVisible);
+  assert.ok(speakers.length >= 1, 'speaker still present after reveal');
+  assert.equal(speakers[0], beforeRef, 'same speaker node survives reveal (never destroyed)');
+  await clickAndSettle(speakers[0]);
+  assert.equal(harness.speechCalls.length, 2, 'answer speaker still replays');
+});
+
+test('Review 3.0 recall: right answer shows confirmation, wrong shows answer with hint, Check never grades, Enter works', async () => {
+  const item = candidateItem({ entityType: 'vocabulary', entityId: 81, display: '学校', reading: 'がっこう', meaning: 'school', strength: 'strong', lastResult: 'Again' });
+  const { harness, container } = await startWithSingleItem({ item, typesPayload: allTypesPreferences(true) });
+  assert.match(pillText(container), /Recall/);
+  const input = answerInputOf(container);
+  assert.ok(input, 'recall front has answer input');
+  const check = findFirstButtonByText(container, 'Check');
+  assert.ok(check, 'recall front has Check');
+  const gradesBefore = harness.apiCalls.filter((c) => c.url === '/api/review/grade').length;
+  input.value = '学校';
+  await clickAndSettle(check);
+  assert.match(textOf(container), /That matches/, 'right answer confirms');
+  assert.equal(harness.apiCalls.filter((c) => c.url === '/api/review/grade').length, gradesBefore, 'Check does not grade on match');
+  input.value = 'zzz-nope';
+  await clickAndSettle(check);
+  assert.match(textOf(container), /Not quite/, 'wrong answer shows guidance');
+  assert.match(textOf(container), /学校/, 'wrong answer reveals expected display');
+  assert.match(textOf(container), /Starts with/, 'wrong answer includes hint with first character');
+  assert.equal(harness.apiCalls.filter((c) => c.url === '/api/review/grade').length, gradesBefore, 'Check does not grade on mismatch');
+  // Enter triggers Check too.
+  input.value = '学校';
+  input.dispatchEvent({ type: 'keydown', key: 'Enter', preventDefault() {} });
+  await sleep(10);
+  assert.match(textOf(container), /That matches/, 'Enter in input triggers Check');
+  assert.equal(harness.apiCalls.filter((c) => c.url === '/api/review/grade').length, gradesBefore, 'Enter-Check still never grades');
+  // Reading/kana layer: kana input matching reading also confirms.
+  input.value = 'がっこう';
+  await clickAndSettle(check);
+  assert.match(textOf(container), /That matches/, 'reading/kana match also confirms');
+});
+
+test('Review 3.0 cloze: sentence persists after reveal with check result above grades', async () => {
+  const display = '水';
+  const sentenceWithBlank = '＿＿を飲む。';
+  const filled = '水を飲む。';
+  const item = candidateItem({ entityType: 'grammar', entityId: 91, display: '〜ても', reading: null, meaning: 'even if', strength: 'strong', lastResult: 'Good' });
+  // Use a grammar display that appears in the stub sentence for blank/fill logic.
+  const grammarItem = { ...item, display, reading: null, meaning: 'water?' };
+  const { harness, container } = await startWithSingleItem({
+    item: grammarItem,
+    typesPayload: allTypesPreferences(true),
+    clozeSentence: '水を飲む。'
+  });
+  await sleep(20);
+  assert.match(pillText(container), /Cloze/);
+  assert.match(textOf(container), /＿＿/, 'front shows blanked sentence');
+  const input = answerInputOf(container);
+  assert.ok(input, 'cloze front has answer input');
+  const check = findFirstButtonByText(container, 'Check');
+  input.value = display;
+  await clickAndSettle(check);
+  assert.match(textOf(container), /That matches/, 'cloze right answer confirms');
+  const gradesBefore = harness.apiCalls.filter((c) => c.url === '/api/review/grade').length;
+  assert.equal(gradesBefore, 0);
+  await clickAndSettle(findFirstButtonByText(container, 'Reveal answer'));
+  await sleep(10);
+  const after = textOf(container);
+  assert.match(after, /水を飲む/, 'filled sentence stays visible after reveal');
+  assert.match(after, /That matches/, 'check result persists after reveal');
+  assert.ok(findFirstButtonByText(container, 'Good'), 'grades present below persistent sentence');
+  // Wrong-path also reveals without grading.
+  const item2 = candidateItem({ entityType: 'vocabulary', entityId: 92, display: '学校', reading: 'がっこう', meaning: 'school', strength: 'strong', lastResult: 'Again' });
+  const second = await startWithSingleItem({ item: item2, typesPayload: allTypesPreferences(true), sessionId: 303 });
+  const input2 = answerInputOf(second.container);
+  const check2 = findFirstButtonByText(second.container, 'Check');
+  input2.value = 'totally-different';
+  await clickAndSettle(check2);
+  assert.match(textOf(second.container), /Not quite/);
+  assert.equal(second.harness.apiCalls.filter((c) => c.url === '/api/review/grade').length, 0, 'wrong Check still never grades');
+});
+
+test('Review 3.0 preferences: automatic checkbox default-checked, save sends autoPick', async () => {
+  const harness = loadReviewModule({
+    candidatesPayload: { groups: {} },
+    typesPayload: allTypesPreferences(true)
+  });
+  const container = await gotoSetup(harness);
+  const edit = container.querySelector('button[aria-label="Edit card types"]') || findFirstButtonByText(container, 'Edit');
+  assert.ok(edit, 'Edit card types control exists');
+  await clickAndSettle(edit);
+  assert.equal(harness.openDialogCalls.length, 1, 'preferences dialog opened');
+  const { form, onSubmit } = harness.openDialogCalls[0];
+  const autoBox = form.querySelector('input[name="card-auto-pick"]');
+  assert.ok(autoBox, 'auto checkbox exists');
+  assert.equal(autoBox.checked, true, 'auto checked by default');
+  assert.match(textOf(form), /Automatic card choice/, 'auto label present');
+  assert.match(textOf(form), /Preview Japanese voice/, 'voice preview kept');
+  assert.match(textOf(form), /See the word or kanji/, 'per-type descriptions kept');
+  // Save with auto on.
+  const closeCalls = [];
+  const close = () => { closeCalls.push(1); };
+  await onSubmit(form, close);
+  await sleep(10);
+  const prefCall = harness.apiCalls.find((c) => c.url === '/api/review/preferences');
+  assert.ok(prefCall, 'preferences save sent');
+  assert.equal(prefCall.options.body.autoPick, true, 'save sends autoPick true');
+  assert.ok(Array.isArray(prefCall.options.body.cardTypes), 'save sends cardTypes');
+  assert.ok(prefCall.options.body.weights !== undefined, 'save sends weights');
+  // Save with auto off sends false.
+  autoBox.checked = false;
+  await onSubmit(form, close);
+  await sleep(10);
+  const lastPref = [...harness.apiCalls].reverse().find((c) => c.url === '/api/review/preferences');
+  assert.equal(lastPref.options.body.autoPick, false, 'unchecking sends autoPick false');
+});
+
+test('Review 3.0 lifecycle: front and answer are hidden-toggled containers, controls stay live', async () => {
+  const item = candidateItem({ entityType: 'vocabulary', entityId: 111, display: '学校', reading: 'がっこう', meaning: 'school', strength: 'strong', lastResult: 'Again' });
+  const { container } = await startWithSingleItem({ item, typesPayload: allTypesPreferences(true) });
+  assert.match(reviewSource, /frontWrap\.hidden/, 'front hidden toggle present');
+  assert.match(reviewSource, /answerWrap\.hidden/, 'answer hidden toggle present');
+  assert.ok(!reviewSource.includes('body.replaceChildren()') || (reviewSource.match(/body\.replaceChildren\(\)/g) || []).length === 0, 'no body wiping that kills controls');
+  const reveal = findFirstButtonByText(container, 'Reveal answer');
+  assert.ok(reveal && isVisible(reveal), 'reveal visible in front');
+  assert.equal(findButtonsByText(container, 'Good').filter(isVisible).length, 0, 'grades hidden before reveal');
+  const speakerBefore = speakerButtons(container).filter(isVisible)[0];
+  assert.ok(speakerBefore, 'speaker visible before reveal');
+  await clickAndSettle(reveal);
+  await sleep(10);
+  assert.equal(visibleButtonsByText(container, 'Reveal answer').length, 0, 'reveal hidden after reveal');
+  assert.ok(findFirstButtonByText(container, 'Good') && isVisible(findFirstButtonByText(container, 'Good')), 'grades visible after reveal');
+  assert.ok(isVisible(speakerButtons(container)[0]), 'speaker still visible after reveal');
+  assert.equal(speakerButtons(container).filter(isVisible)[0], speakerBefore, 'speaker node identity preserved');
 });

@@ -1,5 +1,6 @@
 import { apiRequest, queryString } from '../api';
 import { kanjiReferenceRoute } from '../kanjiReference';
+import { icon } from '../icons';
 import { element, emptyState, errorState, loadingState, openDetailModal, openDialog, pageHeader, setActionPending, showToast, withPendingAction } from '../ui';
 
 const TYPE_ORDER = ['kanji', 'vocabulary', 'grammar'];
@@ -23,7 +24,7 @@ const ENTITY_SUPPORTED_CARD_TYPES = {
   vocabulary: ['recognition', 'recall', 'cloze', 'audio'],
   grammar: ['recognition', 'cloze', 'audio']
 };
-const DEFAULT_CARD_PREFERENCES = { cardTypes: ['recognition'], weights: {}, engineMode: 'fixed' };
+const DEFAULT_CARD_PREFERENCES = { cardTypes: ['recognition'], weights: {}, engineMode: 'fixed', autoPick: true };
 
 let activeReview = { sessionId: null, selected: [] };
 let detachReviewKeys = null;
@@ -117,6 +118,7 @@ export async function renderReview(container) {
       currentIndex = 0;
       revealed = false;
       graded = [];
+      lastPickedByKey.clear();
       activeReview = { sessionId, selected: items };
       setStage('REVIEWING');
       renderCard();
@@ -408,6 +410,7 @@ export async function renderReview(container) {
     graded = stored
       .filter((entry) => entry.lastResult === 'Again' || entry.lastResult === 'Hard')
       .map(({ lastResult, position, ...rest }) => ({ ...rest, result: lastResult }));
+    lastPickedByKey.clear();
     activeReview = { sessionId, selected: queue };
     lastSearch = { from: session.sourceFrom || null, to: session.sourceTo || null };
     if (typeof closeModal === 'function') { try { closeModal(); } catch { /* already closed */ } }
@@ -503,7 +506,10 @@ export async function renderReview(container) {
   // ------------------------------------------------------------ Review 2.0
 
   // Preferences + focused-practice state (module-scoped to this render).
-  let reviewPreferences = { cardTypes: [...DEFAULT_CARD_PREFERENCES.cardTypes], weights: {}, engineMode: 'fixed' };
+  let reviewPreferences = { cardTypes: [...DEFAULT_CARD_PREFERENCES.cardTypes], weights: {}, engineMode: 'fixed', autoPick: true };
+
+  // Per-item last presentation in this session (anti-repeat guard).
+  const lastPickedByKey = new Map();
 
   async function loadCardTypePreferences() {
     try {
@@ -513,8 +519,11 @@ export async function renderReview(container) {
         reviewPreferences = {
           cardTypes: preferences.cardTypes,
           weights: preferences.weights && typeof preferences.weights === 'object' ? preferences.weights : {},
-          engineMode: preferences.engineMode || 'fixed'
+          engineMode: preferences.engineMode || 'fixed',
+          autoPick: preferences.autoPick !== false
         };
+      } else if (preferences) {
+        reviewPreferences.autoPick = preferences.autoPick !== false;
       }
       renderCardTypeSummary();
     } catch { /* fail-open: defaults keep Recognition cards */ }
@@ -537,6 +546,18 @@ const CARD_TYPE_DESCRIPTIONS = {
   function openCardTypeDialog() {
     const previewVoiceButton = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Preview Japanese voice', attrs: { type: 'button', 'aria-label': 'Preview how audio cards sound on this device' } });
     previewVoiceButton.addEventListener('click', () => { speakDisplay('日本語のテストです。よろしくおねがいします。'); });
+    const autoOn = reviewPreferences.autoPick !== false;
+    const autoCheckbox = element('input', {
+      className: 'size-4 accent-vermilion',
+      attrs: { type: 'checkbox', name: 'card-auto-pick', ...(autoOn ? { checked: '' } : {}) }
+    });
+    const autoBlock = element('div', { className: 'grid gap-1 sm:col-span-2' }, [
+      element('label', { className: 'flex items-center gap-2 text-sm font-medium text-ink' }, [
+        autoCheckbox,
+        element('span', { text: 'Automatic card choice (recommended)' })
+      ]),
+      element('p', { className: 'text-xs leading-5 text-muted', text: 'Let review pick the best presentation for each item. Turn off to use weighted rotation only.' })
+    ]);
     const rows = CARD_TYPES.map((type) => {
       const checked = reviewPreferences.cardTypes.includes(type);
       const weight = Math.round(Number(reviewPreferences.weights?.[type] ?? 50));
@@ -564,15 +585,18 @@ const CARD_TYPE_DESCRIPTIONS = {
           previewVoiceButton,
           element('p', { className: 'text-xs leading-5 text-muted', text: 'Hear how audio cards sound on this device. If nothing plays, install a Japanese voice in your system settings.' })
         ]),
+        autoBlock,
         ...rows
       ],
       submitLabel: 'Save',
       onSubmit: async (form, close) => {
         const cardTypes = [];
         const weights = {};
+        const autoInput = form.querySelector('input[name="card-auto-pick"]');
+        const autoPick = autoInput ? Boolean(autoInput.checked) : reviewPreferences.autoPick !== false;
         for (const type of CARD_TYPES) {
-          const checkbox = document.querySelector(`input[name="card-type-${type}"]`);
-          const slider = document.querySelector(`input[name="card-weight-${type}"]`);
+          const checkbox = form.querySelector(`input[name="card-type-${type}"]`);
+          const slider = form.querySelector(`input[name="card-weight-${type}"]`);
           if (checkbox?.checked) cardTypes.push(type);
           if (slider) weights[type] = Number(slider.value) || 0;
         }
@@ -582,14 +606,17 @@ const CARD_TYPE_DESCRIPTIONS = {
           if (submitButton) setActionPending(submitButton, false);
           return;
         }
-        const saved = await apiRequest('/api/review/preferences', { method: 'PUT', body: { cardTypes, weights } });
+        const saved = await apiRequest('/api/review/preferences', { method: 'PUT', body: { cardTypes, weights, autoPick } });
         const preferences = saved?.userPreferences;
         if (preferences) {
           reviewPreferences = {
             cardTypes: preferences.cardTypes,
             weights: preferences.weights || {},
-            engineMode: preferences.engineMode || 'fixed'
+            engineMode: preferences.engineMode || 'fixed',
+            autoPick: preferences.autoPick !== false
           };
+        } else {
+          reviewPreferences.autoPick = autoPick;
         }
         renderCardTypeSummary();
         showToast('Card type preferences saved.');
@@ -607,9 +634,40 @@ const CARD_TYPE_DESCRIPTIONS = {
     });
   }
 
-  // Deterministic weighted rotation: position % expanded pool. Falls back to
-  // recognition when an entity supports none of the enabled types.
-  function pickCardType(item) {
+  // Practice-only typed-answer helpers (never grade; grading stays with
+  // the Again/Hard/Good buttons). Layers: display text equality, then
+  // reading/kana equality, then the expected display is shown with a hint.
+  function foldKana(value) {
+    return String(value || '').replace(/[\u30A1-\u30F6]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0x60));
+  }
+  function normForMatch(value) {
+    return foldKana(String(value || '').trim().toLowerCase()).replace(/\s+/g, '');
+  }
+  function matchTypedAnswer(typed, item) {
+    const raw = String(typed || '').trim();
+    if (!raw) return { empty: true };
+    const want = String(item.display || '').trim();
+    if (raw === want) return { matched: true, layer: 'display' };
+    const wantReading = String(item.reading || '').trim();
+    if (wantReading && normForMatch(raw) === normForMatch(wantReading)) return { matched: true, layer: 'reading' };
+    if (want && normForMatch(raw) === normForMatch(want)) return { matched: true, layer: 'reading' };
+    return { matched: false };
+  }
+  function hintForItem(item) {
+    const want = String(item.display || '');
+    const first = want.slice(0, 1);
+    return first ? `Starts with \u201C${first}\u201D \u00B7 ${want.length} characters` : `${want.length} characters`;
+  }
+
+  // Weight factor for rule slots: default 50 gives x1, ratios stay relative.
+  function weightFactor(type) {
+    const raw = Number(reviewPreferences.weights?.[type] ?? 50);
+    const safe = Number.isFinite(raw) ? raw : 50;
+    return Math.max(1, Math.round(safe / 50));
+  }
+  // Frozen rotation used when automatic choice is off and as the final
+  // fallback inside automatic choice. Position % expanded pool.
+  function legacyRotationPick(item, index) {
     const supported = ENTITY_SUPPORTED_CARD_TYPES[item.entityType] || ['recognition'];
     const enabled = reviewPreferences.cardTypes.filter((type) => supported.includes(type));
     if (!enabled.length) return 'recognition';
@@ -617,9 +675,63 @@ const CARD_TYPE_DESCRIPTIONS = {
     const pool = [];
     for (const type of enabled) {
       const slots = Math.max(1, Math.round(Number(weights[type] ?? 50) / 10));
-      for (let index = 0; index < slots; index += 1) pool.push(type);
+      for (let slotIndex = 0; slotIndex < slots; slotIndex += 1) pool.push(type);
     }
-    return pool[currentIndex % pool.length] || enabled[0];
+    return pool[index % pool.length] || enabled[0];
+  }
+  function withAntiRepeat(key, candidate, enabled) {
+    const prev = lastPickedByKey.get(key);
+    if (prev !== candidate || enabled.length < 2) {
+      lastPickedByKey.set(key, candidate);
+      return candidate;
+    }
+    const alt = enabled.find((entry) => entry !== candidate) || candidate;
+    lastPickedByKey.set(key, alt);
+    return alt;
+  }
+  // Automatic presentation choice. Deterministic for the same queue, index,
+  // and preferences. Falls back to recognition when nothing enabled fits.
+  // Rules in order: needing-work recall, fresh recognition, grammar cloze,
+  // then weighted rotation. Rule slots are 3 x weight factor.
+  function pickCardType(item, index = currentIndex) {
+    const supported = ENTITY_SUPPORTED_CARD_TYPES[item.entityType] || ['recognition'];
+    const enabled = reviewPreferences.cardTypes.filter((type) => supported.includes(type));
+    if (!enabled.length) return 'recognition';
+    if (reviewPreferences.autoPick === false) {
+      return legacyRotationPick(item, index);
+    }
+    const key = itemKey(item);
+    const needingWork = item.lastResult === 'Again' || item.lastResult === 'Hard' || item.evidenceStrength === 'weak';
+    if (needingWork) {
+      if (item.entityType === 'vocabulary' && enabled.includes('recall') && enabled.includes('audio')) {
+        const parity = (index % 2 === 0) ? 'recall' : 'audio';
+        const slots = 3 * weightFactor(parity);
+        const pool = Array(slots).fill(parity);
+        const chosen = pool[index % pool.length] || parity;
+        return withAntiRepeat(key, chosen, enabled);
+      }
+      if (enabled.includes('recall')) {
+        const slots = 3 * weightFactor('recall');
+        const pool = Array(slots).fill('recall');
+        const chosen = pool[index % pool.length] || 'recall';
+        return withAntiRepeat(key, chosen, enabled);
+      }
+    }
+    const isFresh = item.lastResult == null;
+    if (isFresh && enabled.includes('recognition')) {
+      const slots = 3 * weightFactor('recognition');
+      const pool = Array(slots).fill('recognition');
+      const chosen = pool[index % pool.length] || 'recognition';
+      return withAntiRepeat(key, chosen, enabled);
+    }
+    if (item.entityType === 'grammar' && enabled.includes('cloze')) {
+      const slots = 3 * weightFactor('cloze');
+      const pool = Array(slots).fill('cloze');
+      const chosen = pool[index % pool.length] || 'cloze';
+      return withAntiRepeat(key, chosen, enabled);
+    }
+    const rotated = legacyRotationPick(item, index);
+    return withAntiRepeat(key, rotated, enabled);
   }
 
   // Cloze needs a real sentence; fetched lazily per card (bounded, user-paced)
@@ -1007,7 +1119,9 @@ const CARD_TYPE_DESCRIPTIONS = {
               entityId: item.entityId,
               display: item.display,
               reading: item.reading,
-              meaning: item.meaning
+              meaning: item.meaning,
+              ...(item.evidenceStrength ? { evidenceStrength: item.evidenceStrength } : {}),
+              ...(item.lastResult ? { lastResult: item.lastResult } : {})
             });
           }
         });
@@ -1027,6 +1141,7 @@ const CARD_TYPE_DESCRIPTIONS = {
         currentIndex = 0;
         revealed = false;
         graded = [];
+        lastPickedByKey.clear();
         activeReview = { sessionId, selected: picked };
         setStage('REVIEWING');
         renderCard();
@@ -1082,58 +1197,117 @@ const CARD_TYPE_DESCRIPTIONS = {
     // V5.3a Review 2.0: pick the presentation for THIS card. Recognition is
     // the frozen default (and the fallback whenever richer data is missing).
     const cardType = (() => {
-      const picked = pickCardType(item);
+      const picked = pickCardType(item, currentIndex);
       if (picked === 'recall' && !item.meaning) return 'recognition';
       return picked;
     })();
     const typePill = element('span', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: CARD_TYPE_LABEL[cardType] || cardType, attrs: { 'aria-label': `Card type ${CARD_TYPE_LABEL[cardType] || cardType}` } });
     const frontText = cardType === 'recall' ? item.meaning : cardType === 'audio' ? 'Listen and recall' : item.display;
     const title = element('h2', { className: 'mt-2 break-words text-3xl font-semibold tracking-tight text-ink', text: frontText, attrs: { tabindex: '-1' } });
+    // Speaker lives beside the heading so the front/answer toggle never removes it.
+    const speakerButton = element('button', { className: 'icon-button shrink-0', attrs: { type: 'button', 'aria-label': `Play ${item.display}` } }, [icon('volume', { size: 20 })]);
+    speakerButton.addEventListener('click', () => { speakDisplay(item.display); });
+    const titleRow = element('div', { className: 'mt-2 flex items-center gap-2' }, [title, speakerButton]);
     const card = element('article', { className: 'surface review-card p-5 sm:p-8' }, [
       element('div', { className: 'flex items-start justify-between gap-3' }, [progress, counter]),
       track,
       typePill,
-      title
+      titleRow
     ]);
 
     const body = element('div', { className: 'mt-5 border-t border-stone pt-5' });
+    const frontWrap = element('div', { className: 'grid gap-3' });
+    const answerWrap = element('div', { className: 'grid gap-3' });
+    answerWrap.hidden = true;
+    body.append(frontWrap, answerWrap);
     card.appendChild(body);
 
-    function renderFront() {
-      body.replaceChildren();
-      if (cardType === 'audio') {
-        const playButton = element('button', { className: 'button-secondary min-h-10 px-4 py-2 text-sm', text: 'Play audio', attrs: { type: 'button', 'aria-label': `Play ${item.display}` } });
-        playButton.addEventListener('click', () => { speakDisplay(item.display); });
-        body.appendChild(element('div', { className: 'mb-3' }, [playButton]));
+    // Practice-only typed-answer state (grading stays with Again/Hard/Good).
+    let checkState = null;
+    let clozeBlank = null;
+    let clozeFilled = null;
+    let filledLine = null;
+
+    const frontResult = element('p', { className: 'text-sm leading-6 text-ink', attrs: { 'aria-live': 'polite' } });
+    frontResult.hidden = true;
+    const answerResult = element('p', { className: 'text-sm leading-6 text-ink', attrs: { 'aria-live': 'polite' } });
+    answerResult.hidden = true;
+
+    function showCheck(state) {
+      checkState = state;
+      if (!state) {
+        frontResult.hidden = true;
+        frontResult.textContent = '';
+        answerResult.hidden = true;
+        answerResult.textContent = '';
+        return;
       }
-      if (cardType === 'cloze') {
-        const sentenceLine = element('p', { className: 'mb-3 break-words text-base leading-8 text-ink', text: 'Loading sentence…', attrs: { lang: 'ja' } });
-        body.appendChild(sentenceLine);
-        fetchClozeSentence(item).then((sentence) => {
-          if (!sentence) {
-            // Fail-open: no sentence available -> recognition fallback.
-            sentenceLine.replaceChildren(element('span', { text: item.display }));
-            return;
-          }
-          sentenceLine.textContent = sentence;
-        });
+      if (state.matched) {
+        frontResult.hidden = false;
+        frontResult.textContent = 'That matches! Reveal to review the details and grade yourself.';
+        answerResult.hidden = false;
+        answerResult.textContent = 'That matches! Grade yourself below.';
+      } else {
+        const want = String(item.display || '');
+        const hint = hintForItem(item);
+        frontResult.hidden = false;
+        frontResult.textContent = `Not quite \u2014 answer: ${want} (${hint})`;
+        answerResult.hidden = false;
+        answerResult.textContent = `Your try: \u201C${state.typed}\u201D \u2014 answer: ${want} (${hint})`;
       }
-      const revealButton = element('button', { className: 'button-primary', text: 'Reveal answer', attrs: { type: 'button' } });
-      revealButton.addEventListener('click', () => {
-        revealed = true;
-        renderAnswer();
-      });
-      body.appendChild(revealButton);
     }
 
-    function renderAnswer() {
-      body.replaceChildren();
-      if (cardType !== 'recognition') {
-        body.appendChild(element('p', { className: 'font-jp text-2xl font-semibold text-ink', text: item.display }));
+    function buildAnswerInput() {
+      const answerInput = element('input', {
+        className: 'field-control',
+        attrs: { type: 'text', 'aria-label': 'Type the answer', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' }
+      });
+      const checkButton = element('button', { className: 'button-secondary min-h-10 px-4 py-2 text-sm', text: 'Check', attrs: { type: 'button' } });
+      const runCheck = () => {
+        const typed = answerInput.value || '';
+        if (!String(typed).trim()) {
+          checkState = null;
+          frontResult.hidden = false;
+          frontResult.textContent = 'Type something first.';
+          answerResult.hidden = false;
+          answerResult.textContent = 'Type something first.';
+          return;
+        }
+        const verdict = matchTypedAnswer(typed, item);
+        if (verdict.empty) return;
+        if (verdict.matched) {
+          showCheck({ matched: true, typed: String(typed).trim() });
+        } else {
+          showCheck({ matched: false, typed: String(typed).trim() });
+        }
+      };
+      checkButton.addEventListener('click', runCheck);
+      answerInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          checkButton.click();
+        }
+      });
+      const row = element('div', { className: 'flex flex-col gap-2 sm:flex-row' }, [answerInput, checkButton]);
+      return { answerInput, checkButton, row };
+    }
+
+    const revealButton = element('button', { className: 'button-primary', text: 'Reveal answer', attrs: { type: 'button' } });
+    let answerBuilt = false;
+    function buildAnswer() {
+      if (answerBuilt) return;
+      answerBuilt = true;
+      if (cardType === 'cloze') {
+        filledLine = element('p', { className: 'break-words text-base leading-8 text-ink', text: clozeFilled || String(item.display || ''), attrs: { lang: 'ja' } });
+        answerWrap.appendChild(filledLine);
       }
-      if (item.reading) body.appendChild(element('p', { className: 'text-sm text-muted', text: item.reading }));
-      if (item.meaning) body.appendChild(element('p', { className: 'mt-2 text-base leading-7 text-ink', text: item.meaning }));
-      body.appendChild(element('p', { className: 'mt-5 text-sm font-semibold text-ink', text: 'How did recall feel?' }));
+      if (cardType !== 'recognition') {
+        answerWrap.appendChild(element('p', { className: 'font-jp text-2xl font-semibold text-ink', text: item.display }));
+      }
+      if (item.reading) answerWrap.appendChild(element('p', { className: 'text-sm text-muted', text: item.reading }));
+      if (item.meaning) answerWrap.appendChild(element('p', { className: 'mt-2 text-base leading-7 text-ink', text: item.meaning }));
+      answerWrap.appendChild(answerResult);
+      answerWrap.appendChild(element('p', { className: 'mt-5 text-sm font-semibold text-ink', text: 'How did recall feel?' }));
       const grades = element('div', { className: 'mt-3 grid gap-2 sm:grid-cols-3' });
       GRADES.forEach(({ result, hint }, gradeIndex) => {
         const button = element('button', { className: 'button-secondary flex-col gap-1 px-4 py-3 text-center', attrs: { type: 'button', 'aria-keyshortcuts': String(gradeIndex + 1) } }, [
@@ -1160,12 +1334,51 @@ const CARD_TYPE_DESCRIPTIONS = {
         gradeButtons.push(button);
         grades.appendChild(button);
       });
-      body.appendChild(grades);
-      body.appendChild(element('p', { className: 'mt-3 text-xs text-muted', text: 'Shortcuts: 1 Again · 2 Hard · 3 Good' }));
+      answerWrap.appendChild(grades);
+      answerWrap.appendChild(element('p', { className: 'mt-3 text-xs text-muted', text: 'Shortcuts: 1 Again · 2 Hard · 3 Good' }));
+    }
+    revealButton.addEventListener('click', () => {
+      revealed = true;
+      buildAnswer();
+      frontWrap.hidden = true;
+      answerWrap.hidden = false;
+      if (cardType === 'cloze' && clozeFilled && filledLine) {
+        filledLine.textContent = clozeFilled;
+      }
+    });
+
+    if (cardType === 'cloze') {
+      const sentenceLine = element('p', { className: 'mb-3 break-words text-base leading-8 text-ink', text: 'Loading sentence…', attrs: { lang: 'ja' } });
+      frontWrap.appendChild(sentenceLine);
+      const built = buildAnswerInput();
+      frontWrap.append(built.row, frontResult, revealButton);
+      fetchClozeSentence(item).then((sentence) => {
+        if (!sentence) {
+          sentenceLine.textContent = String(item.display || '');
+          clozeBlank = String(item.display || '');
+          clozeFilled = String(item.display || '');
+          if (filledLine) filledLine.textContent = clozeFilled;
+          return;
+        }
+        sentenceLine.textContent = sentence;
+        clozeBlank = sentence;
+        const want = String(item.display || '');
+        clozeFilled = sentence.includes('＿＿') ? sentence.replaceAll('＿＿', want) : sentence;
+        if (filledLine) filledLine.textContent = clozeFilled;
+      });
+    } else if (cardType === 'recall') {
+      const built = buildAnswerInput();
+      frontWrap.append(built.row, frontResult, revealButton);
+    } else if (cardType === 'audio') {
+      frontWrap.append(
+        element('p', { className: 'text-sm leading-6 text-muted', text: 'Tap the speaker to hear it.' }),
+        revealButton
+      );
+    } else {
+      frontWrap.appendChild(revealButton);
     }
 
     reviewingBlock.appendChild(card);
-    renderFront();
     title.focus({ preventScroll: true });
   }
 
@@ -1239,6 +1452,7 @@ const CARD_TYPE_DESCRIPTIONS = {
           currentIndex = 0;
           revealed = false;
           graded = [];
+          lastPickedByKey.clear();
           activeReview = { sessionId, selected: queue };
           setStage('REVIEWING');
           renderCard();

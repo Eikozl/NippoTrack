@@ -48,7 +48,8 @@ const PATTERN_MINIMUM_EVENTS = 2;
 const DEFAULT_PREFERENCES = Object.freeze({
   cardTypes: ['recognition'],
   weights: {},
-  engineMode: 'fixed'
+  engineMode: 'fixed',
+  autoPick: true
 });
 
 function normalizeCardTypes(value) {
@@ -92,6 +93,29 @@ function normalizeEngineMode(value) {
   return mode;
 }
 
+// Review 3.0: whether the client auto-picks the next card. Optional on PUT;
+// absent (undefined/null) keeps the contract default true, matching the
+// weights/engineMode convention. Any other non-boolean rejects with 400.
+function normalizeAutoPick(value) {
+  if (value === undefined || value === null) return true;
+  if (typeof value !== 'boolean') {
+    throw new ValidationError('autoPick must be a boolean.');
+  }
+  return value;
+}
+
+// Storage read for auto_pick. The column is boolean, but the Postgres adapter
+// (postgresAdapter.js mysqlLikeResult) surfaces booleans as 1/0, so accept
+// true/1 and false/0. Missing (pre-027 rows) and NULL default to true per the
+// Review 3.0 contract; anything else degrades to true rather than 500ing the
+// read path.
+function autoPickFromStorage(value) {
+  if (value === undefined || value === null) return true;
+  if (value === true || value === 1) return true;
+  if (value === false || value === 0) return false;
+  return true;
+}
+
 // facility from a result history; 'correct' = Good + Hard, 'wrong' = Again.
 // Empty history returns the neutral 1 so the formula reduces to the base.
 function facilityFromResults(results) {
@@ -123,33 +147,36 @@ function preferencesFromRow(row) {
   return {
     cardTypes: Array.isArray(row.card_types) ? [...row.card_types] : [...DEFAULT_PREFERENCES.cardTypes],
     weights: row.weights && typeof row.weights === 'object' && !Array.isArray(row.weights) ? { ...row.weights } : {},
-    engineMode: normalizeEngineMode(row.engine_mode)
+    engineMode: normalizeEngineMode(row.engine_mode),
+    autoPick: autoPickFromStorage(row.auto_pick)
   };
 }
 
 async function getUserReviewPreferences(executor, userId) {
   const [rows] = await executor.execute(
-    'SELECT card_types, weights, engine_mode FROM user_review_preferences WHERE user_id = ?',
+    'SELECT card_types, weights, engine_mode, auto_pick FROM user_review_preferences WHERE user_id = ?',
     [userId]
   );
   return preferencesFromRow(rows && rows[0]);
 }
 
-async function upsertUserReviewPreferences(executor, userId, { cardTypes, weights, engineMode } = {}) {
+async function upsertUserReviewPreferences(executor, userId, { cardTypes, weights, engineMode, autoPick } = {}) {
   const normalized = {
     cardTypes: normalizeCardTypes(cardTypes),
     weights: normalizeWeights(weights),
-    engineMode: normalizeEngineMode(engineMode)
+    engineMode: normalizeEngineMode(engineMode),
+    autoPick: normalizeAutoPick(autoPick)
   };
   await executor.execute(
-    `INSERT INTO user_review_preferences (user_id, card_types, weights, engine_mode)
-     VALUES (?, ?::jsonb, ?::jsonb, ?)
+    `INSERT INTO user_review_preferences (user_id, card_types, weights, engine_mode, auto_pick)
+     VALUES (?, ?::jsonb, ?::jsonb, ?, ?)
      ON CONFLICT (user_id) DO UPDATE SET
        card_types = EXCLUDED.card_types,
        weights = EXCLUDED.weights,
        engine_mode = EXCLUDED.engine_mode,
+       auto_pick = EXCLUDED.auto_pick,
        updated_at = CURRENT_TIMESTAMP`,
-    [userId, JSON.stringify(normalized.cardTypes), JSON.stringify(normalized.weights), normalized.engineMode]
+    [userId, JSON.stringify(normalized.cardTypes), JSON.stringify(normalized.weights), normalized.engineMode, normalized.autoPick]
   );
   return normalized;
 }
@@ -345,6 +372,7 @@ module.exports = {
   facilityFromResults,
   getUserReviewPreferences,
   listReviewPatterns,
+  normalizeAutoPick,
   normalizeCardTypes,
   normalizeEngineMode,
   normalizeWeights,

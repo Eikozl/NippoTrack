@@ -197,6 +197,116 @@ test('detectPatternsFromRows finds reading confusion, grammar bands, and frequen
   assert.deepEqual(engine.detectPatternsFromRows([]), []);
 });
 
+test('PUT /api/review/preferences rejects non-boolean autoPick with 400', async () => {
+  for (const autoPick of ['yes', 1, 0, 42, {}, [], ['recognition']]) {
+    const mocked = mockRes();
+    await controller.putReviewPreferences(
+      { user: { id: USER_ID }, body: { cardTypes: ['recall'], autoPick } },
+      mocked.res
+    );
+    assert.equal(mocked.status(), 400, `expected 400 for autoPick=${JSON.stringify(autoPick)}`);
+    assert.match(mocked.body().error, /autoPick must be a boolean/);
+  }
+  // Unknown-field policy still applies alongside the new field.
+  const unknown = mockRes();
+  await controller.putReviewPreferences(
+    { user: { id: USER_ID }, body: { cardTypes: ['recall'], autoPick: true, sabotage: true } },
+    unknown.res
+  );
+  assert.equal(unknown.status(), 400);
+});
+
+test('PUT /api/review/preferences round-trips autoPick scoped to req.user.id', async () => {
+  const calls = [];
+  await withPoolExecute(async (sql, params) => {
+    calls.push({ sql, params });
+    return [{ affectedRows: 1 }];
+  }, async () => {
+    const explicitFalse = mockRes();
+    await controller.putReviewPreferences({
+      user: { id: USER_ID },
+      body: { cardTypes: ['recall'], autoPick: false }
+    }, explicitFalse.res);
+    assert.equal(explicitFalse.status(), 200);
+    assert.equal(explicitFalse.body().userPreferences.autoPick, false);
+    assert.match(calls[0].sql, /INSERT INTO user_review_preferences/);
+    assert.match(calls[0].sql, /auto_pick/);
+    assert.match(calls[0].sql, /ON CONFLICT \(user_id\) DO UPDATE/);
+    assert.equal(calls[0].params[0], USER_ID);
+    assert.equal(calls[0].params[calls[0].params.length - 1], false);
+
+    const explicitTrue = mockRes();
+    await controller.putReviewPreferences({
+      user: { id: USER_ID },
+      body: { cardTypes: ['recall'], weights: { recall: 10 }, engineMode: 'fixed', autoPick: true }
+    }, explicitTrue.res);
+    assert.equal(explicitTrue.status(), 200);
+    assert.equal(explicitTrue.body().userPreferences.autoPick, true);
+    assert.equal(calls[1].params[0], USER_ID);
+    assert.equal(calls[1].params[calls[1].params.length - 1], true);
+
+    // Omitted autoPick keeps the contract default (true), like engineMode.
+    const omitted = mockRes();
+    await controller.putReviewPreferences({
+      user: { id: USER_ID },
+      body: { cardTypes: ['recall'] }
+    }, omitted.res);
+    assert.equal(omitted.status(), 200);
+    assert.equal(omitted.body().userPreferences.autoPick, true);
+    assert.equal(calls[2].params[0], USER_ID);
+    assert.equal(calls[2].params[calls[2].params.length - 1], true);
+  });
+});
+
+test('GET /api/review/types defaults autoPick to true for missing or legacy rows', async () => {
+  // No stored row at all.
+  await withPoolExecute(async (sql, params) => {
+    assert.match(sql, /FROM user_review_preferences WHERE user_id = \?/);
+    assert.deepEqual(params, [USER_ID]);
+    return [[]];
+  }, async () => {
+    const { res, status, body } = mockRes();
+    await controller.getReviewTypes({ user: { id: USER_ID } }, res);
+    assert.equal(status(), 200);
+    assert.equal(body().userPreferences.autoPick, true);
+  });
+
+  // Legacy pre-027 row without the auto_pick column selected.
+  await withPoolExecute(async () => [[{
+    card_types: ['recall'], weights: { recall: 20 }, engine_mode: 'dynamic'
+  }]], async () => {
+    const { res, status, body } = mockRes();
+    await controller.getReviewTypes({ user: { id: USER_ID } }, res);
+    assert.equal(status(), 200);
+    assert.equal(body().userPreferences.autoPick, true);
+    assert.equal(body().userPreferences.engineMode, 'dynamic');
+  });
+
+  // Stored false survives both driver shapes (boolean false and adapter 0).
+  for (const auto_pick of [false, 0]) {
+    await withPoolExecute(async () => [[{
+      card_types: ['recall'], weights: {}, engine_mode: 'fixed', auto_pick
+    }]], async () => {
+      const { res, status, body } = mockRes();
+      await controller.getReviewTypes({ user: { id: USER_ID } }, res);
+      assert.equal(status(), 200);
+      assert.equal(body().userPreferences.autoPick, false);
+    });
+  }
+
+  // Stored true survives both driver shapes (boolean true and adapter 1).
+  for (const auto_pick of [true, 1]) {
+    await withPoolExecute(async () => [[{
+      card_types: ['recall'], weights: {}, engine_mode: 'fixed', auto_pick
+    }]], async () => {
+      const { res, status, body } = mockRes();
+      await controller.getReviewTypes({ user: { id: USER_ID } }, res);
+      assert.equal(status(), 200);
+      assert.equal(body().userPreferences.autoPick, true);
+    });
+  }
+});
+
 test('GET /api/review/patterns detects, replaces stored rows, and returns the fresh set', async () => {
   const calls = [];
   await withPoolExecute(async (sql, params) => {
