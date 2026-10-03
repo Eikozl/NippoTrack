@@ -1709,3 +1709,49 @@ test('Review audio hardening: preview with zero Japanese voices surfaces guidanc
   assert.ok(harness.toasts.length > countBefore, 'onerror toasts');
   assert.ok(/No Japanese voice/.test(harness.toasts[harness.toasts.length - 1].message), 'onerror with no ja voice uses guidance');
 });
+
+test('Review audio: late-loading Japanese voice is used, never misreported as missing', async () => {
+  const liveVoices = [];
+  const harness = loadReviewModule({
+    candidatesPayload: { groups: {} },
+    typesPayload: allTypesPreferences(true),
+    speechVoices: () => liveVoices.slice()
+  });
+  const container = await gotoSetup(harness);
+  const edit = container.querySelector('button[aria-label="Edit card types"]') || findFirstButtonByText(container, 'Edit');
+  assert.ok(edit, 'Edit card types control exists');
+  await clickAndSettle(edit);
+  const { form } = harness.openDialogCalls[0];
+  const preview = findFirstButtonByText(form, 'Preview Japanese voice');
+  assert.ok(preview, 'preview button present');
+  preview.click();
+  await sleep(30);
+  assert.ok(!harness.toasts.some((t) => /No Japanese voice/.test(t.message)), 'no false absence verdict while list is unloaded');
+  assert.equal(harness.speechCalls.length, 0, 'nothing spoken before voices arrive');
+  liveVoices.push({ lang: 'ja-JP' });
+  for (const handler of [...(harness.speechListeners.get('voiceschanged') || [])]) {
+    try { handler(); } catch { /* harness listeners are best-effort */ }
+  }
+  await sleep(200);
+  assert.equal(harness.speechCalls.length, 1, 'speaks once voices arrive');
+  assert.equal(harness.speechCalls[0]?.voice?.lang, 'ja-JP', 'picks the Japanese voice');
+  assert.ok(!harness.toasts.some((t) => /No Japanese voice/.test(t.message)), 'still no false guidance');
+});
+
+test('Review audio: voice list that never loads reports unknown, not missing', async () => {
+  const harness = loadReviewModule({
+    candidatesPayload: { groups: {} },
+    typesPayload: allTypesPreferences(true),
+    speechVoices: () => []
+  });
+  const container = await gotoSetup(harness);
+  const edit = container.querySelector('button[aria-label="Edit card types"]') || findFirstButtonByText(container, 'Edit');
+  await clickAndSettle(edit);
+  const { form } = harness.openDialogCalls[0];
+  const preview = findFirstButtonByText(form, 'Preview Japanese voice');
+  preview.click();
+  await sleep(2800);
+  assert.ok(!harness.toasts.some((t) => /No Japanese voice found/.test(t.message)), 'unloaded list is never declared missing');
+  assert.ok(harness.toasts.some((t) => /not loaded yet/.test(t.message)), 'unknown state says retry shortly');
+  assert.equal(harness.speechCalls.length, 0, 'nothing spoken without voices');
+});

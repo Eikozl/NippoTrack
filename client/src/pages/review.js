@@ -100,6 +100,76 @@ function japaneseVoiceGuidance() {
   return 'No Japanese voice found on this device — install one in your system settings to hear audio.';
 }
 
+// Browsers load the voice list asynchronously: getVoices() is often [] on
+// first read even when voices ARE installed, and voiceschanged can fire with
+// a partial list first. Never judge an unloaded list — wait for a non-empty
+// one (or the timeout) and only then decide whether Japanese is missing.
+const VOICE_LOAD_TIMEOUT_MS = 2500;
+
+function waitForVoices(synthesis, timeoutMs = VOICE_LOAD_TIMEOUT_MS) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (voices) => {
+      if (done) return;
+      done = true;
+      resolve(Array.isArray(voices) ? voices : []);
+    };
+    const readNow = () => {
+      try {
+        const voices = typeof synthesis.getVoices === 'function' ? synthesis.getVoices() : [];
+        return Array.isArray(voices) ? voices : [];
+      } catch {
+        return [];
+      }
+    };
+    const current = readNow();
+    if (current.length) {
+      try { cachedVoices = current.slice(); } catch { /* cache store is best-effort */ }
+      finish(current);
+      return;
+    }
+    const clearTimer = (timer) => {
+      try {
+        if (typeof window !== 'undefined' && window && typeof window.clearTimeout === 'function') window.clearTimeout(timer);
+        else clearTimeout(timer);
+      } catch { /* timer clear is best-effort */ }
+    };
+    const scheduleTimer = (fn, ms) => {
+      try {
+        if (typeof window !== 'undefined' && window && typeof window.setTimeout === 'function') return window.setTimeout(fn, ms);
+      } catch { /* fall through to global */ }
+      return setTimeout(fn, ms);
+    };
+    let timer = null;
+    const cleanup = () => {
+      if (timer !== null) { clearTimer(timer); timer = null; }
+      try { synthesis.removeEventListener('voiceschanged', onChange); } catch { /* detach is best-effort */ }
+    };
+    const onChange = () => {
+      let voices = [];
+      try {
+        voices = typeof synthesis.getVoices === 'function' ? synthesis.getVoices() : [];
+        if (Array.isArray(voices) && voices.length) {
+          try { cachedVoices = voices.slice(); } catch { /* cache store is best-effort */ }
+        }
+      } catch { /* read is best-effort */ }
+      if (Array.isArray(voices) && voices.length) { cleanup(); finish(voices); }
+    };
+    timer = scheduleTimer(() => { cleanup(); finish(readNow()); }, timeoutMs);
+    try {
+      if (typeof synthesis.addEventListener === 'function') {
+        synthesis.addEventListener('voiceschanged', onChange);
+      } else {
+        cleanup();
+        finish(readNow());
+      }
+    } catch {
+      cleanup();
+      finish(readNow());
+    }
+  });
+}
+
 function toISODate(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -836,20 +906,6 @@ const CARD_TYPE_DESCRIPTIONS = {
       activeUtterance = utterance;
       utterance.lang = 'ja-JP';
       utterance.rate = 0.9;
-      let picked = null;
-      try {
-        const voices = readVoices(synthesis);
-        picked = findJapaneseVoice(voices);
-        if (picked) utterance.voice = picked;
-      } catch { /* voice picking is best-effort; lang still guides the platform */ }
-      if (!picked) {
-        try {
-          const check = readVoices(synthesis);
-          if (!hasJapaneseVoice(check)) {
-            showToast(japaneseVoiceGuidance(), 'error');
-          }
-        } catch { /* guidance is best-effort */ }
-      }
       const clearIfCurrent = () => { if (activeUtterance === utterance) activeUtterance = null; };
       try {
         utterance.onend = () => { clearIfCurrent(); };
@@ -859,7 +915,7 @@ const CARD_TYPE_DESCRIPTIONS = {
           clearIfCurrent();
           try {
             const voices = readVoices(synthesis);
-            if (!hasJapaneseVoice(voices)) {
+            if (voices.length && !hasJapaneseVoice(voices)) {
               showToast(japaneseVoiceGuidance(), 'error');
             } else {
               showToast('Audio playback is unavailable on this device right now.', 'error');
@@ -869,29 +925,62 @@ const CARD_TYPE_DESCRIPTIONS = {
           }
         };
       } catch { /* handler attach is best-effort */ }
-      try { synthesis.cancel(); } catch { /* stop is best-effort */ }
-      try {
-        if (pendingSpeakTimer !== null && pendingSpeakTimer !== undefined) {
-          try {
-            if (typeof window !== 'undefined' && window && typeof window.clearTimeout === 'function') window.clearTimeout(pendingSpeakTimer);
-            else if (typeof clearTimeout === 'function') clearTimeout(pendingSpeakTimer);
-          } catch { /* timer clear is best-effort */ }
-          pendingSpeakTimer = null;
-        }
-      } catch { /* timer clear is best-effort */ }
-      const schedule = (typeof window !== 'undefined' && window && typeof window.setTimeout === 'function')
-        ? window.setTimeout.bind(window)
-        : setTimeout;
-      pendingSpeakTimer = schedule(() => {
-        pendingSpeakTimer = null;
+      const beginSpeaking = (voicesConfirmed) => {
         if (activeUtterance !== utterance) return;
+        let picked = null;
         try {
-          synthesis.speak(utterance);
-        } catch {
-          clearIfCurrent();
-          showToast('Audio playback is unavailable on this device right now.', 'error');
+          const voices = readVoices(synthesis);
+          picked = findJapaneseVoice(voices);
+          if (picked) utterance.voice = picked;
+        } catch { /* voice picking is best-effort; lang still guides the platform */ }
+        if (!picked && voicesConfirmed) {
+          try {
+            const check = readVoices(synthesis);
+            if (check.length && !hasJapaneseVoice(check)) {
+              showToast(japaneseVoiceGuidance(), 'error');
+            }
+          } catch { /* guidance is best-effort */ }
         }
-      }, 80);
+        try { synthesis.cancel(); } catch { /* stop is best-effort */ }
+        try {
+          if (pendingSpeakTimer !== null && pendingSpeakTimer !== undefined) {
+            try {
+              if (typeof window !== 'undefined' && window && typeof window.clearTimeout === 'function') window.clearTimeout(pendingSpeakTimer);
+              else if (typeof clearTimeout === 'function') clearTimeout(pendingSpeakTimer);
+            } catch { /* timer clear is best-effort */ }
+            pendingSpeakTimer = null;
+          }
+        } catch { /* timer clear is best-effort */ }
+        const schedule = (typeof window !== 'undefined' && window && typeof window.setTimeout === 'function')
+          ? window.setTimeout.bind(window)
+          : setTimeout;
+        pendingSpeakTimer = schedule(() => {
+          pendingSpeakTimer = null;
+          if (activeUtterance !== utterance) return;
+          try {
+            synthesis.speak(utterance);
+          } catch {
+            clearIfCurrent();
+            showToast('Audio playback is unavailable on this device right now.', 'error');
+          }
+        }, 80);
+      };
+      const cached = readVoices(synthesis);
+      if (cached.length) {
+        beginSpeaking(true);
+        return;
+      }
+      // List not loaded yet: never declare absence on it. Wait briefly; an
+      // empty list at timeout means "unknown", not "missing".
+      waitForVoices(synthesis).then((voices) => {
+        if (activeUtterance !== utterance) return;
+        if (!voices.length) {
+          showToast('Voice list has not loaded yet — try again in a moment.', 'error');
+          clearIfCurrent();
+          return;
+        }
+        beginSpeaking(true);
+      });
     } catch {
       showToast('Audio playback is unavailable on this device right now.', 'error');
     }
