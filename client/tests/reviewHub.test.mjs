@@ -297,7 +297,7 @@ function makeUi(doc, toasts) {
   return { element, pageHeader, loadingState, emptyState, errorState, showToast, withPendingAction };
 }
 
-function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, completePayload, gradeReject, historyPayload, sessionDetailPayload } = {}) {
+function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, completePayload, gradeReject, historyPayload, sessionDetailPayload, sessionItemsPayload } = {}) {
   const doc = new FakeDocument();
   const toasts = [];
   const apiCalls = [];
@@ -324,6 +324,11 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
       if (sessionDetailPayload === undefined) throw new Error(`unexpected apiRequest ${url}`);
       return typeof sessionDetailPayload === 'function' ? sessionDetailPayload(detailMatch[1], url) : sessionDetailPayload;
     }
+    const itemsMatch = url.match(/^\/api\/review\/sessions\/(\d+)\/items$/);
+    if (itemsMatch && (opts.method || 'GET') === 'GET') {
+      if (sessionItemsPayload === undefined) throw new Error(`unexpected apiRequest ${url}`);
+      return typeof sessionItemsPayload === 'function' ? sessionItemsPayload(itemsMatch[1], url) : sessionItemsPayload;
+    }
     if (url === '/api/review/grade' && (opts.method || 'GET') === 'POST') {
       if (gradeReject) throw gradeReject;
       if (typeof gradeImpl === 'function') return gradeImpl(url, opts);
@@ -342,9 +347,13 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
     .replace(/import\s*\{[^}]+\}\s*from\s*['"]\.\.\/ui['"];?/, '')
     .replace(/export\s+async\s+function\s+renderReview/, 'async function renderReview');
   code += '\nreturn { renderReview };';
-  const openDetailModal = ({ title, subtitle, content } = {}) => {
-    dialogs.push({ title: title === undefined ? '' : String(title), subtitle, content });
-    return () => {};
+  const openDetailModal = ({ title, subtitle, content, actions = [] } = {}) => {
+    dialogs.push({ title: title === undefined ? '' : String(title), subtitle, content, actions });
+    const hook = doc.createElement('div');
+    hook.setAttribute('data-test-dialog-actions', '');
+    for (const action of actions || []) hook.appendChild(action);
+    doc.body.appendChild(hook);
+    return () => { try { hook.remove(); } catch { /* already gone */ } };
   };
   const kanjiReferenceRoute = (character) => (
     typeof character === 'string' && /^\p{Script=Han}$/u.test(character)
@@ -755,7 +764,8 @@ test('Review Hub SESSION: start creates ONLY review_session (no grade/enroll at 
   await clickAndSettle(starts[starts.length - 1]);
   const sessionCalls = harness.apiCalls.filter((c) => c.url === '/api/review/sessions');
   assert.equal(sessionCalls.length, 1, 'start creates exactly one session');
-  assert.deepEqual(Object.keys(sessionCalls[0].options.body || {}).sort(), ['sourceFrom', 'sourceTo'].sort(), 'session body is source range only');
+  assert.deepEqual(Object.keys(sessionCalls[0].options.body || {}).sort(), ['items', 'sourceFrom', 'sourceTo'].sort(), 'session body is source range plus the exact queue');
+  assert.deepEqual(sessionCalls[0].options.body.items, [{ entityType: 'kanji', entityId: 1 }], 'queue carries identity only, never display payloads');
   assert.equal(harness.apiCalls.filter((c) => c.url === '/api/review/grade').length, 0, 'no grade at start');
 });
 
@@ -1082,8 +1092,13 @@ test('Review Hub endpoints: uses candidates/sessions/grade/complete contracts on
   assert.match(reviewSource, /entityType.*entityId.*result.*reviewSessionId|reviewSessionId/);
   // Grade payload keys exact.
   assert.match(reviewSource, /body:\s*\{\s*entityType:\s*item\.entityType,\s*entityId:\s*item\.entityId,\s*result,\s*reviewSessionId:\s*sessionId\s*\}/);
-  // Session creation sends only the source range (no enrollment payload).
-  assert.match(reviewSource, /body:\s*\{\s*sourceFrom:\s*lastSearch\.from,\s*sourceTo:\s*lastSearch\.to\s*\}/);
+  // Session creation sends the source range plus the exact persisted queue
+  // (entity identity only — never display payloads), so unfinished sessions
+  // can retake where the user left off.
+  assert.match(reviewSource, /body:\s*\{\s*sourceFrom:\s*lastSearch\.from,\s*sourceTo:\s*lastSearch\.to,\s*items:\s*picked\.map\(\(\{\s*entityType,\s*entityId\s*\}\)\s*=>\s*\(\{\s*entityType,\s*entityId\s*\}\)\)\s*\}/);
+  assert.match(reviewSource, /items:\s*retryQueue\.map\(\(\{\s*entityType,\s*entityId\s*\}\)\s*=>\s*\(\{\s*entityType,\s*entityId\s*\}\)\)/);
+  // Retake reads the persisted queue back through the items contract.
+  assert.ok(reviewSource.includes('/api/review/sessions/${session.id}/items'), 'retake queue contract');
   // No legacy auto-enroll references on the client.
   assert.ok(!reviewSource.includes('createReviewItem'), 'no createReviewItem reference on client');
 });
@@ -1218,4 +1233,70 @@ test('Review Hub HISTORY: session with zero items informs politely without a mod
   await clickAndSettle(emptyRow);
   assert.equal(dialogs.length, 0, 'empty session opens no modal');
   assert.ok(toasts.some((t) => /No items recorded in this session/.test(t.message)), 'empty state explains itself via toast');
+});
+
+function dialogButtonsByText(doc, text) {
+  const found = [];
+  for (const node of doc.body.querySelectorAll('button')) {
+    if (textOf(node).includes(text)) found.push(node);
+  }
+  return found;
+}
+
+test('Review Hub HISTORY: in-progress sessions offer Retake, completed ones do not', async () => {
+  const harness = loadReviewModule({
+    candidatesPayload: { groups: {} },
+    historyPayload: {
+      items: [historySessionFixture({ id: 58, completedAt: null }), historySessionFixture({ id: 59 })],
+      total: 2,
+      page: 1,
+      limit: 10
+    },
+    sessionDetailPayload: historyDetailFixture()
+  });
+  const { doc, renderReview, dialogs } = harness;
+  const container = doc.createElement('div');
+  doc.body.appendChild(container);
+  await renderReview(container);
+  await sleep(15);
+
+  const rows = historyRows(container);
+  assert.equal(rows.length, 2);
+  await clickAndSettle(rows[0]);
+  assert.equal(dialogs.length, 1);
+  assert.equal(dialogButtonsByText(doc, 'Retake').length, 1, 'in-progress modal offers Retake');
+  await clickAndSettle(rows[1]);
+  assert.equal(dialogs.length, 2);
+  assert.equal(dialogButtonsByText(doc, 'Retake').length, 1, 'completed modal adds no Retake');
+});
+
+test('Review Hub HISTORY: Retake resumes the same session with only ungraded items', async () => {
+  const harness = loadReviewModule({
+    candidatesPayload: { groups: {} },
+    historyPayload: { items: [historySessionFixture({ id: 60, completedAt: null })], total: 1, page: 1, limit: 10 },
+    sessionDetailPayload: historyDetailFixture(),
+    sessionItemsPayload: {
+      id: 60,
+      items: [
+        { position: 0, entityType: 'kanji', entityId: 1, display: 'GRADED-KANJI', reading: 'r', meaning: 'm', lastResult: 'Good' },
+        { position: 1, entityType: 'vocabulary', entityId: 2, display: 'TODO-VOCAB', reading: 'r2', meaning: 'm2', lastResult: null }
+      ]
+    }
+  });
+  const { doc, renderReview, apiCalls, toasts } = harness;
+  const container = doc.createElement('div');
+  doc.body.appendChild(container);
+  await renderReview(container);
+  await sleep(15);
+
+  const rows = historyRows(container);
+  assert.equal(rows.length, 1);
+  await clickAndSettle(rows[0]);
+  const retake = dialogButtonsByText(doc, 'Retake')[0];
+  assert.ok(retake, 'Retake action rendered');
+  await clickAndSettle(retake);
+  assert.equal(apiCalls.filter((c) => c.url === '/api/review/sessions/60/items').length, 1, 'retake queue fetched once');
+  const visible = textOf(container);
+  assert.match(visible, /TODO-VOCAB/, 'reviewing resumes with the ungraded item');
+  assert.ok(toasts.some((t) => /Resumed with 1 remaining item/.test(t.message)), 'resume toasted');
 });

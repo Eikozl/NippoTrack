@@ -277,7 +277,7 @@ async function recordReview(req, res) {
 
 async function createReviewSession(req, res) {
   try {
-    const { sourceFrom, sourceTo } = req.body || {};
+    const { sourceFrom, sourceTo, items } = req.body || {};
     if (!isValidDateString(sourceFrom) || !isValidDateString(sourceTo)) {
       throw new ValidationError('sourceFrom and sourceTo are required and must use YYYY-MM-DD format.');
     }
@@ -291,13 +291,69 @@ async function createReviewSession(req, res) {
     if (dateDiffDays(sourceFrom, sourceTo) > 366) {
       throw new ValidationError('Date range must not exceed 366 days.');
     }
-    const [result] = await pool.execute(
-      'INSERT INTO review_sessions (user_id, source_from, source_to) VALUES (?, ?, ?) RETURNING id_review_session AS insertId',
-      [req.user.id, sourceFrom, sourceTo]
-    );
-    const id = extractInsertId(result);
-    if (!id) throw new Error('Failed to create review session.');
-    return res.status(201).json({ id, sourceFrom, sourceTo, completedAt: null });
+    // Optional exact queue: persisted as review_session_items so an unfinished
+    // session can be retaken where the user left off. Validated (type, shape,
+    // ownership, no repeats, bounded) before anything is written.
+    let queueItems = [];
+    if (items !== undefined) {
+      if (!Array.isArray(items) || !items.length || items.length > 500) {
+        throw new ValidationError('items must be a non-empty array of at most 500 entries.');
+      }
+      const seen = new Set();
+      queueItems = items.map((entry, index) => {
+        if (!entry || typeof entry !== 'object') {
+          throw new ValidationError('items must be entries with entityType and entityId.');
+        }
+        validateAllowedValues(entry.entityType, ['kanji', 'vocabulary', 'grammar'], 'entityType');
+        const entityId = Number(entry.entityId);
+        if (!Number.isInteger(entityId) || entityId <= 0) {
+          throw new ValidationError(`${entry.entityType} id must be a positive integer`);
+        }
+        const key = `${entry.entityType}:${entityId}`;
+        if (seen.has(key)) throw new ValidationError('items must not repeat the same entity.');
+        seen.add(key);
+        return { entityType: entry.entityType, entityId, position: index };
+      });
+      for (const entry of queueItems) {
+        const config = ENTITY_CONFIG[entry.entityType];
+        const [entityRows] = await pool.execute(
+          `SELECT 1 FROM ${config.table} WHERE ${config.pk} = ? AND user_id = ?`,
+          [entry.entityId, req.user.id]
+        );
+        if (!entityRows[0]) return res.status(404).json({ error: 'review entity not found' });
+      }
+    }
+    if (!queueItems.length) {
+      const [result] = await pool.execute(
+        'INSERT INTO review_sessions (user_id, source_from, source_to) VALUES (?, ?, ?) RETURNING id_review_session AS insertId',
+        [req.user.id, sourceFrom, sourceTo]
+      );
+      const id = extractInsertId(result);
+      if (!id) throw new Error('Failed to create review session.');
+      return res.status(201).json({ id, sourceFrom, sourceTo, completedAt: null });
+    }
+    let connection = null;
+    try {
+      connection = await pool.getConnection();
+      await connection.beginTransaction();
+      const [result] = await connection.execute(
+        'INSERT INTO review_sessions (user_id, source_from, source_to) VALUES (?, ?, ?) RETURNING id_review_session AS insertId',
+        [req.user.id, sourceFrom, sourceTo]
+      );
+      const id = extractInsertId(result);
+      if (!id) throw new Error('Failed to create review session.');
+      await connection.execute(
+        `INSERT INTO review_session_items (id_review_session, entity_type, entity_id, position) VALUES ${queueItems.map(() => '(?, ?, ?, ?)').join(', ')}`,
+        queueItems.flatMap((entry) => [id, entry.entityType, entry.entityId, entry.position])
+      );
+      await connection.commit();
+      connection.release();
+      connection = null;
+      return res.status(201).json({ id, sourceFrom, sourceTo, completedAt: null, itemCount: queueItems.length });
+    } catch (error) {
+      if (connection) { await connection.rollback().catch(() => {}); connection.release(); connection = null; }
+      throw error;
+    }
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 500, defaultMessage: 'Unable to start review session.' });
   }
@@ -553,6 +609,68 @@ async function getReviewSession(req, res) {
   }
 }
 
+// Retake queue: the persisted session items in start order, each annotated
+// with its latest grade inside THIS session (null = not yet reviewed).
+// Only open sessions are resumable; missing-or-foreign 404s without leaking
+// existence, mirroring requireOpenSession.
+async function getReviewSessionItems(req, res) {
+  try {
+    const id = parseIdParam(req, 'review session');
+    try {
+      await requireOpenSession(pool, id, req.user.id);
+    } catch (sessionError) {
+      if (sessionError && sessionError.status === 404) {
+        return res.status(404).json({ error: 'review session not found' });
+      }
+      throw sessionError;
+    }
+    const [rows] = await pool.execute(
+      `SELECT si.position AS "position",
+        si.entity_type AS "entityType",
+        si.entity_id AS "entityId",
+        COALESCE(v.word, k.character_kanji, g.grammar_point) AS display,
+        v.reading AS reading,
+        COALESCE(v.meaning, k.meaning, g.meaning) AS meaning,
+        last_event.result AS "lastResult"
+       FROM review_session_items si
+       JOIN review_sessions rs ON rs.id_review_session = si.id_review_session
+       LEFT JOIN vocabulary v ON si.entity_type = 'vocabulary' AND v.id_vocabulary = si.entity_id AND v.user_id = ?
+       LEFT JOIN kanji k ON si.entity_type = 'kanji' AND k.id_kanji = si.entity_id AND k.user_id = ?
+       LEFT JOIN grammar_points g ON si.entity_type = 'grammar' AND g.id_grammar = si.entity_id AND g.user_id = ?
+       LEFT JOIN LATERAL (
+         SELECT re.result
+         FROM review_events re
+         JOIN review_items ri ON ri.id_review_item = re.id_review_item
+         WHERE re.id_review_session = si.id_review_session
+           AND ((si.entity_type = 'vocabulary' AND ri.id_vocabulary = si.entity_id)
+             OR (si.entity_type = 'kanji' AND ri.id_kanji = si.entity_id)
+             OR (si.entity_type = 'grammar' AND ri.id_grammar = si.entity_id))
+         ORDER BY re.reviewed_at DESC, re.id_review_event DESC
+         LIMIT 1
+       ) last_event ON true
+       WHERE si.id_review_session = ? AND rs.user_id = ?
+       ORDER BY si.position ASC, si.id_review_session_item ASC
+       LIMIT 500`,
+      [req.user.id, req.user.id, req.user.id, id, req.user.id]
+    );
+    return res.json({
+      id,
+      items: (rows || []).map((row) => ({
+        position: Number(row.position),
+        entityType: row.entityType,
+        entityId: Number(row.entityId),
+        display: row.display,
+        reading: row.reading || null,
+        meaning: row.meaning || null,
+        lastResult: row.lastResult || null
+      }))
+    });
+  } catch (error) {
+    if (error && error.status === 404) return res.status(404).json({ error: 'review session not found' });
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load review session items.' });
+  }
+}
+
 // "Frequently difficult" = a review item with >= DIFFICULT_THRESHOLD
 // 'Again' events in its history (reuses the existing Again result; no leech
 // system, no ML, no second review classification). Read-only, one bounded
@@ -608,4 +726,4 @@ async function listDifficultItems(req, res) {
   }
 }
 
-module.exports = { createReviewItem, listDueReviews, listDueReviewCards, recordReview, createReviewSession, completeReviewSession, gradeEntity, listCandidates, listReviewSessions, getReviewSession, listDifficultItems, getReviewTypes, putReviewPreferences, getReviewPatterns };
+module.exports = { createReviewItem, listDueReviews, listDueReviewCards, recordReview, createReviewSession, completeReviewSession, gradeEntity, listCandidates, listReviewSessions, getReviewSession, getReviewSessionItems, listDifficultItems, getReviewTypes, putReviewPreferences, getReviewPatterns };

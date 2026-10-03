@@ -61,6 +61,7 @@ app.get('/api', (req, res) => {
       'GET /api/review/difficult',
       'GET /api/review/sessions',
       'GET /api/review/sessions/:id',
+      'GET /api/review/sessions/:id/items',
       'GET /api/review/due',
       'GET /api/review/types',
       'GET /api/review/patterns',

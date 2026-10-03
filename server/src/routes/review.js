@@ -10,6 +10,7 @@ router.get('/patterns', controller.getReviewPatterns);
 router.put('/preferences', controller.putReviewPreferences);
 router.get('/sessions', controller.listReviewSessions);
 router.get('/sessions/:id', controller.getReviewSession);
+router.get('/sessions/:id/items', controller.getReviewSessionItems);
 router.post('/sessions', controller.createReviewSession);
 router.post('/sessions/:id/complete', controller.completeReviewSession);
 router.post('/grade', controller.gradeEntity);

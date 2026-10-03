@@ -192,3 +192,4 @@ donde el prompt de V5.3a asumÃ­a otra cosa se marca como [DESVIACIÃ“N].
 - Import resiliente: reintento 1x (análisis) y commit por item con reintento ante fallos de transporte del pooler; ParserError excluido del reintento. Hallazgo: CHECK 23514 tumbaba los inserts (sin migración no hay fuente nueva).
 - Live: cuento real importa punta a punta (N1, 1662 chars, 0 mojibake). Nota honesta: el clasificador es estricto (hasta ?????? sale N2), así que los cuentos también salen N1; el valor de Hukumusume es variedad + sitio conocido, no facilidad.
 - Separación visual biblioteca (mt-4): no hay márgenes negativos en el código; era apilado sin aire.
+- Retake (migración 026 review_session_items): la queue exacta con orden persiste al crear (normal, repeat e inmersión); GET /sessions/:id/items devuelve pendientes+lastResult; el modal de In progress ofrece Retake y reanuda la MISMA sesión donde quedó (terminar la completa, sin duplicar historial). Verifier 47/51/23/0.

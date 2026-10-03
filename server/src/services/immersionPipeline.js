@@ -483,6 +483,16 @@ async function createImmersionSession(pool, userId, { text, selected } = {}) {
       await createReviewItem(connection, targetColumn, targetId);
     }
 
+    // 3b. Persisted retake queue: the same ordered entities as
+    // review_session_items so an unfinished immersion review can resume
+    // exactly where the user left off.
+    if (reviewTargets.length) {
+      await connection.execute(
+        `INSERT INTO review_session_items (id_review_session, entity_type, entity_id, position) VALUES ${reviewTargets.map(() => '(?, ?, ?, ?)').join(', ')}`,
+        reviewTargets.flatMap(([ , entityType, entityId], position) => [reviewSessionId, entityType, entityId, position])
+      );
+    }
+
     // 4. Immersion session record (truncated to the accepted maximum).
     const storedText = truncateCodePoints(sourceText, MAX_IMMERSION_TEXT_LENGTH);
     const [immersionResult] = await connection.execute(

@@ -56,6 +56,7 @@ function makeConnection(behavior = {}) {
       if (/INSERT INTO grammar_points/i.test(sql)) return [{ insertId: 80 }];
       if (/INSERT INTO review_sessions/i.test(sql)) return [{ insertId: 55 }];
       if (/INSERT INTO review_items/i.test(sql)) return [{ affectedRows: 1 }];
+    if (/INSERT INTO review_session_items/i.test(sql)) return [{ affectedRows: 8 }];
       if (/INSERT INTO immersion_sessions/i.test(sql)) return [{ insertId: 77 }];
       if (/INSERT INTO immersion_session_items/i.test(sql)) return [{ affectedRows: 2 }];
       if (/character_kanji = ANY\(\?\)/i.test(sql)) {
@@ -152,6 +153,12 @@ test('create-session persists session, review items and encounters in one transa
     const reviewItemInserts = sqls.filter((sql) => /INSERT INTO review_items/i.test(sql));
     assert.ok(reviewItemInserts.length >= 2);
     for (const sql of reviewItemInserts) assert.match(sql, /ON CONFLICT \((id_kanji|id_vocabulary|id_grammar)\) DO NOTHING/i);
+    // Retake queue persisted against the same review session, in order.
+    const queueInsert = connection.seen.find((entry) => entry.sql && /INSERT INTO review_session_items/i.test(entry.sql));
+    assert.ok(queueInsert, 'review_session_items insert recorded');
+    assert.equal(queueInsert.params[0], 55);
+    const positions = queueInsert.params.filter((_, index) => index % 4 === 3);
+    assert.deepEqual(positions, positions.map((_, index) => index), 'positions are sequential from 0');
     assert.ok(sqls.some((sql) => /INSERT INTO immersion_sessions/i.test(sql) && /RETURNING id_immersion_session AS insertId/i.test(sql)));
     const itemInsert = connection.seen.find((entry) => entry.sql && /INSERT INTO immersion_session_items/i.test(entry.sql));
     assert.ok(itemInsert);

@@ -347,11 +347,57 @@ export async function renderReview(container) {
         ...(status ? [element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: status })] : [])
       ]);
     }));
-    openDetailModal({
+    // In-progress sessions offer Retake: resume the same open session where
+    // the user left off (persisted queue minus already-graded items).
+    const actions = [];
+    if (!session.completedAt) {
+      const retakeButton = element('button', {
+        className: 'button-primary',
+        text: 'Retake',
+        attrs: { type: 'button', 'aria-label': `Resume session from ${date} where you left off` }
+      });
+      retakeButton.addEventListener('click', () => { retakeSession(session, closeSessionModal); });
+      actions.push(retakeButton);
+    }
+    const closeSessionModal = openDetailModal({
       title: `${type} Review Session • ${date}`,
       subtitle: `${items.length} item${items.length === 1 ? '' : 's'} reviewed`,
-      content: [list]
+      content: [list],
+      actions
     });
+  }
+
+  // Retake: resume an unfinished session exactly where the user left off.
+  // The persisted queue minus already-graded items becomes the new queue on
+  // the SAME open session, so finishing completes it instead of duplicating
+  // history. Already-graded Again/Hard items seed the repeat-failed subset.
+  async function retakeSession(session, closeModal) {
+    let data = null;
+    try {
+      data = await apiRequest(`/api/review/sessions/${session.id}/items`);
+    } catch (error) {
+      showToast(error?.message || 'Could not load the session queue.', 'error');
+      return;
+    }
+    const stored = Array.isArray(data?.items) ? data.items : [];
+    const remaining = stored.filter((entry) => !entry.lastResult);
+    if (!remaining.length) {
+      showToast(stored.length ? 'Nothing left to retake in this session.' : 'No items recorded in this session.', 'info');
+      return;
+    }
+    sessionId = session.id;
+    queue = remaining.map(({ lastResult, position, ...rest }) => rest);
+    currentIndex = 0;
+    revealed = false;
+    graded = stored
+      .filter((entry) => entry.lastResult === 'Again' || entry.lastResult === 'Hard')
+      .map(({ lastResult, position, ...rest }) => ({ ...rest, result: lastResult }));
+    activeReview = { sessionId, selected: queue };
+    lastSearch = { from: session.sourceFrom || null, to: session.sourceTo || null };
+    if (typeof closeModal === 'function') { try { closeModal(); } catch { /* already closed */ } }
+    setStage('REVIEWING');
+    renderCard();
+    showToast(`Resumed with ${remaining.length} remaining item${remaining.length === 1 ? '' : 's'}.`);
   }
 
   async function loadHistory() {
@@ -954,7 +1000,11 @@ const CARD_TYPE_DESCRIPTIONS = {
       withPendingAction(startReviewBtn, async () => {
         const session = await apiRequest('/api/review/sessions', {
           method: 'POST',
-          body: { sourceFrom: lastSearch.from, sourceTo: lastSearch.to }
+          body: {
+            sourceFrom: lastSearch.from,
+            sourceTo: lastSearch.to,
+            items: picked.map(({ entityType, entityId }) => ({ entityType, entityId }))
+          }
         });
         sessionId = session.id;
         queue = picked;
@@ -1159,12 +1209,17 @@ const CARD_TYPE_DESCRIPTIONS = {
         // A fresh session groups the retry (the completed one is closed);
         // items are the already-graded failed subset — no duplicates.
         withPendingAction(repeatButton, async () => {
+          const retryQueue = failed.map(({ result, ...rest }) => rest);
           const session = await apiRequest('/api/review/sessions', {
             method: 'POST',
-            body: { sourceFrom: lastSearch.from, sourceTo: lastSearch.to }
+            body: {
+              sourceFrom: lastSearch.from,
+              sourceTo: lastSearch.to,
+              items: retryQueue.map(({ entityType, entityId }) => ({ entityType, entityId }))
+            }
           });
           sessionId = session.id;
-          queue = failed.map(({ result, ...rest }) => rest);
+          queue = retryQueue;
           currentIndex = 0;
           revealed = false;
           graded = [];
