@@ -32,6 +32,12 @@ const MAX_LIBRARY_LIMIT = 50;
 const MAX_IMPORT_ITEMS = 20;
 const MAX_DATABASE_IN_VALUES = 1000;
 const SOURCE_TIMEOUT_MS = 8000;
+// Minimum text length for a level estimate. Below ~50 code points (a couple
+// of sentences) the sentence-length and grammar adjustments are single-sample
+// noise — e.g. one N3 word in an 18-character paste reporting N3 — so short
+// texts carry level null instead of a misleading badge. Annotations are still
+// computed in full; only the level + confidence are withheld.
+const MIN_LEVEL_CHARACTERS = 50;
 // Aozora's old works index (sakuhin_top.html) was retired; the per-kana work
 // indexes (e.g. sakuhin_a1.html) carry the same /cards/N/cardN.html links the
 // listing parser accepts. One fixed index per request keeps the import
@@ -354,9 +360,10 @@ async function analyzeReading(executor, userId, rawText) {
   const lexical = await collectLexicalAnalysis(executor, userId, sentences);
   const stats = buildStats(text, positions, kanjiEstimate, lexical.vocabulary, lexical.grammar);
   const blended = deriveBlendedLevel(kanjiEstimate.level, kanjiEstimate.confidence, stats);
+  const leveled = stats.characters >= MIN_LEVEL_CHARACTERS ? blended : { level: null, confidence: 0 };
   return {
-    level: blended.level,
-    confidence: blended.confidence,
+    level: leveled.level,
+    confidence: leveled.confidence,
     stats,
     annotations: makeAnnotations(positions, kanjiData, lexical.vocabulary, lexical.grammar)
   };
@@ -386,8 +393,8 @@ async function listReadingLibrary(executor, userId, {
   if (level !== undefined && level !== '' && !JLPT_LEVELS.includes(level)) {
     throw new ValidationError(`level must be one of: ${JLPT_LEVELS.join(', ')}`);
   }
-  if (source !== undefined && source !== '' && !['aozora', 'user'].includes(source)) {
-    throw new ValidationError('source must be one of: aozora, user.');
+  if (source !== undefined && source !== '' && !['aozora', 'hukumusume', 'user'].includes(source)) {
+    throw new ValidationError('source must be one of: aozora, hukumusume, user.');
   }
   if (date !== undefined && date !== '' && !isValidDateString(date)) {
     throw new ValidationError('date must use YYYY-MM-DD format.');
@@ -1210,6 +1217,7 @@ module.exports = {
   MAX_LIBRARY_LIMIT,
   MAX_READING_TEXT_LENGTH,
   MAX_READING_TITLE_LENGTH,
+  MIN_LEVEL_CHARACTERS,
   buildAnnotations,
   analyzeTextForReading,
   classifyLevel,

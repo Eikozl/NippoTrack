@@ -50,14 +50,15 @@ function analysisPool(sqlCalls = []) {
   };
 }
 
-test('classifier is deterministic, reports user-scoped kanji stats, and empty text has null level/confidence zero', async () => {
+test('classifier is deterministic, reports user-scoped kanji stats, and withholds level below the length threshold', async () => {
+  assert.equal(gradedReader.MIN_LEVEL_CHARACTERS, 50);
   const calls = [];
   await withPoolStubs({ execute: analysisPool(calls) }, async () => {
-    const first = await gradedReader.classifyLevel(pool, USER_ID, '学');
-    const second = await gradedReader.classifyLevel(pool, USER_ID, '学');
+    const first = await gradedReader.classifyLevel(pool, USER_ID, `学${'あ'.repeat(49)}`);
+    const second = await gradedReader.classifyLevel(pool, USER_ID, `学${'あ'.repeat(49)}`);
     assert.deepEqual(first, second);
     assert.equal(first.level, 'N5');
-    assert.equal(first.stats.characters, 1);
+    assert.equal(first.stats.characters, 50);
     assert.equal(first.stats.uniqueKanji, 1);
     assert.equal(first.stats.knownKanjiPct, 100);
     assert.deepEqual(first.stats.byLevel, { N5: 1, N4: 0, N3: 0, N2: 0, N1: 0, unclassified: 0 });
@@ -69,9 +70,14 @@ test('classifier is deterministic, reports user-scoped kanji stats, and empty te
     assert.equal(long.stats.characters, 2101);
     assert.equal(long.stats.uniqueKanji, 1);
 
+    // Below the threshold (and empty texts) the level is withheld instead of
+    // reporting single-sample noise — annotations are unaffected.
+    for (const tiny of ['学', 'これは本です。', '   ']) {
+      const result = await gradedReader.classifyLevel(pool, USER_ID, tiny);
+      assert.equal(result.level, null, `no level for ${result.stats.characters} chars`);
+      assert.equal(result.confidence, 0);
+    }
     const empty = await gradedReader.classifyLevel(pool, USER_ID, '   ');
-    assert.equal(empty.level, null);
-    assert.equal(empty.confidence, 0);
     assert.equal(empty.stats.characters, 0);
     assert.equal(empty.stats.grammarMatchesPer1000, 0);
   });
