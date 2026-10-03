@@ -21,14 +21,13 @@
 // page (existing /api/level/progress data); this page links there instead of
 // duplicating that computation.
 
-import { apiRequest, listReadingLibrary, getReadingText, createUserReadingText, updateReadingProgress, importReadingSources, listReadingProgress } from '../api';
-import { element, pageHeader, showToast, withPendingAction, paginationControls, openDetailModal, emptyState, errorState, loadingState } from '../ui';
+import { apiRequest, listReadingLibrary, getReadingText, createUserReadingText, deleteReadingText, updateReadingProgress, importReadingSources, listReadingProgress } from '../api';
+import { element, pageHeader, showToast, withPendingAction, paginationControls, openDetailModal, confirmDialog, emptyState, errorState, loadingState } from '../ui';
 
 const LIBRARY_PAGE_SIZE = 12;
 const LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1'];
 const SOURCES = [
   { value: 'aozora', label: 'Aozora Bunko' },
-  { value: 'nhk', label: 'NHK Easy News' },
   { value: 'user', label: 'My texts' }
 ];
 
@@ -100,7 +99,7 @@ async function renderLibraryView(container) {
     if (!items.length) {
       gridWrap.replaceChildren(emptyState({
         title: 'No reading texts yet',
-        description: 'Import from NHK Easy or Aozora, or paste your own text to start reading.'
+        description: 'Import from Aozora, or paste your own text to start reading.'
       }));
       return;
     }
@@ -130,42 +129,43 @@ async function renderLibraryView(container) {
   const applyButton = element('button', { className: 'button-secondary w-full sm:w-auto sm:justify-self-start', text: 'Apply filters', attrs: { type: 'button' } });
   applyButton.addEventListener('click', () => refresh(1));
 
-  function importUnavailableMessage(reason, sourceName) {
-    // The API reports fetch-level failures as "Source request failed." — tell
-    // the user what that actually means instead of echoing the raw reason.
-    if (!reason || /request failed/i.test(reason)) {
-      return `${sourceName} could not be reached from this network. Check your connection and try again.`;
+  // NHK Easy import was retired: NHK discontinued its public feed, so only
+  // Aozora remains as an importable source (plus pasting your own text).
+  // Imports run in the background (a full import classifies every text and
+  // takes minutes), so this polls the library until the new rows land.
+  let importPollTimer = null;
+  async function pollLibraryForImports(baseline, attempt = 0) {
+    if (importPollTimer) window.clearTimeout(importPollTimer);
+    importPollTimer = null;
+    if (attempt >= 24) {
+      showToast('Import is taking longer than expected — check back in a bit.');
+      return;
     }
-    return reason;
-  }
-
-  const importNhk = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Import NHK Easy', attrs: { type: 'button' } });
-  importNhk.addEventListener('click', () => withPendingAction(importNhk, async () => {
     try {
-      const result = await importReadingSources('nhk');
-      if (result?.status === 'unavailable') {
-        showToast(importUnavailableMessage(result?.reason, 'NHK Easy'), 'warning');
+      const data = await listReadingLibrary({ source: 'aozora', page: 1, limit: 1 });
+      if (Number(data?.total || 0) > baseline) {
+        refresh(1);
+        showToast('Aozora import finished.');
         return;
       }
-      showToast(`Imported ${Number(result?.textsImported ?? result?.imported ?? 0)} item(s) from NHK Easy.`);
-      refresh(1);
-    } catch (error) {
-      showToast(error?.message || 'Could not reach the source. Check your connection.', 'error');
-    }
-  }));
+    } catch { /* transient failures must not stop the poll */ }
+    importPollTimer = window.setTimeout(() => { pollLibraryForImports(baseline, attempt + 1); }, 15000);
+  }
 
   const importAozora = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Import Aozora', attrs: { type: 'button' } });
   importAozora.addEventListener('click', () => withPendingAction(importAozora, async () => {
     try {
+      const before = await listReadingLibrary({ source: 'aozora', page: 1, limit: 1 }).catch(() => null);
+      const baseline = Number(before?.total || 0);
       const result = await importReadingSources('aozora');
-      if (result?.status === 'unavailable') {
-        showToast(importUnavailableMessage(result?.reason, 'Aozora'), 'warning');
+      if (result?.status !== 'accepted') {
+        showToast('Import did not start. Please try again.', 'error');
         return;
       }
-      showToast(`Imported ${Number(result?.textsImported ?? result?.imported ?? 0)} item(s) from Aozora.`);
-      refresh(1);
+      showToast('Import started — new texts will appear below as they arrive.');
+      pollLibraryForImports(baseline);
     } catch (error) {
-      showToast(error?.message || 'Could not reach the source. Check your connection.', 'error');
+      showToast(error?.message || 'Could not reach the API. Check your connection.', 'error');
     }
   }));
 
@@ -245,7 +245,7 @@ async function renderLibraryView(container) {
       applyButton,
       element('div', { className: 'grid gap-2 border-t border-stone pt-3' }, [
         element('p', { className: 'text-xs font-medium text-muted', text: 'More texts' }),
-        element('div', { className: 'grid grid-cols-1 gap-2 sm:grid-cols-3' }, [importNhk, importAozora, progressLink])
+        element('div', { className: 'grid grid-cols-1 gap-2 sm:grid-cols-2' }, [importAozora, progressLink])
       ])
     ]),
     gridWrap,
@@ -523,8 +523,32 @@ async function renderReader(container, textId) {
   window.addEventListener('scroll', onScroll, { passive: true });
   cleanupReader = () => window.removeEventListener('scroll', onScroll);
 
+  // Owner-only delete with the same confirm pattern as the kanji/vocabulary
+  // CRUDs. Shared (imported) library texts are read-only and get no button;
+  // the API 404s any non-owned id either way.
+  const deleteButton = element('button', {
+    className: 'button-danger min-h-9 px-3 py-1.5 text-xs',
+    text: 'Delete text',
+    attrs: { type: 'button', 'aria-label': `Delete ${data.title}` }
+  });
+  deleteButton.addEventListener('click', () => {
+    confirmDialog({
+      title: 'Delete reading text?',
+      description: `This will permanently delete “${data.title}” and its reading progress. This cannot be undone.`,
+      confirmLabel: 'Delete',
+      onConfirm: async () => {
+        await deleteReadingText(textId);
+        showToast('Reading text deleted.');
+        window.location.hash = '#reading';
+      }
+    });
+  });
+
   container.replaceChildren(element('section', { className: 'mx-auto w-full max-w-3xl' }, [
-    element('a', { className: 'text-sm font-medium text-muted underline-offset-4 hover:text-ink hover:underline', text: '← Back to library', attrs: { href: '#reading' } }),
+    element('div', { className: 'flex items-center justify-between gap-3' }, [
+      element('a', { className: 'text-sm font-medium text-muted underline-offset-4 hover:text-ink hover:underline', text: '← Back to library', attrs: { href: '#reading' } }),
+      ...(data.sourceType === 'user' ? [deleteButton] : [])
+    ]),
     element('header', { className: 'mt-2 flex flex-wrap items-center gap-x-3 gap-y-2' }, [
       element('h1', { className: 'min-w-0 flex-1 break-words text-xl font-semibold text-ink', text: data.title }),
       levelBadge(data.level) || element('span', { className: 'text-xs text-muted', text: data.sourceType || 'user' })

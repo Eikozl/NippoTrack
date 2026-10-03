@@ -32,8 +32,10 @@ const MAX_LIBRARY_LIMIT = 50;
 const MAX_IMPORT_ITEMS = 20;
 const MAX_DATABASE_IN_VALUES = 1000;
 const SOURCE_TIMEOUT_MS = 8000;
-const NHK_RSS_URL = 'https://www3.nhk.or.jp/rss/news/easy.xml';
-const AOZORA_LISTING_URL = 'https://www.aozora.gr.jp/index_pages/sakuhin_top.html';
+// Aozora's old works index (sakuhin_top.html) was retired; the per-kana work
+// indexes (e.g. sakuhin_a1.html) carry the same /cards/N/cardN.html links the
+// listing parser accepts. One fixed index keeps the import bounded.
+const AOZORA_LISTING_URL = 'https://www.aozora.gr.jp/index_pages/sakuhin_a1.html';
 const LEVEL_RANK = Object.freeze({ N5: 1, N4: 2, N3: 3, N2: 4, N1: 5 });
 const LEVEL_BY_RANK = Object.freeze(['N5', 'N4', 'N3', 'N2', 'N1']);
 
@@ -370,8 +372,8 @@ async function listReadingLibrary(executor, userId, {
   if (level !== undefined && level !== '' && !JLPT_LEVELS.includes(level)) {
     throw new ValidationError(`level must be one of: ${JLPT_LEVELS.join(', ')}`);
   }
-  if (source !== undefined && source !== '' && !['aozora', 'nhk', 'user'].includes(source)) {
-    throw new ValidationError('source must be one of: aozora, nhk, user.');
+  if (source !== undefined && source !== '' && !['aozora', 'user'].includes(source)) {
+    throw new ValidationError('source must be one of: aozora, user.');
   }
   if (date !== undefined && date !== '' && !isValidDateString(date)) {
     throw new ValidationError('date must use YYYY-MM-DD format.');
@@ -495,6 +497,45 @@ async function createUserReadingText(executor, userId, { text: rawText, title: r
   }
 }
 
+async function deleteUserReadingText(executor, userId, textId) {
+  const connection = await executor.getConnection();
+  try {
+    await connection.beginTransaction();
+    // Only the owner's own texts are deletable: shared (imported) library
+    // rows carry user_id NULL and never match, so they 404 here.
+    const [rows] = await connection.execute(
+      'SELECT id_reading_text, source_id FROM reading_texts WHERE id_reading_text = ? AND user_id = ?',
+      [textId, userId]
+    );
+    const row = rows?.[0];
+    if (!row) {
+      await connection.rollback();
+      return null;
+    }
+    // Progress rows follow via ON DELETE CASCADE.
+    await connection.execute(
+      'DELETE FROM reading_texts WHERE id_reading_text = ? AND user_id = ?',
+      [textId, userId]
+    );
+    // Drop the private per-text user source when orphaned; shared import
+    // sources are never user-owned so this cannot remove library data.
+    if (row.source_id) {
+      await connection.execute(
+        `DELETE FROM reading_sources WHERE id_reading_source = ? AND type = 'user'
+         AND NOT EXISTS (SELECT 1 FROM reading_texts WHERE source_id = ?)`,
+        [row.source_id, row.source_id]
+      );
+    }
+    await connection.commit();
+    return { id: textId, deleted: true };
+  } catch (error) {
+    await connection.rollback().catch(() => {});
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
 async function upsertReadingProgress(executor, userId, textId, {
   position,
   timeSpentSeconds,
@@ -515,21 +556,32 @@ async function upsertReadingProgress(executor, userId, textId, {
   if (completed !== undefined && typeof completed !== 'boolean') throw new ValidationError('completed must be a boolean.');
   // PUT replaces the progress state: omitted optional values reset to their
   // schema defaults, making retries deterministic rather than additive.
+  // Position is the one exception: it only ever advances (GREATEST), so a
+  // stale or out-of-order save — second tab, re-render before first autosave,
+  // retried request — can never move the reader backwards.
   const [result] = await executor.execute(
     `INSERT INTO user_reading_progress (user_id, text_id, position, time_spent_seconds, completed_at)
      SELECT ?, rt.id_reading_text, ?, ?, CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END
      FROM reading_texts rt
      WHERE rt.id_reading_text = ? AND (rt.user_id IS NULL OR rt.user_id = ?)
      ON CONFLICT (user_id, text_id) DO UPDATE SET
-       position = EXCLUDED.position,
+       position = GREATEST(user_reading_progress.position, EXCLUDED.position),
        time_spent_seconds = EXCLUDED.time_spent_seconds,
        completed_at = EXCLUDED.completed_at
      RETURNING id AS insertId`,
     [userId, position, timeSpentSeconds ?? 0, completed ?? false, textId, userId]
   );
   if (!extractInsertId(result)) return null;
+  // Echo the stored position (post-GREATEST), never the submitted one: the
+  // request adapter only surfaces the insert id from RETURNING rows, so read
+  // the authoritative value back with one indexed lookup.
+  const [storedRows] = await executor.execute(
+    'SELECT position FROM user_reading_progress WHERE user_id = ? AND text_id = ?',
+    [userId, textId]
+  );
+  const storedPosition = Number(storedRows?.[0]?.position);
   return {
-    position,
+    position: Number.isSafeInteger(storedPosition) ? storedPosition : position,
     timeSpentSeconds: timeSpentSeconds ?? 0,
     completed: completed ?? false
   };
@@ -604,12 +656,6 @@ function plainTextFromMarkup(value) {
     .trim();
 }
 
-function xmlTag(xml, tagName) {
-  const escaped = tagName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = String(xml).match(new RegExp(`<${escaped}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${escaped}\\s*>`, 'i'));
-  return match ? plainTextFromMarkup(match[1]) : '';
-}
-
 function safeExternalUrl(value, allowedHost) {
   try {
     const url = new URL(String(value || '').trim());
@@ -618,6 +664,26 @@ function safeExternalUrl(value, allowedHost) {
   } catch (_) {
     return null;
   }
+}
+
+// Aozora serves legacy pages as EUC-JP or Shift_JIS. Sniff the charset from
+// the content-type header, else from a meta tag in the first 2KB, and
+// transcode; UTF-8 (and pure-ASCII payloads, which decode identically
+// everywhere) pass through untouched. Unknown labels fall back to UTF-8.
+function decodeSourceBytes(buffer, contentType) {
+  const fromHeader = /charset\s*=\s*["']?([\w-]+)/i.exec(String(contentType || ''))?.[1]?.toLowerCase();
+  let charset = fromHeader;
+  if (!charset) {
+    const head = buffer.subarray(0, 2048).toString('latin1');
+    charset = (/content\s*=\s*["'][^"']*charset=([\w-]+)/i.exec(head)?.[1]
+      || /<meta\b[^>]*charset\s*=\s*["']?([\w-]+)/i.exec(head)?.[1] || '').toLowerCase() || null;
+  }
+  if (charset && !['utf-8', 'utf8', 'ascii', 'us-ascii'].includes(charset)) {
+    try {
+      return new TextDecoder(charset).decode(buffer);
+    } catch (_) { /* unknown/unsupported label: fall through to UTF-8 */ }
+  }
+  return buffer.toString('utf8');
 }
 
 async function readResponseBody(response, maxBytes) {
@@ -644,7 +710,7 @@ async function readResponseBody(response, maxBytes) {
     } finally {
       reader.releaseLock?.();
     }
-    return Buffer.concat(chunks).toString('utf8');
+    return decodeSourceBytes(Buffer.concat(chunks), response.headers?.get?.('content-type'));
   }
   const body = await response.text();
   if (Buffer.byteLength(body, 'utf8') > maxBytes) throw new Error('response_too_large');
@@ -670,39 +736,10 @@ async function fetchFixedText(fetchImpl, rawUrl, host, maxBytes) {
   }
 }
 
-function nhkItemsFromXml(xml) {
-  const items = [];
-  const itemPattern = /<item\b[^>]*>([\s\S]*?)<\/item\s*>/gi;
-  let match;
-  while ((match = itemPattern.exec(xml)) && items.length < MAX_IMPORT_ITEMS) {
-    const itemXml = match[1];
-    const title = truncateCodePoints(xmlTag(itemXml, 'title'), MAX_READING_TITLE_LENGTH);
-    const url = safeExternalUrl(xmlTag(itemXml, 'link'), 'www3.nhk.or.jp');
-    if (!title || !url) continue;
-    const pubDate = xmlTag(itemXml, 'pubDate');
-    const parsedDate = pubDate && Number.isFinite(Date.parse(pubDate)) ? new Date(pubDate).toISOString() : null;
-    const description = xmlTag(itemXml, 'description');
-    const audioMatch = itemXml.match(/<(?:enclosure|media:content)\b[^>]*\burl=["']([^"']+)["'][^>]*\/?\s*>/i);
-    const audioUrl = audioMatch ? safeExternalUrl(decodeEntities(audioMatch[1]), 'www3.nhk.or.jp') : null;
-    items.push({
-      title,
-      url: url.toString(),
-      date: parsedDate,
-      text: description ? truncateCodePoints(description, MAX_READING_TEXT_LENGTH) : null,
-      audio: audioUrl ? audioUrl.toString() : null
-    });
-  }
-  return items;
-}
-
-async function loadNHKEasySources(fetchImpl = globalThis.fetch) {
-  try {
-    const xml = await fetchFixedText(fetchImpl, NHK_RSS_URL, 'www3.nhk.or.jp', 1024 * 1024);
-    return { status: 'ok', items: nhkItemsFromXml(xml) };
-  } catch (error) {
-    return { status: 'unavailable', reason: error?.message === 'response_too_large' ? 'Source response exceeded the size limit.' : 'Source request failed.' };
-  }
-}
+// NHK Easy import was retired: NHK migrated the site and discontinued the
+// public feed (the pinned RSS returns 404, the replacement page is a
+// client-rendered shell with no machine-readable article source), so there is
+// no fixed, allowlisted NHK endpoint left to fetch. Aozora remains.
 
 function aozoraListingItems(html) {
   const items = [];
@@ -729,7 +766,10 @@ function aozoraTextUrlFromCard(cardHtml, baseUrl) {
     let resolved;
     try { resolved = new URL(decodeEntities(match[2]), baseUrl); } catch (_) { continue; }
     if (!safeExternalUrl(resolved.toString(), 'www.aozora.gr.jp')) continue;
-    if (/^\/files\/[\w./%-]+\.(?:html?|txt)$/i.test(resolved.pathname)) return resolved.toString();
+    // File links are relative (./files/<name>.html under /cards/<n>/) on real
+    // card pages; the absolute /files/ form is kept for older markup.
+    if (!/^\/(?:files\/[\w./%-]+\.(?:html?|txt)|cards\/\d+\/files\/[\w.%-]+\.html?)$/i.test(resolved.pathname)) continue;
+    return resolved.toString();
   }
   return null;
 }
@@ -777,76 +817,83 @@ async function loadAozoraSources(fetchImpl = globalThis.fetch) {
 }
 
 async function syncReadingSources(executor, userId, sourceType, { fetch: fetchImpl = globalThis.fetch } = {}) {
-  if (!['aozora', 'nhk'].includes(sourceType)) throw new ValidationError('sourceType must be aozora or nhk.');
-  const sourceResult = sourceType === 'nhk'
-    ? await loadNHKEasySources(fetchImpl)
-    : await loadAozoraSources(fetchImpl);
+  if (sourceType !== 'aozora') throw new ValidationError('sourceType must be aozora.');
+  const sourceResult = await loadAozoraSources(fetchImpl);
   if (sourceResult.status !== 'ok') return sourceResult;
   const items = sourceResult.items.slice(0, MAX_IMPORT_ITEMS);
   if (!items.length) return { status: 'ok', imported: 0, textsImported: 0 };
 
-  const prepared = [];
-  for (const item of items) {
-    const text = typeof item.text === 'string' && item.text.trim()
-      ? truncateCodePoints(item.text.trim(), MAX_READING_TEXT_LENGTH)
-      : null;
-    const analysis = text ? await analyzeReading(executor, userId, text) : null;
-    prepared.push({ item, text, analysis });
-  }
-
+  // Texts land one by one: analyze, then commit that item immediately, so a
+  // minutes-long import is visible incrementally and a late failure (or a
+  // restart) keeps everything saved so far. A failing item rolls back only
+  // itself and the loop continues; re-running the import resumes safely
+  // because the advisory lock + existing-row checks make items idempotent.
   const connection = await executor.getConnection();
   let textsImported = 0;
   try {
-    await connection.beginTransaction();
-    for (const { item, text, analysis } of prepared) {
-      // Migration 022 intentionally has no UNIQUE(type,url). A transaction
-      // advisory lock serializes check/insert for this stable key without
-      // requiring an unreviewed database change.
-      await connection.execute('SELECT pg_advisory_xact_lock(hashtext(?), hashtext(?))', [sourceType, item.url]);
-      const [existingRows] = await connection.execute(
-        'SELECT id_reading_source FROM reading_sources WHERE type = ? AND url = ? ORDER BY id_reading_source LIMIT 1',
-        [sourceType, item.url]
-      );
-      let sourceId = Number(existingRows?.[0]?.id_reading_source) || null;
-      const metadata = JSON.stringify({ date: item.date || null, audio: item.audio || null });
-      if (sourceId) {
-        await connection.execute(
-          'UPDATE reading_sources SET title = ?, metadata = ?::jsonb, fetched_at = CURRENT_TIMESTAMP WHERE id_reading_source = ?',
-          [item.title, metadata, sourceId]
-        );
-      } else {
-        const [insertResult] = await connection.execute(
-          'INSERT INTO reading_sources (type, url, title, metadata, fetched_at) VALUES (?, ?, ?, ?::jsonb, CURRENT_TIMESTAMP) RETURNING id_reading_source AS insertId',
-          [sourceType, item.url, item.title, metadata]
-        );
-        sourceId = extractInsertId(insertResult);
-        if (!sourceId) throw new Error('Failed to save reading source.');
+    for (const item of items) {
+      let text = null;
+      let analysis = null;
+      try {
+        const raw = typeof item.text === 'string' && item.text.trim()
+          ? truncateCodePoints(item.text.trim(), MAX_READING_TEXT_LENGTH)
+          : null;
+        text = raw;
+        analysis = text ? await analyzeReading(executor, userId, text) : null;
+      } catch (_) {
+        continue;
       }
-      if (!text) continue;
-      const [existingTextRows] = await connection.execute(
-        'SELECT id_reading_text FROM reading_texts WHERE source_id = ? AND user_id IS NULL ORDER BY id_reading_text LIMIT 1',
-        [sourceId]
-      );
-      const existingTextId = Number(existingTextRows?.[0]?.id_reading_text) || null;
-      if (existingTextId) {
-        await connection.execute(
-          "UPDATE reading_texts SET text = ?, title = ?, level = ?, annotations_json = '[]'::jsonb WHERE id_reading_text = ? AND user_id IS NULL",
-          [text, item.title, analysis.level, existingTextId]
+      await connection.beginTransaction();
+      try {
+        // Migration 022 intentionally has no UNIQUE(type,url). A transaction
+        // advisory lock serializes check/insert for this stable key without
+        // requiring an unreviewed database change.
+        await connection.execute('SELECT pg_advisory_xact_lock(hashtext(?), hashtext(?))', [sourceType, item.url]);
+        const [existingRows] = await connection.execute(
+          'SELECT id_reading_source FROM reading_sources WHERE type = ? AND url = ? ORDER BY id_reading_source LIMIT 1',
+          [sourceType, item.url]
         );
-      } else {
-        const [textResult] = await connection.execute(
-          "INSERT INTO reading_texts (source_id, user_id, text, title, level, annotations_json) VALUES (?, NULL, ?, ?, ?, '[]'::jsonb) RETURNING id_reading_text AS insertId",
-          [sourceId, text, item.title, analysis.level]
-        );
-        if (!extractInsertId(textResult)) throw new Error('Failed to save reading text.');
+        let sourceId = Number(existingRows?.[0]?.id_reading_source) || null;
+        const metadata = JSON.stringify({ date: item.date || null, audio: item.audio || null });
+        if (sourceId) {
+          await connection.execute(
+            'UPDATE reading_sources SET title = ?, metadata = ?::jsonb, fetched_at = CURRENT_TIMESTAMP WHERE id_reading_source = ?',
+            [item.title, metadata, sourceId]
+          );
+        } else {
+          const [insertResult] = await connection.execute(
+            'INSERT INTO reading_sources (type, url, title, metadata, fetched_at) VALUES (?, ?, ?, ?::jsonb, CURRENT_TIMESTAMP) RETURNING id_reading_source AS insertId',
+            [sourceType, item.url, item.title, metadata]
+          );
+          sourceId = extractInsertId(insertResult);
+          if (!sourceId) throw new Error('Failed to save reading source.');
+        }
+        if (text) {
+          const [existingTextRows] = await connection.execute(
+            'SELECT id_reading_text FROM reading_texts WHERE source_id = ? AND user_id IS NULL ORDER BY id_reading_text LIMIT 1',
+            [sourceId]
+          );
+          const existingTextId = Number(existingTextRows?.[0]?.id_reading_text) || null;
+          if (existingTextId) {
+            await connection.execute(
+              "UPDATE reading_texts SET text = ?, title = ?, level = ?, annotations_json = '[]'::jsonb WHERE id_reading_text = ? AND user_id IS NULL",
+              [text, item.title, analysis.level, existingTextId]
+            );
+          } else {
+            const [textResult] = await connection.execute(
+              "INSERT INTO reading_texts (source_id, user_id, text, title, level, annotations_json) VALUES (?, NULL, ?, ?, ?, '[]'::jsonb) RETURNING id_reading_text AS insertId",
+              [sourceId, text, item.title, analysis.level]
+            );
+            if (!extractInsertId(textResult)) throw new Error('Failed to save reading text.');
+          }
+          textsImported += 1;
+        }
+        await connection.commit();
+      } catch (error) {
+        await connection.rollback().catch(() => {});
       }
-      textsImported += 1;
     }
-    await connection.commit();
     return { status: 'ok', imported: items.length, textsImported };
-  } catch (error) {
-    await connection.rollback().catch(() => {});
-    throw error;
   } finally {
     connection.release();
   }
@@ -859,15 +906,14 @@ module.exports = {
   MAX_LIBRARY_LIMIT,
   MAX_READING_TEXT_LENGTH,
   MAX_READING_TITLE_LENGTH,
-  NHK_RSS_URL,
   buildAnnotations,
   analyzeTextForReading,
   classifyLevel,
   createUserReadingText,
+  deleteUserReadingText,
   extractAozoraText,
   getReadingText,
   loadAozoraSources,
-  loadNHKEasySources,
   listReadingLibrary,
   listReadingProgress,
   normalizeReadingText,

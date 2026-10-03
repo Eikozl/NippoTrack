@@ -146,9 +146,9 @@ test('library returns shared and owned rows with filters and bounded pagination'
     }
     if (/FROM reading_texts rt LEFT JOIN reading_sources rs/i.test(sql)) {
       return sql.includes('rt.level = ?')
-        ? [[{ id: '5', title: 'Shared', level: 'N5', sourceType: 'nhk', text: '学', createdAt: '2026-09-01' }]]
+        ? [[{ id: '5', title: 'Shared', level: 'N5', sourceType: 'aozora', text: '学', createdAt: '2026-09-01' }]]
         : [[
-          { id: '5', title: 'Shared', level: 'N5', sourceType: 'nhk', text: '学', createdAt: '2026-09-01' },
+          { id: '5', title: 'Shared', level: 'N5', sourceType: 'aozora', text: '学', createdAt: '2026-09-01' },
           { id: '6', title: 'Mine', level: 'N4', sourceType: 'user', text: '本', createdAt: '2026-09-01' }
         ]];
     }
@@ -156,7 +156,7 @@ test('library returns shared and owned rows with filters and bounded pagination'
     throw new Error(`Unexpected library SQL: ${sql}`);
   } }, async () => {
     const response = mockRes();
-    await controller.listLibrary({ query: { level: 'N5', source: 'nhk', date: '2026-09-01', page: '2', limit: '1' }, user: { id: USER_ID } }, response.res);
+    await controller.listLibrary({ query: { level: 'N5', source: 'aozora', date: '2026-09-01', page: '2', limit: '1' }, user: { id: USER_ID } }, response.res);
     assert.equal(response.status(), 200);
     assert.equal(response.body().total, 1);
     assert.equal(response.body().page, 2);
@@ -169,7 +169,7 @@ test('library returns shared and owned rows with filters and bounded pagination'
     const allRows = mockRes();
     await controller.listLibrary({ query: { page: '1', limit: '2' }, user: { id: USER_ID } }, allRows.res);
     assert.equal(allRows.body().items.length, 2);
-    assert.deepEqual(allRows.body().items.map((item) => item.sourceType), ['nhk', 'user']);
+    assert.deepEqual(allRows.body().items.map((item) => item.sourceType), ['aozora', 'user']);
   });
 });
 
@@ -207,6 +207,7 @@ test('progress is user-scoped, validates bounds, and uses an upsert', async () =
       return [[{ id_reading_text: 31, text: '学生' }]];
     }
     if (/INSERT INTO user_reading_progress/i.test(sql)) return [[{ id: 4 }]];
+    if (/SELECT position FROM user_reading_progress/i.test(sql)) return [[{ position: '2' }]];
     throw new Error(`Unexpected progress SQL: ${sql}`);
   } }, async () => {
     const invalid = mockRes();
@@ -222,7 +223,24 @@ test('progress is user-scoped, validates bounds, and uses an upsert', async () =
     assert.equal(response.body().position, 2);
     const upsert = calls.find(({ sql }) => /INSERT INTO user_reading_progress/i.test(sql));
     assert.match(upsert.sql, /ON CONFLICT \(user_id, text_id\) DO UPDATE/i);
+    assert.match(upsert.sql, /GREATEST\(user_reading_progress\.position, EXCLUDED\.position\)/i);
     assert.ok(upsert.params.includes(USER_ID));
+  });
+
+  await withPoolStubs({ execute: async (sql, params = []) => {
+    if (/SELECT id_reading_text, text FROM reading_texts/i.test(sql)) {
+      return [[{ id_reading_text: 31, text: '学生' }]];
+    }
+    // Stored position 5 wins over the submitted 1: progress never regresses,
+    // and the response echoes the stored (post-GREATEST) value.
+    if (/INSERT INTO user_reading_progress/i.test(sql)) return [[{ id: 4 }]];
+    if (/SELECT position FROM user_reading_progress/i.test(sql)) return [[{ position: '5' }]];
+    throw new Error(`Unexpected progress SQL: ${sql}`);
+  } }, async () => {
+    const response = mockRes();
+    await controller.updateProgress({ params: { id: '31' }, body: { position: 1, timeSpentSeconds: 15 }, user: { id: USER_ID } }, response.res);
+    assert.equal(response.status(), 200);
+    assert.equal(response.body().position, 5);
   });
 
   await withPoolStubs({ execute: async (sql) => {
@@ -235,41 +253,140 @@ test('progress is user-scoped, validates bounds, and uses an upsert', async () =
   });
 });
 
-test('source import has fixed-host parsing and reports fetch failures as unavailable', async () => {
-  const fixture = `<?xml version="1.0"?><rss><channel><item><title><![CDATA[学ぶニュース]]></title><link>https://www3.nhk.or.jp/news/easy/abc/abc.html</link><pubDate>Fri, 02 Oct 2026 10:00:00 GMT</pubDate><description><![CDATA[<p>子どもが学校で学びます。</p>]]></description><enclosure url="https://www3.nhk.or.jp/audio/example.mp3" /></item></channel></rss>`;
-  const parsed = await gradedReader.loadNHKEasySources(async (url, options) => {
-    assert.equal(String(url), 'https://www3.nhk.or.jp/rss/news/easy.xml');
-    assert.equal(options.redirect, 'error');
-    return { ok: true, headers: { get: () => String(Buffer.byteLength(fixture)) }, text: async () => fixture };
-  });
-  assert.equal(parsed.status, 'ok');
-  assert.equal(parsed.items.length, 1);
-  assert.equal(parsed.items[0].title, '学ぶニュース');
-  assert.match(parsed.items[0].text, /子どもが学校で学びます/);
-  assert.equal(parsed.items[0].audio, 'https://www3.nhk.or.jp/audio/example.mp3');
-
+test('source import reads the fixed Aozora work index and reports fetch failures as unavailable', async () => {
   const aozoraPages = new Map([
-    ['https://www.aozora.gr.jp/index_pages/sakuhin_top.html', '<a href="https://attacker.test/cards/1/card1.html">No</a><a href="/cards/000001/card1.html">短い物語</a>'],
+    ['https://www.aozora.gr.jp/index_pages/sakuhin_a1.html', '<a href="https://attacker.test/cards/1/card1.html">No</a><a href="/cards/000001/card1.html">短い物語</a><a href="/cards/000002/card2.html">第二話</a>'],
     ['https://www.aozora.gr.jp/cards/000001/card1.html', '<a href="/files/1_1.html">テキストファイル</a>'],
-    ['https://www.aozora.gr.jp/files/1_1.html', '<div class="main_text"><p>昔々、村に子どもがいました。</p></div>']
+    ['https://www.aozora.gr.jp/files/1_1.html', '<div class="main_text"><p>昔々、村に子どもがいました。</p></div>'],
+    ['https://www.aozora.gr.jp/cards/000002/card2.html', '<a href="./files/2_1.html">2_1.html</a>'],
+    ['https://www.aozora.gr.jp/cards/000002/files/2_1.html', '<div class="main_text"><p>第二の物語です。</p></div>']
   ]);
+  const fetchedUrls = [];
   const aozora = await gradedReader.loadAozoraSources(async (url, options) => {
     assert.equal(options.redirect, 'error');
+    fetchedUrls.push(String(url));
     const page = aozoraPages.get(String(url));
     assert.ok(page, `unexpected source URL: ${url}`);
     return { ok: true, headers: { get: () => String(Buffer.byteLength(page)) }, text: async () => page };
   });
+  assert.equal(fetchedUrls[0], gradedReader.AOZORA_LISTING_URL);
+  assert.match(gradedReader.AOZORA_LISTING_URL, /^https:\/\/www\.aozora\.gr\.jp\/index_pages\/sakuhin_a1\.html$/);
   assert.equal(aozora.status, 'ok');
-  assert.equal(aozora.items.length, 1);
+  assert.equal(aozora.items.length, 2);
   assert.equal(aozora.items[0].title, '短い物語');
   assert.match(aozora.items[0].text, /昔々、村に子どもがいました/);
+  assert.equal(aozora.items[1].title, '第二話');
+  assert.match(aozora.items[1].text, /第二の物語です/);
 
-  const unavailable = await gradedReader.loadNHKEasySources(async () => { throw new Error('private network detail'); });
+  const unavailable = await gradedReader.loadAozoraSources(async () => { throw new Error('private network detail'); });
   assert.deepEqual(unavailable, { status: 'unavailable', reason: 'Source request failed.' });
-  const response = mockRes();
-  await controller.importSources({ body: { sourceType: 'nhk' }, user: { id: USER_ID }, app: { locals: { readingFetch: async () => { throw new Error('offline'); } } } }, response.res);
-  assert.equal(response.status(), 200);
-  assert.deepEqual(response.body(), { status: 'unavailable', reason: 'Source request failed.' });
+
+  // The endpoint only validates and enqueues (202): real imports take minutes
+  // (per-text classification), so the work runs detached after the response.
+  const accepted = mockRes();
+  await controller.importSources({ body: { sourceType: 'aozora' }, user: { id: USER_ID }, app: { locals: { readingFetch: async () => { throw new Error('offline'); } } } }, accepted.res);
+  assert.equal(accepted.status(), 202);
+  assert.deepEqual(accepted.body(), { status: 'accepted', sourceType: 'aozora' });
+  // Let the detached background attempt settle (it fails against the offline
+  // fetch stub and logs; it must never reject into the request lifecycle).
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  const retired = mockRes();
+  await controller.importSources({ body: { sourceType: 'nhk' }, user: { id: USER_ID } }, retired.res);
+  assert.equal(retired.status(), 400);
+  assert.match(retired.body().error, /sourceType must be aozora/i);
+});
+
+test('legacy source bytes transcode from the declared charset instead of mojibake', async () => {
+  // '<a>' + あ (U+3042: EUC-JP A4A2) + '</a>' with an euc-jp meta declaration.
+  const eucJp = Buffer.concat([
+    Buffer.from('<html><head><meta http-equiv="Content-Type" content="text/html;charset=euc-jp"></head><body><a href="/cards/1/card1.html">', 'latin1'),
+    Buffer.from([0xa4, 0xa2]),
+    Buffer.from('</a></body></html>', 'latin1')
+  ]);
+  const chunks = [eucJp];
+  const readerStub = {
+    ok: true,
+    headers: { get: () => null },
+    body: {
+      getReader: () => {
+        let done = false;
+        return {
+          async read() {
+            if (done) return { done: true, value: undefined };
+            done = true;
+            return { done: false, value: new Uint8Array(chunks[0]) };
+          },
+          async cancel() {},
+          releaseLock() {}
+        };
+      }
+    }
+  };
+  const byteLength = eucJp.byteLength;
+  assert.ok(byteLength > 0);
+  const listed = await gradedReader.loadAozoraSources(async (url) => {
+    if (String(url) === gradedReader.AOZORA_LISTING_URL) return readerStub;
+    throw new Error(`unexpected source URL: ${url}`);
+  });
+  assert.equal(listed.status, 'ok');
+  // A UTF-8 misread of A4A2 would be mojibake, never あ: the anchor title
+  // proves the euc-jp bytes were transcoded before parsing.
+  assert.equal(listed.items.length, 1);
+  assert.equal(listed.items[0].title, 'あ');
+});
+
+test('reading text delete is owner-scoped and cleans the private source', async () => {
+  const calls = [];
+  let flow = [];
+  const connection = {
+    async beginTransaction() { flow.push('BEGIN'); },
+    async commit() { flow.push('COMMIT'); },
+    async rollback() { flow.push('ROLLBACK'); },
+    release() {},
+    async execute(sql, params = []) {
+      calls.push({ sql, params });
+      if (/SELECT id_reading_text, source_id FROM reading_texts/i.test(sql)) {
+        assert.deepEqual(params, [31, USER_ID]);
+        return [[{ id_reading_text: 31, source_id: 9 }]];
+      }
+      if (/DELETE FROM reading_texts/i.test(sql)) {
+        assert.deepEqual(params, [31, USER_ID]);
+        return [{ affectedRows: 1 }];
+      }
+      if (/DELETE FROM reading_sources/i.test(sql)) {
+        assert.match(sql, /NOT EXISTS \(SELECT 1 FROM reading_texts WHERE source_id = \?\)/i);
+        assert.deepEqual(params, [9, 9]);
+        return [{ affectedRows: 1 }];
+      }
+      throw new Error(`Unexpected delete SQL: ${sql}`);
+    }
+  };
+  await withPoolStubs({ getConnection: async () => connection }, async () => {
+    const response = mockRes();
+    await controller.deleteText({ params: { id: '31' }, user: { id: USER_ID } }, response.res);
+    assert.equal(response.status(), 200);
+    assert.deepEqual(response.body(), { id: 31, deleted: true });
+    assert.deepEqual(flow, ['BEGIN', 'COMMIT']);
+  });
+
+  const foreignConnection = {
+    async beginTransaction() {},
+    async rollback() { flow.push('FOREIGN-ROLLBACK'); },
+    async commit() { throw new Error('must not commit a foreign delete'); },
+    release() {},
+    async execute(sql) {
+      if (/SELECT id_reading_text, source_id FROM reading_texts/i.test(sql)) return [[]];
+      throw new Error(`Unexpected foreign delete SQL: ${sql}`);
+    }
+  };
+  await withPoolStubs({ getConnection: async () => foreignConnection }, async () => {
+    const response = mockRes();
+    await controller.deleteText({ params: { id: '31' }, user: { id: OTHER_USER_ID } }, response.res);
+    assert.equal(response.status(), 404);
+    assert.ok(flow.includes('FOREIGN-ROLLBACK'));
+  });
 });
 
 test('reading progress listing is user-scoped, joined with text metadata, and paginated', async () => {

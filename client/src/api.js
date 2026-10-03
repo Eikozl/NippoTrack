@@ -74,6 +74,10 @@ export function createUserReadingText({ text, title } = {}) {
   return apiRequest('/api/reading/user-text', { method: 'POST', body: { text, title } });
 }
 
+export function deleteReadingText(id) {
+  return apiRequest(`/api/reading/text/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
 export function updateReadingProgress(id, { position, timeSpentSeconds, completed } = {}) {
   return apiRequest(`/api/reading/text/${encodeURIComponent(id)}/progress`, {
     method: 'PUT',

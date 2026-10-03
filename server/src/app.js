@@ -75,6 +75,7 @@ app.get('/api', (req, res) => {
       'GET /api/reading/library',
       'GET /api/reading/progress',
       'GET /api/reading/text/:id',
+      'DELETE /api/reading/text/:id',
       'POST /api/reading/analyze',
       'POST /api/reading/user-text',
       'PUT /api/reading/text/:id/progress',

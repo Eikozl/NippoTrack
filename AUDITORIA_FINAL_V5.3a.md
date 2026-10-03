@@ -168,3 +168,14 @@ donde el prompt de V5.3a asumÃ­a otra cosa se marca como [DESVIACIÃ“N].
 - [x] Verifier dev: 46 tablas / 0 failures
 - [x] Git: master 3c7a422 intacto, sin merges, sin deps nuevas, cero secretos
 - [x] DocumentaciÃ³n: `AUDITORIA_FINAL_V5.3a.md` (este archivo)
+
+## V5.3b — post-freeze hardening (dev: f953019, 67706c0, b9968c5, + cierre)
+- Review history: la fila abre el openDetailModal propio ('<Tipo> Review Session • <fecha>') con items y kanji enlazados a su kanji-reference (stroke order). Tests reviewHub reescritos al modal (25/26; el fallo restante es el guard pre-existente).
+- Review: botón 'Start immersed review' junto a 'Start review'; eliminado el atajo 'Card types' del intro (sigue en opciones). Card types documentadas en el diálogo + voz japonesa explícita y avisos si el TTS no existe.
+- Reading: selects con value reales (el 400 'level must be one of...' era label enviado como valor); header del lector y panel de filtros reorganizados móvil-first; slider con id/acento; barra = furthest-read (seed + monótona).
+- Progreso servidor: GREATEST en el upsert + eco del valor guardado (el adapter descarta extras del RETURNING: se lee de vuelta). Regresión imposible punta a punta (verificado live).
+- Aozora: índice vivo sakuhin_a1.html + links relativos ./files + transcodificación euc-jp/shift_jis + import en background (202 + poll, textos por commits individuales). Verificado live: 202 en <1s, primera fila <60s, N1 real, 0 mojibake.
+- NHK Easy retirado (feed 404, JSON 401, HTML sin enlaces): sin botón, sourceType solo aozora, tests y docs actualizados.
+- Delete de textos propios: DELETE /api/reading/text/:id (solo dueño; 404 ajeno/compartido) + botón con confirmDialog igual que los CRUDs.
+- 'Suggested goals' (antes 'Smart goals') en UI; mismo fix de option-value en sus selects.
+- Notas de entorno: kuromoji tarda ~29s en esta máquina (benchmark 1.4s) — los 4 suites de parser fallan por timeout de init 15s; pooler Supabase con ECONNRESET/timeouts esporádicos; un flake del classifier (vocabUnknown 0/1 en primera tokenización) aparece bajo carga. Nada de esto lo toca este diff.

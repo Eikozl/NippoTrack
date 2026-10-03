@@ -465,6 +465,13 @@ export async function renderReview(container) {
     }
   }
 
+const CARD_TYPE_DESCRIPTIONS = {
+  recognition: 'See the word or kanji, then recall its reading and meaning.',
+  recall: 'See the meaning, then recall the word or kanji.',
+  cloze: 'Fill in the missing word from a real example sentence.',
+  audio: 'Hear the word spoken aloud, then recall it. Needs a Japanese voice on your device.'
+};
+
   function openCardTypeDialog() {
     const rows = CARD_TYPES.map((type) => {
       const checked = reviewPreferences.cardTypes.includes(type);
@@ -481,12 +488,13 @@ export async function renderReview(container) {
       slider.addEventListener('input', () => { readout.textContent = `${slider.value}%`; });
       return element('div', { className: 'grid gap-1' }, [
         element('label', { className: 'flex items-center gap-2 text-sm font-medium text-ink' }, [checkbox, element('span', { text: CARD_TYPE_LABEL[type] })]),
+        element('p', { className: 'text-xs leading-5 text-muted', text: CARD_TYPE_DESCRIPTIONS[type] || '' }),
         element('div', { className: 'flex items-center gap-2' }, [slider, readout])
       ]);
     });
     openDialog({
       title: 'Card types',
-      description: 'Pick how cards are presented and weight the rotation. Weights are relative; disabled types never appear.',
+      description: 'Pick how cards are presented and weight the rotation. Weights are relative; disabled types never appear. Some types only fit some materials: kanji supports recognition and recall, audio needs vocabulary and a Japanese voice on your device — anything unsupported falls back to recognition.',
       content: rows,
       submitLabel: 'Save',
       onSubmit: async () => {
@@ -546,14 +554,31 @@ export async function renderReview(container) {
     } catch { return null; }
   }
 
+  // Audio cards speak through the device's own speech engine (Web Speech API):
+  // no audio files, no network, no dependencies. Picks an installed Japanese
+  // voice when one is listed, slows the rate slightly for learners, and says
+  // so out loud via toast when the platform cannot speak at all.
   function speakDisplay(text) {
     try {
-      if (typeof window === 'undefined' || !window.speechSynthesis) return;
+      if (typeof window === 'undefined' || !window.speechSynthesis) {
+        showToast('Audio is not supported in this browser.', 'error');
+        return;
+      }
+      const synthesis = window.speechSynthesis;
       const utterance = new window.SpeechSynthesisUtterance(text);
       utterance.lang = 'ja-JP';
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(utterance);
-    } catch { /* TTS unavailable: the card still reveals on demand */ }
+      utterance.rate = 0.9;
+      try {
+        const voices = typeof synthesis.getVoices === 'function' ? synthesis.getVoices() : [];
+        const japanese = voices.find((voice) => String(voice?.lang || '').toLowerCase().replace('_', '-').startsWith('ja'));
+        if (japanese) utterance.voice = japanese;
+      } catch { /* voice picking is best-effort; lang still guides the platform */ }
+      utterance.onerror = () => { showToast('Audio playback is unavailable on this device right now.', 'error'); };
+      synthesis.cancel();
+      synthesis.speak(utterance);
+    } catch {
+      showToast('Audio playback is unavailable on this device right now.', 'error');
+    }
   }
 
   async function loadPatterns() {

@@ -7,6 +7,7 @@ const {
   MAX_READING_TITLE_LENGTH,
   analyzeTextForReading,
   createUserReadingText,
+  deleteUserReadingText,
   getReadingText,
   listReadingLibrary,
   listReadingProgress,
@@ -145,18 +146,39 @@ async function listProgress(req, res) {
   }
 }
 
+async function deleteText(req, res) {
+  try {
+    const id = parseIdParam(req, 'reading text');
+    const result = await deleteUserReadingText(pool, req.user.id, id);
+    if (!result) return res.status(404).json({ error: 'Reading text not found.' });
+    return res.json({ id, deleted: true });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to delete reading text.' });
+  }
+}
+
 async function importSources(req, res) {
   try {
     const body = bodyObject(req.body);
     rejectUnknownFields(body, ['sourceType']);
-    if (!['aozora', 'nhk'].includes(body.sourceType)) {
-      throw new ValidationError('sourceType must be aozora or nhk.');
+    if (body.sourceType !== 'aozora') {
+      throw new ValidationError('sourceType must be aozora.');
     }
-    // fetch is injectable through app.locals for offline tests/operators; the
-    // service still pins every request to its fixed, allowlisted host.
+    // A real import fetches up to ten articles and runs the full classifier
+    // per text — minutes of pooler round-trips, far beyond any HTTP header
+    // timeout. So the request only validates and enqueues: the work runs
+    // detached right after the 202, and texts land in the library as they
+    // finish (syncReadingSources commits per item batch and is retry-safe via
+    // its advisory lock + existing-row checks). Failures go to the server log;
+    // the client polls the library until new rows arrive.
+    const userId = req.user.id;
     const fetchImpl = req.app?.locals?.readingFetch || globalThis.fetch;
-    const result = await syncReadingSources(pool, req.user.id, body.sourceType, { fetch: fetchImpl });
-    return res.json(result);
+    setImmediate(() => {
+      syncReadingSources(pool, userId, body.sourceType, { fetch: fetchImpl }).catch((error) => {
+        console.error(`[reading-import] background ${body.sourceType} import failed:`, error?.message || error);
+      });
+    });
+    return res.status(202).json({ status: 'accepted', sourceType: body.sourceType });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to import reading sources.' });
   }
@@ -165,6 +187,7 @@ async function importSources(req, res) {
 module.exports = {
   analyzeText,
   createUserText,
+  deleteText,
   getText,
   importSources,
   listLibrary,
