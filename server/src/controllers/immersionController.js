@@ -77,6 +77,7 @@ async function createSession(req, res) {
       sessionId: result.immersionSessionId,
       reviewSessionId: result.reviewSessionId,
       createdCounts: result.createdCounts,
+      items: result.items,
       reviewSessionUrl: `/review?reviewSessionId=${result.reviewSessionId}`
     });
   } catch (error) {

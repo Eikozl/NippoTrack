@@ -95,6 +95,36 @@ export async function renderReview(container) {
   let graded = [];
   let localDetach = null;
 
+  // V5.3a hand-off: the Immersion page stores the server-resolved queue for
+  // the freshly created OPEN review session (freshly enrolled items carry no
+  // review_events, so date-range discovery cannot surface them yet). Consumed
+  // exactly once; any mismatch falls back to the informational banner below.
+  function tryResumeImmersionQueue() {
+    const handoffSessionId = reviewSessionIdFromHash();
+    if (!handoffSessionId) return false;
+    try {
+      const raw = typeof window !== 'undefined' && window.sessionStorage
+        ? window.sessionStorage.getItem('jlt-immersion-review-queue')
+        : null;
+      if (!raw) return false;
+      const parsed = JSON.parse(raw);
+      const items = Array.isArray(parsed?.items) ? parsed.items : [];
+      if (Number(parsed?.reviewSessionId) !== Number(handoffSessionId) || !items.length) return false;
+      window.sessionStorage.removeItem('jlt-immersion-review-queue');
+      sessionId = Number(handoffSessionId);
+      queue = items;
+      currentIndex = 0;
+      revealed = false;
+      graded = [];
+      activeReview = { sessionId, selected: items };
+      setStage('REVIEWING');
+      renderCard();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function detachKeys() {
     if (typeof localDetach === 'function') {
       try { localDetach(); } catch { /* noop */ }
@@ -1116,4 +1146,5 @@ export async function renderReview(container) {
   loadDifficult();
   loadCardTypePreferences();
   loadPatterns();
+  tryResumeImmersionQueue();
 }

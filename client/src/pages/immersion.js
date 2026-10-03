@@ -207,6 +207,20 @@ export async function renderImmersion(container) {
       };
       withPendingAction(createButton, async () => {
         const result = await createImmersionSession({ text: analyzedText, selectedItems });
+        // Hand-off queue for the Review page: freshly enrolled items have no
+        // review_events yet, so date-range discovery cannot surface them.
+        // The server returns the resolved items; Review consumes them against
+        // the freshly created OPEN review session (grading still validates
+        // ownership server-side). sessionStorage is per-tab and consumed once.
+        const queueItems = Array.isArray(result?.items) ? result.items : [];
+        try {
+          if (typeof window !== 'undefined' && window.sessionStorage && queueItems.length) {
+            window.sessionStorage.setItem('jlt-immersion-review-queue', JSON.stringify({
+              reviewSessionId: Number(result?.reviewSessionId),
+              items: queueItems
+            }));
+          }
+        } catch { /* storage full/blocked: Review falls back to its banner */ }
         followReviewSessionUrl(result?.reviewSessionUrl);
       }, { pendingLabel: 'Creating…' }).catch((error) => {
         showToast(error?.message || 'Unable to create the study session.', 'error');

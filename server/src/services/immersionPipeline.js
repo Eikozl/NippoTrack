@@ -516,6 +516,14 @@ async function createImmersionSession(pool, userId, { text, selected } = {}) {
     });
 
     await connection.commit();
+    // Hand-off queue: the resolved entities with their display data so the
+    // Review page can start REVIEWING against the freshly created (open)
+    // review session. Entity ids are the authoritative server-resolved ones.
+    const sessionItems = [
+      ...chosen.vocabulary.map((candidate) => ({ entityType: 'vocabulary', entityId: vocabularyResult.ids.get(candidate.id), display: candidate.display, reading: candidate.reading || null, meaning: candidate.meaning || null })),
+      ...chosen.kanji.map((candidate) => ({ entityType: 'kanji', entityId: kanjiResult.ids.get(candidate.id), display: candidate.display, reading: candidate.reading || null, meaning: candidate.meaning || null })),
+      ...chosen.grammar.map((candidate) => ({ entityType: 'grammar', entityId: grammarResult.ids.get(candidate.id), display: candidate.display, reading: candidate.reading || null, meaning: candidate.meaning || null }))
+    ].filter((item) => Number.isInteger(item.entityId)).map((item) => ({ ...item, entityId: Number(item.entityId) }));
     return {
       immersionSessionId: Number(immersionSessionId),
       reviewSessionId: Number(reviewSessionId),
@@ -524,7 +532,8 @@ async function createImmersionSession(pool, userId, { text, selected } = {}) {
         kanji: kanjiResult.created,
         grammar: grammarResult.created,
         reviewItems: reviewTargets.length
-      }
+      },
+      items: sessionItems
     };
   } catch (error) {
     await connection.rollback().catch(() => {});
@@ -559,19 +568,22 @@ async function listImmersionSessions(pool, userId, { from, to, level, page, limi
   const where = conditions.join(' AND ');
   const [countRows] = await pool.execute(`SELECT COUNT(*) AS total FROM immersion_sessions s WHERE ${where}`, params);
   const total = Number(countRows?.[0]?.total) || 0;
+  // Entity-type FILTER literals are inlined (constants, never user input) so
+  // the placeholder order stays exactly [filters..., limit, offset]; passing
+  // them as parameters would bind them to the earlier WHERE ? slots.
   const [rows] = await pool.execute(
     `SELECT s.id_immersion_session AS id, s.estimated_level AS "estimatedLevel", s.confidence, s.created_at AS "createdAt",
       COUNT(i.id) AS items,
-      COUNT(i.id) FILTER (WHERE i.entity_type = ?) AS vocabulary,
-      COUNT(i.id) FILTER (WHERE i.entity_type = ?) AS kanji,
-      COUNT(i.id) FILTER (WHERE i.entity_type = ?) AS grammar
+      COUNT(i.id) FILTER (WHERE i.entity_type = 'vocabulary') AS vocabulary,
+      COUNT(i.id) FILTER (WHERE i.entity_type = 'kanji') AS kanji,
+      COUNT(i.id) FILTER (WHERE i.entity_type = 'grammar') AS grammar
      FROM immersion_sessions s
      LEFT JOIN immersion_session_items i ON i.id_immersion_session = s.id_immersion_session
      WHERE ${where}
      GROUP BY s.id_immersion_session, s.estimated_level, s.confidence, s.created_at
      ORDER BY s.created_at DESC, s.id_immersion_session DESC
      LIMIT ? OFFSET ?`,
-    [...params, 'vocabulary', 'kanji', 'grammar', limit, offset]
+    [...params, limit, offset]
   );
   const items = (rows || []).map((row) => ({
     id: Number(row.id),

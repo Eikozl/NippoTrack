@@ -139,6 +139,14 @@ test('create-session persists session, review items and encounters in one transa
     assert.equal(body().createdCounts.kanji, 2);
     assert.equal(body().createdCounts.reviewItems, body().createdCounts.kanji + body().createdCounts.vocabulary + body().createdCounts.grammar);
 
+    // V5.3a hand-off queue: resolved entities (server-assigned ids) so the
+    // Review page can start REVIEWING against the open session.
+    const queue = body().items;
+    assert.ok(Array.isArray(queue) && queue.length >= 2, 'hand-off queue returned');
+    assert.ok(queue.every((entry) => ['vocabulary', 'kanji', 'grammar'].includes(entry.entityType)
+      && Number.isInteger(entry.entityId) && typeof entry.display === 'string'));
+    assert.ok(new Set(queue.map((entry) => entry.entityId)).size === queue.length, 'queue entity ids are unique');
+
     const sqls = connection.seen.map((entry) => entry.sql).filter(Boolean);
     assert.ok(sqls.some((sql) => /INSERT INTO review_sessions/i.test(sql) && /RETURNING id_review_session AS insertId/i.test(sql)));
     const reviewItemInserts = sqls.filter((sql) => /INSERT INTO review_items/i.test(sql));
@@ -212,7 +220,12 @@ test('history is scoped by req.user.id, validates filters, and paginates', async
       return [[{ total: '1' }]];
     }
     if (/FROM immersion_sessions s\s+LEFT JOIN immersion_session_items/i.test(sql)) {
-      assert.deepEqual(params, [USER_ID, '2026-09-01', '2026-09-30', 'N5', 'vocabulary', 'kanji', 'grammar', 10, 0]);
+      // Entity-type FILTER literals are inlined (no placeholders), so the
+      // parameter order is exactly [filters..., limit, offset].
+      assert.match(sql, /FILTER \(WHERE i\.entity_type = 'vocabulary'\)/i);
+      assert.match(sql, /FILTER \(WHERE i\.entity_type = 'kanji'\)/i);
+      assert.match(sql, /FILTER \(WHERE i\.entity_type = 'grammar'\)/i);
+      assert.deepEqual(params, [USER_ID, '2026-09-01', '2026-09-30', 'N5', 10, 0]);
       return [[{
         id: '7',
         estimatedLevel: 'N5',
