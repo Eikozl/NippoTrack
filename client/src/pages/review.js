@@ -381,8 +381,24 @@ export async function renderReview(container) {
     }
     const stored = Array.isArray(data?.items) ? data.items : [];
     const remaining = stored.filter((entry) => !entry.lastResult);
+    // Reconstructed queues (open sessions whose original selection was never
+    // persisted: pre-queue sessions, the no-items path, target-less
+    // immersion) resume from candidate discovery over the session's source
+    // range — say so honestly instead of pretending the queue was stored.
+    const reconstructed = data?.reconstructed === true;
+    const rangeLabel = (() => {
+      const from = data?.sourceFrom || session.sourceFrom || null;
+      const to = data?.sourceTo || session.sourceTo || null;
+      return from && to ? `${from} to ${to}` : null;
+    })();
     if (!remaining.length) {
-      showToast(stored.length ? 'Nothing left to retake in this session.' : 'No items recorded in this session.', 'info');
+      if (stored.length) {
+        showToast('Nothing left to retake in this session.', 'info');
+      } else if (reconstructed) {
+        showToast(rangeLabel ? `Original selection wasn't saved for this older session — nothing new found in ${rangeLabel}.` : `Original selection wasn't saved for this older session — nothing new found to resume.`, 'info');
+      } else {
+        showToast('No items recorded in this session.', 'info');
+      }
       return;
     }
     sessionId = session.id;
@@ -397,7 +413,7 @@ export async function renderReview(container) {
     if (typeof closeModal === 'function') { try { closeModal(); } catch { /* already closed */ } }
     setStage('REVIEWING');
     renderCard();
-    showToast(`Resumed with ${remaining.length} remaining item${remaining.length === 1 ? '' : 's'}.`);
+    showToast(reconstructed && rangeLabel ? `Original selection wasn't saved for this older session — resumed from ${rangeLabel} with ${remaining.length} remaining item${remaining.length === 1 ? '' : 's'}.` : `Resumed with ${remaining.length} remaining item${remaining.length === 1 ? '' : 's'}.`);
   }
 
   async function loadHistory() {

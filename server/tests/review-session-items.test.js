@@ -216,6 +216,121 @@ test('getReviewSessionItems 404s foreign sessions and refuses completed ones', a
   assert.equal(invalid.status(), 400);
 });
 
+test('getReviewSessionItems marks persisted queues as not reconstructed', async () => {
+  await withPoolStubs({ execute: async (sql, params = []) => {
+    if (/FROM review_sessions WHERE id_review_session/i.test(sql)) {
+      return [[{ id_review_session: 81, completed_at: null }]];
+    }
+    if (/FROM review_session_items si/i.test(sql)) {
+      return [[
+        { position: '0', entityType: 'vocabulary', entityId: '9', display: '学生', reading: 'がくせい', meaning: 'student', lastResult: null }
+      ]];
+    }
+    throw new Error(`Unexpected persisted-flag SQL: ${sql}`);
+  } }, async () => {
+    const { res, status, body } = mockRes();
+    await reviewController.getReviewSessionItems({ params: { id: '81' }, user: { id: USER_ID } }, res);
+    assert.equal(status(), 200);
+    assert.equal(body().reconstructed, false);
+    assert.equal(body().items.length, 1);
+    assert.equal(body().sourceFrom, undefined, 'persisted path echoes no source range');
+  });
+});
+
+test('getReviewSessionItems reconstructs a resume set when the persisted queue is empty', async () => {
+  const from = daysAgo(3);
+  const to = isoToday();
+  await withPoolStubs({ execute: async (sql, params = []) => {
+    if (/FROM review_sessions WHERE id_review_session/i.test(sql) && !/source_from/i.test(sql)) {
+      assert.deepEqual(params, [80, USER_ID]);
+      return [[{ id_review_session: 80, completed_at: null }]];
+    }
+    if (/FROM review_session_items si/i.test(sql)) {
+      assert.deepEqual(params, [USER_ID, USER_ID, USER_ID, 80, USER_ID]);
+      return [[]];
+    }
+    if (/source_from/i.test(sql)) {
+      assert.deepEqual(params, [80, USER_ID]);
+      return [[{ sourceFrom: from, sourceTo: to }]];
+    }
+    if (/FROM review_events re/i.test(sql)) {
+      assert.deepEqual(params, [80, USER_ID]);
+      // Kanji 7 already graded inside this session: must be excluded.
+      return [[{ kanjiId: 7, vocabularyId: null, grammarId: null }]];
+    }
+    if (/PARTITION BY entity_type/i.test(sql)) {
+      assert.ok(params.includes(USER_ID), 'candidate discovery must carry req.user.id');
+      return [[
+        { entity_type: 'kanji', entity_id: 7, display: '学', reading: 'ガク', meaning: 'study', jlpt: null, source_date: daysAgo(1) },
+        { entity_type: 'vocabulary', entity_id: 9, display: '学生', reading: 'がくせい', meaning: 'student', jlpt: null, source_date: daysAgo(1) },
+        { entity_type: 'grammar', entity_id: 11, display: 'TEMO', reading: null, meaning: 'even if', jlpt: null, source_date: daysAgo(2) }
+      ]];
+    }
+    throw new Error(`Unexpected reconstructed SQL: ${sql}`);
+  } }, async () => {
+    const { res, status, body } = mockRes();
+    await reviewController.getReviewSessionItems({ params: { id: '80' }, user: { id: USER_ID } }, res);
+    assert.equal(status(), 200);
+    assert.equal(body().id, 80);
+    assert.equal(body().reconstructed, true);
+    assert.equal(body().sourceFrom, from);
+    assert.equal(body().sourceTo, to);
+    assert.deepEqual(body().items, [
+      { position: 0, entityType: 'vocabulary', entityId: 9, display: '学生', reading: 'がくせい', meaning: 'student', lastResult: null },
+      { position: 1, entityType: 'grammar', entityId: 11, display: 'TEMO', reading: null, meaning: 'even if', lastResult: null }
+    ]);
+  });
+});
+
+test('getReviewSessionItems reconstructed fallback caps at 100 in deterministic order', async () => {
+  const from = daysAgo(3);
+  const to = isoToday();
+  await withPoolStubs({ execute: async (sql, params = []) => {
+    if (/FROM review_sessions WHERE id_review_session/i.test(sql) && !/source_from/i.test(sql)) {
+      return [[{ id_review_session: 82, completed_at: null }]];
+    }
+    if (/FROM review_session_items si/i.test(sql)) return [[]];
+    if (/source_from/i.test(sql)) return [[{ sourceFrom: from, sourceTo: to }]];
+    if (/FROM review_events re/i.test(sql)) return [[{ kanjiId: null, vocabularyId: null, grammarId: null }]];
+    if (/PARTITION BY entity_type/i.test(sql)) {
+      const rows = [];
+      for (let entityId = 1; entityId <= 120; entityId += 1) {
+        rows.push({ entity_type: 'vocabulary', entity_id: entityId, display: `W${entityId}`, reading: `r${entityId}`, meaning: `m${entityId}`, jlpt: null, source_date: daysAgo(1) });
+      }
+      return [rows];
+    }
+    throw new Error(`Unexpected capped SQL: ${sql}`);
+  } }, async () => {
+    const { res, status, body } = mockRes();
+    await reviewController.getReviewSessionItems({ params: { id: '82' }, user: { id: USER_ID } }, res);
+    assert.equal(status(), 200);
+    assert.equal(body().reconstructed, true);
+    assert.equal(body().items.length, 100);
+    assert.deepEqual(body().items[0], { position: 0, entityType: 'vocabulary', entityId: 1, display: 'W1', reading: 'r1', meaning: 'm1', lastResult: null });
+    assert.deepEqual(body().items[99], { position: 99, entityType: 'vocabulary', entityId: 100, display: 'W100', reading: 'r100', meaning: 'm100', lastResult: null });
+  });
+});
+
+test('getReviewSessionItems reconstructed fallback returns an honest empty set when nothing is discoverable', async () => {
+  const from = daysAgo(3);
+  const to = isoToday();
+  await withPoolStubs({ execute: async (sql) => {
+    if (/FROM review_sessions WHERE id_review_session/i.test(sql) && !/source_from/i.test(sql)) {
+      return [[{ id_review_session: 83, completed_at: null }]];
+    }
+    if (/FROM review_session_items si/i.test(sql)) return [[]];
+    if (/source_from/i.test(sql)) return [[{ sourceFrom: from, sourceTo: to }]];
+    if (/FROM review_events re/i.test(sql)) return [[]];
+    if (/PARTITION BY entity_type/i.test(sql)) return [[]];
+    throw new Error(`Unexpected empty-fallback SQL: ${sql}`);
+  } }, async () => {
+    const { res, status, body } = mockRes();
+    await reviewController.getReviewSessionItems({ params: { id: '83' }, user: { id: USER_ID } }, res);
+    assert.equal(status(), 200);
+    assert.deepEqual(body(), { id: 83, reconstructed: true, sourceFrom: from, sourceTo: to, items: [] });
+  });
+});
+
 test.after(async () => {
   try { await pool.end(); } catch { /* already ended */ }
 });

@@ -2,7 +2,7 @@ const pool = require('../config/db');
 const { ValidationError, sendRouteError } = require('../errors/http');
 const { parseIdParam, isValidDateString, validateAllowedValues } = require('../validation');
 const { parsePagination, paginationPayload } = require('../pagination');
-const { getReviewCandidates } = require('../services/reviewCandidates');
+const { getReviewCandidates, toIsoDate } = require('../services/reviewCandidates');
 const {
   CARD_TYPES,
   ENTITY_CARD_TYPES,
@@ -613,6 +613,71 @@ async function getReviewSession(req, res) {
 // with its latest grade inside THIS session (null = not yet reviewed).
 // Only open sessions are resumable; missing-or-foreign 404s without leaking
 // existence, mirroring requireOpenSession.
+//
+// Legacy fallback: sessions created before queue persistence (migration 026)
+// — plus sessions from the still-supported no-items create path and
+// target-less immersion runs — have zero persisted rows, so the queue alone
+// cannot resume them even though GET /sessions/:id shows their graded
+// events. For those OPEN sessions we reconstruct a resume set from candidate
+// discovery over the session's own source range, minus entities already
+// graded in this session (capped, deterministic, read-only: no new session,
+// no writes). The additive `reconstructed` flag (+ the echoed source range)
+// lets callers explain the substitution honestly.
+const RECONSTRUCTED_QUEUE_LIMIT = 100;
+
+async function buildReconstructedSessionItems(executor, sessionId, userId, sourceFrom, sourceTo) {
+  const [gradedRows] = await executor.execute(
+    `SELECT ri.id_kanji AS "kanjiId", ri.id_vocabulary AS "vocabularyId", ri.id_grammar AS "grammarId"
+      FROM review_events re
+      JOIN review_items ri ON ri.id_review_item = re.id_review_item
+      WHERE re.id_review_session = ?
+      AND EXISTS (SELECT 1 FROM review_sessions rs WHERE rs.id_review_session = re.id_review_session AND rs.user_id = ?)
+      LIMIT 500`,
+    [sessionId, userId]
+  );
+  const gradedKeys = new Set();
+  for (const row of gradedRows || []) {
+    if (row.kanjiId !== null && row.kanjiId !== undefined) gradedKeys.add(`kanji:${Number(row.kanjiId)}`);
+    else if (row.vocabularyId !== null && row.vocabularyId !== undefined) gradedKeys.add(`vocabulary:${Number(row.vocabularyId)}`);
+    else if (row.grammarId !== null && row.grammarId !== undefined) gradedKeys.add(`grammar:${Number(row.grammarId)}`);
+  }
+  // Same contract as listCandidates: full range, all types, no JLPT filter.
+  const groups = await getReviewCandidates(executor, userId, {
+    from: sourceFrom,
+    to: sourceTo,
+    jlpt: 'all',
+    types: ['kanji', 'vocabulary', 'grammar']
+  });
+  const ordered = [];
+  for (const entityType of ['kanji', 'vocabulary', 'grammar']) {
+    const group = groups && groups[entityType];
+    const list = group && Array.isArray(group.items) ? group.items : [];
+    for (const item of list) {
+      if (ordered.length >= RECONSTRUCTED_QUEUE_LIMIT) break;
+      const entityId = Number(item && item.entityId);
+      if (!Number.isInteger(entityId) || entityId <= 0) continue;
+      if (gradedKeys.has(`${entityType}:${entityId}`)) continue;
+      ordered.push({
+        entityType,
+        entityId,
+        display: item.display ?? null,
+        reading: item.reading ?? null,
+        meaning: item.meaning ?? null
+      });
+    }
+    if (ordered.length >= RECONSTRUCTED_QUEUE_LIMIT) break;
+  }
+  return ordered.map((entry, position) => ({
+    position,
+    entityType: entry.entityType,
+    entityId: entry.entityId,
+    display: entry.display,
+    reading: entry.reading || null,
+    meaning: entry.meaning || null,
+    lastResult: null
+  }));
+}
+
 async function getReviewSessionItems(req, res) {
   try {
     const id = parseIdParam(req, 'review session');
@@ -653,18 +718,35 @@ async function getReviewSessionItems(req, res) {
        LIMIT 500`,
       [req.user.id, req.user.id, req.user.id, id, req.user.id]
     );
-    return res.json({
-      id,
-      items: (rows || []).map((row) => ({
-        position: Number(row.position),
-        entityType: row.entityType,
-        entityId: Number(row.entityId),
-        display: row.display,
-        reading: row.reading || null,
-        meaning: row.meaning || null,
-        lastResult: row.lastResult || null
-      }))
-    });
+    const persisted = (rows || []).map((row) => ({
+      position: Number(row.position),
+      entityType: row.entityType,
+      entityId: Number(row.entityId),
+      display: row.display,
+      reading: row.reading || null,
+      meaning: row.meaning || null,
+      lastResult: row.lastResult || null
+    }));
+    if (persisted.length) {
+      return res.json({ id, reconstructed: false, items: persisted });
+    }
+    // Empty persisted queue on an OPEN session: legacy (pre-026), no-items,
+    // or target-less immersion session. Reconstruct a resume set instead of
+    // stranding the user with []. requireOpenSession already proved ownership,
+    // so the range lookup below stays user-scoped without leaking existence.
+    const [sessions] = await pool.execute(
+      'SELECT source_from AS "sourceFrom", source_to AS "sourceTo" FROM review_sessions WHERE id_review_session = ? AND user_id = ?',
+      [id, req.user.id]
+    );
+    const range = sessions && sessions[0];
+    if (!range) return res.status(404).json({ error: 'review session not found' });
+    const sourceFrom = toIsoDate(range.sourceFrom);
+    const sourceTo = toIsoDate(range.sourceTo);
+    if (!isValidDateString(sourceFrom) || !isValidDateString(sourceTo)) {
+      return res.json({ id, reconstructed: true, sourceFrom: sourceFrom || null, sourceTo: sourceTo || null, items: [] });
+    }
+    const reconstructed = await buildReconstructedSessionItems(pool, id, req.user.id, sourceFrom, sourceTo);
+    return res.json({ id, reconstructed: true, sourceFrom, sourceTo, items: reconstructed });
   } catch (error) {
     if (error && error.status === 404) return res.status(404).json({ error: 'review session not found' });
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load review session items.' });
