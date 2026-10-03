@@ -44,9 +44,8 @@ function selectControl({ name, label, value, options }) {
     className: 'field-control',
     attrs: { id: name, name, 'aria-label': label }
   }, options.map((option) => element('option', {
-    value: option.value,
     text: option.label,
-    attrs: { ...(option.value === value ? { selected: '' } : {}) }
+    attrs: { value: option.value, ...(option.value === value ? { selected: '' } : {}) }
   })));
   return element('div', { className: 'grid gap-1' }, [
     element('label', { className: 'text-xs font-medium text-ink', text: label, attrs: { for: name } }),
@@ -128,7 +127,7 @@ async function renderLibraryView(container) {
     if (pagination) pageWrap.replaceChildren(pagination);
   }
 
-  const applyButton = element('button', { className: 'button-secondary self-end', text: 'Apply filters', attrs: { type: 'button' } });
+  const applyButton = element('button', { className: 'button-secondary w-full sm:w-auto sm:justify-self-start', text: 'Apply filters', attrs: { type: 'button' } });
   applyButton.addEventListener('click', () => refresh(1));
 
   function importUnavailableMessage(reason, sourceName) {
@@ -238,11 +237,16 @@ async function renderLibraryView(container) {
       title: 'Graded Reading',
       description: 'Read real Japanese matched to your level. Tap annotated words to study them.'
     }),
-    element('div', { className: 'surface mt-4 flex flex-wrap items-end gap-3 p-4' }, [
-      levelWrapper,
-      sourceWrapper,
+    element('div', { className: 'surface mt-4 grid gap-3 p-4' }, [
+      element('div', { className: 'grid grid-cols-2 gap-3' }, [
+        levelWrapper,
+        sourceWrapper
+      ]),
       applyButton,
-      element('div', { className: 'ml-auto flex flex-wrap gap-2' }, [importNhk, importAozora, progressLink])
+      element('div', { className: 'grid gap-2 border-t border-stone pt-3' }, [
+        element('p', { className: 'text-xs font-medium text-muted', text: 'More texts' }),
+        element('div', { className: 'grid grid-cols-1 gap-2 sm:grid-cols-3' }, [importNhk, importAozora, progressLink])
+      ])
     ]),
     gridWrap,
     pageWrap,
@@ -430,10 +434,14 @@ async function renderReader(container, textId) {
     attrs: { 'aria-label': 'Reading text', lang: 'ja' }
   });
 
-  const progressLabel = element('span', { className: 'text-xs text-muted', text: '0%' });
-  const progressBar = element('div', { className: 'h-1.5 w-24 overflow-hidden rounded-full bg-ink/10' }, [
-    element('div', { className: 'h-full w-0 rounded-full bg-ink transition-all', attrs: { 'data-progress-fill': '' } })
+  const progressLabel = element('span', { className: 'text-xs font-medium tabular-nums text-muted', text: '0%' });
+  const progressBar = element('div', { className: 'h-2 w-28 overflow-hidden rounded-full bg-ink/10 sm:w-36' }, [
+    element('div', { className: 'h-full w-0 rounded-full bg-vermilion transition-all', attrs: { 'data-progress-fill': '' } })
   ]);
+  const progressGroup = element('div', {
+    className: 'ml-auto flex items-center gap-2',
+    attrs: { role: 'progressbar', 'aria-label': 'Reading progress', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': '0' }
+  }, [progressBar, progressLabel]);
 
   const annotationsToggle = element('button', {
     className: 'button-secondary min-h-9 px-3 py-1.5 text-xs',
@@ -448,13 +456,13 @@ async function renderReader(container, textId) {
   });
 
   const fontSlider = element('input', {
-    className: 'w-28',
-    attrs: { type: 'range', min: '14', max: '28', step: '1', value: '18', 'aria-label': 'Font size' }
+    className: 'h-1.5 w-full cursor-pointer accent-vermilion',
+    attrs: { id: 'reader-font-size', type: 'range', min: '14', max: '28', step: '1', value: '18', 'aria-label': 'Font size' }
   });
   fontSlider.addEventListener('input', () => { textBody.style.fontSize = `${fontSlider.value}px`; });
 
   const completeButton = element('button', {
-    className: 'button-primary min-h-9 px-4 py-2 text-xs',
+    className: 'button-primary min-h-9 w-full px-4 py-2 text-xs sm:w-auto',
     text: completed ? 'Completed' : 'Mark completed',
     attrs: { type: 'button', ...(completed ? { disabled: '' } : {}) }
   });
@@ -470,6 +478,11 @@ async function renderReader(container, textId) {
     }
   }));
 
+  // Progress = furthest-read position. Seeded from the saved value so a
+  // reopened text shows its resume point instead of 0%; scrolling can only
+  // advance it, never regress it, and completed texts stop autosaving.
+  let highWaterPosition = total ? Math.max(0, Math.min(total, Number(data.progress?.position || 0))) : 0;
+
   function saveProgress() {
     if (completed || !textBody.isConnected) {
       if (!textBody.isConnected && cleanupReader) {
@@ -483,21 +496,22 @@ async function renderReader(container, textId) {
     lastSaveAt = now;
     const rect = textBody.getBoundingClientRect();
     const viewport = window.innerHeight || 1;
-    // Removed the upper-bound clamp that forced scrolled >= rect.height → 100%.
-    // Now scrolled is the actual pixel distance from the viewport top to the text top.
     const scrolled = Math.max(viewport - rect.top, 0);
     const fraction = rect.height ? scrolled / rect.height : 1;
     const position = total ? Math.max(1, Math.min(total, Math.ceil(fraction * total))) : 1;
-    updateReadingProgress(textId, { position, timeSpentSeconds: accumulatedSeconds(), completed: false }).catch(() => { /* best-effort autosave */ });
+    highWaterPosition = Math.max(highWaterPosition, position);
+    updateReadingProgress(textId, { position: highWaterPosition, timeSpentSeconds: accumulatedSeconds(), completed: false }).catch(() => { /* best-effort autosave */ });
   }
 
   function updateProgressUi() {
     const rect = textBody.getBoundingClientRect();
     const viewport = window.innerHeight || 1;
-    // Removed the upper-bound clamp that forced 100% when scrolling past text body.
     const scrolled = Math.max(viewport - rect.top, 0);
-    const percent = rect.height ? Math.min(100, Math.round((scrolled / rect.height) * 100)) : 0;
+    const scrollFraction = rect.height ? scrolled / rect.height : 1;
+    const fraction = total ? Math.max(scrollFraction, highWaterPosition / total) : scrollFraction;
+    const percent = Math.min(100, Math.round(fraction * 100));
     progressLabel.textContent = `${percent}%`;
+    progressGroup.setAttribute('aria-valuenow', String(percent));
     const fill = progressBar.querySelector('[data-progress-fill]');
     if (fill) fill.style.width = `${percent}%`;
   }
@@ -510,17 +524,22 @@ async function renderReader(container, textId) {
   cleanupReader = () => window.removeEventListener('scroll', onScroll);
 
   container.replaceChildren(element('section', { className: 'mx-auto w-full max-w-3xl' }, [
-    element('a', { className: 'button-secondary inline-flex min-h-9 items-center px-3 py-1.5 text-xs', text: 'Back to library', attrs: { href: '#reading' } }),
-    element('header', { className: 'mt-4 flex flex-wrap items-center gap-2' }, [
-      element('h1', { className: 'text-xl font-semibold text-ink', text: data.title }),
+    element('a', { className: 'text-sm font-medium text-muted underline-offset-4 hover:text-ink hover:underline', text: '← Back to library', attrs: { href: '#reading' } }),
+    element('header', { className: 'mt-2 flex flex-wrap items-center gap-x-3 gap-y-2' }, [
+      element('h1', { className: 'min-w-0 flex-1 break-words text-xl font-semibold text-ink', text: data.title }),
       levelBadge(data.level) || element('span', { className: 'text-xs text-muted', text: data.sourceType || 'user' })
     ]),
-    element('div', { className: 'mt-3 flex flex-wrap items-center gap-3' }, [
-      annotationsToggle,
-      element('label', { className: 'flex items-center gap-2 text-xs text-muted', attrs: { for: 'reader-font-size' } }, [element('span', { text: 'Font size' }), fontSlider]),
-      progressBar,
-      progressLabel,
-      completeButton
+    element('div', { className: 'surface mt-3 flex flex-col gap-3 p-4' }, [
+      element('div', { className: 'flex flex-wrap items-center gap-x-5 gap-y-3' }, [
+        annotationsToggle,
+        element('label', { className: 'flex min-w-44 flex-1 items-center gap-2 text-xs text-muted', attrs: { for: 'reader-font-size' } }, [
+          element('span', { text: 'A', attrs: { 'aria-hidden': 'true' } }),
+          fontSlider,
+          element('span', { className: 'text-sm font-semibold', text: 'A', attrs: { 'aria-hidden': 'true' } })
+        ]),
+        progressGroup
+      ]),
+      element('div', { className: 'border-t border-stone pt-3' }, [completeButton])
     ]),
     textBody
   ]));

@@ -1,4 +1,4 @@
-// V5.3a Smart Goals — dashboard widget + settings section (vanilla JS).
+// V5.3a Suggested goals — dashboard widget + settings section (vanilla JS).
 // Both are self-loading and fail-open: any API trouble hides the widget /
 // shows a muted note in settings, never blocking the host page. The backend
 // owns every computation (heuristic engine in server/src/services/smartGoals.js);
@@ -10,7 +10,7 @@ import { element, showToast } from './ui';
 const JLPT_LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1'];
 
 export function smartGoalsWidget() {
-  const wrap = element('section', { className: 'surface mt-5 p-5 sm:p-6', attrs: { 'aria-label': 'Smart goals' } });
+  const wrap = element('section', { className: 'surface mt-5 p-5 sm:p-6', attrs: { 'aria-label': 'Suggested goals' } });
   wrap.hidden = true;
   (async () => {
     try {
@@ -21,7 +21,7 @@ export function smartGoalsWidget() {
       const prediction = data?.prediction || {};
       const microGoals = Array.isArray(data?.microGoals) ? data.microGoals : [];
       wrap.replaceChildren(
-        element('h2', { className: 'font-semibold text-ink', text: 'Smart goals' }),
+        element('h2', { className: 'font-semibold text-ink', text: 'Suggested goals' }),
         element('p', {
           className: 'mt-1 text-sm text-muted',
           text: `This week: ${progress} of ${goal} reviews · ${percent}%${Number(data?.autoAdjust ? data.preferences?.autoAdjust : data.preferences?.autoAdjust) ? ' · auto-adjust on' : ''}`
@@ -54,15 +54,15 @@ export function smartGoalsSettingsSection() {
     className: 'settings-section surface max-w-5xl p-5 sm:p-6',
     attrs: { 'aria-labelledby': 'smart-goals-heading' }
   });
-  const heading = element('h2', { className: 'settings-title', text: 'Smart goals', attrs: { id: 'smart-goals-heading' } });
+  const heading = element('h2', { className: 'settings-title', text: 'Suggested goals', attrs: { id: 'smart-goals-heading' } });
   const description = element('p', { className: 'mt-1 text-sm text-muted', text: 'Auto-adjust nudges your weekly review goal ±20% from recent activity. Grace days forgive missed days in your study run.' });
-  const status = element('p', { className: 'mt-2 min-h-5 text-sm text-muted', attrs: { 'aria-live': 'polite' }, text: 'Loading smart goals…' });
+  const status = element('p', { className: 'mt-2 min-h-5 text-sm text-muted', attrs: { 'aria-live': 'polite' }, text: 'Loading suggested goals…' });
 
   const autoToggle = element('input', { className: 'size-4 accent-vermilion', attrs: { type: 'checkbox', name: 'smart-auto-adjust' } });
-  const graceSelect = element('select', { className: 'field-control max-w-24', attrs: { name: 'smart-grace-days', 'aria-label': 'Grace days per week' } }, [0, 1, 2].map((days) => element('option', { value: String(days), text: String(days) })));
-  const targetSelect = element('select', { className: 'field-control max-w-32', attrs: { name: 'smart-target-jlpt', 'aria-label': 'Smart goal target JLPT' } }, [
-    element('option', { value: '', text: 'No target' }),
-    ...JLPT_LEVELS.map((level) => element('option', { value: level, text: level }))
+  const graceSelect = element('select', { className: 'field-control max-w-24', attrs: { name: 'smart-grace-days', 'aria-label': 'Grace days per week' } }, [0, 1, 2].map((days) => element('option', { text: String(days), attrs: { value: String(days) } })));
+  const targetSelect = element('select', { className: 'field-control max-w-32', attrs: { name: 'smart-target-jlpt', 'aria-label': 'Suggested goal target JLPT' } }, [
+    element('option', { text: 'No target', attrs: { value: '' } }),
+    ...JLPT_LEVELS.map((level) => element('option', { text: level, attrs: { value: level } }))
   ]);
   const saveButton = element('button', { className: 'button-primary min-h-9 self-start px-4 py-2 text-sm', text: 'Save preferences', attrs: { type: 'button', disabled: '' } });
 
@@ -76,7 +76,7 @@ export function smartGoalsSettingsSection() {
       status.textContent = `Current weekly goal: ${Number(data?.weeklyGoal || 0)} reviews.`;
       saveButton.disabled = false;
     } catch {
-      status.textContent = 'Smart goals are unavailable right now.';
+      status.textContent = 'Suggested goals are unavailable right now.';
     }
   })();
 
@@ -89,11 +89,11 @@ export function smartGoalsSettingsSection() {
     })
       .then(() => {
         status.textContent = '✓ Saved';
-        showToast('Smart goal preferences saved.');
+        showToast('Suggested goal preferences saved.');
       })
       .catch(() => {
         status.textContent = 'Could not save. Please try again.';
-        showToast('Unable to save smart goal preferences.', 'error');
+        showToast('Unable to save suggested goal preferences.', 'error');
       })
       .finally(() => { saveButton.disabled = false; });
   });

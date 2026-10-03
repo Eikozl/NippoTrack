@@ -160,10 +160,9 @@ export async function renderReview(container) {
 
   const startWrap = element('div', { className: 'mt-5' });
   const startButton = element('button', { className: 'button-primary', text: 'Start review', attrs: { type: 'button' } });
-  // V5.3a Review 2.0 entry: card-type preferences (dialog below).
-  const cardTypesButton = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-sm', text: 'Card types', attrs: { type: 'button', 'aria-label': 'Card type preferences' } });
-  cardTypesButton.addEventListener('click', () => { openCardTypeDialog(); });
-  startWrap.append(startButton, element('div', { className: 'mt-2' }, [cardTypesButton]));
+  // Card-type preferences live only inside the review setup options (the Edit
+  // control next to the card-type summary) — no shortcut button here.
+  startWrap.append(startButton);
 
   // Setup form (hidden until SETUP).
   const setupWrap = element('div', { className: 'mt-6 overflow-hidden border-t border-stone pt-6 transition-all duration-200' });
