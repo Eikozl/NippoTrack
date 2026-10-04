@@ -152,7 +152,7 @@ function itemsDialog(deckId, title, entityType) {
         title: title || 'Deck',
         description: `${items.length} items. Select one for details, examples and strokes.`,
         content: [
-          element('div', { className: 'flex flex-col gap-2 sm:flex-row' }, [playAll, stop]),
+          element('div', { className: 'flex flex-col gap-2 sm:flex-row sm:items-center' }, [playAll, stop]),
           progress,
           element('ul', { className: 'grid max-h-56 gap-1 overflow-y-auto text-sm text-ink', attrs: { role: 'list' } }, items.map((entry) => {
             const open = smallButton(displayOf(entry), `Details for ${displayOf(entry)}`);
@@ -183,13 +183,13 @@ function deckCard(deck, actions = []) {
   const creator = creatorName
     ? element('p', { className: 'mt-1 text-xs text-muted', text: `by ${creatorName}` })
     : null;
-  return element('article', { className: 'relative rounded-xl border border-stone bg-paper p-4' }, [
-    element('div', { className: 'flex items-start justify-between gap-3' }, [
-      element('h3', { className: 'break-words text-lg font-semibold text-ink', text: deck.title }),
+  return element('article', { className: 'relative min-w-0 overflow-hidden rounded-xl border border-stone bg-paper p-4' }, [
+    element('div', { className: 'flex min-w-0 items-start justify-between gap-3' }, [
+      element('h3', { className: 'min-w-0 break-words text-lg font-semibold text-ink', text: deck.title }),
       pill
     ]),
     ...(creator ? [creator] : []),
-    ...(deck.description ? [element('p', { className: 'mt-1 text-sm leading-6 text-muted', text: deck.description })] : []),
+    ...(deck.description ? [element('p', { className: 'mt-1 break-words text-sm leading-6 text-muted', text: deck.description })] : []),
     element('p', { className: 'mt-2 text-xs font-medium text-muted', text: `${deck.itemCount ?? '?'} items` }),
     ...(actions.length ? [element('div', { className: 'mt-3 flex flex-row flex-wrap items-center gap-2' }, actions)] : [])
   ]);
@@ -251,7 +251,7 @@ export async function renderCommunity(container) {
   container.append(feed.wrap, publish.wrap, share.wrap, mine.wrap, collections.wrap);
 
   // ---- Feed
-  const filterRow = element('div', { className: 'flex flex-col gap-2 sm:flex-row' });
+  const filterRow = element('div', { className: 'flex flex-col gap-2 sm:flex-row sm:items-center' });
   const typeFilter = element('select', { className: 'field-control sm:max-w-44', attrs: { 'aria-label': 'Filter by type' } }, [
     element('option', { text: 'All types', attrs: { value: '' } }),
     ...PICKER_TYPES.map((type) => element('option', { text: type.label, attrs: { value: type.key } }))
@@ -319,7 +319,7 @@ export async function renderCommunity(container) {
       title: 'All public decks',
       description: 'Filter by title and type, same as the feed.',
       content: [
-        element('div', { className: 'flex flex-col gap-2 sm:flex-row' }, [dialogType, dialogSearch]),
+        element('div', { className: 'flex flex-col gap-2 sm:flex-row sm:items-center' }, [dialogType, dialogSearch]),
         dialogList
       ],
       submitLabel: 'Close',
@@ -345,7 +345,7 @@ export async function renderCommunity(container) {
   }
 
   // ---- Publish composer
-  const tabs = element('div', { className: 'flex flex-col gap-2 sm:flex-row', attrs: { role: 'group', 'aria-label': 'Pick item type' } });
+  const tabs = element('div', { className: 'flex flex-col gap-2 sm:flex-row sm:items-center', attrs: { role: 'group', 'aria-label': 'Pick item type' } });
   let pickerType = PICKER_TYPES[0];
   const search = element('input', { className: 'field-control', attrs: { type: 'search', 'aria-label': 'Search your collection', placeholder: 'Search your collection…' } });
   const jlptFilter = element('select', { className: 'field-control sm:max-w-36', attrs: { 'aria-label': 'Filter picker by JLPT level' } }, [
@@ -439,7 +439,7 @@ export async function renderCommunity(container) {
       descriptionInput.value = '';
     }).catch((error) => showToast(error?.message || 'Unable to publish the deck.', 'error'));
   });
-  publish.body.append(tabs, element('div', { className: 'flex flex-col gap-2 sm:flex-row' }, [search, jlptFilter]), results, tray, titleInput, descriptionInput, publishButton);
+  publish.body.append(tabs, element('div', { className: 'flex flex-col gap-2 sm:flex-row sm:items-center' }, [search, jlptFilter]), results, tray, titleInput, descriptionInput, publishButton);
   syncTray();
   runSearch();
 
@@ -483,7 +483,7 @@ export async function renderCommunity(container) {
       importPreview.replaceChildren(
         element('p', { className: 'text-sm font-semibold text-ink', text: `${deck.title || 'Shared deck'} · ${items.length} items` }),
         ...(deck.description ? [element('p', { className: 'text-sm text-muted', text: deck.description })] : []),
-        element('div', { className: 'flex flex-col gap-2 sm:flex-row' }, [selectAll, clearSelection]),
+        element('div', { className: 'flex flex-col gap-2 sm:flex-row sm:items-center' }, [selectAll, clearSelection]),
         count,
         element('div', { className: 'grid max-h-56 gap-1.5 overflow-y-auto' }, boxes.map(({ box }, position) => {
           const entry = items[position];
@@ -710,7 +710,7 @@ export async function renderCommunity(container) {
         return card;
       }));
       collections.body.replaceChildren(
-        element('div', { className: 'flex flex-col gap-2 sm:flex-row' }, [createTitle, create]),
+        element('div', { className: 'flex flex-col gap-2 sm:flex-row sm:items-center' }, [createTitle, create]),
         list
       );
     } catch {
