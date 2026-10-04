@@ -11,6 +11,19 @@ process.env.JLT_AUTH_BYPASS_FOR_TESTS = 'true';
 
 const TEST_USER = '00000000-0000-4000-8000-000000000001';
 
+// Known flaky: kuromoji init can exceed its budget under contention, so a
+// cold first run may come back 'unavailable'/timeout. Retry such runs ONCE;
+// anything else (or a second failure) is a real failure. Scoped to the
+// cold-init test below, never global.
+async function retryOnceOnFlakyInit(fn) {
+  try {
+    await fn();
+  } catch (error) {
+    if (!/unavailable|timeout/i.test(String(error?.message || ''))) throw error;
+    await fn();
+  }
+}
+
 const PIN = { source_id: '7', source_name: 'JMdict-Test', converter: 'fixture-converter', converter_version: '9.9.9', file_date: '2026-08-31' };
 
 // Minimal in-memory reference: one single-sense noun, one two-sense verb,
@@ -202,7 +215,7 @@ function itemByKey(context, key) {
   return context.items.find((item) => item.key === key);
 }
 
-test('context omitted: no context key, lexical untouched', async () => {
+test('context omitted: no context key, lexical untouched', async () => retryOnceOnFlakyInit(async () => {
   // Would fail if the additive block leaked into existing responses.
   const stub = installStub();
   try {
@@ -220,7 +233,7 @@ test('context omitted: no context key, lexical untouched', async () => {
   } finally {
     stub.restore();
   }
-});
+}));
 
 test('lexical + context resolves UNIQUE/COMPATIBLE and UNIQUE/AMBIGUOUS additively', async () => {
   // Would fail if context broke the lexical block shape, or if the two-axis
