@@ -177,7 +177,7 @@ function section(title, description) {
   return { wrap, body };
 }
 
-function deckCard(deck, actions = [], compact = false) {
+function deckCard(deck, actions = []) {
   const pill = element('span', { className: 'status-pill shrink-0 text-xs', text: deck.entityType || '' });
   const creatorName = deck.ownerDisplay || (deck.ownerUsername ? `@${deck.ownerUsername}` : null);
   const creator = creatorName
@@ -191,7 +191,7 @@ function deckCard(deck, actions = [], compact = false) {
     ...(creator ? [creator] : []),
     ...(deck.description ? [element('p', { className: 'mt-1 text-sm leading-6 text-muted', text: deck.description })] : []),
     element('p', { className: 'mt-2 text-xs font-medium text-muted', text: `${deck.itemCount ?? '?'} items` }),
-    ...(actions.length ? [element('div', { className: compact ? 'mt-3 flex flex-row items-center gap-2' : 'mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap' }, actions)] : [])
+    ...(actions.length ? [element('div', { className: 'mt-3 flex flex-row flex-wrap items-center gap-2 sm:pr-12' }, actions)] : [])
   ]);
 }
 
@@ -227,7 +227,7 @@ function starWidget(deck) {
       paint();
     }).catch((error) => showToast(error?.message || 'Unable to like the deck.', 'error'));
   });
-  const wrap = element('div', { className: 'flex flex-col items-center gap-0.5' }, [star, countNode]);
+  const wrap = element('div', { className: 'flex shrink-0 flex-col items-center gap-0.5 sm:absolute sm:bottom-3 sm:right-3' }, [star, countNode]);
   return wrap;
 }
 
@@ -269,7 +269,7 @@ export async function renderCommunity(container) {
     const view = smallButton('Open deck', `Open ${deck.title}`);
     view.classList.add('flex-1');
     view.addEventListener('click', () => itemsDialog(deck.id, deck.title, deck.entityType));
-    const card = deckCard(deck, [view, starWidget(deck)], true);
+    const card = deckCard(deck, [view, starWidget(deck)]);
     if (withPreview) {
       const previewItems = (deck.previewItems || []).slice(0, 3);
       if (previewItems.length) {
