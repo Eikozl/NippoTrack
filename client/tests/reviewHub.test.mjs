@@ -1517,6 +1517,9 @@ test('Review 3.0 audio: speaker icon in front and after reveal, gated input unlo
   assert.ok(input, 'audio front has answer input');
   let reveal = findFirstButtonByText(container, 'Reveal answer');
   assert.ok(reveal.hasAttribute('disabled'), 'reveal locked until the heard word is typed');
+  const frontSpeaker = speakerButtons(container).filter(isVisible)[0];
+  assert.ok(frontSpeaker, 'speaker present in front');
+  assert.equal(frontSpeaker.getAttribute('aria-label'), 'Play audio', 'audio speaker never names the word');
   input.value = '水';
   input.dispatchEvent({ type: 'input', target: input, preventDefault() {} });
   await sleep(10);
@@ -1580,6 +1583,29 @@ test('Review 3.0 audio: device without Japanese voice renders the card as recogn
   await clickAndSettle(reveal);
   await sleep(10);
   assert.ok(findFirstButtonByText(container, 'Good'), 'grades reachable from the fallback');
+});
+
+test('Review 3.0 audio: fallback re-check restores the gate once a voice shows up', async () => {
+  const liveVoices = [{ lang: 'en-US' }];
+  const item = candidateItem({ entityType: 'vocabulary', entityId: 77, display: '水', reading: 'みず', meaning: 'water', strength: 'strong' });
+  const { harness, container } = await startWithSingleItem({
+    item,
+    typesPayload: { availableTypes: ['recognition', 'recall', 'cloze', 'audio'], userPreferences: { cardTypes: ['audio'], weights: {}, engineMode: 'fixed', autoPick: true } },
+    speechVoices: () => liveVoices.slice()
+  });
+  assert.match(textOf(container), /No Japanese voice on this device/, 'fallback explains itself');
+  const toastsBefore = harness.toasts.length;
+  await clickAndSettle(findFirstButtonByText(container, 'Check for audio again'));
+  await sleep(10);
+  assert.ok(harness.toasts.length > toastsBefore, 'still-missing re-check says so');
+  assert.equal(answerInputOf(container), null, 'gate stays off while missing');
+  liveVoices.push({ lang: 'ja-JP' });
+  await clickAndSettle(findFirstButtonByText(container, 'Check for audio again'));
+  await sleep(20);
+  assert.ok(answerInputOf(container), 'gate restored once a voice shows up');
+  const reveal = findFirstButtonByText(container, 'Reveal answer');
+  assert.ok(reveal && reveal.hasAttribute('disabled'), 'reveal locked again on restore');
+  assert.match(textOf(container), /type what you hear/, 'listening exercise back');
 });
 
 test('Review 3.0 audio: late confirmation of no Japanese voice steps a waiting card down', async () => {

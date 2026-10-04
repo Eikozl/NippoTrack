@@ -107,6 +107,22 @@ function hasJapaneseVoice(voices) {
   return Boolean(findJapaneseVoice(voices));
 }
 
+// Live-first voice read for the audio-card probe: a fresh install (or a
+// list that finished loading) must be visible immediately instead of
+// hiding behind a stale cache. Falls back to the cache when unreadable.
+function readVoicesLive(synthesis) {
+  try {
+    if (synthesis && typeof synthesis.getVoices === 'function') {
+      const voices = synthesis.getVoices();
+      if (Array.isArray(voices) && voices.length) {
+        try { cachedVoices = voices.slice(); } catch { /* cache store is best-effort */ }
+        return voices;
+      }
+    }
+  } catch { /* fall through to the cache */ }
+  return readVoices(synthesis);
+}
+
 function japaneseVoiceGuidance() {
   return 'No Japanese voice found on this device — install one in your system settings to hear audio.';
 }
@@ -1054,7 +1070,7 @@ const CARD_TYPE_DESCRIPTIONS = {
     try { warmCachedVoices(); } catch { /* warm-up is best-effort */ }
     let voices = [];
     try {
-      voices = readVoices(window.speechSynthesis);
+      voices = readVoicesLive(window.speechSynthesis);
     } catch { return 'unknown'; }
     if (!Array.isArray(voices) || voices.length === 0) return 'unknown';
     return hasJapaneseVoice(voices) ? 'ready' : 'missing';
@@ -1492,7 +1508,10 @@ const CARD_TYPE_DESCRIPTIONS = {
     // Speaker lives beside the heading so the front/answer toggle never removes it,
     // with the discrete speed selector right after it. All selectors stay in
     // sync; changing any of them applies instantly and persists in background.
-    const speakerButton = element('button', { className: 'icon-button shrink-0', attrs: { type: 'button', 'aria-label': `Play ${item.display}` } }, [icon('volume', { size: 20 })]);
+    // On audio cards the button label never names the word: announcing it
+    // would hand out the answer the listening exercise is asking for.
+    const speakerLabel = cardType === 'audio' ? 'Play audio' : `Play ${item.display}`;
+    const speakerButton = element('button', { className: 'icon-button shrink-0', attrs: { type: 'button', 'aria-label': speakerLabel } }, [icon('volume', { size: 20 })]);
     speakerButton.addEventListener('click', () => { speakDisplay(item.display); });
     const speedSelect = element('select', {
       className: 'rounded-lg border border-stone bg-paper px-1.5 py-1 text-xs font-semibold text-muted',
@@ -1688,13 +1707,57 @@ const CARD_TYPE_DESCRIPTIONS = {
       frontWrap.append(built.row, frontResult, revealButton);
     } else if (cardType === 'audio') {
       // No Japanese voice on the device: the listening task is impossible,
-      // so the card is presented as plain recognition instead.
+      // so the card is presented as plain recognition instead, with a way
+      // back once a voice shows up.
+      const renderAudioGated = () => {
+        showCheck(null);
+        title.textContent = 'Listen and recall';
+        revealButton.setAttribute('disabled', '');
+        const built = buildAnswerInput({
+          conceal: true,
+          onMatch: () => { revealButton.removeAttribute('disabled'); }
+        });
+        frontWrap.replaceChildren();
+        frontWrap.append(
+          element('p', { className: 'text-sm leading-6 text-muted', text: 'Tap the speaker to hear it, then type what you hear.' }),
+          built.row,
+          frontResult,
+          revealButton
+        );
+      };
+      const confirmVoicesInBackground = () => {
+        // The voice list may still be loading: confirm in the background
+        // and only step down a card that is still on its front.
+        const myIndex = currentIndex;
+        const myItem = item;
+        try {
+          waitForVoices(window.speechSynthesis).then((voices) => {
+            if (revealed || currentIndex !== myIndex || queue[myIndex] !== myItem) return;
+            if (Array.isArray(voices) && voices.length && !hasJapaneseVoice(voices)) {
+              renderAudioAsRecognition();
+            }
+          });
+        } catch { /* stepping down is best-effort */ }
+      };
       const renderAudioAsRecognition = () => {
         title.textContent = String(item.display || '');
         revealButton.removeAttribute('disabled');
+        const recheckButton = element('button', { className: 'button-secondary min-h-10 px-4 py-2 text-sm', text: 'Check for audio again', attrs: { type: 'button' } });
+        recheckButton.addEventListener('click', () => {
+          const status = audioVoiceStatus();
+          if (status === 'missing') {
+            showToast('Still no Japanese voice — install one in your system settings, then check again.', 'error');
+            return;
+          }
+          // A voice turned up (or the list is still loading): back to the
+          // listening exercise, confirming a genuinely empty list later.
+          renderAudioGated();
+          if (status === 'unknown') confirmVoicesInBackground();
+        });
         frontWrap.replaceChildren();
         frontWrap.append(
-          element('p', { className: 'text-sm leading-6 text-muted', text: 'Audio is unavailable on this device, so this card is shown as recognition.' }),
+          element('p', { className: 'text-sm font-semibold leading-6 text-ink', text: 'No Japanese voice on this device — this card is shown as recognition so you can still review it.' }),
+          recheckButton,
           revealButton
         );
       };
@@ -1703,31 +1766,8 @@ const CARD_TYPE_DESCRIPTIONS = {
       } else {
         // Gated listen-and-recall: Reveal stays locked until the heard
         // word is typed (practice only; grading stays with the buttons).
-        revealButton.setAttribute('disabled', '');
-        const built = buildAnswerInput({
-          conceal: true,
-          onMatch: () => { revealButton.removeAttribute('disabled'); }
-        });
-        frontWrap.append(
-          element('p', { className: 'text-sm leading-6 text-muted', text: 'Tap the speaker to hear it, then type what you hear.' }),
-          built.row,
-          frontResult,
-          revealButton
-        );
-        if (audioVoiceStatus() === 'unknown') {
-          // The voice list may still be loading: confirm in the background
-          // and only step down a card that is still on its front.
-          const myIndex = currentIndex;
-          const myItem = item;
-          try {
-            waitForVoices(window.speechSynthesis).then((voices) => {
-              if (revealed || currentIndex !== myIndex || queue[myIndex] !== myItem) return;
-              if (Array.isArray(voices) && voices.length && !hasJapaneseVoice(voices)) {
-                renderAudioAsRecognition();
-              }
-            });
-          } catch { /* stepping down is best-effort */ }
-        }
+        renderAudioGated();
+        if (audioVoiceStatus() === 'unknown') confirmVoicesInBackground();
       }
     } else {
       frontWrap.appendChild(revealButton);
