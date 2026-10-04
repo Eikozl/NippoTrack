@@ -2,6 +2,7 @@ import { apiRequest, queryString } from '../api';
 import { kanjiReferenceRoute } from '../kanjiReference';
 import { icon } from '../icons';
 import { element, emptyState, errorState, loadingState, openDetailModal, openDialog, pageHeader, setActionPending, showToast, withPendingAction } from '../ui';
+import { mountKanjiWriting } from '../kanjiWriting.js';
 
 const TYPE_ORDER = ['kanji', 'vocabulary', 'grammar'];
 const TYPE_LABEL = { kanji: 'Kanji', vocabulary: 'Vocabulary', grammar: 'Grammar' };
@@ -1766,7 +1767,25 @@ const CARD_TYPE_DESCRIPTIONS = {
       });
     } else if (cardType === 'recall') {
       const built = buildAnswerInput();
-      frontWrap.append(built.row, frontResult, revealButton);
+      frontWrap.append(built.row, frontResult);
+      // Kanji recall can open the handwriting overlay (order-only practice;
+      // grading stays with the buttons).
+      if (item.entityType === 'kanji' && typeof item.display === 'string' && /^\p{Script=Han}$/u.test(item.display)) {
+        const practiceButton = element('button', { className: 'button-secondary min-h-10 px-4 py-2 text-sm', text: 'Practice strokes', attrs: { type: 'button' } });
+        practiceButton.addEventListener('click', () => {
+          const holder = element('div', { className: 'grid gap-3' });
+          const closePractice = openDialog({
+            title: `Practice strokes: ${item.display}`,
+            description: 'Trace in stroke order. Practice only — nothing is graded.',
+            content: [holder],
+            submitLabel: 'Done',
+            onSubmit: async (form, closeDialog) => { closeDialog(); }
+          });
+          mountKanjiWriting(holder, { character: item.display, onDone: closePractice });
+        });
+        frontWrap.append(practiceButton);
+      }
+      frontWrap.append(revealButton);
     } else if (cardType === 'audio') {
       // No Japanese voice on the device: the listening task is impossible,
       // so the card is presented as plain recognition instead, with a way

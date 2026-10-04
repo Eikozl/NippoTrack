@@ -22,6 +22,7 @@ import {
 } from '../ui';
 import { iconForTitle, iconTile } from '../icons';
 import { speakJapanese } from '../speech.js';
+import { mountKanjiWriting } from '../kanjiWriting.js';
 
 const JLPT_OPTIONS = [
   { value: '', label: 'Any / not set' },
@@ -201,6 +202,14 @@ renderDetail: (item) => {
         // headline, On'yomi/Kun'yomi with the Reference-vs-Your-record split,
         // JLPT/strokes metadata, and status all live here.
         buildKanjiIdentity(normalizeKanjiOwnedIdentity(item), element),
+
+        // Handwriting practice (MVP): stroke-order overlay + order-only
+        // check in a modal. Lazy + fail-open like the stroke slots above.
+        element('section', { className: 'kanji-detail-section surface p-5', attrs: { 'aria-label': 'Handwriting practice' } }, [
+          element('h3', { className: 'font-semibold text-ink', text: 'Handwriting Practice' }),
+          element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: 'Trace the character in stroke order. Only the order is checked.' }),
+          element('button', { className: 'button-secondary mt-3 min-h-9 px-3 py-1.5', text: 'Practice writing', attrs: { type: 'button', 'data-writing-practice': 'true' } })
+        ]),
 
         // 2 + 3. SRS Review + Encounter Intelligence side by side on wide
         // dialogs; stacked otherwise. Exposure stays exposure-only.
@@ -1020,6 +1029,19 @@ export function renderEntityPage(container, config) {
         // B.2 stroke-order overlay: lazy + fail-open — the owned detail
         // never depends on it. Same shared module as the reference page.
         import('../strokeOrder.js').then((module) => module.mountStrokeSlots(content)).catch(() => {});
+        // Handwriting MVP: modal with the trace overlay + order check.
+        content.querySelector('[data-writing-practice]')?.addEventListener('click', () => {
+          const character = record.character_kanji || '';
+          const holder = element('div', { className: 'grid gap-3' });
+          const closeButton = element('button', { className: 'button-ghost', text: 'Close', attrs: { type: 'button' } });
+          const closePractice = openDetailModal({
+            title: character ? `Practice writing ${character}` : 'Practice writing',
+            content: [holder],
+            actions: [closeButton]
+          });
+          closeButton.addEventListener('click', closePractice);
+          mountKanjiWriting(holder, { character, onDone: closePractice });
+        });
       }
     } catch (error) {
       showToast(error.message, 'error');

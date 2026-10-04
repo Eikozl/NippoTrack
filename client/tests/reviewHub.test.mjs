@@ -306,6 +306,7 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
   const speechCalls = [];
   const speechCancelCalls = [];
   const speechListeners = new Map();
+  const mountCalls = [];
   const ui = makeUi(doc, toasts);
   const apiRequest = async (url, opts = {}) => {
     apiCalls.push({ url, options: opts });
@@ -384,6 +385,7 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
     .replace(/import\s*\{[^}]+\}\s*from\s*['"]\.\.\/kanjiReference['"];?/, '')
     .replace(/import\s*\{[^}]+\}\s*from\s*['"]\.\.\/icons['"];?/, '')
     .replace(/import\s*\{[^}]+\}\s*from\s*['"]\.\.\/ui['"];?/, '')
+    .replace(/import\s*\{[^}]+\}\s*from\s*['"]\.\.\/kanjiWriting\.js['"];?/, '')
     .replace(/export\s+async\s+function\s+renderReview/, 'async function renderReview');
   code += '\nreturn { renderReview };';
   const openDetailModal = ({ title, subtitle, content, actions = [] } = {}) => {
@@ -426,7 +428,7 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
       : null
   );
   const factory = new Function(
-    'apiRequest', 'queryString', 'kanjiReferenceRoute', 'icon', 'element', 'emptyState', 'errorState', 'loadingState', 'openDetailModal', 'openDialog', 'pageHeader', 'setActionPending', 'showToast', 'withPendingAction', 'document', 'window',
+    'apiRequest', 'queryString', 'kanjiReferenceRoute', 'icon', 'element', 'emptyState', 'errorState', 'loadingState', 'openDetailModal', 'openDialog', 'pageHeader', 'setActionPending', 'showToast', 'withPendingAction', 'document', 'window', 'mountKanjiWriting',
     code
   );
   const fakeWindow = {
@@ -452,9 +454,9 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
     }
   };
   const { renderReview } = factory(
-    apiRequest, queryString, kanjiReferenceRoute, icon, ui.element, ui.emptyState, ui.errorState, ui.loadingState, openDetailModal, openDialog, ui.pageHeader, setActionPending, ui.showToast, ui.withPendingAction, doc, fakeWindow
+    apiRequest, queryString, kanjiReferenceRoute, icon, ui.element, ui.emptyState, ui.errorState, ui.loadingState, openDetailModal, openDialog, ui.pageHeader, setActionPending, ui.showToast, ui.withPendingAction, doc, fakeWindow, (...args) => { mountCalls.push(args); return () => {}; }
   );
-  return { doc, toasts, apiCalls, dialogs, renderReview, ui, openDialogCalls, speechCalls, speechCancelCalls, speechListeners, fakeWindow };
+  return { doc, toasts, apiCalls, dialogs, renderReview, ui, openDialogCalls, speechCalls, speechCancelCalls, speechListeners, fakeWindow, mountCalls };
 }
 
 // ---------------------------------------------------------------- fixtures
@@ -1541,6 +1543,24 @@ test('Review 3.0 audio: speaker icon in front and after reveal, gated input unlo
   await clickAndSettle(speakers[0]);
   await sleep(120);
   assert.equal(harness.speechCalls.length, 2, 'answer speaker still replays');
+});
+
+test('Review 3.0 recall kanji: Practice strokes opens the writing overlay', async () => {
+  const item = candidateItem({ entityType: 'kanji', entityId: 61, display: '日', reading: 'にち', meaning: 'day', strength: 'strong', lastResult: 'Again' });
+  const { harness, container } = await startWithSingleItem({
+    item,
+    typesPayload: {
+      availableTypes: ['recognition', 'recall'],
+      userPreferences: { cardTypes: ['recall'], weights: {}, engineMode: 'fixed', autoPick: false }
+    }
+  });
+  assert.match(pillText(container), /Recall/, 'kanji card renders as recall');
+  const practice = findFirstButtonByText(container, 'Practice strokes');
+  assert.ok(practice, 'recall kanji front offers stroke practice');
+  await clickAndSettle(practice);
+  assert.equal(harness.mountCalls.length, 1, 'writing overlay mounted once');
+  assert.equal(harness.mountCalls[0][1]?.character, '日', 'overlay receives the kanji');
+  assert.match(harness.openDialogCalls[harness.openDialogCalls.length - 1]?.title || '', /Practice strokes/, 'practice opens in a dialog');
 });
 
 test('Review 3.0 audio: mismatch keeps reveal locked and never discloses the word', async () => {
