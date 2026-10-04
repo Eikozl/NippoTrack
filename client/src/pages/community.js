@@ -177,7 +177,7 @@ function section(title, description) {
   return { wrap, body };
 }
 
-function deckCard(deck, actions = [], corner = null) {
+function deckCard(deck, actions = [], compact = false) {
   const pill = element('span', { className: 'status-pill shrink-0 text-xs', text: deck.entityType || '' });
   const creatorName = deck.ownerDisplay || (deck.ownerUsername ? `@${deck.ownerUsername}` : null);
   const creator = creatorName
@@ -191,8 +191,7 @@ function deckCard(deck, actions = [], corner = null) {
     ...(creator ? [creator] : []),
     ...(deck.description ? [element('p', { className: 'mt-1 text-sm leading-6 text-muted', text: deck.description })] : []),
     element('p', { className: 'mt-2 text-xs font-medium text-muted', text: `${deck.itemCount ?? '?'} items` }),
-    ...(actions.length ? [element('div', { className: `mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap${corner ? ' sm:pr-12' : ''}` }, actions)] : []),
-    ...(corner ? [element('div', { className: 'mt-3 flex flex-row items-center gap-2 sm:absolute sm:bottom-3 sm:right-3 sm:mt-0 sm:flex-col sm:gap-0.5' }, [corner])] : [])
+    ...(actions.length ? [element('div', { className: compact ? 'mt-3 flex flex-row items-center gap-2' : 'mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap' }, actions)] : [])
   ]);
 }
 
@@ -268,8 +267,9 @@ export async function renderCommunity(container) {
     (!query || `${deck.title} ${deck.description || ''}`.toLowerCase().includes(query)));
   const buildFeedCard = (deck, withPreview) => {
     const view = smallButton('Open deck', `Open ${deck.title}`);
+    view.classList.add('flex-1');
     view.addEventListener('click', () => itemsDialog(deck.id, deck.title, deck.entityType));
-    const card = deckCard(deck, [view], starWidget(deck));
+    const card = deckCard(deck, [view, starWidget(deck)], true);
     if (withPreview) {
       const previewItems = (deck.previewItems || []).slice(0, 3);
       if (previewItems.length) {
