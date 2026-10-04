@@ -1,6 +1,6 @@
 import {
   BookOpen, BookOpenText, CalendarDays, CalendarRange, ChartNoAxesCombined, Check, Circle, CircleUserRound,
-  Clock, createElement, FileText, Flame, Globe, History, LayoutDashboard, Library, Languages,
+  Clock, createElement, FileText, Flag, Flame, Globe, History, LayoutDashboard, Library, Languages,
   Menu, MessagesSquare, Moon, Newspaper, PieChart, RefreshCw, ScanText, Search, Settings, Star, Sun, Tag, Target, Trash2, Volume2, X, Zap
 } from 'lucide';
 
@@ -11,7 +11,7 @@ const ICONS = {
   kanji: Languages,
   analyzer: ScanText,
   grammar: MessagesSquare,
-  goals: Target,
+  goals: Flag,
   content: Library,
   community: Globe,
   notes: FileText,
