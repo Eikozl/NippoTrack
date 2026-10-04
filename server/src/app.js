@@ -84,6 +84,7 @@ app.get('/api', (req, res) => {
       'POST /api/share/deck/import',
       'GET /api/users/:username/public',
       'GET /api/users/:username/decks',
+      'PUT /api/users/me',
       'POST /api/decks',
       'GET /api/decks',
       'GET /api/decks/:id',

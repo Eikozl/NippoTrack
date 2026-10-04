@@ -27,7 +27,7 @@ test('navigation renders grouped destinations in the approved order', () => {
   const pages = navPages(source);
   assert.deepEqual(pages, [
     'dashboard', 'review', 'sessions', 'goals',
-    'vocabulary', 'kanji', 'grammar', 'notes', 'content',
+    'vocabulary', 'kanji', 'grammar', 'decks', 'notes', 'content',
     'analyzer', 'immersion', 'reading', 'statistics'
   ]);
   for (const group of ['Study', 'Library', 'Tools', 'System']) {

@@ -1,7 +1,7 @@
 // Persisted public decks: publish owned items, browse public decks,
 // follow/unfollow and public author profiles.
 const pool = require('../config/db');
-const { sendRouteError } = require('../errors/http');
+const { ValidationError, sendRouteError } = require('../errors/http');
 const { parseIdParam } = require('../validation');
 const {
   getDeckAnalytics,
@@ -57,10 +57,12 @@ async function getAnalytics(req, res) {
 
 async function listDecks(req, res) {
   try {
+    const mine = req.query?.mine === 'true' || req.query?.mine === '1';
     const decks = await listPublicDecks(pool, {
       entityType: req.query?.entityType || null,
       limit: req.query?.limit,
-      offset: req.query?.offset
+      offset: req.query?.offset,
+      ownerId: mine ? req.user.id : null
     });
     return res.json({ items: decks });
   } catch (error) {
@@ -133,6 +135,63 @@ async function getPublicUser(req, res) {
   }
 }
 
+const OWN_PROFILE_FIELDS = ['username', 'display_name', 'bio', 'avatar_url', 'is_public'];
+
+async function putOwnProfile(req, res) {
+  try {
+    const body = req.body || {};
+    const unknown = Object.keys(body).filter((key) => !OWN_PROFILE_FIELDS.includes(key));
+    if (unknown.length) throw new ValidationError(`Unexpected field(s): ${unknown.join(', ')}.`);
+    const patch = {};
+    if (body.username !== undefined) {
+      const username = String(body.username || '').toLowerCase();
+      if (username !== '' && !/^[a-z0-9][a-z0-9-]{1,29}$/.test(username)) {
+        throw new ValidationError('username holds 2-30 lowercase letters, numbers or hyphens');
+      }
+      patch.username = username === '' ? null : username;
+    }
+    if (body.display_name !== undefined) {
+      const displayName = String(body.display_name || '').slice(0, 50);
+      patch.display_name = displayName === '' ? null : displayName;
+    }
+    if (body.bio !== undefined) patch.bio = String(body.bio || '').slice(0, 500) || null;
+    if (body.avatar_url !== undefined) patch.avatar_url = String(body.avatar_url || '').slice(0, 500) || null;
+    if (body.is_public !== undefined) {
+      if (typeof body.is_public !== 'boolean') throw new ValidationError('is_public must be a boolean');
+      patch.is_public = body.is_public;
+    }
+    const columns = Object.keys(patch);
+    if (!columns.length) throw new ValidationError('Nothing to update.');
+    const excluded = columns.map((column) => `${column} = EXCLUDED.${column}`).join(', ');
+    try {
+      await pool.execute(
+        `INSERT INTO user_profile (user_id, ${columns.join(', ')}) VALUES (?, ${columns.map(() => '?').join(', ')})
+         ON CONFLICT (user_id) DO UPDATE SET ${excluded}`,
+        [req.user.id, ...columns.map((column) => patch[column])]
+      );
+    } catch (error) {
+      if (String(error?.message || '').includes('user_profile_username_key')) {
+        throw new ValidationError('username is already taken');
+      }
+      throw error;
+    }
+    const [rows] = await pool.execute(
+      'SELECT username, display_name, bio, avatar_url, is_public FROM user_profile WHERE user_id = ?',
+      [req.user.id]
+    );
+    const row = Array.isArray(rows) ? rows[0] : {};
+    return res.json({
+      username: row?.username || null,
+      displayName: row?.display_name || null,
+      bio: row?.bio || null,
+      avatarUrl: row?.avatar_url || null,
+      isPublic: Boolean(row?.is_public)
+    });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to save the public profile.' });
+  }
+}
+
 async function listPublicUserDecks(req, res) {
   try {
     const profile = await getPublicProfile(pool, req.params.username);
@@ -179,5 +238,6 @@ module.exports = {
   postDecide,
   postFollow,
   postPublish,
-  postSuggest
+  postSuggest,
+  putOwnProfile
 };
