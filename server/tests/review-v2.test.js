@@ -235,7 +235,7 @@ test('PUT /api/review/preferences round-trips autoPick scoped to req.user.id', a
     assert.match(calls[0].sql, /ON CONFLICT \(user_id\) DO UPDATE/);
     assert.equal(calls[0].params[0], USER_ID);
     assert.equal(calls[0].params[4], false);
-    assert.equal(calls[0].params[5], 0.9);
+    assert.equal(calls[0].params[5], 1);
 
     const explicitTrue = mockRes();
     await controller.putReviewPreferences({
@@ -246,7 +246,7 @@ test('PUT /api/review/preferences round-trips autoPick scoped to req.user.id', a
     assert.equal(explicitTrue.body().userPreferences.autoPick, true);
     assert.equal(calls[1].params[0], USER_ID);
     assert.equal(calls[1].params[4], true);
-    assert.equal(calls[1].params[5], 0.9);
+    assert.equal(calls[1].params[5], 1);
 
     // Omitted autoPick keeps the contract default (true), like engineMode.
     const omitted = mockRes();
@@ -258,7 +258,7 @@ test('PUT /api/review/preferences round-trips autoPick scoped to req.user.id', a
     assert.equal(omitted.body().userPreferences.autoPick, true);
     assert.equal(calls[2].params[0], USER_ID);
     assert.equal(calls[2].params[4], true);
-    assert.equal(calls[2].params[5], 0.9);
+    assert.equal(calls[2].params[5], 1);
   });
 });
 
@@ -276,14 +276,25 @@ test('PUT /api/review/preferences saves reported card-type payload with autoPick
 });
 
 test('PUT /api/review/preferences rejects out-of-range speechRate with 400', async () => {
-  for (const speechRate of ['fast', 0.4, 1.6, NaN, Infinity, {}, []]) {
+  for (const speechRate of ['fast', 0.2, 1.6, NaN, Infinity, {}, []]) {
     const mocked = mockRes();
     await controller.putReviewPreferences(
       { user: { id: USER_ID }, body: { cardTypes: ['recall'], speechRate } },
       mocked.res
     );
     assert.equal(mocked.status(), 400, `expected 400 for speechRate=${JSON.stringify(speechRate)}`);
-    assert.match(mocked.body().error, /speechRate must be a number between 0.5 and 1.5/);
+    assert.match(mocked.body().error, /speechRate must be a number between 0.25 and 1.5/);
+  }
+  for (const speechRate of [0.25, 0.5, 1, 1.5]) {
+    const mocked = mockRes();
+    await withPoolExecute(async () => [{ affectedRows: 1 }], async () => {
+      await controller.putReviewPreferences(
+        { user: { id: USER_ID }, body: { cardTypes: ['recall'], speechRate } },
+        mocked.res
+      );
+    });
+    assert.equal(mocked.status(), 200, `expected 200 for speechRate=${speechRate}`);
+    assert.equal(mocked.body().userPreferences.speechRate, speechRate);
   }
 });
 
@@ -309,7 +320,7 @@ test('PUT /api/review/preferences round-trips speechRate scoped to req.user.id',
       body: { cardTypes: ['recall'] }
     }, omitted.res);
     assert.equal(omitted.status(), 200);
-    assert.equal(omitted.body().userPreferences.speechRate, 0.9);
+    assert.equal(omitted.body().userPreferences.speechRate, 1);
   });
 });
 
@@ -318,7 +329,7 @@ test('GET /api/review/types defaults speechRate for missing or legacy rows', asy
     const { res, status, body } = mockRes();
     await controller.getReviewTypes({ user: { id: USER_ID } }, res);
     assert.equal(status(), 200);
-    assert.equal(body().userPreferences.speechRate, 0.9);
+    assert.equal(body().userPreferences.speechRate, 1);
   });
 
   await withPoolExecute(async () => [[{
@@ -327,7 +338,7 @@ test('GET /api/review/types defaults speechRate for missing or legacy rows', asy
     const { res, status, body } = mockRes();
     await controller.getReviewTypes({ user: { id: USER_ID } }, res);
     assert.equal(status(), 200);
-    assert.equal(body().userPreferences.speechRate, 0.9);
+    assert.equal(body().userPreferences.speechRate, 1);
   });
 
   await withPoolExecute(async () => [[{
@@ -345,7 +356,7 @@ test('GET /api/review/types defaults speechRate for missing or legacy rows', asy
     const { res, status, body } = mockRes();
     await controller.getReviewTypes({ user: { id: USER_ID } }, res);
     assert.equal(status(), 200);
-    assert.equal(body().userPreferences.speechRate, 0.9);
+    assert.equal(body().userPreferences.speechRate, 1);
   });
 });
 

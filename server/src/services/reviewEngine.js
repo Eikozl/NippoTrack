@@ -45,9 +45,9 @@ const BASE_INTERVALS = Object.freeze({ Again: 1, Hard: 3, Good: 7 });
 const PATTERN_EVENT_WINDOW = 50;
 const PATTERN_MINIMUM_EVENTS = 2;
 
-// Historical in-code TTS rate, kept as the contract default so behavior is
-// byte-identical until the user moves the slider.
-const DEFAULT_SPEECH_RATE = 0.9;
+// Historical default TTS rate; the user asked for 1x as the fresh default,
+// so never-set callers speak at natural speed while stored choices persist.
+const DEFAULT_SPEECH_RATE = 1;
 
 const DEFAULT_PREFERENCES = Object.freeze({
   cardTypes: ['recognition'],
@@ -123,13 +123,13 @@ function autoPickFromStorage(value) {
 
 // Review 3.0 voice speed: TTS rate persisted per user. Optional on PUT;
 // absent (undefined/null) keeps the contract default (see
-// DEFAULT_SPEECH_RATE above). Anything outside 0.5–1.5 or non-numeric
+// DEFAULT_SPEECH_RATE above). Anything outside 0.25–1.5 or non-numeric
 // rejects with 400.
 function normalizeSpeechRate(value) {
   if (value === undefined || value === null) return DEFAULT_SPEECH_RATE;
   const rate = Number(value);
-  if (!Number.isFinite(rate) || rate < 0.5 || rate > 1.5) {
-    throw new ValidationError('speechRate must be a number between 0.5 and 1.5.');
+  if (!Number.isFinite(rate) || rate < 0.25 || rate > 1.5) {
+    throw new ValidationError('speechRate must be a number between 0.25 and 1.5.');
   }
   return Math.round(rate * 100) / 100;
 }
@@ -137,7 +137,7 @@ function normalizeSpeechRate(value) {
 function speechRateFromStorage(value) {
   if (value === undefined || value === null) return DEFAULT_SPEECH_RATE;
   const rate = Number(value);
-  return Number.isFinite(rate) && rate >= 0.5 && rate <= 1.5 ? rate : DEFAULT_SPEECH_RATE;
+  return Number.isFinite(rate) && rate >= 0.25 && rate <= 1.5 ? rate : DEFAULT_SPEECH_RATE;
 }
 
 // facility from a result history; 'correct' = Good + Hard, 'wrong' = Again.

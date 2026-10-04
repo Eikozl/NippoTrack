@@ -324,7 +324,8 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
           cardTypes: body.cardTypes || ['recognition'],
           weights: body.weights || {},
           engineMode: 'fixed',
-          autoPick: body.autoPick !== undefined ? Boolean(body.autoPick) : true
+          autoPick: body.autoPick !== undefined ? Boolean(body.autoPick) : true,
+          speechRate: body.speechRate !== undefined ? body.speechRate : 1
         }
       };
     }
@@ -1756,42 +1757,43 @@ test('Review audio: voice list that never loads reports unknown, not missing', a
   assert.equal(harness.speechCalls.length, 0, 'nothing spoken without voices');
 });
 
-test('Review voice speed: slider reflects saved rate and save persists it', async () => {
-  const harness = loadReviewModule({
-    candidatesPayload: { groups: {} },
-    typesPayload: {
-      availableTypes: ['recognition', 'recall', 'cloze', 'audio'],
-      userPreferences: { cardTypes: ['recognition', 'audio'], weights: {}, engineMode: 'fixed', autoPick: true, speechRate: 0.7 }
-    }
-  });
-  const container = await gotoSetup(harness);
-  const edit = container.querySelector('button[aria-label="Edit card types"]') || findFirstButtonByText(container, 'Edit');
-  await clickAndSettle(edit);
-  const { form, onSubmit } = harness.openDialogCalls[0];
-  const slider = form.querySelector('input[name="card-speech-rate"]');
-  assert.ok(slider, 'voice speed slider present');
-  assert.equal(slider.value, '0.7', 'slider reflects the saved rate');
-  slider.value = '1.25';
-  slider.dispatchEvent({ type: 'input', target: slider, preventDefault() {} });
-  await onSubmit(form, () => {});
-  await sleep(10);
-  const lastPref = [...harness.apiCalls].reverse().find((c) => c.url === '/api/review/preferences');
-  assert.equal(lastPref.options.body.speechRate, 1.25, 'save sends the chosen rate');
-});
-
-test('Review voice speed: spoken utterances use the configured rate', async () => {
+test('Review voice speed: selector beside speaker offers discrete rates with saved default', async () => {
   const item = candidateItem({ entityType: 'vocabulary', entityId: 72, display: '本', reading: 'ほん', meaning: 'book', strength: 'strong' });
   const { harness, container } = await startWithSingleItem({
     item,
     typesPayload: {
       availableTypes: ['recognition', 'recall', 'cloze', 'audio'],
-      userPreferences: { cardTypes: ['audio'], weights: {}, engineMode: 'fixed', autoPick: true, speechRate: 0.7 }
+      userPreferences: { cardTypes: ['audio'], weights: {}, engineMode: 'fixed', autoPick: true, speechRate: 1.5 }
     }
   });
+  const selects = container.querySelectorAll('select[data-speech-rate]');
+  assert.ok(selects.length >= 1, 'speed selector beside speaker');
+  const options = [...selects[0].querySelectorAll('option')].map((node) => node.getAttribute('value'));
+  assert.deepEqual(options, ['0.25', '0.5', '1', '1.5'], 'discrete speeds only');
+  const selected = [...selects[0].querySelectorAll('option')].find((node) => node.getAttribute('selected') !== null);
+  assert.equal(selected && selected.getAttribute('value'), '1.5', 'selector defaults to the saved rate');
+});
+
+test('Review voice speed: changing the selector persists and applies instantly', async () => {
+  const item = candidateItem({ entityType: 'vocabulary', entityId: 73, display: '水', reading: 'みず', meaning: 'water', strength: 'strong' });
+  const { harness, container } = await startWithSingleItem({
+    item,
+    typesPayload: {
+      availableTypes: ['recognition', 'recall', 'cloze', 'audio'],
+      userPreferences: { cardTypes: ['audio'], weights: {}, engineMode: 'fixed', autoPick: true }
+    }
+  });
+  const selects = container.querySelectorAll('select[data-speech-rate]');
+  const initiallySelected = [...selects[0].querySelectorAll('option')].find((node) => node.getAttribute('selected') !== null);
+  assert.equal(initiallySelected && initiallySelected.getAttribute('value'), '1', 'fresh default is 1x');
+  selects[0].value = '0.5';
+  selects[0].dispatchEvent({ type: 'change', target: selects[0], preventDefault() {} });
+  await sleep(30);
+  const lastPref = [...harness.apiCalls].reverse().find((c) => c.url === '/api/review/preferences');
+  assert.equal(lastPref.options.body.speechRate, 0.5, 'change persists the chosen rate');
   const speaker = speakerButtons(container).filter(isVisible)[0];
-  assert.ok(speaker, 'speaker present');
   speaker.click();
   await sleep(150);
   assert.equal(harness.speechCalls.length, 1, 'spoken once');
-  assert.equal(harness.speechCalls[0]?.rate, 0.7, 'utterance carries the configured rate');
+  assert.equal(harness.speechCalls[0]?.rate, 0.5, 'utterance carries the new rate');
 });

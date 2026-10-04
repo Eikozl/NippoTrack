@@ -24,14 +24,16 @@ const ENTITY_SUPPORTED_CARD_TYPES = {
   vocabulary: ['recognition', 'recall', 'cloze', 'audio'],
   grammar: ['recognition', 'cloze', 'audio']
 };
-const DEFAULT_CARD_PREFERENCES = { cardTypes: ['recognition'], weights: {}, engineMode: 'fixed', autoPick: true, speechRate: 0.9 };
-const MIN_SPEECH_RATE = 0.5;
+const DEFAULT_CARD_PREFERENCES = { cardTypes: ['recognition'], weights: {}, engineMode: 'fixed', autoPick: true, speechRate: 1 };
+// Discrete playback speeds offered beside every speaker button.
+const SPEECH_RATES = [0.25, 0.5, 1, 1.5];
+const MIN_SPEECH_RATE = 0.25;
 const MAX_SPEECH_RATE = 1.5;
 
 function sanitizeSpeechRate(value) {
   const rate = Number(value);
   return Number.isFinite(rate) && rate >= MIN_SPEECH_RATE && rate <= MAX_SPEECH_RATE
-    ? Math.round(rate * 100) / 100
+    ? rate
     : DEFAULT_CARD_PREFERENCES.speechRate;
 }
 
@@ -659,8 +661,47 @@ export async function renderReview(container) {
   // Preferences + focused-practice state (module-scoped to this render).
   let reviewPreferences = { cardTypes: [...DEFAULT_CARD_PREFERENCES.cardTypes], weights: {}, engineMode: 'fixed', autoPick: true, speechRate: DEFAULT_CARD_PREFERENCES.speechRate };
 
+  // Every rendered speed selector, kept in sync when any of them changes.
+  const speechRateSelects = [];
+
   function currentSpeechRate() {
     return sanitizeSpeechRate(reviewPreferences.speechRate);
+  }
+
+  function syncSpeechRateSelects(rate) {
+    for (const select of speechRateSelects) {
+      try {
+        if (!select || !select.isConnected) continue;
+        select.value = String(rate);
+      } catch { /* detached nodes are best-effort */ }
+    }
+  }
+
+  // Applies instantly for the next utterance and persists in the background;
+  // a failed save restores the previous rate instead of lying about it.
+  async function applySpeechRate(changedSelect) {
+    const previous = currentSpeechRate();
+    const rate = sanitizeSpeechRate(changedSelect ? changedSelect.value : previous);
+    reviewPreferences.speechRate = rate;
+    syncSpeechRateSelects(rate);
+    try {
+      const saved = await apiRequest('/api/review/preferences', {
+        method: 'PUT',
+        body: {
+          cardTypes: reviewPreferences.cardTypes,
+          weights: reviewPreferences.weights || {},
+          autoPick: reviewPreferences.autoPick !== false,
+          speechRate: rate
+        }
+      });
+      const preferences = saved?.userPreferences;
+      reviewPreferences.speechRate = sanitizeSpeechRate(preferences ? preferences.speechRate : rate);
+      syncSpeechRateSelects(reviewPreferences.speechRate);
+    } catch (error) {
+      reviewPreferences.speechRate = previous;
+      syncSpeechRateSelects(previous);
+      showToast(error?.message || 'Could not save voice speed.', 'error');
+    }
   }
 
   // Per-item last presentation in this session (anti-repeat guard).
@@ -703,13 +744,6 @@ const CARD_TYPE_DESCRIPTIONS = {
   function openCardTypeDialog() {
     const previewVoiceButton = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Preview Japanese voice', attrs: { type: 'button', 'aria-label': 'Preview how audio cards sound on this device' } });
     previewVoiceButton.addEventListener('click', () => { speakDisplay('日本語のテストです。よろしくおねがいします。'); });
-    const speedRate = sanitizeSpeechRate(reviewPreferences.speechRate);
-    const speedSlider = element('input', {
-      className: 'w-full accent-vermilion',
-      attrs: { type: 'range', name: 'card-speech-rate', min: '0.5', max: '1.5', step: '0.05', value: String(speedRate), 'aria-label': 'Voice speed' }
-    });
-    const speedReadout = element('span', { className: 'text-xs text-muted', text: `${speedRate.toFixed(2)}×` });
-    speedSlider.addEventListener('input', () => { speedReadout.textContent = `${Number(speedSlider.value).toFixed(2)}×`; });
     const autoOn = reviewPreferences.autoPick !== false;
     const autoCheckbox = element('input', {
       className: 'size-4 accent-vermilion',
@@ -747,12 +781,7 @@ const CARD_TYPE_DESCRIPTIONS = {
       content: [
         element('div', { className: 'grid gap-1 sm:col-span-2' }, [
           previewVoiceButton,
-          element('p', { className: 'text-xs leading-5 text-muted', text: 'Hear how audio cards sound on this device. If nothing plays, install a Japanese voice in your system settings.' }),
-          element('label', { className: 'mt-1 flex items-center gap-2 text-sm font-medium text-ink' }, [
-            element('span', { text: 'Voice speed' }),
-            speedSlider,
-            speedReadout
-          ])
+          element('p', { className: 'text-xs leading-5 text-muted', text: 'Hear how audio cards sound on this device. If nothing plays, install a Japanese voice in your system settings.' })
         ]),
         autoBlock,
         ...rows
@@ -763,8 +792,6 @@ const CARD_TYPE_DESCRIPTIONS = {
         const weights = {};
         const autoInput = form.querySelector('input[name="card-auto-pick"]');
         const autoPick = autoInput ? Boolean(autoInput.checked) : reviewPreferences.autoPick !== false;
-        const speedInput = form.querySelector('input[name="card-speech-rate"]');
-        const speechRate = speedInput ? sanitizeSpeechRate(speedInput.value) : currentSpeechRate();
         for (const type of CARD_TYPES) {
           const checkbox = form.querySelector(`input[name="card-type-${type}"]`);
           const slider = form.querySelector(`input[name="card-weight-${type}"]`);
@@ -777,7 +804,7 @@ const CARD_TYPE_DESCRIPTIONS = {
           if (submitButton) setActionPending(submitButton, false);
           return;
         }
-        const saved = await apiRequest('/api/review/preferences', { method: 'PUT', body: { cardTypes, weights, autoPick, speechRate } });
+        const saved = await apiRequest('/api/review/preferences', { method: 'PUT', body: { cardTypes, weights, autoPick, speechRate: currentSpeechRate() } });
         const preferences = saved?.userPreferences;
         if (preferences) {
           reviewPreferences = {
@@ -1446,10 +1473,21 @@ const CARD_TYPE_DESCRIPTIONS = {
     const typePill = element('span', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: CARD_TYPE_LABEL[cardType] || cardType, attrs: { 'aria-label': `Card type ${CARD_TYPE_LABEL[cardType] || cardType}` } });
     const frontText = cardType === 'recall' ? item.meaning : cardType === 'audio' ? 'Listen and recall' : item.display;
     const title = element('h2', { className: 'mt-2 break-words text-3xl font-semibold tracking-tight text-ink', text: frontText, attrs: { tabindex: '-1' } });
-    // Speaker lives beside the heading so the front/answer toggle never removes it.
+    // Speaker lives beside the heading so the front/answer toggle never removes it,
+    // with the discrete speed selector right after it. All selectors stay in
+    // sync; changing any of them applies instantly and persists in background.
     const speakerButton = element('button', { className: 'icon-button shrink-0', attrs: { type: 'button', 'aria-label': `Play ${item.display}` } }, [icon('volume', { size: 20 })]);
     speakerButton.addEventListener('click', () => { speakDisplay(item.display); });
-    const titleRow = element('div', { className: 'mt-2 flex items-center gap-2' }, [title, speakerButton]);
+    const speedSelect = element('select', {
+      className: 'rounded-lg border border-stone bg-paper px-1.5 py-1 text-xs font-semibold text-muted',
+      attrs: { 'aria-label': 'Voice speed', 'data-speech-rate': '' }
+    }, SPEECH_RATES.map((rate) => element('option', {
+      text: `${rate}×`,
+      attrs: { value: String(rate), ...(rate === currentSpeechRate() ? { selected: '' } : {}) }
+    })));
+    speedSelect.addEventListener('change', () => { applySpeechRate(speedSelect); });
+    speechRateSelects.push(speedSelect);
+    const titleRow = element('div', { className: 'mt-2 flex items-center gap-2' }, [title, speakerButton, speedSelect]);
     const card = element('article', { className: 'surface review-card p-5 sm:p-8' }, [
       element('div', { className: 'flex items-start justify-between gap-3' }, [progress, counter]),
       track,
