@@ -1,9 +1,170 @@
-// Public decks page: browse public decks, follow, view items, manage own
-// decks (suggestions inbox + analytics), collections and public profile.
-// Vanilla, fail-open sections: each block loads independently.
+// Decks hub: the single home for everything decks (feed-style). Publishing,
+// sharing, importing, browsing, collections and profile live here — entity
+// tabs no longer carry deck actions. Vanilla, fail-open sections.
 import { apiRequest } from '../api';
-import { element, emptyState, errorState, loadingState, openDialog, pageHeader, showToast, withPendingAction } from '../ui';
+import { element, emptyState, openDialog, pageHeader, showToast, withPendingAction } from '../ui';
 import { speakJapanese } from '../speech.js';
+import { loadStrokePaths, STROKE_SVG_NS, STROKE_SVG_VIEWBOX } from '../strokeOrder.js';
+import { mountKanjiWriting } from '../kanjiWriting.js';
+
+function smallButton(label, ariaLabel) {
+  return element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: label, attrs: { type: 'button', 'aria-label': ariaLabel || label } });
+}
+
+function speechPieces() {
+  const hasWindow = typeof window !== 'undefined';
+  return {
+    synthesis: hasWindow ? window.speechSynthesis : null,
+    Utterance: hasWindow ? window.SpeechSynthesisUtterance : null
+  };
+}
+
+// Sequential TTS queue with a stop flag: each utterance ends into the next.
+// A fresh play flushes the previous queue first (no overlaps).
+const player = { stopped: true, playing: false };
+function stopQueue() {
+  player.stopped = true;
+  player.playing = false;
+  try {
+    if (typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel();
+  } catch { /* stop is best-effort */ }
+}
+function playQueue(texts, onProgress) {
+  stopQueue();
+  const queue = (Array.isArray(texts) ? texts : []).map((text) => String(text || '').trim()).filter(Boolean);
+  if (!queue.length) { showToast('Nothing to play.', 'error'); return; }
+  player.stopped = false;
+  player.playing = true;
+  const next = (index) => {
+    if (player.stopped || index >= queue.length) {
+      player.playing = false;
+      if (typeof onProgress === 'function') onProgress(-1);
+      return;
+    }
+    if (typeof onProgress === 'function') onProgress(index, queue.length, queue[index]);
+    const verdict = speakJapanese(queue[index], {
+      ...speechPieces(),
+      onEnd: () => next(index + 1)
+    });
+    if (!verdict.ok) {
+      player.playing = false;
+      if (typeof onProgress === 'function') onProgress(-1);
+      showToast(verdict.message || 'Audio playback is unavailable.', 'error');
+    }
+  };
+  next(0);
+}
+
+function displayOf(entry) {
+  return entry.word || entry.character_kanji || entry.grammar_point || 'item';
+}
+function readingOf(entry) {
+  return entry.reading || entry.onyomi || entry.kunyomi || null;
+}
+
+// Rich item detail: snapshot facts + spoken word + owned examples when the
+// snapshot carries an id + stroke preview and practice for kanji.
+function openItemDetail(entry, entityType) {
+  const display = displayOf(entry);
+  const reading = readingOf(entry);
+  const body = element('div', { className: 'grid gap-3' });
+  const play = smallButton('Play', `Play ${display} aloud`);
+  play.addEventListener('click', () => playQueue([display], () => {}));
+  body.append(
+    element('p', { className: 'font-jp text-2xl font-semibold text-ink', text: display, attrs: { lang: 'ja' } }),
+    ...(reading ? [element('p', { className: 'text-sm text-muted', text: reading })] : []),
+    ...(entry.meaning ? [element('p', { className: 'text-base leading-7 text-ink', text: entry.meaning })] : []),
+    play
+  );
+  const extras = element('div', { className: 'grid gap-3' });
+  body.appendChild(extras);
+  const itemId = Number(entry.id);
+  if (entityType === 'kanji' && /^\p{Script=Han}$/u.test(display)) {
+    loadStrokePaths(display).then((paths) => {
+      const svg = document.createElementNS(STROKE_SVG_NS, 'svg');
+      svg.setAttribute('viewBox', STROKE_SVG_VIEWBOX);
+      svg.setAttribute('role', 'img');
+      svg.setAttribute('aria-label', `Stroke order for ${display}: ${paths.length} strokes`);
+      svg.style.cssText = 'width:120px;height:120px;opacity:0.8;';
+      for (const d of paths) {
+        const path = document.createElementNS(STROKE_SVG_NS, 'path');
+        path.setAttribute('d', d);
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', 'currentColor');
+        path.setAttribute('stroke-width', '4.5');
+        path.setAttribute('stroke-linecap', 'round');
+        extras.appendChild(svg);
+        svg.appendChild(path);
+      }
+      const practice = smallButton('Practice strokes', `Practice strokes of ${display}`);
+      practice.addEventListener('click', () => {
+        const holder = element('div', { className: 'grid gap-3' });
+        const closePractice = openDialog({
+          title: `Practice strokes: ${display}`,
+          description: 'Trace in stroke order. Practice only — nothing is graded.',
+          content: [holder],
+          submitLabel: 'Done',
+          onSubmit: async (form, closeDialog) => { closeDialog(); }
+        });
+        mountKanjiWriting(holder, { character: display, onDone: closePractice });
+      });
+      extras.append(practice);
+    }).catch(() => {});
+  } else if (Number.isInteger(itemId) && itemId > 0 && (entityType === 'vocabulary' || entityType === 'grammar')) {
+    const endpoint = entityType === 'vocabulary' ? `/api/vocabulary/${itemId}` : `/api/grammar/${itemId}`;
+    apiRequest(endpoint).then((detail) => {
+      const examples = Array.isArray(detail?.examples) ? detail.examples : [];
+      if (!examples.length) return;
+      extras.append(element('p', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Usage examples' }));
+      extras.append(element('ul', { className: 'grid gap-2', attrs: { role: 'list' } }, examples.slice(0, 3).map((example) => element('li', { className: 'rounded-md bg-paper p-2 text-sm' }, [
+        element('p', { className: 'font-jp text-ink', text: example.sentence, attrs: { lang: 'ja' } }),
+        ...(example.translation ? [element('p', { className: 'mt-1 text-xs text-muted', text: example.translation })] : [])
+      ]))));
+    }).catch(() => {});
+  }
+  openDialog({
+    title: display,
+    description: reading || entityType,
+    content: [body],
+    submitLabel: 'Close',
+    onSubmit: async (form, close) => { close(); }
+  });
+}
+
+function itemsDialog(deckId, title, entityType) {
+  apiRequest(`/api/decks/${deckId}`)
+    .then((detail) => {
+      const items = Array.isArray(detail.items) ? detail.items : [];
+      const progress = element('p', { className: 'text-xs text-muted', attrs: { 'aria-live': 'polite' } });
+      const playAll = smallButton('Play all', 'Play every item aloud in order');
+      playAll.addEventListener('click', () => {
+        playQueue(items.map((entry) => displayOf(entry)), (index, total, text) => {
+          progress.textContent = index < 0 ? '' : `Playing ${index + 1} of ${total}: ${text}`;
+        });
+      });
+      const stop = smallButton('Stop', 'Stop playback');
+      stop.addEventListener('click', () => {
+        stopQueue();
+        progress.textContent = '';
+      });
+      openDialog({
+        title: title || 'Deck',
+        description: `${items.length} items. Select one for details, examples and strokes.`,
+        content: [
+          element('div', { className: 'flex flex-col gap-2 sm:flex-row' }, [playAll, stop]),
+          progress,
+          element('ul', { className: 'grid max-h-56 gap-1 overflow-y-auto text-sm text-ink', attrs: { role: 'list' } }, items.map((entry) => {
+            const open = smallButton(displayOf(entry), `Details for ${displayOf(entry)}`);
+            open.addEventListener('click', () => openItemDetail(entry, entityType || detail.entityType));
+            return element('li', {}, [open]);
+          }))
+        ],
+        submitLabel: 'Close',
+        onSubmit: async (form, close) => { stopQueue(); close(); }
+      });
+    })
+    .catch((error) => showToast(error?.message || 'Unable to load the deck.', 'error'));
+}
 
 function section(title, description) {
   const body = element('div', { className: 'grid gap-3' });
@@ -16,93 +177,264 @@ function section(title, description) {
 }
 
 function deckCard(deck, actions = []) {
-  return element('article', { className: 'rounded-md bg-paper p-3' }, [
-    element('p', { className: 'font-medium text-ink', text: `${deck.title} · ${deck.entityType || ''}` }),
-    ...(deck.description ? [element('p', { className: 'mt-1 text-sm text-muted', text: deck.description })] : []),
-    element('p', { className: 'mt-1 text-xs text-muted', text: `${deck.itemCount ?? '?'} items · ${deck.followers ?? 0} followers` }),
-    ...(actions.length ? [element('div', { className: 'mt-2 flex flex-col gap-2 sm:flex-row' }, actions)] : [])
+  const pill = element('span', { className: 'status-pill shrink-0 text-xs', text: deck.entityType || '' });
+  return element('article', { className: 'rounded-xl border border-stone bg-paper p-4' }, [
+    element('div', { className: 'flex items-start justify-between gap-3' }, [
+      element('h3', { className: 'break-words text-lg font-semibold text-ink', text: deck.title }),
+      pill
+    ]),
+    ...(deck.description ? [element('p', { className: 'mt-1 text-sm leading-6 text-muted', text: deck.description })] : []),
+    element('p', { className: 'mt-2 text-xs font-medium text-muted', text: `${deck.itemCount ?? '?'} items · ${deck.followers ?? 0} followers` }),
+    ...(actions.length ? [element('div', { className: 'mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap' }, actions)] : [])
   ]);
 }
 
-function smallButton(label, ariaLabel) {
-  return element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: label, attrs: { type: 'button', 'aria-label': ariaLabel || label } });
-}
-
-function viewItemsDialog(deckId, title) {
-  apiRequest(`/api/decks/${deckId}`)
-    .then((detail) => {
-      const items = Array.isArray(detail.items) ? detail.items : [];
-      const playAll = smallButton('Play all', 'Play all items aloud');
-      playAll.addEventListener('click', () => {
-        const first = items.map((entry) => entry.word || entry.character_kanji || entry.grammar_point).find(Boolean);
-        if (!first) { showToast('Nothing to play.', 'error'); return; }
-        const verdict = speakJapanese(first, {
-          synthesis: typeof window !== 'undefined' ? window.speechSynthesis : null,
-          Utterance: typeof window !== 'undefined' ? window.SpeechSynthesisUtterance : null
-        });
-        if (!verdict.ok) showToast(verdict.message || 'Audio playback is unavailable.', 'error');
-      });
-      openDialog({
-        title: title || 'Deck',
-        description: `${items.length} items (first word plays aloud).`,
-        content: [
-          playAll,
-          element('ul', { className: 'grid max-h-56 gap-1 overflow-y-auto text-sm text-ink', attrs: { role: 'list' } }, items.map((entry) => {
-            const item = entry.word || entry.character_kanji || entry.grammar_point || 'item';
-            return element('li', { text: item });
-          }))
-        ],
-        submitLabel: 'Close',
-        onSubmit: async (form, close) => { close(); }
-      });
-    })
-    .catch((error) => showToast(error?.message || 'Unable to load the deck.', 'error'));
-}
+const PICKER_TYPES = [
+  { key: 'vocabulary', label: 'Vocabulary', endpoint: '/api/vocabulary/options', idKey: 'id_vocabulary', titleOf: (row) => row.word, subOf: (row) => [row.reading, row.meaning].filter(Boolean).join(' · ') },
+  { key: 'kanji', label: 'Kanji', endpoint: '/api/kanji/options', idKey: 'id_kanji', titleOf: (row) => row.character_kanji, subOf: (row) => [row.meaning].filter(Boolean).join(' · ') },
+  { key: 'grammar', label: 'Grammar', endpoint: '/api/grammar/options', idKey: 'id_grammar', titleOf: (row) => row.grammar_point, subOf: (row) => [row.meaning].filter(Boolean).join(' · ') }
+];
 
 export async function renderDecks(container) {
   container.replaceChildren(pageHeader({
     eyebrow: 'Social',
     title: 'Decks',
-    description: 'Public decks to follow, your publications, collections and public profile.'
+    description: 'Discover, publish, share and collect decks. Everything decks lives here.'
   }));
-  const browse = section('Browse public decks', 'Follow decks you like. Publishing snapshots your items.');
+  const feed = section('Feed', 'Public decks. Filter, listen, open details, follow.');
+  const publish = section('Publish', 'Pick items from your collection and publish a deck.');
+  const share = section('Share & import', 'Signed codes: share your own items, import codes as new rows.');
   const mine = section('My decks', 'Your publications with suggestions and analytics.');
   const collections = section('Collections', 'Group decks into playlists and share them as one code.');
   const profile = section('Public profile', 'Claim a username to be followable. Only what you publish is public.');
-  container.append(browse.wrap, mine.wrap, collections.wrap, profile.wrap);
+  container.append(feed.wrap, publish.wrap, share.wrap, mine.wrap, collections.wrap, profile.wrap);
 
-  // Browse
-  browse.body.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Loading public decks…' }));
-  try {
-    const data = await apiRequest('/api/decks?limit=20');
-    const decks = Array.isArray(data?.items) ? data.items : [];
-    if (!decks.length) {
-      browse.body.replaceChildren(emptyState({ title: 'No public decks yet', description: 'Publish one from Vocabulary, Kanji or Grammar.' }));
-    } else {
-      browse.body.replaceChildren(element('div', { className: 'grid gap-3' }, decks.map((deck) => {
-        const follow = smallButton('Follow', `Follow ${deck.title}`);
-        follow.addEventListener('click', () => {
-          withPendingAction(follow, async () => {
-            const result = await apiRequest(`/api/decks/${deck.id}/follow`, { method: 'POST' });
-            showToast(`Following (${result.followers} followers).`);
-          }).catch((error) => showToast(error?.message || 'Unable to follow the deck.', 'error'));
-        });
-        const view = smallButton('View items', `View items of ${deck.title}`);
-        view.addEventListener('click', () => viewItemsDialog(deck.id, deck.title));
-        return deckCard(deck, [follow, view]);
-      })));
+  // ---- Feed
+  const filterRow = element('div', { className: 'flex flex-col gap-2 sm:flex-row' });
+  const typeFilter = element('select', { className: 'field-control sm:max-w-44', attrs: { 'aria-label': 'Filter by type' } }, [
+    element('option', { text: 'All types', attrs: { value: '' } }),
+    ...PICKER_TYPES.map((type) => element('option', { text: type.label, attrs: { value: type.key } }))
+  ]);
+  const textFilter = element('input', { className: 'field-control', attrs: { type: 'search', 'aria-label': 'Filter decks by text', placeholder: 'Filter by title…' } });
+  filterRow.append(typeFilter, textFilter);
+  const feedList = element('div', { className: 'grid gap-4' });
+  feed.body.append(filterRow, feedList);
+  let feedDecks = [];
+  const renderFeed = () => {
+    const query = String(textFilter.value || '').trim().toLowerCase();
+    const visible = feedDecks.filter((deck) =>
+      (!typeFilter.value || deck.entityType === typeFilter.value) &&
+      (!query || `${deck.title} ${deck.description || ''}`.toLowerCase().includes(query)));
+    if (!visible.length) {
+      feedList.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'No decks match. Publish the first one below.' }));
+      return;
     }
+    feedList.replaceChildren(element('div', { className: 'grid gap-4 md:grid-cols-2' }, visible.map((deck) => {
+      const follow = smallButton('Follow', `Follow ${deck.title}`);
+      follow.addEventListener('click', () => {
+        withPendingAction(follow, async () => {
+          const result = await apiRequest(`/api/decks/${deck.id}/follow`, { method: 'POST' });
+          showToast(`Following (${result.followers} followers).`);
+        }).catch((error) => showToast(error?.message || 'Unable to follow the deck.', 'error'));
+      });
+      const unfollow = smallButton('Unfollow', `Unfollow ${deck.title}`);
+      unfollow.addEventListener('click', () => {
+        withPendingAction(unfollow, async () => {
+          await apiRequest(`/api/decks/${deck.id}/follow`, { method: 'DELETE' });
+          showToast('Unfollowed.');
+        }).catch((error) => showToast(error?.message || 'Unable to unfollow the deck.', 'error'));
+      });
+      const view = smallButton('Open deck', `Open ${deck.title}`);
+      view.addEventListener('click', () => itemsDialog(deck.id, deck.title, deck.entityType));
+      const previewItems = (deck.previewItems || []).slice(0, 3);
+      const card = deckCard(deck, [view, follow, unfollow]);
+      if (previewItems.length) {
+        card.append(element('ul', { className: 'mt-2 flex flex-wrap gap-1.5', attrs: { role: 'list' } }, [
+          ...previewItems.map((text) => element('li', { className: 'status-pill text-xs', text })),
+          ...((deck.itemCount || 0) > previewItems.length ? [element('li', { className: 'text-xs text-muted', text: `+${deck.itemCount - previewItems.length} more` })] : [])
+        ]));
+      }
+      return card;
+    })));
+  };
+  typeFilter.addEventListener('change', renderFeed);
+  textFilter.addEventListener('input', renderFeed);
+  feedList.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Loading public decks…' }));
+  try {
+    const data = await apiRequest('/api/decks?limit=30');
+    feedDecks = Array.isArray(data?.items) ? data.items : [];
+    // Item previews come from each deck detail (bounded: first 6 decks get previews).
+    await Promise.all(feedDecks.slice(0, 6).map(async (deck) => {
+      try {
+        const detail = await apiRequest(`/api/decks/${deck.id}`);
+        deck.previewItems = (Array.isArray(detail.items) ? detail.items : []).slice(0, 3).map(displayOf);
+      } catch { /* previews are best-effort */ }
+    }));
+    renderFeed();
   } catch {
-    browse.body.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Public decks are unavailable.' }));
+    feedList.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Public decks are unavailable.' }));
   }
 
-  // My decks + suggestions + analytics
+  // ---- Publish composer
+  const tabs = element('div', { className: 'flex flex-col gap-2 sm:flex-row', attrs: { role: 'group', 'aria-label': 'Pick item type' } });
+  let pickerType = PICKER_TYPES[0];
+  const search = element('input', { className: 'field-control', attrs: { type: 'search', 'aria-label': 'Search your collection', placeholder: 'Search your collection…' } });
+  const results = element('div', { className: 'grid gap-1.5' });
+  const tray = element('div', { className: 'flex flex-wrap gap-1.5', attrs: { 'aria-live': 'polite' } });
+  const titleInput = element('input', { className: 'field-control', attrs: { type: 'text', 'aria-label': 'Deck title', placeholder: 'Deck title', maxLength: '120' } });
+  const descriptionInput = element('textarea', { className: 'field-control', attrs: { 'aria-label': 'Deck description', placeholder: 'Description (optional)', maxLength: '500' } });
+  const selected = new Map();
+  const syncTray = () => {
+    tray.replaceChildren(...[...selected.values()].map(({ label, remove }) => element('span', { className: 'status-pill text-xs' }, [
+      element('span', { text: label }),
+      (() => {
+        const clear = element('button', { className: 'ml-1 font-bold', text: '×', attrs: { type: 'button', 'aria-label': `Remove ${label}` } });
+        clear.addEventListener('click', remove);
+        return clear;
+      })()
+    ])));
+  };
+  const runSearch = async () => {
+    const query = String(search.value || '').trim();
+    results.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Searching…' }));
+    try {
+      const data = await apiRequest(`${pickerType.endpoint}?search=${encodeURIComponent(query)}&limit=30`);
+      const rows = Array.isArray(data?.items) ? data.items : [];
+      if (!rows.length) {
+        results.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Nothing found.' }));
+        return;
+      }
+      results.replaceChildren(element('div', { className: 'grid max-h-56 gap-1.5 overflow-y-auto' }, rows.map((row) => {
+        const id = row[pickerType.idKey];
+        const label = pickerType.titleOf(row);
+        const box = element('input', { attrs: { type: 'checkbox', 'aria-label': `Include ${label}` } });
+        box.checked = selected.has(`${pickerType.key}:${id}`);
+        box.addEventListener('change', () => {
+          if (box.checked) selected.set(`${pickerType.key}:${id}`, { id, label, remove: () => { selected.delete(`${pickerType.key}:${id}`); syncTray(); } });
+          else { selected.delete(`${pickerType.key}:${id}`); syncTray(); }
+        });
+        return element('label', { className: 'flex items-center gap-2 text-sm text-ink' }, [
+          box,
+          element('span', {}, [
+            element('span', { className: 'font-medium', text: label }),
+            element('span', { className: 'text-muted', text: ` — ${pickerType.subOf(row)}` })
+          ])
+        ]);
+      })));
+    } catch {
+      results.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Search is unavailable.' }));
+    }
+  };
+  let searchTimer = null;
+  search.addEventListener('input', () => {
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(runSearch, 250);
+  });
+  for (const type of PICKER_TYPES) {
+    const tab = element('button', {
+      className: `button-secondary min-h-9 px-3 py-1.5 text-sm${type.key === pickerType.key ? ' font-bold' : ''}`,
+      text: type.label,
+      attrs: { type: 'button', 'aria-pressed': String(type.key === pickerType.key) }
+    });
+    tab.addEventListener('click', () => {
+      pickerType = type;
+      selected.clear();
+      syncTray();
+      [...tabs.children].forEach((node, index) => {
+        const active = PICKER_TYPES[index].key === type.key;
+        node.setAttribute('aria-pressed', String(active));
+        node.classList.toggle('font-bold', active);
+      });
+      runSearch();
+    });
+    tabs.appendChild(tab);
+  }
+  const publishButton = smallButton('Publish deck', 'Publish deck');
+  publishButton.addEventListener('click', () => {
+    const ids = [...selected.values()].map(({ id }) => id);
+    const title = String(titleInput.value || '').trim();
+    if (!ids.length) { showToast('Select at least one item.', 'error'); return; }
+    if (!title) { showToast('Give the deck a title.', 'error'); return; }
+    withPendingAction(publishButton, async () => {
+      const deck = await apiRequest('/api/decks', { method: 'POST', body: { entityType: pickerType.key, ids, title, description: descriptionInput.value } });
+      showToast(`Deck published (${deck.itemCount} items).`);
+      selected.clear();
+      syncTray();
+      titleInput.value = '';
+      descriptionInput.value = '';
+    }).catch((error) => showToast(error?.message || 'Unable to publish the deck.', 'error'));
+  });
+  publish.body.append(tabs, search, results, tray, titleInput, descriptionInput, publishButton);
+  syncTray();
+  runSearch();
+
+  // ---- Share & import (moved here from entity tabs)
+  const codeInput = element('textarea', { className: 'field-control font-mono text-xs', attrs: { rows: '3', 'aria-label': 'Paste share code', placeholder: 'Paste a share code to preview it…' } });
+  const importPreview = element('div', { className: 'grid gap-2' });
+  let pendingCode = '';
+  const previewImport = smallButton('Preview', 'Preview share code');
+  previewImport.addEventListener('click', () => {
+    const code = String(codeInput.value || '').trim();
+    if (!code) { showToast('Paste a share code first.', 'error'); return; }
+    withPendingAction(previewImport, async () => {
+      const deck = await apiRequest('/api/share/deck/preview', { method: 'POST', body: { shareCode: code } });
+      pendingCode = code;
+      const items = Array.isArray(deck.items) ? deck.items : [];
+      const boxes = items.map((entry, index) => {
+        const box = element('input', { attrs: { type: 'checkbox', 'aria-label': `Import ${entry.display || 'item'}` } });
+        box.checked = true;
+        return { index, box };
+      });
+      const count = element('p', { className: 'text-sm font-semibold text-ink', attrs: { 'aria-live': 'polite' } });
+      const syncImportCount = () => {
+        count.textContent = `${boxes.filter(({ box }) => box.checked).length} of ${items.length} items selected`;
+      };
+      const selectAll = smallButton('Select all', 'Select all items');
+      const clearSelection = smallButton('Clear selection', 'Clear selection');
+      selectAll.addEventListener('click', () => { boxes.forEach(({ box }) => { box.checked = true; }); syncImportCount(); });
+      clearSelection.addEventListener('click', () => { boxes.forEach(({ box }) => { box.checked = false; }); syncImportCount(); });
+      const confirmImport = smallButton('Import selected', 'Import selected items');
+      confirmImport.addEventListener('click', () => {
+        const selectedItems = boxes.filter(({ box }) => box.checked).map(({ index }) => index);
+        if (!selectedItems.length) { showToast('Select at least one item.', 'error'); return; }
+        withPendingAction(confirmImport, async () => {
+          const result = await apiRequest('/api/share/deck/import', { method: 'POST', body: { shareCode: pendingCode, selectedItems } });
+          const imported = typeof result.imported === 'object'
+            ? Object.values(result.imported).reduce((sum, n) => sum + Number(n || 0), 0)
+            : Number(result.imported || 0);
+          showToast(`Imported ${imported}, skipped ${Number(result.skipped || 0)}.`);
+        }).catch((error) => showToast(error?.message || 'Unable to import the deck.', 'error'));
+      });
+      importPreview.replaceChildren(
+        element('p', { className: 'text-sm font-semibold text-ink', text: `${deck.title || 'Shared deck'} · ${items.length} items` }),
+        ...(deck.description ? [element('p', { className: 'text-sm text-muted', text: deck.description })] : []),
+        element('div', { className: 'flex flex-col gap-2 sm:flex-row' }, [selectAll, clearSelection]),
+        count,
+        element('div', { className: 'grid max-h-56 gap-1.5 overflow-y-auto' }, boxes.map(({ box }, position) => {
+          const entry = items[position];
+          box.addEventListener('change', syncImportCount);
+          return element('label', { className: 'flex items-center gap-2 text-sm text-ink' }, [
+            box,
+            element('span', { text: `${entry.display || 'item'} — ${[entry.entityType, entry.reading, entry.meaning].filter(Boolean).join(' · ')}` })
+          ]);
+        })),
+        confirmImport
+      );
+      syncImportCount();
+    }).catch((error) => showToast(error?.message || 'Share code is invalid or expired.', 'error'));
+  });
+  share.body.append(
+    element('p', { className: 'text-sm text-muted', text: 'Publish above for public decks, or paste a signed code to import items as new rows.' }),
+    codeInput, previewImport, importPreview
+  );
+
+  // ---- My decks + suggestions + analytics
   mine.body.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Loading your decks…' }));
   try {
     const data = await apiRequest('/api/decks?mine=true&limit=50');
     const decks = Array.isArray(data?.items) ? data.items : [];
     if (!decks.length) {
-      mine.body.replaceChildren(emptyState({ title: 'No decks published', description: 'Publish one from Vocabulary, Kanji or Grammar.' }));
+      mine.body.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Nothing published yet — use the composer above.' }));
     } else {
       const cards = [];
       for (const deck of decks) {
@@ -110,7 +442,7 @@ export async function renderDecks(container) {
         const analyticsLine = element('p', { className: 'mt-1 text-xs text-muted', text: 'Loading analytics…' });
         const card = deckCard(deck, []);
         const view = smallButton('View items', `View items of ${deck.title}`);
-        view.addEventListener('click', () => viewItemsDialog(deck.id, deck.title));
+        view.addEventListener('click', () => itemsDialog(deck.id, deck.title, deck.entityType));
         card.append(view, analyticsLine, suggestionsBox);
         cards.push(card);
         apiRequest(`/api/decks/${deck.id}/analytics?period=30d`)
@@ -145,13 +477,13 @@ export async function renderDecks(container) {
           })
           .catch(() => {});
       }
-      mine.body.replaceChildren(element('div', { className: 'grid gap-3' }, cards));
+      mine.body.replaceChildren(element('div', { className: 'grid gap-4 md:grid-cols-2' }, cards));
     }
   } catch {
     mine.body.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Your decks are unavailable.' }));
   }
 
-  // Collections
+  // ---- Collections
   collections.body.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Loading collections…' }));
   const refreshCollections = async () => {
     try {
@@ -169,8 +501,8 @@ export async function renderDecks(container) {
         }).catch((error) => showToast(error?.message || 'Unable to create the collection.', 'error'));
       });
       const list = element('div', { className: 'grid gap-3' }, items.map((collection) => {
-        const share = smallButton('Share', `Share collection ${collection.title}`);
-        share.addEventListener('click', () => {
+        const shareCollection = smallButton('Share', `Share collection ${collection.title}`);
+        shareCollection.addEventListener('click', () => {
           apiRequest(`/api/collections/${collection.id}/share`, { method: 'POST' })
             .then((result) => {
               const output = element('textarea', { className: 'field-control font-mono text-xs', attrs: { readonly: '', rows: '3', 'aria-label': 'Collection share code' } });
@@ -185,7 +517,7 @@ export async function renderDecks(container) {
             })
             .catch((error) => showToast(error?.message || 'Unable to share the collection.', 'error'));
         });
-        return deckCard({ title: collection.title, description: collection.description, entityType: 'collection', itemCount: `${collection.deckCount} decks`, followers: '' }, [share]);
+        return deckCard({ title: collection.title, description: collection.description, entityType: 'collection', itemCount: `${collection.deckCount} decks`, followers: '' }, [shareCollection]);
       }));
       collections.body.replaceChildren(
         element('div', { className: 'flex flex-col gap-2 sm:flex-row' }, [createTitle, create]),
@@ -197,7 +529,7 @@ export async function renderDecks(container) {
   };
   await refreshCollections();
 
-  // Profile
+  // ---- Profile
   const usernameInput = element('input', { className: 'field-control', attrs: { type: 'text', 'aria-label': 'Username', placeholder: 'username (2-30, lowercase, hyphens)', maxLength: '30' } });
   const displayInput = element('input', { className: 'field-control', attrs: { type: 'text', 'aria-label': 'Display name', placeholder: 'Display name (optional)', maxLength: '50' } });
   const bioInput = element('textarea', { className: 'field-control', attrs: { 'aria-label': 'Bio', placeholder: 'Bio (optional)', maxLength: '500' } });
@@ -221,9 +553,7 @@ export async function renderDecks(container) {
       showToast(saved.username ? `Public profile: ${saved.username}.` : 'Profile saved (private).');
     }).catch((error) => showToast(error?.message || 'Unable to save the profile.', 'error'));
   });
-  profile.body.replaceChildren(
-    usernameInput, displayInput, bioInput,
+  profile.body.append(usernameInput, displayInput, bioInput,
     element('label', { className: 'flex items-center gap-2 text-sm text-ink' }, [publicBox, element('span', { text: 'Public profile' })]),
-    save
-  );
+    save);
 }

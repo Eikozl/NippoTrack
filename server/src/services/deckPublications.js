@@ -9,7 +9,7 @@ const SNAPSHOT_COLUMNS = ['word', 'character_kanji', 'grammar_point', 'reading',
 
 function snapshotItem(entityType, row) {
   const def = ENTITY[entityType];
-  const entry = {};
+  const entry = { id: row?.[def.idColumn] ?? null };
   for (const column of SNAPSHOT_COLUMNS) {
     if (def.columns.includes(column)) entry[column] = row[column] ?? null;
   }
@@ -76,18 +76,24 @@ async function getDeckPublication(executor, deckId, viewerId) {
   };
 }
 
-async function listPublicDecks(executor, { entityType = null, limit = 20, offset = 0 } = {}) {
+async function listPublicDecks(executor, { entityType = null, limit = 20, offset = 0, ownerId = null } = {}) {
   const safeLimit = Math.max(1, Math.min(50, Number(limit) || 20));
   const safeOffset = Math.max(0, Number(offset) || 0);
-  const where = ['d.is_public = TRUE'];
+  const where = [];
   const params = [];
+  if (ownerId) {
+    where.push('d.owner_id = ?');
+    params.push(ownerId);
+  } else {
+    where.push('d.is_public = TRUE');
+  }
   if (entityType) {
     if (!ENTITY[entityType]) throw new ValidationError('entityType must be vocabulary, kanji or grammar');
     where.push('d.entity_type = ?');
     params.push(entityType);
   }
   const [rows] = await executor.execute(
-    `SELECT d.id_deck_publication AS id, d.title, d.description, d.entity_type, d.created_at,
+    `SELECT d.id_deck_publication AS id, d.title, d.description, d.entity_type, d.is_public, d.created_at,
        (SELECT COUNT(*) FROM deck_follows f WHERE f.id_deck_publication = d.id_deck_publication) AS followers,
        (SELECT COUNT(*) FROM deck_publication_items i WHERE i.id_deck_publication = d.id_deck_publication) AS items
      FROM deck_publications d WHERE ${where.join(' AND ')}
@@ -99,6 +105,7 @@ async function listPublicDecks(executor, { entityType = null, limit = 20, offset
     title: row.title,
     description: row.description,
     entityType: row.entity_type,
+    isPublic: Boolean(row.is_public),
     createdAt: row.created_at,
     followers: Number(row.followers || 0),
     itemCount: Number(row.items || 0)
