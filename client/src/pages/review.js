@@ -24,7 +24,16 @@ const ENTITY_SUPPORTED_CARD_TYPES = {
   vocabulary: ['recognition', 'recall', 'cloze', 'audio'],
   grammar: ['recognition', 'cloze', 'audio']
 };
-const DEFAULT_CARD_PREFERENCES = { cardTypes: ['recognition'], weights: {}, engineMode: 'fixed', autoPick: true };
+const DEFAULT_CARD_PREFERENCES = { cardTypes: ['recognition'], weights: {}, engineMode: 'fixed', autoPick: true, speechRate: 0.9 };
+const MIN_SPEECH_RATE = 0.5;
+const MAX_SPEECH_RATE = 1.5;
+
+function sanitizeSpeechRate(value) {
+  const rate = Number(value);
+  return Number.isFinite(rate) && rate >= MIN_SPEECH_RATE && rate <= MAX_SPEECH_RATE
+    ? Math.round(rate * 100) / 100
+    : DEFAULT_CARD_PREFERENCES.speechRate;
+}
 
 let activeReview = { sessionId: null, selected: [] };
 let detachReviewKeys = null;
@@ -648,7 +657,11 @@ export async function renderReview(container) {
   // ------------------------------------------------------------ Review 2.0
 
   // Preferences + focused-practice state (module-scoped to this render).
-  let reviewPreferences = { cardTypes: [...DEFAULT_CARD_PREFERENCES.cardTypes], weights: {}, engineMode: 'fixed', autoPick: true };
+  let reviewPreferences = { cardTypes: [...DEFAULT_CARD_PREFERENCES.cardTypes], weights: {}, engineMode: 'fixed', autoPick: true, speechRate: DEFAULT_CARD_PREFERENCES.speechRate };
+
+  function currentSpeechRate() {
+    return sanitizeSpeechRate(reviewPreferences.speechRate);
+  }
 
   // Per-item last presentation in this session (anti-repeat guard).
   const lastPickedByKey = new Map();
@@ -662,10 +675,12 @@ export async function renderReview(container) {
           cardTypes: preferences.cardTypes,
           weights: preferences.weights && typeof preferences.weights === 'object' ? preferences.weights : {},
           engineMode: preferences.engineMode || 'fixed',
-          autoPick: preferences.autoPick !== false
+          autoPick: preferences.autoPick !== false,
+          speechRate: sanitizeSpeechRate(preferences.speechRate)
         };
       } else if (preferences) {
         reviewPreferences.autoPick = preferences.autoPick !== false;
+        reviewPreferences.speechRate = sanitizeSpeechRate(preferences.speechRate);
       }
       renderCardTypeSummary();
     } catch { /* fail-open: defaults keep Recognition cards */ }
@@ -688,6 +703,13 @@ const CARD_TYPE_DESCRIPTIONS = {
   function openCardTypeDialog() {
     const previewVoiceButton = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Preview Japanese voice', attrs: { type: 'button', 'aria-label': 'Preview how audio cards sound on this device' } });
     previewVoiceButton.addEventListener('click', () => { speakDisplay('日本語のテストです。よろしくおねがいします。'); });
+    const speedRate = sanitizeSpeechRate(reviewPreferences.speechRate);
+    const speedSlider = element('input', {
+      className: 'w-full accent-vermilion',
+      attrs: { type: 'range', name: 'card-speech-rate', min: '0.5', max: '1.5', step: '0.05', value: String(speedRate), 'aria-label': 'Voice speed' }
+    });
+    const speedReadout = element('span', { className: 'text-xs text-muted', text: `${speedRate.toFixed(2)}×` });
+    speedSlider.addEventListener('input', () => { speedReadout.textContent = `${Number(speedSlider.value).toFixed(2)}×`; });
     const autoOn = reviewPreferences.autoPick !== false;
     const autoCheckbox = element('input', {
       className: 'size-4 accent-vermilion',
@@ -725,7 +747,12 @@ const CARD_TYPE_DESCRIPTIONS = {
       content: [
         element('div', { className: 'grid gap-1 sm:col-span-2' }, [
           previewVoiceButton,
-          element('p', { className: 'text-xs leading-5 text-muted', text: 'Hear how audio cards sound on this device. If nothing plays, install a Japanese voice in your system settings.' })
+          element('p', { className: 'text-xs leading-5 text-muted', text: 'Hear how audio cards sound on this device. If nothing plays, install a Japanese voice in your system settings.' }),
+          element('label', { className: 'mt-1 flex items-center gap-2 text-sm font-medium text-ink' }, [
+            element('span', { text: 'Voice speed' }),
+            speedSlider,
+            speedReadout
+          ])
         ]),
         autoBlock,
         ...rows
@@ -736,6 +763,8 @@ const CARD_TYPE_DESCRIPTIONS = {
         const weights = {};
         const autoInput = form.querySelector('input[name="card-auto-pick"]');
         const autoPick = autoInput ? Boolean(autoInput.checked) : reviewPreferences.autoPick !== false;
+        const speedInput = form.querySelector('input[name="card-speech-rate"]');
+        const speechRate = speedInput ? sanitizeSpeechRate(speedInput.value) : currentSpeechRate();
         for (const type of CARD_TYPES) {
           const checkbox = form.querySelector(`input[name="card-type-${type}"]`);
           const slider = form.querySelector(`input[name="card-weight-${type}"]`);
@@ -748,17 +777,19 @@ const CARD_TYPE_DESCRIPTIONS = {
           if (submitButton) setActionPending(submitButton, false);
           return;
         }
-        const saved = await apiRequest('/api/review/preferences', { method: 'PUT', body: { cardTypes, weights, autoPick } });
+        const saved = await apiRequest('/api/review/preferences', { method: 'PUT', body: { cardTypes, weights, autoPick, speechRate } });
         const preferences = saved?.userPreferences;
         if (preferences) {
           reviewPreferences = {
             cardTypes: preferences.cardTypes,
             weights: preferences.weights || {},
             engineMode: preferences.engineMode || 'fixed',
-            autoPick: preferences.autoPick !== false
+            autoPick: preferences.autoPick !== false,
+            speechRate: sanitizeSpeechRate(preferences.speechRate)
           };
         } else {
           reviewPreferences.autoPick = autoPick;
+          reviewPreferences.speechRate = speechRate;
         }
         renderCardTypeSummary();
         showToast('Card type preferences saved.');
@@ -905,7 +936,7 @@ const CARD_TYPE_DESCRIPTIONS = {
       const utterance = new window.SpeechSynthesisUtterance(text);
       activeUtterance = utterance;
       utterance.lang = 'ja-JP';
-      utterance.rate = 0.9;
+      utterance.rate = currentSpeechRate();
       const clearIfCurrent = () => { if (activeUtterance === utterance) activeUtterance = null; };
       try {
         utterance.onend = () => { clearIfCurrent(); };

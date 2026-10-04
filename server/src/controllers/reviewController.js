@@ -232,7 +232,7 @@ async function getReviewTypes(req, res) {
 async function putReviewPreferences(req, res) {
   try {
     const body = req.body || {};
-    const allowed = ['cardTypes', 'weights', 'engineMode', 'autoPick'];
+    const allowed = ['cardTypes', 'weights', 'engineMode', 'autoPick', 'speechRate'];
     const unknown = Object.keys(body).filter((key) => !allowed.includes(key));
     if (unknown.length) throw new ValidationError(`Unexpected field(s): ${unknown.join(', ')}.`);
     if (!Array.isArray(body.cardTypes)) throw new ValidationError('cardTypes is required and must be an array.');
@@ -240,7 +240,8 @@ async function putReviewPreferences(req, res) {
       cardTypes: body.cardTypes,
       weights: body.weights,
       engineMode: body.engineMode,
-      autoPick: body.autoPick
+      autoPick: body.autoPick,
+      speechRate: body.speechRate
     });
     return res.json({ userPreferences: saved });
   } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to save review preferences.' }); }

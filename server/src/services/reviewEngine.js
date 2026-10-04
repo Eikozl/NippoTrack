@@ -45,11 +45,16 @@ const BASE_INTERVALS = Object.freeze({ Again: 1, Hard: 3, Good: 7 });
 const PATTERN_EVENT_WINDOW = 50;
 const PATTERN_MINIMUM_EVENTS = 2;
 
+// Historical in-code TTS rate, kept as the contract default so behavior is
+// byte-identical until the user moves the slider.
+const DEFAULT_SPEECH_RATE = 0.9;
+
 const DEFAULT_PREFERENCES = Object.freeze({
   cardTypes: ['recognition'],
   weights: {},
   engineMode: 'fixed',
-  autoPick: true
+  autoPick: true,
+  speechRate: DEFAULT_SPEECH_RATE
 });
 
 function normalizeCardTypes(value) {
@@ -116,6 +121,25 @@ function autoPickFromStorage(value) {
   return true;
 }
 
+// Review 3.0 voice speed: TTS rate persisted per user. Optional on PUT;
+// absent (undefined/null) keeps the contract default (see
+// DEFAULT_SPEECH_RATE above). Anything outside 0.5–1.5 or non-numeric
+// rejects with 400.
+function normalizeSpeechRate(value) {
+  if (value === undefined || value === null) return DEFAULT_SPEECH_RATE;
+  const rate = Number(value);
+  if (!Number.isFinite(rate) || rate < 0.5 || rate > 1.5) {
+    throw new ValidationError('speechRate must be a number between 0.5 and 1.5.');
+  }
+  return Math.round(rate * 100) / 100;
+}
+
+function speechRateFromStorage(value) {
+  if (value === undefined || value === null) return DEFAULT_SPEECH_RATE;
+  const rate = Number(value);
+  return Number.isFinite(rate) && rate >= 0.5 && rate <= 1.5 ? rate : DEFAULT_SPEECH_RATE;
+}
+
 // facility from a result history; 'correct' = Good + Hard, 'wrong' = Again.
 // Empty history returns the neutral 1 so the formula reduces to the base.
 function facilityFromResults(results) {
@@ -148,35 +172,38 @@ function preferencesFromRow(row) {
     cardTypes: Array.isArray(row.card_types) ? [...row.card_types] : [...DEFAULT_PREFERENCES.cardTypes],
     weights: row.weights && typeof row.weights === 'object' && !Array.isArray(row.weights) ? { ...row.weights } : {},
     engineMode: normalizeEngineMode(row.engine_mode),
-    autoPick: autoPickFromStorage(row.auto_pick)
+    autoPick: autoPickFromStorage(row.auto_pick),
+    speechRate: speechRateFromStorage(row.speech_rate)
   };
 }
 
 async function getUserReviewPreferences(executor, userId) {
   const [rows] = await executor.execute(
-    'SELECT card_types, weights, engine_mode, auto_pick FROM user_review_preferences WHERE user_id = ?',
+    'SELECT card_types, weights, engine_mode, auto_pick, speech_rate FROM user_review_preferences WHERE user_id = ?',
     [userId]
   );
   return preferencesFromRow(rows && rows[0]);
 }
 
-async function upsertUserReviewPreferences(executor, userId, { cardTypes, weights, engineMode, autoPick } = {}) {
+async function upsertUserReviewPreferences(executor, userId, { cardTypes, weights, engineMode, autoPick, speechRate } = {}) {
   const normalized = {
     cardTypes: normalizeCardTypes(cardTypes),
     weights: normalizeWeights(weights),
     engineMode: normalizeEngineMode(engineMode),
-    autoPick: normalizeAutoPick(autoPick)
+    autoPick: normalizeAutoPick(autoPick),
+    speechRate: normalizeSpeechRate(speechRate)
   };
   await executor.execute(
-    `INSERT INTO user_review_preferences (user_id, card_types, weights, engine_mode, auto_pick)
-     VALUES (?, ?::jsonb, ?::jsonb, ?, ?)
+    `INSERT INTO user_review_preferences (user_id, card_types, weights, engine_mode, auto_pick, speech_rate)
+     VALUES (?, ?::jsonb, ?::jsonb, ?, ?, ?)
      ON CONFLICT (user_id) DO UPDATE SET
        card_types = EXCLUDED.card_types,
        weights = EXCLUDED.weights,
        engine_mode = EXCLUDED.engine_mode,
        auto_pick = EXCLUDED.auto_pick,
+       speech_rate = EXCLUDED.speech_rate,
        updated_at = CURRENT_TIMESTAMP`,
-    [userId, JSON.stringify(normalized.cardTypes), JSON.stringify(normalized.weights), normalized.engineMode, normalized.autoPick]
+    [userId, JSON.stringify(normalized.cardTypes), JSON.stringify(normalized.weights), normalized.engineMode, normalized.autoPick, normalized.speechRate]
   );
   return normalized;
 }
@@ -375,6 +402,7 @@ module.exports = {
   normalizeAutoPick,
   normalizeCardTypes,
   normalizeEngineMode,
+  normalizeSpeechRate,
   normalizeWeights,
   preferencesFromRow,
   resolveIntervalDays,

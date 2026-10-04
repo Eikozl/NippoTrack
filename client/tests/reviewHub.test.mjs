@@ -1755,3 +1755,43 @@ test('Review audio: voice list that never loads reports unknown, not missing', a
   assert.ok(harness.toasts.some((t) => /not loaded yet/.test(t.message)), 'unknown state says retry shortly');
   assert.equal(harness.speechCalls.length, 0, 'nothing spoken without voices');
 });
+
+test('Review voice speed: slider reflects saved rate and save persists it', async () => {
+  const harness = loadReviewModule({
+    candidatesPayload: { groups: {} },
+    typesPayload: {
+      availableTypes: ['recognition', 'recall', 'cloze', 'audio'],
+      userPreferences: { cardTypes: ['recognition', 'audio'], weights: {}, engineMode: 'fixed', autoPick: true, speechRate: 0.7 }
+    }
+  });
+  const container = await gotoSetup(harness);
+  const edit = container.querySelector('button[aria-label="Edit card types"]') || findFirstButtonByText(container, 'Edit');
+  await clickAndSettle(edit);
+  const { form, onSubmit } = harness.openDialogCalls[0];
+  const slider = form.querySelector('input[name="card-speech-rate"]');
+  assert.ok(slider, 'voice speed slider present');
+  assert.equal(slider.value, '0.7', 'slider reflects the saved rate');
+  slider.value = '1.25';
+  slider.dispatchEvent({ type: 'input', target: slider, preventDefault() {} });
+  await onSubmit(form, () => {});
+  await sleep(10);
+  const lastPref = [...harness.apiCalls].reverse().find((c) => c.url === '/api/review/preferences');
+  assert.equal(lastPref.options.body.speechRate, 1.25, 'save sends the chosen rate');
+});
+
+test('Review voice speed: spoken utterances use the configured rate', async () => {
+  const item = candidateItem({ entityType: 'vocabulary', entityId: 72, display: '本', reading: 'ほん', meaning: 'book', strength: 'strong' });
+  const { harness, container } = await startWithSingleItem({
+    item,
+    typesPayload: {
+      availableTypes: ['recognition', 'recall', 'cloze', 'audio'],
+      userPreferences: { cardTypes: ['audio'], weights: {}, engineMode: 'fixed', autoPick: true, speechRate: 0.7 }
+    }
+  });
+  const speaker = speakerButtons(container).filter(isVisible)[0];
+  assert.ok(speaker, 'speaker present');
+  speaker.click();
+  await sleep(150);
+  assert.equal(harness.speechCalls.length, 1, 'spoken once');
+  assert.equal(harness.speechCalls[0]?.rate, 0.7, 'utterance carries the configured rate');
+});

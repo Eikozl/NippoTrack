@@ -231,9 +231,11 @@ test('PUT /api/review/preferences round-trips autoPick scoped to req.user.id', a
     assert.equal(explicitFalse.body().userPreferences.autoPick, false);
     assert.match(calls[0].sql, /INSERT INTO user_review_preferences/);
     assert.match(calls[0].sql, /auto_pick/);
+    assert.match(calls[0].sql, /speech_rate/);
     assert.match(calls[0].sql, /ON CONFLICT \(user_id\) DO UPDATE/);
     assert.equal(calls[0].params[0], USER_ID);
-    assert.equal(calls[0].params[calls[0].params.length - 1], false);
+    assert.equal(calls[0].params[4], false);
+    assert.equal(calls[0].params[5], 0.9);
 
     const explicitTrue = mockRes();
     await controller.putReviewPreferences({
@@ -243,7 +245,8 @@ test('PUT /api/review/preferences round-trips autoPick scoped to req.user.id', a
     assert.equal(explicitTrue.status(), 200);
     assert.equal(explicitTrue.body().userPreferences.autoPick, true);
     assert.equal(calls[1].params[0], USER_ID);
-    assert.equal(calls[1].params[calls[1].params.length - 1], true);
+    assert.equal(calls[1].params[4], true);
+    assert.equal(calls[1].params[5], 0.9);
 
     // Omitted autoPick keeps the contract default (true), like engineMode.
     const omitted = mockRes();
@@ -254,7 +257,8 @@ test('PUT /api/review/preferences round-trips autoPick scoped to req.user.id', a
     assert.equal(omitted.status(), 200);
     assert.equal(omitted.body().userPreferences.autoPick, true);
     assert.equal(calls[2].params[0], USER_ID);
-    assert.equal(calls[2].params[calls[2].params.length - 1], true);
+    assert.equal(calls[2].params[4], true);
+    assert.equal(calls[2].params[5], 0.9);
   });
 });
 
@@ -268,6 +272,80 @@ test('PUT /api/review/preferences saves reported card-type payload with autoPick
     assert.equal(response.status(), 200);
     assert.equal(response.body().userPreferences.autoPick, true);
     assert.deepEqual(response.body().userPreferences.cardTypes, ['recognition', 'recall']);
+  });
+});
+
+test('PUT /api/review/preferences rejects out-of-range speechRate with 400', async () => {
+  for (const speechRate of ['fast', 0.4, 1.6, NaN, Infinity, {}, []]) {
+    const mocked = mockRes();
+    await controller.putReviewPreferences(
+      { user: { id: USER_ID }, body: { cardTypes: ['recall'], speechRate } },
+      mocked.res
+    );
+    assert.equal(mocked.status(), 400, `expected 400 for speechRate=${JSON.stringify(speechRate)}`);
+    assert.match(mocked.body().error, /speechRate must be a number between 0.5 and 1.5/);
+  }
+});
+
+test('PUT /api/review/preferences round-trips speechRate scoped to req.user.id', async () => {
+  const calls = [];
+  await withPoolExecute(async (sql, params) => {
+    calls.push({ sql, params });
+    return [{ affectedRows: 1 }];
+  }, async () => {
+    const explicit = mockRes();
+    await controller.putReviewPreferences({
+      user: { id: USER_ID },
+      body: { cardTypes: ['recall'], speechRate: 1.25 }
+    }, explicit.res);
+    assert.equal(explicit.status(), 200);
+    assert.equal(explicit.body().userPreferences.speechRate, 1.25);
+    assert.equal(calls[0].params[0], USER_ID);
+    assert.equal(calls[0].params[calls[0].params.length - 1], 1.25);
+
+    const omitted = mockRes();
+    await controller.putReviewPreferences({
+      user: { id: USER_ID },
+      body: { cardTypes: ['recall'] }
+    }, omitted.res);
+    assert.equal(omitted.status(), 200);
+    assert.equal(omitted.body().userPreferences.speechRate, 0.9);
+  });
+});
+
+test('GET /api/review/types defaults speechRate for missing or legacy rows', async () => {
+  await withPoolExecute(async () => [[]], async () => {
+    const { res, status, body } = mockRes();
+    await controller.getReviewTypes({ user: { id: USER_ID } }, res);
+    assert.equal(status(), 200);
+    assert.equal(body().userPreferences.speechRate, 0.9);
+  });
+
+  await withPoolExecute(async () => [[{
+    card_types: ['recall'], weights: {}, engine_mode: 'fixed', auto_pick: true
+  }]], async () => {
+    const { res, status, body } = mockRes();
+    await controller.getReviewTypes({ user: { id: USER_ID } }, res);
+    assert.equal(status(), 200);
+    assert.equal(body().userPreferences.speechRate, 0.9);
+  });
+
+  await withPoolExecute(async () => [[{
+    card_types: ['recall'], weights: {}, engine_mode: 'fixed', auto_pick: true, speech_rate: 0.7
+  }]], async () => {
+    const { res, status, body } = mockRes();
+    await controller.getReviewTypes({ user: { id: USER_ID } }, res);
+    assert.equal(status(), 200);
+    assert.equal(body().userPreferences.speechRate, 0.7);
+  });
+
+  await withPoolExecute(async () => [[{
+    card_types: ['recall'], weights: {}, engine_mode: 'fixed', auto_pick: true, speech_rate: 99
+  }]], async () => {
+    const { res, status, body } = mockRes();
+    await controller.getReviewTypes({ user: { id: USER_ID } }, res);
+    assert.equal(status(), 200);
+    assert.equal(body().userPreferences.speechRate, 0.9);
   });
 });
 
