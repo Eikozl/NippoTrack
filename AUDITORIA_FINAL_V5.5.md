@@ -57,3 +57,5 @@ dependencias nuevas, vanilla JS (sin JSX).
 - Password rol runtime + smoke jlt_runtime en prod.
 - UI sugerencias/colecciones/analytics (backend listo y testeado).
 - Profile page /u/:username (backend listo).
+- Social UI: página Decks (nav Library): browse público con follow/view, mis decks con inbox de sugerencias + analytics, collections con create/share, formulario de perfil público. PUT /api/users/me (409 si tomado). Smoke HTTP con limpieza. Nav test actualizado.
+- Deploy: .env.production completado; prod migrada 030-032; provision total imposible (sin CREATEROLE en Supabase) E innecesario (verifier verde: los grants vienen de las migraciones); rotar el password del rol rompería la app y no se hizo.
