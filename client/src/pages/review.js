@@ -590,24 +590,42 @@ export async function renderReview(container) {
     showToast(reconstructed && rangeLabel ? `Original selection wasn't saved for this older session — resumed from ${rangeLabel} with ${remaining.length} remaining item${remaining.length === 1 ? '' : 's'}.` : `Resumed with ${remaining.length} remaining item${remaining.length === 1 ? '' : 's'}.`);
   }
 
+  let historyHasContent = false;
   async function loadHistory() {
+    if (!historyHasContent) {
+      historyBlock.replaceChildren(loadingState('Loading…'));
+      historyBlock.hidden = false;
+    }
     try {
       const data = await apiRequest('/api/review/sessions?limit=10');
       const sessions = Array.isArray(data?.items) ? data.items : [];
+      const header = element('div', { className: 'flex items-center justify-between gap-3' }, [
+        element('h2', { className: 'font-semibold text-ink', text: 'Recent review sessions' }),
+        reloadSectionButton('Reload recent review sessions', loadHistory)
+      ]);
       if (!sessions.length) {
-        historyBlock.hidden = true;
-        historyBlock.replaceChildren();
+        historyBlock.replaceChildren(
+          header,
+          element('p', { className: 'mt-1 text-sm text-muted', text: 'When you studied, how much you reviewed, and how it felt.' }),
+          element('p', { className: 'mt-2 text-sm text-muted', text: 'No review sessions yet. Finish a review to see it here.' })
+        );
+        historyBlock.hidden = false;
+        historyHasContent = true;
         return;
       }
       historyBlock.replaceChildren(
-        element('h2', { className: 'font-semibold text-ink', text: 'Recent review sessions' }),
+        header,
         element('p', { className: 'mt-1 text-sm text-muted', text: 'When you studied, how much you reviewed, and how it felt.' }),
-        element('ul', { className: 'mt-4 grid gap-2' }, sessions.map((session) => {
+        element('ul', { className: 'mt-4 grid gap-2', attrs: { role: 'list' } }, sessions.map((session) => {
+          const iso = String(session.startedAt || '');
           const date = session.startedAt ? formattedDate(session.startedAt) : '';
           const summary = `${Number(session.total || 0)} items · ${Number(session.byResult?.Good || 0)} comfortable · ${Number(session.byResult?.Hard || 0)} difficult · ${Number(session.byResult?.Again || 0)} revisit`;
           const scope = `Kanji ${Number(session.byType?.kanji || 0)} · Vocabulary ${Number(session.byType?.vocabulary || 0)} · Grammar ${Number(session.byType?.grammar || 0)}`;
           const row = element('li', { className: 'cursor-pointer rounded-xl border border-stone bg-paper px-3 py-2.5 text-sm transition hover:border-vermilion', attrs: { role: 'button', tabindex: '0', 'aria-label': `Open details for session ${date || session.id}` } }, [
-            element('p', { className: 'font-semibold text-ink', text: `${date || 'Session'}${session.completedAt ? ' · completed' : ' · in progress'}` }),
+            element('p', { className: 'font-semibold text-ink' }, [
+              ...(date ? [element('time', { text: date, attrs: { dateTime: iso } })] : [element('span', { text: 'Session' })]),
+              element('span', { text: session.completedAt ? ' · completed' : ' · in progress' })
+            ]),
             element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: summary }),
             element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: scope })
           ]);
@@ -619,8 +637,14 @@ export async function renderReview(container) {
         }))
       );
       historyBlock.hidden = false;
-    } catch {
-      historyBlock.hidden = true;
+      historyHasContent = true;
+    } catch (error) {
+      if (historyHasContent) {
+        showToast(error?.message || 'Unable to refresh this section.', 'error');
+        return;
+      }
+      historyBlock.replaceChildren(errorState(error, loadHistory));
+      historyBlock.hidden = false;
     }
   }
 
@@ -645,32 +669,68 @@ export async function renderReview(container) {
     patternsBlock
   ]));
 
+  // Small section-reload affordance: re-runs the loader, staying on the
+  // previous content with a toast when a refresh fails (fail-open).
+  function reloadSectionButton(label, onReload) {
+    const button = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Reload', attrs: { type: 'button', 'aria-label': label } });
+    button.addEventListener('click', () => {
+      showToast('Refreshing…');
+      onReload();
+    });
+    return button;
+  }
+
+  let difficultHasContent = false;
   async function loadDifficult() {
+    if (!difficultHasContent) {
+      difficultBlock.replaceChildren(loadingState('Loading…'));
+      difficultBlock.hidden = false;
+    }
     try {
       const data = await apiRequest('/api/review/difficult');
       const items = Array.isArray(data?.items) ? data.items : [];
+      const header = element('div', { className: 'flex items-center justify-between gap-3' }, [
+        element('h2', { className: 'font-semibold text-ink', text: 'Frequently difficult' }),
+        reloadSectionButton('Reload frequently difficult items', loadDifficult)
+      ]);
+      const description = element('p', { className: 'mt-1 text-sm text-muted', text: 'Items you have marked Again at least twice — worth another look.' });
       if (!items.length) {
-        difficultBlock.hidden = true;
-        difficultBlock.replaceChildren();
+        difficultBlock.replaceChildren(
+          header,
+          description,
+          element('p', { className: 'mt-2 text-sm text-muted', text: 'No frequently difficult items yet. Keep reviewing to populate this section.' })
+        );
+        difficultBlock.hidden = false;
+        difficultHasContent = true;
         return;
       }
       difficultBlock.replaceChildren(
-        element('h2', { className: 'font-semibold text-ink', text: 'Frequently difficult' }),
-        element('p', { className: 'mt-1 text-sm text-muted', text: 'Items you have marked Again at least twice — worth another look.' }),
-        element('ul', { className: 'mt-4 grid gap-2' }, items.map((item) => {
-          const date = String(item.lastReviewedAt || '').slice(0, 10);
+        header,
+        description,
+        element('ul', { className: 'mt-4 grid gap-2', attrs: { role: 'list' } }, items.map((item) => {
+          const iso = String(item.lastReviewedAt || '');
+          const date = iso ? formattedDate(iso) : '';
           const tally = `${Number(item.againCount || 0)} again of ${Number(item.totalEvents || 0)} reviews`;
           return element('li', { className: 'rounded-xl border border-stone bg-paper px-3 py-2.5 text-sm' }, [
             element('p', { className: 'break-words font-jp font-semibold text-ink', text: item.display }),
             ...(item.reading ? [element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: item.reading })] : []),
             ...(item.meaning ? [element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: item.meaning })] : []),
-            element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: date ? `${tally} · last reviewed ${date}` : tally })
+            element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted' }, [
+              element('span', { text: tally }),
+              ...(date ? [element('span', { text: ' · last reviewed ' }), element('time', { text: date, attrs: { dateTime: iso } })] : [])
+            ])
           ]);
         }))
       );
       difficultBlock.hidden = false;
-    } catch {
-      difficultBlock.hidden = true;
+      difficultHasContent = true;
+    } catch (error) {
+      if (difficultHasContent) {
+        showToast(error?.message || 'Unable to refresh this section.', 'error');
+        return;
+      }
+      difficultBlock.replaceChildren(errorState(error, loadDifficult));
+      difficultBlock.hidden = false;
     }
   }
 
@@ -1090,7 +1150,7 @@ const CARD_TYPE_DESCRIPTIONS = {
       patternsBlock.replaceChildren(
         element('h2', { className: 'font-semibold text-ink', text: 'Detected patterns' }),
         element('p', { className: 'mt-1 text-sm text-muted', text: 'Recurring trouble spots from your recent reviews.' }),
-        element('ul', { className: 'mt-4 grid gap-2' }, patterns.map((pattern) => {
+        element('ul', { className: 'mt-4 grid gap-2', attrs: { role: 'list' } }, patterns.map((pattern) => {
           const displays = (pattern.affectedItems || []).map((entry) => entry.display).filter(Boolean);
           const practiceButton = element('button', {
             className: 'button-secondary mt-2 min-h-8 px-2.5 py-1 text-xs',

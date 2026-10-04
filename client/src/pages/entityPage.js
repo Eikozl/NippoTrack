@@ -248,7 +248,7 @@ renderDetail: (item) => {
               wordExamples.length ? element('div', { className: 'mt-3 grid gap-2' }, wordExamples.map((ex) => element('div', { className: 'detail-panel p-2 text-xs' }, [
                 element('p', { className: 'whitespace-pre-wrap text-ink', text: ex.sentence }),
                 ex.translation && element('p', { className: 'mt-1 text-muted', text: ex.translation })
-              ]))) : null
+              ]))) : element('p', { className: 'mt-2 text-xs text-muted', text: 'No examples recorded yet.' })
             ]);
           })) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No connected vocabulary yet' })
         ]),
