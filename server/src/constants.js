@@ -16,7 +16,7 @@ const ALLOWED_FIELDS = {
   kanji: ['character_kanji', 'meaning', 'onyomi', 'kunyomi', 'jlpt_level', 'status', 'notes'],
   grammar: ['grammar_point', 'meaning', 'structure', 'example', 'jlpt_level', 'status', 'notes', 'reference_id'],
   goals: ['title', 'goal_type', 'target_value', 'period_type', 'target_jlpt_level', 'target_status', 'start_date', 'due_date', 'is_active'],
-  content: ['title', 'content_type', 'content_date', 'perceived_difficulty', 'comprehension_percent', 'new_words_count', 'notes'],
+  content: ['title', 'content_type', 'content_date', 'perceived_difficulty', 'comprehension_percent', 'new_words_count', 'notes', 'source_text', 'source_url'],
   notes: ['title', 'body', 'category'],
   tags: ['name']
 };

@@ -4,6 +4,7 @@ import { t } from '../i18n';
 import { iconForTitle, iconTile } from '../icons';
 import { confirmDialog, debounce, element, emptyState, errorState, field, formatDate,
 loadingState, openDialog, pageHeader, paginationControls, searchableMultiSelect, showToast, withGlobalLoading } from '../ui';
+import { openEnrollDialog } from './stories.js';
 
 const options = (values, blank = 'Not set') => [{ value: '', label: blank }, ...values.map((value) => ({ value, label: value }))];
 const jlpt = options(['N5', 'N4', 'N3', 'N2', 'N1']);
@@ -163,12 +164,26 @@ export function renderV2Page(container, kind) {
     // due-date field for weekly goals (the backend weekly window ignores
     // due dates). Hidden fields still submit, so stored data is preserved.
     if (kind === 'goals') attachGoalHelpers(fields);
+    // Stories live inside the Content Log: source URL + pasted text ride
+    // along with the generic fields and submit through the same endpoint.
+    if (kind === 'content') {
+      fields.push(
+        field({ name: 'source_url', label: 'Source URL (optional)', value: record?.source_url || '', maxLength: 2000 }),
+        field({ name: 'source_text', label: 'Source text (optional, up to 5000 characters)', type: 'textarea', value: record?.source_text || '', maxLength: 5000 })
+      );
+    }
     openDialog({ title: `${record ? 'Edit' : 'Add'} ${config.singular}`, content: fields, onSubmit: async (form, close) => {
       if (kind === 'goals') {
         const raw = new FormData(form).get('target_value');
         if (!isValidTargetAmount(raw)) { showToast(TARGET_AMOUNT_ERROR, 'error'); return; }
       }
-      await apiRequest(record ? `${config.endpoint}/${record[config.id]}` : config.endpoint, { method: record ? 'PUT' : 'POST', body: payload(form, config) });
+      const body = payload(form, config);
+      if (kind === 'content') {
+        const data = new FormData(form);
+        body.source_url = data.get('source_url') ?? '';
+        body.source_text = data.get('source_text') ?? '';
+      }
+      await apiRequest(record ? `${config.endpoint}/${record[config.id]}` : config.endpoint, { method: record ? 'PUT' : 'POST', body });
       close(); showToast(`${config.singular} saved.`); await load();
     } });
   }
@@ -236,12 +251,20 @@ export function renderV2Page(container, kind) {
     const edit = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5', text: 'Edit', attrs: { type: 'button' } }); edit.addEventListener('click', () => openRecord(record));
     const links = config.linkGroups?.length ? element('button', { className: 'button-secondary min-h-9 px-3 py-1.5', text: 'Links', attrs: { type: 'button' } }) : null;
     links?.addEventListener('click', () => openLinks(record));
+    const extract = kind === 'content' ? element('button', { className: 'button-secondary min-h-9 px-3 py-1.5', text: 'Extract', attrs: { type: 'button', 'aria-label': `Extract linguistic value from ${record.title || 'entry'}` } }) : null;
+    if (extract) extract.addEventListener('click', async () => {
+      try {
+        const result = await apiRequest(`/api/stories/${record[config.id]}/extract`, { method: 'POST' });
+        openEnrollDialog(record[config.id], record.title, result?.extracted);
+      } catch (error) { showToast(error?.message || 'Story has no text to extract from.', 'error'); }
+    });
     const del = element('button', { className: 'button-danger', text: 'Delete', attrs: { type: 'button' } }); del.addEventListener('click', () => remove(record));
+    const actions = [links, extract, del, edit].filter(Boolean);
     return element('article', { className: 'surface flex min-h-44 flex-col p-5' }, [
       element('div', { className: 'flex items-start justify-between gap-3' }, [element('div', { className: 'flex min-w-0 items-start gap-3' }, [iconTile(iconForTitle(config.title), { className: 'preview-icon shrink-0' }), element('h2', { className: 'break-words text-lg font-semibold text-ink', text: record.title || record.name })]), element('span', { className: 'status-pill', text: meta })]),
       ...(detail ? [element('p', { className: 'mt-3 line-clamp-3 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: detail })] : []),
       ...(Array.isArray(footer) ? footer.map((line) => element('p', { className: 'mt-1 line-clamp-3 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: line })) : []),
-      element('div', { className: 'mt-auto flex items-end justify-start gap-3 pt-5' }, [element('div', { className: 'flex shrink-0 flex-nowrap gap-2' }, [links, del, edit]), ...(Array.isArray(footer) || !footer ? [] : [element('span', { className: footer === 'Complete' ? 'status-pill goal-complete ml-auto' : 'ml-auto text-xs font-semibold text-muted', text: footer })])])
+      element('div', { className: 'mt-auto flex items-end justify-start gap-3 pt-5' }, [element('div', { className: 'flex shrink-0 flex-nowrap gap-2' }, actions), ...(Array.isArray(footer) || !footer ? [] : [element('span', { className: footer === 'Complete' ? 'status-pill goal-complete ml-auto' : 'ml-auto text-xs font-semibold text-muted', text: footer })])])
     ]);
   }
 

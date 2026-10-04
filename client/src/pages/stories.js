@@ -1,8 +1,7 @@
-// Story Registry (V5.6 phase 1): paste text, preview the linguistic
-// extraction, enroll selections into SRS. No external fetching yet: embeds
-// and transcripts arrive in phase 2. Vanilla, fail-open blocks.
+// Story Registry enroll dialog (shared with the Content Log): candidate
+// checkboxes with TTS preview, server-id enrollment. No fetching here.
 import { apiRequest } from '../api';
-import { element, emptyState, openDialog, pageHeader, showToast, withPendingAction } from '../ui';
+import { element, openDialog, showToast, withPendingAction } from '../ui';
 import { speakJapanese } from '../speech.js';
 
 function smallButton(label, ariaLabel) {
@@ -23,7 +22,7 @@ function candidateLabel(kind, entry) {
   return `${entry.pattern} · ${entry.meaning || '?'}`;
 }
 
-function openEnrollDialog(storyId, storyTitle, preview) {
+export function openEnrollDialog(storyId, storyTitle, preview) {
   const groups = [
     { kind: 'kanji', label: 'Kanji', entries: Array.isArray(preview?.kanji) ? preview.kanji : [] },
     { kind: 'vocab', label: 'Vocabulary', entries: Array.isArray(preview?.vocab) ? preview.vocab : [] },
@@ -77,92 +76,3 @@ function openEnrollDialog(storyId, storyTitle, preview) {
   });
 }
 
-export async function renderStories(container) {
-  container.replaceChildren(pageHeader({
-    eyebrow: 'Immersion',
-    title: 'Stories',
-    description: 'Paste text, preview what the engine hears in it, enroll it into SRS.'
-  }));
-  const createSection = element('section', { className: 'surface mt-4 p-5 sm:p-6', attrs: { 'aria-label': 'New story' } });
-  const listSection = element('section', { className: 'surface mt-4 p-5 sm:p-6', attrs: { 'aria-label': 'My stories' } });
-  container.append(createSection, listSection);
-
-  const titleInput = element('input', { className: 'field-control', attrs: { type: 'text', 'aria-label': 'Story title', placeholder: 'Story title', maxLength: '255' } });
-  const textInput = element('textarea', { className: 'field-control min-h-32', attrs: { 'aria-label': 'Story text', placeholder: 'Paste Japanese text (up to 5000 characters)…' } });
-  const create = element('button', { className: 'button-primary min-h-9 px-3 py-1.5 text-sm', text: 'Analyze text', attrs: { type: 'button' } });
-  const previewBox = element('div', { className: 'grid gap-2' });
-  create.addEventListener('click', () => {
-    const text = String(textInput.value || '');
-    if (!text.trim()) { showToast('Paste some text first.', 'error'); return; }
-    if (!String(titleInput.value || '').trim()) { showToast('Give the story a title.', 'error'); return; }
-    withPendingAction(create, async () => {
-      const preview = await apiRequest('/api/stories/extract-preview', { method: 'POST', body: { text } });
-      const data = preview?.preview || {};
-      const counts = [
-        `${(data.kanji || []).length} kanji`,
-        `${(data.vocab || []).length} vocabulary`,
-        `${(data.grammar || []).length} grammar`
-      ].join(' · ');
-      const save = smallButton('Save story with extraction', 'Save story with extraction');
-      save.addEventListener('click', () => {
-        withPendingAction(save, async () => {
-          const story = await apiRequest('/api/stories', {
-            method: 'POST',
-            body: { title: titleInput.value, text, auto_extract: true }
-          });
-          showToast(`Story saved (${story.extracted ? `${story.extracted.kanji + story.extracted.vocab + story.extracted.grammar} candidates` : 'extracted'}).`);
-          titleInput.value = '';
-          textInput.value = '';
-          previewBox.replaceChildren();
-          await refreshStories();
-        }).catch((error) => showToast(error?.message || 'Unable to save the story.', 'error'));
-      });
-      previewBox.replaceChildren(
-        element('p', { className: 'text-sm font-semibold text-ink', text: `Detected: ${counts}` }),
-        save
-      );
-    }).catch((error) => showToast(error?.message || 'Unable to analyze the text.', 'error'));
-  });
-  createSection.append(
-    element('h2', { className: 'font-semibold text-ink', text: 'New story' }),
-    titleInput, textInput, create, previewBox
-  );
-
-  const listBox = element('div', { className: 'grid gap-3' });
-  listSection.append(element('h2', { className: 'font-semibold text-ink', text: 'My stories' }), listBox);
-  async function refreshStories() {
-    listBox.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Loading stories…' }));
-    try {
-      const data = await apiRequest('/api/content?limit=30');
-      const items = Array.isArray(data?.items) ? data.items : [];
-      if (!items.length) {
-        listBox.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'No stories yet — paste text above.' }));
-        return;
-      }
-      listBox.replaceChildren(element('div', { className: 'grid gap-3' }, items.map((story) => {
-        const extract = smallButton('Extract', `Extract ${story.title}`);
-        extract.addEventListener('click', () => {
-          withPendingAction(extract, async () => {
-            const result = await apiRequest(`/api/stories/${story.id_content_entry}/extract`, { method: 'POST' });
-            openEnrollDialog(story.id_content_entry, story.title, result?.extracted);
-          }).catch((error) => showToast(error?.message || 'Story has no text to extract from.', 'error'));
-        });
-        const enroll = smallButton('Enroll', `Enroll ${story.title} into SRS`);
-        enroll.addEventListener('click', () => {
-          withPendingAction(enroll, async () => {
-            const result = await apiRequest(`/api/stories/${story.id_content_entry}/extract`, { method: 'POST' });
-            openEnrollDialog(story.id_content_entry, story.title, result?.extracted);
-          }).catch((error) => showToast(error?.message || 'Story has no text to extract from.', 'error'));
-        });
-        return element('article', { className: 'rounded-md bg-paper p-3' }, [
-          element('p', { className: 'font-medium text-ink', text: story.title }),
-          element('p', { className: 'mt-1 text-xs text-muted', text: `${story.content_type || ''} · ${story.content_date || ''}` }),
-          element('div', { className: 'mt-2 flex flex-col gap-2 sm:flex-row' }, [extract, enroll])
-        ]);
-      })));
-    } catch {
-      listBox.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Stories are unavailable.' }));
-    }
-  }
-  await refreshStories();
-}

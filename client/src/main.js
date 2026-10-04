@@ -39,7 +39,6 @@ const pageLoaders = {
   notes: () => import('./pages/v2Pages.js').then((module) => (container) => module.renderV2Page(container, 'notes')),
   tags: () => import('./pages/v2Pages.js').then((module) => (container) => module.renderV2Page(container, 'tags')),
   review: () => import('./pages/review.js').then((module) => (container) => module.renderReview(container)),
-  stories: () => import('./pages/stories.js').then((module) => (container) => module.renderStories(container)),
   community: () => import('./pages/community.js').then((module) => (container) => module.renderCommunity(container)),
   statistics: () => import('./pages/statistics.js').then((module) => (container) => module.renderStatistics(container)),
   settings: () => import('./pages/settings.js').then((module) => (container) => module.renderSettings(container))
@@ -64,7 +63,6 @@ const pages = {
   notes: (container) => loadPage('notes').then((render) => render(container)),
   tags: (container) => loadPage('tags').then((render) => render(container)),
   review: (container) => loadPage('review').then((render) => render(container)),
-  stories: (container) => loadPage('stories').then((render) => render(container)),
   community: (container) => loadPage('community').then((render) => render(container)),
   statistics: (container) => loadPage('statistics').then((render) => render(container)),
   settings: (container) => loadPage('settings').then((render) => render(container))
