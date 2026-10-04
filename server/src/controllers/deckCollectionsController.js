@@ -74,6 +74,17 @@ async function getCollectionDetail(req, res) {
   }
 }
 
+async function deleteCollectionHandler(req, res) {
+  try {
+    const id = parseIdParam(req, 'collection');
+    const result = await deleteCollection(pool, id, req.user.id);
+    if (!result) return res.status(404).json({ error: 'collection not found' });
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to delete the collection.' });
+  }
+}
+
 async function postCollectionDeck(req, res) {
   try {
     const id = parseIdParam(req, 'collection');
@@ -149,6 +160,7 @@ async function postCollectionImport(req, res) {
 }
 
 module.exports = {
+  deleteCollection: deleteCollectionHandler,
   deleteCollectionDeck,
   getCollectionDetail,
   listCollections,

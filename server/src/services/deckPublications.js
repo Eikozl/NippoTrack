@@ -53,11 +53,12 @@ async function getDeckPublication(executor, deckId, viewerId) {
   const [rows] = await executor.execute(
     `SELECT d.id_deck_publication AS id, d.owner_id, d.title, d.description, d.entity_type, d.is_public, d.created_at,
        p.username AS owner_username, p.display_name AS owner_display,
-       (SELECT COUNT(*) FROM deck_follows f WHERE f.id_deck_publication = d.id_deck_publication) AS followers
+       (SELECT COUNT(*) FROM deck_follows f WHERE f.id_deck_publication = d.id_deck_publication) AS followers,
+       CASE WHEN ? IS NULL THEN NULL ELSE EXISTS (SELECT 1 FROM deck_follows f WHERE f.id_deck_publication = d.id_deck_publication AND f.follower_id = ?) END AS viewer_following
      FROM deck_publications d
      LEFT JOIN user_profile p ON p.user_id = d.owner_id
      WHERE d.id_deck_publication = ?`,
-    [deckId]
+    [viewerId || null, viewerId || null, deckId]
   );
   const deck = Array.isArray(rows) ? rows[0] : null;
   if (!deck) return null;
@@ -71,6 +72,7 @@ async function getDeckPublication(executor, deckId, viewerId) {
     ownerId: deck.owner_id,
     ownerUsername: deck.owner_username || null,
     ownerDisplay: deck.owner_display || null,
+    viewerFollowing: deck.viewer_following === null || deck.viewer_following === undefined ? null : Number(deck.viewer_following) === 1,
     title: deck.title,
     description: deck.description,
     entityType: deck.entity_type,
@@ -81,7 +83,7 @@ async function getDeckPublication(executor, deckId, viewerId) {
   };
 }
 
-async function listPublicDecks(executor, { entityType = null, limit = 20, offset = 0, ownerId = null } = {}) {
+async function listPublicDecks(executor, { entityType = null, limit = 20, offset = 0, ownerId = null, viewerId = null } = {}) {
   const safeLimit = Math.max(1, Math.min(50, Number(limit) || 20));
   const safeOffset = Math.max(0, Number(offset) || 0);
   const where = [];
@@ -101,12 +103,13 @@ async function listPublicDecks(executor, { entityType = null, limit = 20, offset
     `SELECT d.id_deck_publication AS id, d.title, d.description, d.entity_type, d.is_public, d.created_at,
        p.username AS owner_username, p.display_name AS owner_display,
        (SELECT COUNT(*) FROM deck_follows f WHERE f.id_deck_publication = d.id_deck_publication) AS followers,
-       (SELECT COUNT(*) FROM deck_publication_items i WHERE i.id_deck_publication = d.id_deck_publication) AS items
+       (SELECT COUNT(*) FROM deck_publication_items i WHERE i.id_deck_publication = d.id_deck_publication) AS items,
+       CASE WHEN ? IS NULL THEN NULL ELSE EXISTS (SELECT 1 FROM deck_follows f WHERE f.id_deck_publication = d.id_deck_publication AND f.follower_id = ?) END AS viewer_following
      FROM deck_publications d
      LEFT JOIN user_profile p ON p.user_id = d.owner_id
      WHERE ${where.join(' AND ')}
      ORDER BY followers DESC, d.id_deck_publication DESC LIMIT ? OFFSET ?`,
-    [...params, safeLimit, safeOffset]
+    [viewerId || null, viewerId || null, ...params, safeLimit, safeOffset]
   );
   return (Array.isArray(rows) ? rows : []).map((row) => ({
     id: Number(row.id),
@@ -116,6 +119,7 @@ async function listPublicDecks(executor, { entityType = null, limit = 20, offset
     isPublic: Boolean(row.is_public),
     ownerUsername: row.owner_username || null,
     ownerDisplay: row.owner_display || null,
+    viewerFollowing: row.viewer_following === null || row.viewer_following === undefined ? null : Number(row.viewer_following) === 1,
     createdAt: row.created_at,
     followers: Number(row.followers || 0),
     itemCount: Number(row.items || 0)

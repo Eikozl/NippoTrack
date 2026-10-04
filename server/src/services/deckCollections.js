@@ -178,11 +178,23 @@ async function importCollectionShare(executor, payload, userId) {
   return { imported, skipped, decks: perDeck };
 }
 
+async function deleteCollection(executor, collectionId, viewerId) {
+  const [rows] = await executor.execute(
+    'SELECT owner_id FROM deck_collections WHERE id_deck_collection = ?',
+    [collectionId]
+  );
+  const collection = Array.isArray(rows) ? rows[0] : null;
+  if (!collection || String(collection.owner_id) !== String(viewerId)) return null;
+  await executor.execute('DELETE FROM deck_collections WHERE id_deck_collection = ?', [collectionId]);
+  return { deletedId: Number(collectionId) };
+}
+
 module.exports = {
   COLLECTION_TTL_MS,
   addDeckToCollection,
   createCollection,
   createCollectionShare,
+  deleteCollection,
   getCollection,
   importCollectionShare,
   parseCollectionShare,

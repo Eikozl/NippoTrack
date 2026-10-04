@@ -142,3 +142,18 @@ test('deck deletion is owner-only', async () => {
   assert.equal(await deleteDeckPublication(executor, 7, 'stranger-9'), null);
   assert.equal(await deleteDeckPublication(executor, 999, 'owner-1'), null);
 });
+
+test('viewer following flag maps from the database', async () => {
+  const executor = {
+    async execute(sql) {
+      if (/LEFT JOIN user_profile/.test(sql)) {
+        return [[{ id: 7, owner_id: 'owner-1', title: 'Open', description: '', entity_type: 'vocabulary', is_public: 1, created_at: '2026-01-01', owner_username: null, owner_display: null, viewer_following: 1, followers: 5 }]];
+      }
+      if (/FROM deck_publication_items/.test(sql)) return [[{ position: 0, item_json: { word: '水' } }]];
+      throw new Error(`unexpected SQL in following test: ${sql.slice(0, 60)}`);
+    }
+  };
+  const deck = await getDeckPublication(executor, 7, 'fan-1');
+  assert.equal(deck.viewerFollowing, true);
+  assert.equal(deck.followers, 5);
+});

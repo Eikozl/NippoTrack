@@ -177,22 +177,59 @@ function section(title, description) {
   return { wrap, body };
 }
 
-function deckCard(deck, actions = []) {
+function deckCard(deck, actions = [], corner = null) {
   const pill = element('span', { className: 'status-pill shrink-0 text-xs', text: deck.entityType || '' });
   const creatorName = deck.ownerDisplay || (deck.ownerUsername ? `@${deck.ownerUsername}` : null);
   const creator = creatorName
     ? element('p', { className: 'mt-1 text-xs text-muted', text: `by ${creatorName}` })
     : null;
-  return element('article', { className: 'rounded-xl border border-stone bg-paper p-4' }, [
+  return element('article', { className: 'relative rounded-xl border border-stone bg-paper p-4' }, [
     element('div', { className: 'flex items-start justify-between gap-3' }, [
       element('h3', { className: 'break-words text-lg font-semibold text-ink', text: deck.title }),
       pill
     ]),
     ...(creator ? [creator] : []),
     ...(deck.description ? [element('p', { className: 'mt-1 text-sm leading-6 text-muted', text: deck.description })] : []),
-    element('p', { className: 'mt-2 text-xs font-medium text-muted', text: `${deck.itemCount ?? '?'} items · ${deck.followers ?? 0} followers` }),
-    ...(actions.length ? [element('div', { className: 'mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap' }, actions)] : [])
+    element('p', { className: 'mt-2 text-xs font-medium text-muted', text: `${deck.itemCount ?? '?'} items` }),
+    ...(actions.length ? [element('div', { className: `mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap${corner ? ' pr-12' : ''}` }, actions)] : []),
+    ...(corner ? [element('div', { className: 'absolute bottom-3 right-3 flex flex-col items-center gap-0.5' }, [corner])] : [])
   ]);
+}
+
+// GitHub-style like: star above, count right below it, bottom-right corner.
+function starWidget(deck) {
+  let liked = Boolean(deck.viewerFollowing);
+  let count = Number(deck.followers || 0);
+  const countNode = element('p', { className: 'text-xs font-semibold text-muted', text: String(count), attrs: { 'aria-label': `${count} likes` } });
+  const star = element('button', { className: 'icon-button shrink-0', attrs: { type: 'button', 'aria-label': `Like ${deck.title}`, 'aria-pressed': String(liked) } }, [icon('star', { size: 20 })]);
+  const paint = () => {
+    star.setAttribute('aria-pressed', String(liked));
+    star.classList.toggle('text-amber-500', liked);
+    const svg = star.querySelector('svg');
+    if (svg) {
+      if (liked) svg.setAttribute('fill', 'currentColor');
+      else svg.removeAttribute('fill');
+    }
+    countNode.textContent = String(count);
+    countNode.setAttribute('aria-label', `${count} likes`);
+  };
+  paint();
+  star.addEventListener('click', () => {
+    withPendingAction(star, async () => {
+      if (liked) {
+        const result = await apiRequest(`/api/decks/${deck.id}/follow`, { method: 'DELETE' });
+        liked = false;
+        count = Number(result.followers || 0);
+      } else {
+        const result = await apiRequest(`/api/decks/${deck.id}/follow`, { method: 'POST' });
+        liked = true;
+        count = Number(result.followers || 0);
+      }
+      paint();
+    }).catch((error) => showToast(error?.message || 'Unable to like the deck.', 'error'));
+  });
+  const wrap = element('div', { className: 'flex flex-col items-center gap-0.5' }, [star, countNode]);
+  return wrap;
 }
 
 const PICKER_TYPES = [
@@ -235,24 +272,10 @@ export async function renderCommunity(container) {
       return;
     }
     feedList.replaceChildren(element('div', { className: 'grid gap-4 md:grid-cols-2' }, visible.map((deck) => {
-      const follow = smallButton('Follow', `Follow ${deck.title}`);
-      follow.addEventListener('click', () => {
-        withPendingAction(follow, async () => {
-          const result = await apiRequest(`/api/decks/${deck.id}/follow`, { method: 'POST' });
-          showToast(`Following (${result.followers} followers).`);
-        }).catch((error) => showToast(error?.message || 'Unable to follow the deck.', 'error'));
-      });
-      const unfollow = smallButton('Unfollow', `Unfollow ${deck.title}`);
-      unfollow.addEventListener('click', () => {
-        withPendingAction(unfollow, async () => {
-          await apiRequest(`/api/decks/${deck.id}/follow`, { method: 'DELETE' });
-          showToast('Unfollowed.');
-        }).catch((error) => showToast(error?.message || 'Unable to unfollow the deck.', 'error'));
-      });
       const view = smallButton('Open deck', `Open ${deck.title}`);
       view.addEventListener('click', () => itemsDialog(deck.id, deck.title, deck.entityType));
       const previewItems = (deck.previewItems || []).slice(0, 3);
-      const card = deckCard(deck, [view, follow, unfollow]);
+      const card = deckCard(deck, [view], starWidget(deck));
       if (previewItems.length) {
         card.append(element('ul', { className: 'mt-2 flex flex-wrap gap-1.5', attrs: { role: 'list' } }, [
           ...previewItems.map((text) => element('li', { className: 'status-pill text-xs', text })),
@@ -439,33 +462,11 @@ export async function renderCommunity(container) {
     codeInput, previewImport, importPreview
   );
 
-  // ---- My decks: click a card to open it; trash deletes (confirmed),
-  // checkboxes enable multi-delete.
+  // ---- My decks: click a card to open it; trash deletes. When two or more
+  // cards are checked, any single trash deletes the whole selection.
   const selectedDecks = new Set();
-  const deleteSelected = smallButton('Delete selected', 'Delete selected decks');
-  deleteSelected.disabled = true;
-  const syncDeleteSelected = () => {
-    deleteSelected.disabled = selectedDecks.size === 0;
-    deleteSelected.textContent = selectedDecks.size ? `Delete selected (${selectedDecks.size})` : 'Delete selected';
-  };
-  deleteSelected.addEventListener('click', () => {
-    if (!selectedDecks.size) return;
-    confirmDialog({
-      title: `Delete ${selectedDecks.size} deck${selectedDecks.size > 1 ? 's' : ''}?`,
-      description: 'This permanently deletes the selected decks, their items, follows and suggestions. This cannot be undone.',
-      onConfirm: async () => {
-        for (const id of [...selectedDecks]) {
-          await apiRequest(`/api/decks/${id}`, { method: 'DELETE' });
-        }
-        selectedDecks.clear();
-        showToast('Selected decks deleted.');
-        await loadMine();
-      }
-    });
-  });
   const loadMine = async () => {
     selectedDecks.clear();
-    syncDeleteSelected();
     mine.body.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Loading your decks…' }));
     try {
       const data = await apiRequest('/api/decks?mine=true&limit=50');
@@ -485,17 +486,19 @@ export async function renderCommunity(container) {
         selectBox.addEventListener('change', () => {
           if (selectBox.checked) selectedDecks.add(deck.id);
           else selectedDecks.delete(deck.id);
-          syncDeleteSelected();
         });
         const remove = element('button', { className: 'icon-button icon-button--danger shrink-0', attrs: { type: 'button', 'aria-label': `Delete ${deck.title}` } }, [icon('trash', { size: 18 })]);
         remove.addEventListener('click', (event) => {
           if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+          const ids = selectedDecks.size > 0 ? [...selectedDecks] : [deck.id];
           confirmDialog({
-            title: `Delete ${deck.title}?`,
-            description: 'This permanently deletes the deck, its items, follows and suggestions. This cannot be undone.',
+            title: ids.length > 1 ? `Delete ${ids.length} decks?` : `Delete ${deck.title}?`,
+            description: 'This permanently deletes the deck(s), their items, follows and suggestions. This cannot be undone.',
             onConfirm: async () => {
-              await apiRequest(`/api/decks/${deck.id}`, { method: 'DELETE' });
-              showToast('Deck deleted.');
+              for (const id of ids) {
+                await apiRequest(`/api/decks/${id}`, { method: 'DELETE' });
+              }
+              showToast(ids.length > 1 ? 'Selected decks deleted.' : 'Deck deleted.');
               await loadMine();
             }
           });
@@ -556,7 +559,7 @@ export async function renderCommunity(container) {
           })
           .catch(() => {});
       }
-      mine.body.replaceChildren(deleteSelected, element('div', { className: 'grid gap-4 md:grid-cols-2' }, cards));
+      mine.body.replaceChildren(element('div', { className: 'grid gap-4 md:grid-cols-2' }, cards));
     } catch {
       mine.body.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Your decks are unavailable.' }));
     }
@@ -586,6 +589,18 @@ export async function renderCommunity(container) {
         }).catch((error) => showToast(error?.message || 'Unable to create the collection.', 'error'));
       });
       const list = element('div', { className: 'grid gap-3' }, items.map((collection) => {
+        const removeCollection = element('button', { className: 'icon-button icon-button--danger shrink-0', attrs: { type: 'button', 'aria-label': `Delete collection ${collection.title}` } }, [icon('trash', { size: 18 })]);
+        removeCollection.addEventListener('click', () => {
+          confirmDialog({
+            title: `Delete collection ${collection.title}?`,
+            description: 'This permanently deletes the collection (member decks stay untouched). This cannot be undone.',
+            onConfirm: async () => {
+              await apiRequest(`/api/collections/${collection.id}`, { method: 'DELETE' });
+              showToast('Collection deleted.');
+              await refreshCollections();
+            }
+          });
+        });
         const membersBox = element('div', { className: 'grid gap-1.5' });
         const memberSelect = element('select', { className: 'field-control', attrs: { 'aria-label': `Add deck to ${collection.title}` } }, [
           element('option', { text: 'Pick one of your decks…', attrs: { value: '' } }),
@@ -647,7 +662,11 @@ export async function renderCommunity(container) {
         const card = deckCard({ title: collection.title, description: collection.description, entityType: 'collection', itemCount: `${collection.deckCount} decks`, followers: '' }, [shareCollection]);
         card.append(
           membersBox,
-          element('div', { className: 'mt-2 flex flex-col gap-2 sm:flex-row' }, [memberSelect, addMember])
+          element('div', { className: 'mt-2 flex flex-col gap-2 sm:flex-row' }, [memberSelect, addMember]),
+          element('div', { className: 'mt-2 flex items-center gap-2' }, [
+            element('span', { className: 'text-xs text-muted', text: 'Danger zone:' }),
+            removeCollection
+          ])
         );
         return card;
       }));

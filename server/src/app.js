@@ -100,6 +100,7 @@ app.get('/api', (req, res) => {
       'GET /api/collections',
       'POST /api/collections/import',
       'GET /api/collections/:id',
+      'DELETE /api/collections/:id',
       'POST /api/collections/:id/decks',
       'DELETE /api/collections/:id/decks/:deckId',
       'PUT /api/collections/:id/decks',

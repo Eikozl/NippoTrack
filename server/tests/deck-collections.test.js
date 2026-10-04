@@ -7,6 +7,7 @@ const {
   addDeckToCollection,
   createCollection,
   createCollectionShare,
+  deleteCollection,
   getCollection,
   importCollectionShare,
   parseCollectionShare,
@@ -120,4 +121,19 @@ test('private collections stay invisible to strangers', async () => {
   assert.equal(await getCollection(hidden, 3, 'stranger-9'), null);
   const visible = await getCollection(hidden, 3, 'owner-1');
   assert.equal(visible.decks.length, 2);
+});
+
+test('collection deletion is owner-only', async () => {
+  const executor = {
+    async execute(sql, params) {
+      if (/FROM deck_collections WHERE id_deck_collection/.test(sql)) {
+        return [params[0] === 3 ? [{ owner_id: 'owner-1' }] : []];
+      }
+      if (/DELETE FROM deck_collections/.test(sql)) return [[{ affectedRows: 1 }]];
+      throw new Error(`unexpected SQL in collection delete test: ${sql.slice(0, 60)}`);
+    }
+  };
+  assert.deepEqual(await deleteCollection(executor, 3, 'owner-1'), { deletedId: 3 });
+  assert.equal(await deleteCollection(executor, 3, 'stranger-9'), null);
+  assert.equal(await deleteCollection(executor, 999, 'owner-1'), null);
 });

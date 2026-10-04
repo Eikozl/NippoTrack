@@ -74,7 +74,8 @@ async function listDecks(req, res) {
       entityType: req.query?.entityType || null,
       limit: req.query?.limit,
       offset: req.query?.offset,
-      ownerId: mine ? req.user.id : null
+      ownerId: mine ? req.user.id : null,
+      viewerId: req.user.id
     });
     return res.json({ items: decks });
   } catch (error) {
