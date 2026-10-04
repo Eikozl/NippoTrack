@@ -26,6 +26,32 @@ async function main() {
     await client.query(`GRANT CONNECT ON DATABASE ${quoteIdentifier(database)} TO ${quoteIdentifier(role)}`);
     await client.query(`GRANT USAGE ON SCHEMA public TO ${quoteIdentifier(role)}`);
     await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${quoteIdentifier(role)}`);
+    // Narrow back to the verifier's least-privilege map (mirrors
+    // readOnlyRuntimeTables / appendOnlyRuntimeTables in
+    // verify-postgres-runtime-security.js): reference snapshots stay
+    // SELECT-only, encounters stay append-only. Conditional on existence:
+    // provision may run before migrations create these tables, and a
+    // REVOKE on a missing table would roll back the whole transaction.
+    const narrowTargets = [
+      { table: 'grammar_reference', revoke: 'INSERT, UPDATE, DELETE' },
+      { table: 'kanji_reference', revoke: 'INSERT, UPDATE, DELETE' },
+      { table: 'jmdict_sources', revoke: 'INSERT, UPDATE, DELETE' },
+      { table: 'jmdict_active_snapshot', revoke: 'INSERT, UPDATE, DELETE' },
+      { table: 'jmdict_entries', revoke: 'INSERT, UPDATE, DELETE' },
+      { table: 'jmdict_forms', revoke: 'INSERT, UPDATE, DELETE' },
+      { table: 'jmdict_senses', revoke: 'INSERT, UPDATE, DELETE' },
+      { table: 'kanji_encounters', revoke: 'UPDATE, DELETE' }
+    ];
+    const existing = await client.query(
+      `SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname = ANY ($1)`,
+      [narrowTargets.map((entry) => entry.table)]
+    );
+    const present = new Set(existing.rows.map((row) => row.relname));
+    for (const { table, revoke } of narrowTargets) {
+      if (!present.has(table)) continue;
+      await client.query(`REVOKE ${revoke} ON TABLE public.${quoteIdentifier(table)} FROM ${quoteIdentifier(role)}`);
+    }
     await client.query(`REVOKE ALL PRIVILEGES ON TABLE public.schema_migrations FROM ${quoteIdentifier(role)}`);
     await client.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${quoteIdentifier(role)}`);
     await client.query(`ALTER ROLE ${quoteIdentifier(role)} SET TimeZone TO 'America/Santo_Domingo'`);
