@@ -138,14 +138,27 @@ export function mountKanjiWriting(container, { character = '', onDone = null } =
 
     // Ringotan-style replay: dim the model, then draw each stroke in order.
     // Reduced motion shows the final state instantly (the static overlay).
-    const watch = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-sm', text: 'Watch order', attrs: { type: 'button' } });
+    const buttonClass = 'button-secondary min-h-8 px-2.5 py-1 text-xs';
+    const watch = element('button', { className: buttonClass, text: 'Watch order', attrs: { type: 'button' } });
     watch.addEventListener('click', () => {
       let reduceMotion = false;
       try {
         reduceMotion = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
       } catch { /* motion query is best-effort */ }
       const modelPaths = [...svg.querySelectorAll('path')];
-      modelPaths.forEach((modelPath) => { modelPath.style.opacity = reduceMotion ? '' : '0.12'; });
+      // Flush per replay: cancel settled fill-forwards animations first —
+      // they outrank inline styles, so without this every replay draws on
+      // top of the previous one.
+      modelPaths.forEach((modelPath) => {
+        try {
+          (modelPath.getAnimations?.() || []).forEach((animation) => {
+            try { animation.cancel(); } catch { /* cancel is best-effort */ }
+          });
+        } catch { /* WAAPI lookup is best-effort */ }
+        modelPath.style.strokeDasharray = '';
+        modelPath.style.strokeDashoffset = '';
+        modelPath.style.opacity = reduceMotion ? '' : '0.12';
+      });
       if (reduceMotion) return;
       modelPaths.forEach((modelPath, modelIndex) => {
         let length = 300;
@@ -163,7 +176,7 @@ export function mountKanjiWriting(container, { character = '', onDone = null } =
         }
       });
     });
-    const clear = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-sm', text: 'Clear', attrs: { type: 'button' } });
+    const clear = element('button', { className: buttonClass, text: 'Clear', attrs: { type: 'button' } });
     clear.addEventListener('click', () => {
       drawnStrokes.length = 0;
       current = null;
@@ -172,7 +185,7 @@ export function mountKanjiWriting(container, { character = '', onDone = null } =
       verdict.textContent = 'Canvas cleared.';
       canvas.focus?.();
     });
-    const retry = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-sm', text: 'Retry', attrs: { type: 'button' } });
+    const retry = element('button', { className: buttonClass, text: 'Retry', attrs: { type: 'button' } });
     retry.addEventListener('click', () => {
       drawnStrokes.length = 0;
       current = null;
@@ -181,13 +194,13 @@ export function mountKanjiWriting(container, { character = '', onDone = null } =
       verdict.textContent = '';
       canvas.focus?.();
     });
-    const next = element('button', { className: 'button-primary min-h-9 px-3 py-1.5 text-sm', text: 'Done', attrs: { type: 'button' } });
+    const next = element('button', { className: 'button-primary min-h-8 px-2.5 py-1 text-xs', text: 'Done', attrs: { type: 'button' } });
     next.addEventListener('click', () => { if (typeof onDone === 'function') onDone(); });
     wrap.append(
       element('p', { className: 'text-sm leading-6 text-muted', text: `Watch the order first, then trace ${character} (${paths.length} strokes). Only the order is checked — shape is yours.` }),
       stage,
       verdict,
-      element('div', { className: 'flex flex-col gap-2 sm:flex-row' }, [watch, clear, retry, next])
+      element('div', { className: 'grid grid-cols-2 gap-2', attrs: { role: 'group', 'aria-label': 'Writing actions' } }, [watch, clear, retry, next])
     );
     container.appendChild(wrap);
   }).catch((error) => {

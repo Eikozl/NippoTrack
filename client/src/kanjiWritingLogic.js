@@ -1,7 +1,7 @@
 // Kanji writing MVP, pure logic: stroke-start parsing, model-space scaling
 // and stroke-ORDER assignment. Zero imports so Node tests stay dependency
 // free; the DOM mount lives in kanjiWriting.js.
-export const WRITING_CANVAS_SIZE = 200;
+export const WRITING_CANVAS_SIZE = 260;
 export const MODEL_SPACE = 109;
 export const START_TOLERANCE = 25;
 
