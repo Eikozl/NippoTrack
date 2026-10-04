@@ -632,6 +632,7 @@ export function renderEntityPage(container, config) {
   const pageSize = 30;
   let currentPage = 1;
   let loadSequence = 0;
+  let lastItems = [];
   const addButton = element('button', { className: 'button-primary', text: `Add ${config.singular}`, attrs: { type: 'button' } });
   const search = element('input', { className: 'field-control', attrs: { type: 'search', placeholder: config.searchPlaceholder, 'aria-label': `Search ${config.title}` } });
   const jlpt = element('select', { className: 'field-control', attrs: { 'aria-label': 'Filter by JLPT tag' } }, JLPT_OPTIONS.map((option) => element('option', { text: option.label, attrs: { value: option.value } })));
@@ -641,9 +642,15 @@ export function renderEntityPage(container, config) {
   ]);
   const results = element('div');
   const filterBar = element('div', { className: 'surface mb-5 grid gap-3 p-4 md:grid-cols-[minmax(14rem,1fr)_10rem_11rem]' }, [search, jlpt, status]);
+  const shareableType = { '/api/vocabulary': 'vocabulary', '/api/kanji': 'kanji', '/api/grammar': 'grammar' }[config.endpoint] || null;
+  const deckBar = shareableType ? element('div', { className: 'mb-5 flex flex-col gap-2 sm:flex-row' }, [
+    element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-sm', text: 'Share deck', attrs: { type: 'button', 'data-deck-action': 'share' } }),
+    element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-sm', text: 'Import deck', attrs: { type: 'button', 'data-deck-action': 'import' } })
+  ]) : null;
   const page = element('section', {}, [
     pageHeader({ eyebrow: config.eyebrow, title: config.title, description: config.description, action: addButton }),
     filterBar,
+    ...(deckBar ? [deckBar] : []),
     results
   ]);
 
@@ -662,6 +669,7 @@ export function renderEntityPage(container, config) {
       })}`);
       if (sequence !== loadSequence) return;
       const { items, pagination } = data;
+      lastItems = Array.isArray(items) ? items : [];
       if (!items.length && currentPage > 1 && pagination.totalPages > 0) {
         currentPage = pagination.totalPages;
         await load();
@@ -684,6 +692,111 @@ export function renderEntityPage(container, config) {
       results.replaceChildren(errorState(error, load));
     }
   }
+
+  // Shared decks (social): export the current page as a signed code, or
+  // import a pasted code as new rows. Fail-open with toasts; the list
+  // refreshes after an import.
+  const copyDeckCode = async (text) => {
+    try {
+      if (typeof navigator !== 'undefined' && navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch { /* fall through to the manual fallback */ }
+    try {
+      const area = element('textarea', { attrs: { readonly: '' } });
+      area.value = text;
+      document.body.appendChild(area);
+      area.select();
+      const copied = document.execCommand('copy');
+      area.remove();
+      return copied === true;
+    } catch {
+      return false;
+    }
+  };
+  const openShareDeck = () => {
+    if (!lastItems.length) { showToast('Nothing to share on this page.', 'error'); return; }
+    const boxes = lastItems.map((item) => {
+      const box = element('input', { attrs: { type: 'checkbox', 'aria-label': `Include ${config.primary(item)}` } });
+      box.checked = true;
+      return { id: item[config.idKey], label: config.primary(item), box };
+    });
+    const titleInput = element('input', { className: 'field-control', attrs: { type: 'text', 'aria-label': 'Deck title', placeholder: 'Deck title (optional)', maxLength: '120' } });
+    const descriptionInput = element('textarea', { className: 'field-control', attrs: { 'aria-label': 'Deck description', placeholder: 'Description (optional)', maxLength: '500' } });
+    const output = element('textarea', { className: 'field-control font-mono text-xs', attrs: { readonly: '', rows: '4', 'aria-label': 'Share code' } });
+    output.hidden = true;
+    const generate = element('button', { className: 'button-primary min-h-9 px-3 py-1.5 text-sm', text: 'Generate code', attrs: { type: 'button' } });
+    generate.addEventListener('click', () => {
+      const ids = boxes.filter(({ box }) => box.checked).map(({ id }) => id);
+      if (!ids.length) { showToast('Select at least one item.', 'error'); return; }
+      withPendingAction(generate, async () => {
+        const deck = await apiRequest('/api/share/deck', { method: 'POST', body: { entityType: shareableType, ids, title: titleInput.value, description: descriptionInput.value } });
+        output.value = deck.shareCode;
+        output.hidden = false;
+        showToast(`Share code ready (${deck.itemCount} items).`);
+      }).catch((error) => showToast(error?.message || 'Unable to create the share deck.', 'error'));
+    });
+    const copy = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-sm', text: 'Copy code', attrs: { type: 'button' } });
+    copy.addEventListener('click', async () => {
+      if (!output.value) { showToast('Generate a code first.', 'error'); return; }
+      const copied = await copyDeckCode(output.value);
+      showToast(copied ? 'Share code copied.' : 'Copy failed — select the code manually.', copied ? 'success' : 'error');
+    });
+    openDialog({
+      title: `Share ${config.title} deck`,
+      description: 'Selected items become a signed code. Importing creates new rows — nothing is overwritten.',
+      content: [
+        element('div', { className: 'grid gap-1.5' }, boxes.map(({ label, box }) => element('label', { className: 'flex items-center gap-2 text-sm text-ink' }, [box, element('span', { text: label })]))),
+        titleInput,
+        descriptionInput,
+        element('div', { className: 'flex flex-col gap-2 sm:flex-row' }, [generate, copy]),
+        output
+      ],
+      submitLabel: 'Close',
+      onSubmit: async (form, close) => { close(); }
+    });
+  };
+  const openImportDeck = () => {
+    const paste = element('textarea', { className: 'field-control font-mono text-xs', attrs: { rows: '4', 'aria-label': 'Paste share code', placeholder: 'Paste a share code…' } });
+    const preview = element('div', { className: 'grid gap-2' });
+    let pendingCode = '';
+    const previewButton = element('button', { className: 'button-primary min-h-9 px-3 py-1.5 text-sm', text: 'Preview', attrs: { type: 'button' } });
+    previewButton.addEventListener('click', () => {
+      const code = String(paste.value || '').trim();
+      if (!code) { showToast('Paste a share code first.', 'error'); return; }
+      withPendingAction(previewButton, async () => {
+        const deck = await apiRequest(`/api/share/deck/${encodeURIComponent(code)}`);
+        pendingCode = code;
+        const items = Array.isArray(deck.items) ? deck.items : [];
+        const labelOf = (entry) => entry.word || entry.character_kanji || entry.grammar_point || 'item';
+        preview.replaceChildren(
+          element('p', { className: 'text-sm font-semibold text-ink', text: `${deck.title || 'Shared deck'} · ${deck.entityType} · ${items.length} items` }),
+          ...(deck.description ? [element('p', { className: 'text-sm text-muted', text: deck.description })] : []),
+          element('ul', { className: 'grid gap-1 text-sm text-ink', attrs: { role: 'list' } }, items.slice(0, 10).map((entry) => element('li', { text: labelOf(entry) }))),
+          ...(items.length > 10 ? [element('p', { className: 'text-xs text-muted', text: `…and ${items.length - 10} more` })] : []),
+          element('button', { className: 'button-primary min-h-9 px-3 py-1.5 text-sm', text: 'Import as new rows', attrs: { type: 'button', 'data-deck-action': 'confirm-import' } })
+        );
+        preview.querySelector('[data-deck-action="confirm-import"]')?.addEventListener('click', () => {
+          apiRequest(`/api/share/deck/${encodeURIComponent(pendingCode)}/import`, { method: 'POST' })
+            .then((result) => {
+              showToast(`Imported ${result.imported}, skipped ${result.skipped}.`);
+              load();
+            })
+            .catch((error) => showToast(error?.message || 'Unable to import the deck.', 'error'));
+        });
+      }).catch((error) => showToast(error?.message || 'Share code is invalid or expired.', 'error'));
+    });
+    openDialog({
+      title: `Import ${config.title} deck`,
+      description: 'Paste a share code to preview it, then import its items as new rows.',
+      content: [paste, previewButton, preview],
+      submitLabel: 'Close',
+      onSubmit: async (form, close) => { close(); }
+    });
+  };
+  deckBar?.querySelector('[data-deck-action="share"]')?.addEventListener('click', openShareDeck);
+  deckBar?.querySelector('[data-deck-action="import"]')?.addEventListener('click', openImportDeck);
 
   async function saveRecord(record, form, close, { onDuplicateKanji } = {}) {
     const id = record?.[config.idKey];
