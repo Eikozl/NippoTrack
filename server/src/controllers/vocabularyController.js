@@ -359,9 +359,9 @@ async function deleteVocabularyExample(req, res) {
 async function getVocabularyCloze(req, res) {
   try {
     const id = parseIdParam(req, 'vocabulary entry');
-    const result = await getClozeSentences(pool, id, req.user.id);
-    if (!result) return res.status(404).json({ error: 'vocabulary entry not found' });
-    return res.json(result);
+    const sentences = await getClozeSentences(pool, id, req.user.id);
+    if (!sentences) return res.status(404).json({ error: 'vocabulary entry not found' });
+    return res.json(sentences);
   } catch (error) { return sendRouteError(res, error, { defaultMessage: 'Unable to load cloze sentences.' }); }
 }
 
@@ -377,12 +377,9 @@ async function getVocabularyTags(req, res) {
 async function putVocabularyTags(req, res) {
   try {
     const id = parseIdParam(req, 'vocabulary entry');
-    const tags = req.body?.tags;
-    if (tags !== undefined && !Array.isArray(tags)) throw new ValidationError('tags must be an array of names');
-    if (Array.isArray(tags) && tags.some((tag) => typeof tag !== 'string')) throw new ValidationError('tags must be an array of names');
-    const assigned = await replaceVocabTags(pool, id, req.user.id, tags || []);
-    if (!assigned) return res.status(404).json({ error: 'vocabulary entry not found' });
-    return res.json({ assigned });
+    const tags = await replaceVocabTags(pool, id, req.user.id, req.body?.tags);
+    if (!tags) return res.status(404).json({ error: 'vocabulary entry not found' });
+    return res.json({ tags });
   } catch (error) { return sendRouteError(res, error, { defaultMessage: 'Unable to save vocabulary tags.' }); }
 }
 

@@ -766,25 +766,62 @@ export function renderEntityPage(container, config) {
       const code = String(paste.value || '').trim();
       if (!code) { showToast('Paste a share code first.', 'error'); return; }
       withPendingAction(previewButton, async () => {
-        const deck = await apiRequest(`/api/share/deck/${encodeURIComponent(code)}`);
+        const deck = await apiRequest('/api/share/deck/preview', { method: 'POST', body: { shareCode: code } });
         pendingCode = code;
         const items = Array.isArray(deck.items) ? deck.items : [];
-        const labelOf = (entry) => entry.word || entry.character_kanji || entry.grammar_point || 'item';
-        preview.replaceChildren(
-          element('p', { className: 'text-sm font-semibold text-ink', text: `${deck.title || 'Shared deck'} · ${deck.entityType} · ${items.length} items` }),
-          ...(deck.description ? [element('p', { className: 'text-sm text-muted', text: deck.description })] : []),
-          element('ul', { className: 'grid gap-1 text-sm text-ink', attrs: { role: 'list' } }, items.slice(0, 10).map((entry) => element('li', { text: labelOf(entry) }))),
-          ...(items.length > 10 ? [element('p', { className: 'text-xs text-muted', text: `…and ${items.length - 10} more` })] : []),
-          element('button', { className: 'button-primary min-h-9 px-3 py-1.5 text-sm', text: 'Import as new rows', attrs: { type: 'button', 'data-deck-action': 'confirm-import' } })
-        );
-        preview.querySelector('[data-deck-action="confirm-import"]')?.addEventListener('click', () => {
-          apiRequest(`/api/share/deck/${encodeURIComponent(pendingCode)}/import`, { method: 'POST' })
-            .then((result) => {
-              showToast(`Imported ${result.imported}, skipped ${result.skipped}.`);
-              load();
-            })
-            .catch((error) => showToast(error?.message || 'Unable to import the deck.', 'error'));
+        const labelOf = (entry) => entry.display || 'item';
+        const subOf = (entry) => [entry.entityType, entry.reading, entry.meaning].filter(Boolean).join(' · ');
+        const boxes = items.map((entry, index) => {
+          const box = element('input', { attrs: { type: 'checkbox', 'aria-label': `Import ${labelOf(entry)}` } });
+          box.checked = true;
+          return { index, box };
         });
+        const count = element('p', { className: 'text-sm font-semibold text-ink', attrs: { 'aria-live': 'polite' } });
+        const syncCount = () => {
+          const selected = boxes.filter(({ box }) => box.checked).length;
+          count.textContent = `${selected} of ${items.length} items selected`;
+        };
+        const toggleAll = (checked) => {
+          boxes.forEach(({ box }) => { box.checked = checked; });
+          syncCount();
+        };
+        const selectAll = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Select all', attrs: { type: 'button' } });
+        const clearSelection = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Clear selection', attrs: { type: 'button' } });
+        selectAll.addEventListener('click', () => toggleAll(true));
+        clearSelection.addEventListener('click', () => toggleAll(false));
+        const list = element('div', { className: 'grid max-h-56 gap-1.5 overflow-y-auto' }, boxes.map(({ box }, position) => {
+          box.addEventListener('change', syncCount);
+          const entry = items[position];
+          return element('label', { className: 'flex items-center gap-2 text-sm text-ink' }, [
+            box,
+            element('span', {}, [
+              element('span', { className: 'font-medium', text: labelOf(entry) }),
+              ...(subOf(entry) ? [element('span', { className: 'text-muted', text: ` — ${subOf(entry)}` })] : [])
+            ])
+          ]);
+        }));
+        const importButton = element('button', { className: 'button-primary min-h-9 px-3 py-1.5 text-sm', text: 'Import selected', attrs: { type: 'button' } });
+        importButton.addEventListener('click', () => {
+          const selectedItems = boxes.filter(({ box }) => box.checked).map(({ index }) => index);
+          if (!selectedItems.length) { showToast('Select at least one item.', 'error'); return; }
+          withPendingAction(importButton, async () => {
+            const result = await apiRequest('/api/share/deck/import', { method: 'POST', body: { shareCode: pendingCode, selectedItems } });
+            const imported = typeof result.imported === 'object'
+              ? Object.values(result.imported).reduce((sum, count) => sum + Number(count || 0), 0)
+              : Number(result.imported || 0);
+            showToast(`Imported ${imported}, skipped ${Number(result.skipped || 0)}.`);
+            load();
+          }).catch((error) => showToast(error?.message || 'Unable to import the deck.', 'error'));
+        });
+        preview.replaceChildren(
+          element('p', { className: 'text-sm font-semibold text-ink', text: `${deck.title || 'Shared deck'} · ${items.length} items` }),
+          ...(deck.description ? [element('p', { className: 'text-sm text-muted', text: deck.description })] : []),
+          element('div', { className: 'flex flex-col gap-2 sm:flex-row' }, [selectAll, clearSelection]),
+          count,
+          list,
+          importButton
+        );
+        syncCount();
       }).catch((error) => showToast(error?.message || 'Share code is invalid or expired.', 'error'));
     });
     openDialog({
@@ -1029,8 +1066,8 @@ export function renderEntityPage(container, config) {
           });
           if (!verdict.ok) showToast(verdict.message || 'Audio playback is unavailable.', 'error');
         };
-        apiRequest(`/api/vocabulary/${vocabId}/cloze`).then((data) => {
-          const sentences = Array.isArray(data?.sentences) ? data.sentences : [];
+        apiRequest(`/api/vocabulary/${vocabId}/cloze-sentences`).then((data) => {
+          const sentences = Array.isArray(data) ? data : [];
           clozeSlot.replaceChildren(element('h3', { className: 'font-semibold text-ink', text: 'Cloze Practice' }));
           if (!sentences.length) {
             clozeSlot.append(element('p', { className: 'mt-2 text-sm text-muted', text: 'No cloze sentences yet — add a usage example containing this word.' }));
@@ -1038,8 +1075,8 @@ export function renderEntityPage(container, config) {
           }
           clozeSlot.append(element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: 'Fill the blank from memory. Practice only — nothing is graded.' }));
           clozeSlot.append(element('div', { className: 'mt-3 grid gap-3' }, sentences.map((entry) => {
-            const answer = String(data?.item?.word || '');
-            const reading = String(data?.item?.reading || '');
+            const answer = String(record.word || '');
+            const reading = String(record.reading || '');
             const input = element('input', { className: 'field-control', attrs: { type: 'text', 'aria-label': 'Type the missing word', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' } });
             const verdict = element('p', { className: 'text-sm leading-6 text-ink', attrs: { 'aria-live': 'polite' } });
             verdict.hidden = true;
@@ -1058,7 +1095,7 @@ export function renderEntityPage(container, config) {
                 verdict.hidden = false;
                 verdict.textContent = 'That matches! The full sentence is below.';
                 reveal.hidden = false;
-                reveal.textContent = entry.sentence;
+                reveal.textContent = entry.original;
               } else {
                 verdict.hidden = false;
                 verdict.textContent = 'Not quite — try again.';
@@ -1070,7 +1107,7 @@ export function renderEntityPage(container, config) {
               if (event.key === 'Enter') { event.preventDefault(); check.click(); }
             });
             const play = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-sm', text: 'Play', attrs: { type: 'button', 'aria-label': `Play cloze sentence aloud` } });
-            play.addEventListener('click', () => playCloze(entry.sentence));
+            play.addEventListener('click', () => playCloze(entry.original));
             return element('article', { className: 'rounded-md bg-paper p-3' }, [
               element('p', { className: 'break-words font-jp text-base leading-8 text-ink', text: entry.cloze, attrs: { lang: 'ja' } }),
               ...(entry.translation ? [element('p', { className: 'mt-1 text-sm text-muted', text: entry.translation })] : []),
@@ -1088,12 +1125,12 @@ export function renderEntityPage(container, config) {
       if (tagsSlot && config === ENTITY_CONFIGS.vocabulary) {
         const vocabId = record.id_vocabulary;
         const renderTags = (tags) => {
-          const assigned = Array.isArray(tags?.assigned) ? tags.assigned : [];
-          const suggested = Array.isArray(tags?.suggested) ? tags.suggested : [];
+          const assigned = Array.isArray(tags?.tags) ? tags.tags : [];
+          const suggested = Array.isArray(tags?.suggestedTags) ? tags.suggestedTags : [];
           tagsSlot.replaceChildren(
             element('h3', { className: 'font-semibold text-ink', text: 'Tags' }),
             element('div', { className: 'mt-2 flex flex-wrap gap-2' }, assigned.length
-              ? assigned.map((tag) => element('span', { className: 'status-pill text-xs', text: tag.name }))
+              ? assigned.map((name) => element('span', { className: 'status-pill text-xs', text: name }))
               : [element('p', { className: 'text-sm text-muted', text: 'No tags yet.' })])
           );
           if (suggested.length) {
@@ -1102,23 +1139,23 @@ export function renderEntityPage(container, config) {
             for (const name of suggested) {
               const add = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: `Add ${name}`, attrs: { type: 'button' } });
               add.addEventListener('click', () => {
-                const current = assigned.map((tag) => tag.name).concat([name]);
+                const current = assigned.concat([name]);
                 apiRequest(`/api/vocabulary/${vocabId}/tags`, { method: 'PUT', body: { tags: current } })
-                  .then((saved) => renderTags({ assigned: saved.assigned, suggested: suggested.filter((entry) => entry !== name) }))
+                  .then((saved) => renderTags({ tags: saved.tags, suggestedTags: suggested.filter((entry) => entry !== name) }))
                   .catch((error) => showToast(error?.message || 'Unable to add tag.', 'error'));
               });
               row.appendChild(add);
             }
             tagsSlot.appendChild(row);
           }
-          const custom = element('input', { className: 'field-control mt-3', attrs: { type: 'text', 'aria-label': 'Add a custom tag', placeholder: 'Custom tag…', maxLength: '60' } });
+          const custom = element('input', { className: 'field-control mt-3', attrs: { type: 'text', 'aria-label': 'Add a custom tag', placeholder: 'Custom tag… (letters, numbers, hyphens)', maxLength: '20' } });
           const addCustom = element('button', { className: 'button-secondary mt-2 min-h-9 px-3 py-1.5 text-sm', text: 'Add tag', attrs: { type: 'button' } });
           addCustom.addEventListener('click', () => {
             const name = String(custom.value || '').trim();
             if (!name) return;
-            const current = assigned.map((tag) => tag.name).concat([name]);
+            const current = assigned.concat([name]);
             apiRequest(`/api/vocabulary/${vocabId}/tags`, { method: 'PUT', body: { tags: current } })
-              .then((saved) => renderTags({ assigned: saved.assigned, suggested }))
+              .then((saved) => renderTags({ tags: saved.tags, suggestedTags }))
               .catch((error) => showToast(error?.message || 'Unable to add tag.', 'error'));
           });
           tagsSlot.append(custom, addCustom);

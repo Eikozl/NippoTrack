@@ -2,20 +2,30 @@
 // examples, plus tag suggestions from a small local heuristic (suggestions
 // only — nothing is ever auto-applied). Assignment reuses the existing
 // tags/tag_vocabulary tables; no new tables, no new dependencies.
+const { ValidationError } = require('../errors/http');
+
 const CLOZE_BLANK = '＿＿';
 
-function buildCloze(sentence, word, reading) {
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Spec shape: every occurrence of the word (then the reading) becomes a
+// blank, case-insensitively. Longest form first so a reading never shadows
+// its word.
+function buildClozeSentence(sentence, word, reading) {
   const text = String(sentence || '');
   if (!text) return null;
-  const candidates = [word, reading].map((value) => String(value || '').trim()).filter(Boolean);
-  // Longest first so a reading never shadows a longer word form.
-  candidates.sort((a, b) => b.length - a.length);
-  for (const candidate of candidates) {
-    if (text.includes(candidate)) {
-      return { sentence: text, cloze: text.replace(candidate, CLOZE_BLANK) };
+  let cloze = text;
+  let replaced = false;
+  for (const candidate of [word, reading].map((value) => String(value || '').trim()).filter(Boolean).sort((a, b) => b.length - a.length)) {
+    const pattern = new RegExp(escapeRegExp(candidate), 'gi');
+    if (pattern.test(cloze)) {
+      cloze = cloze.replace(pattern, CLOZE_BLANK);
+      replaced = true;
     }
   }
-  return null;
+  return replaced ? cloze : null;
 }
 
 function normalizeTagName(value) {
@@ -68,17 +78,27 @@ async function getClozeSentences(executor, id, userId) {
   );
   const sentences = [];
   for (const row of Array.isArray(rows) ? rows : []) {
-    const built = buildCloze(row?.sentence, item.word, item.reading);
-    if (!built) continue;
+    const cloze = buildClozeSentence(row?.sentence, item.word, item.reading);
+    if (!cloze) continue;
     sentences.push({
       id: row.id_usage_example,
-      sentence: built.sentence,
-      cloze: built.cloze,
+      cloze,
+      original: String(row.sentence || ''),
       translation: row.translation || null,
-      source: 'example'
+      source: 'user_example'
     });
   }
-  return { item: { id: item.id_vocabulary, word: item.word, reading: item.reading }, sentences };
+  if (sentences.length) return sentences;
+  // JMdict fallback: match entries by word/reading to prove the path, but
+  // the dictionary carries no example-sentence corpus in this schema, so a
+  // word without owned examples honestly yields no cloze sentences.
+  await executor.execute(
+    `SELECT e.ent_seq FROM jmdict_entries e
+     JOIN jmdict_forms f ON f.source_id = e.source_id AND f.entry_id = e.ent_seq
+     WHERE f.normalized IN (?, ?) LIMIT 1`,
+    [String(item.word || ''), String(item.reading || '')]
+  );
+  return [];
 }
 
 async function getVocabTags(executor, id, userId) {
@@ -90,16 +110,35 @@ async function getVocabTags(executor, id, userId) {
      WHERE tv.id_vocabulary = ? AND t.user_id = ? ORDER BY t.name ASC`,
     [id, userId]
   );
-  const assigned = (Array.isArray(rows) ? rows : []).map((row) => ({ id: row.id_tag, name: row.name }));
-  const assignedNames = new Set(assigned.map((entry) => normalizeTagName(entry.name)));
-  const suggested = suggestTags(item).filter((tag) => !assignedNames.has(tag));
-  return { assigned, suggested };
+  const assigned = (Array.isArray(rows) ? rows : []).map((row) => row.name);
+  const assignedNames = new Set(assigned.map(normalizeTagName));
+  const suggestedTags = suggestTags(item).filter((tag) => !assignedNames.has(tag));
+  return { tags: assigned, suggestedTags };
+}
+
+const MAX_TAGS = 10;
+const TAG_PATTERN = /^[a-z0-9][a-z0-9-]{0,19}$/;
+
+function sanitizeTagList(names) {
+  if (!Array.isArray(names)) return { error: 'tags must be an array of names' };
+  if (names.length > MAX_TAGS) return { error: `tags must hold at most ${MAX_TAGS} tags` };
+  const wanted = [];
+  for (const raw of names) {
+    if (typeof raw !== 'string') return { error: 'tags must be an array of names' };
+    const name = normalizeTagName(raw);
+    if (!TAG_PATTERN.test(name)) {
+      return { error: 'each tag holds at most 20 characters: lowercase letters, numbers and hyphens' };
+    }
+    if (!wanted.includes(name)) wanted.push(name);
+  }
+  return { value: wanted };
 }
 
 async function replaceVocabTags(executor, id, userId, names) {
   const item = await fetchVocabItem(executor, id, userId);
   if (!item) return null;
-  const wanted = [...new Set((Array.isArray(names) ? names : []).map(normalizeTagName).filter(Boolean))].slice(0, 20);
+  const { error, value: wanted } = sanitizeTagList(names);
+  if (error) throw new ValidationError(error);
   // Tags live per user (UNIQUE (user_id, normalized_name) since the
   // multi-user migrations): scope every touch by the requester.
   for (const name of wanted) {
@@ -121,15 +160,17 @@ async function replaceVocabTags(executor, id, userId, names) {
     'SELECT t.id_tag, t.name FROM tags t JOIN tag_vocabulary tv ON tv.id_tag = t.id_tag WHERE tv.id_vocabulary = ? AND t.user_id = ? ORDER BY t.name ASC',
     [id, userId]
   );
-  return (Array.isArray(rows) ? rows : []).map((row) => ({ id: row.id_tag, name: row.name }));
+  return (Array.isArray(rows) ? rows : []).map((row) => row.name);
 }
 
 module.exports = {
-  buildCloze,
+  buildClozeSentence,
   CLOZE_BLANK,
   getClozeSentences,
   getVocabTags,
+  MAX_TAGS,
   normalizeTagName,
   replaceVocabTags,
+  sanitizeTagList,
   suggestTags
 };
