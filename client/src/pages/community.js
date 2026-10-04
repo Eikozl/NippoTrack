@@ -191,8 +191,8 @@ function deckCard(deck, actions = [], corner = null) {
     ...(creator ? [creator] : []),
     ...(deck.description ? [element('p', { className: 'mt-1 text-sm leading-6 text-muted', text: deck.description })] : []),
     element('p', { className: 'mt-2 text-xs font-medium text-muted', text: `${deck.itemCount ?? '?'} items` }),
-    ...(actions.length ? [element('div', { className: `mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap${corner ? ' pr-12' : ''}` }, actions)] : []),
-    ...(corner ? [element('div', { className: 'absolute bottom-3 right-3 flex flex-col items-center gap-0.5' }, [corner])] : [])
+    ...(actions.length ? [element('div', { className: `mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap${corner ? ' sm:pr-12' : ''}` }, actions)] : []),
+    ...(corner ? [element('div', { className: 'mt-3 flex flex-row items-center gap-2 sm:absolute sm:bottom-3 sm:right-3 sm:mt-0 sm:flex-col sm:gap-0.5' }, [corner])] : [])
   ]);
 }
 
@@ -262,28 +262,68 @@ export async function renderCommunity(container) {
   const feedList = element('div', { className: 'grid gap-4' });
   feed.body.append(filterRow, feedList);
   let feedDecks = [];
-  const renderFeed = () => {
-    const query = String(textFilter.value || '').trim().toLowerCase();
-    const visible = feedDecks.filter((deck) =>
-      (!typeFilter.value || deck.entityType === typeFilter.value) &&
-      (!query || `${deck.title} ${deck.description || ''}`.toLowerCase().includes(query)));
-    if (!visible.length) {
-      feedList.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'No decks match. Publish the first one below.' }));
-      return;
-    }
-    feedList.replaceChildren(element('div', { className: 'grid gap-4 md:grid-cols-2' }, visible.map((deck) => {
-      const view = smallButton('Open deck', `Open ${deck.title}`);
-      view.addEventListener('click', () => itemsDialog(deck.id, deck.title, deck.entityType));
+  const FEED_VISIBLE = 3;
+  const filterFeedDecks = (type, query) => feedDecks.filter((deck) =>
+    (!type || deck.entityType === type) &&
+    (!query || `${deck.title} ${deck.description || ''}`.toLowerCase().includes(query)));
+  const buildFeedCard = (deck, withPreview) => {
+    const view = smallButton('Open deck', `Open ${deck.title}`);
+    view.addEventListener('click', () => itemsDialog(deck.id, deck.title, deck.entityType));
+    const card = deckCard(deck, [view], starWidget(deck));
+    if (withPreview) {
       const previewItems = (deck.previewItems || []).slice(0, 3);
-      const card = deckCard(deck, [view], starWidget(deck));
       if (previewItems.length) {
         card.append(element('ul', { className: 'mt-2 flex flex-wrap gap-1.5', attrs: { role: 'list' } }, [
           ...previewItems.map((text) => element('li', { className: 'status-pill text-xs', text })),
           ...((deck.itemCount || 0) > previewItems.length ? [element('li', { className: 'text-xs text-muted', text: `+${deck.itemCount - previewItems.length} more` })] : [])
         ]));
       }
-      return card;
-    })));
+    }
+    return card;
+  };
+  const renderFeed = () => {
+    const query = String(textFilter.value || '').trim().toLowerCase();
+    const visible = filterFeedDecks(typeFilter.value, query);
+    if (!visible.length) {
+      feedList.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'No decks match. Publish the first one below.' }));
+      return;
+    }
+    const shown = visible.slice(0, FEED_VISIBLE);
+    feedList.replaceChildren(element('div', { className: 'grid gap-4 md:grid-cols-2' }, shown.map((deck) => buildFeedCard(deck, true))));
+    if (visible.length > FEED_VISIBLE) {
+      const more = smallButton(`Ver más (${visible.length - FEED_VISIBLE} more)`, 'View all matching decks');
+      more.addEventListener('click', () => openAllDecksDialog(typeFilter.value, query));
+      feedList.append(element('div', { className: 'mt-1 flex justify-center' }, [more]));
+    }
+  };
+  const openAllDecksDialog = (initialType, initialQuery) => {
+    const dialogType = element('select', { className: 'field-control sm:max-w-44', attrs: { 'aria-label': 'Filter by type' } }, [
+      element('option', { text: 'All types', attrs: { value: '' } }),
+      ...PICKER_TYPES.map((type) => element('option', { text: type.label, attrs: { value: type.key } }))
+    ]);
+    dialogType.value = initialType || '';
+    const dialogSearch = element('input', { className: 'field-control', attrs: { type: 'search', 'aria-label': 'Filter decks by text', placeholder: 'Filter by title…', value: initialQuery || '' } });
+    const dialogList = element('div', { className: 'grid max-h-[50vh] gap-4 overflow-y-auto md:grid-cols-2' });
+    const renderDialogList = () => {
+      const query = String(dialogSearch.value || '').trim().toLowerCase();
+      const visible = filterFeedDecks(dialogType.value, query);
+      dialogList.replaceChildren(...(visible.length
+        ? visible.map((deck) => buildFeedCard(deck, false))
+        : [element('p', { className: 'text-sm text-muted', text: 'No decks match.' })]));
+    };
+    dialogType.addEventListener('change', renderDialogList);
+    dialogSearch.addEventListener('input', renderDialogList);
+    renderDialogList();
+    openDialog({
+      title: 'All public decks',
+      description: 'Filter by title and type, same as the feed.',
+      content: [
+        element('div', { className: 'flex flex-col gap-2 sm:flex-row' }, [dialogType, dialogSearch]),
+        dialogList
+      ],
+      submitLabel: 'Close',
+      onSubmit: async (form, close) => { close(); }
+    });
   };
   typeFilter.addEventListener('change', renderFeed);
   textFilter.addEventListener('input', renderFeed);
