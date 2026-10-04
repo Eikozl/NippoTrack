@@ -1,7 +1,7 @@
 import { apiRequest, queryString } from '../api';
 import { kanjiReferenceRoute } from '../kanjiReference';
 import { icon } from '../icons';
-import { element, emptyState, errorState, loadingState, openDetailModal, openDialog, pageHeader, setActionPending, showToast, withPendingAction } from '../ui';
+import { element, emptyState, errorState, loadingState, openDetailModal, openDialog, confirmDialog, pageHeader, setActionPending, showToast, withPendingAction } from '../ui';
 import { mountKanjiWriting } from '../kanjiWriting.js';
 
 const TYPE_ORDER = ['kanji', 'vocabulary', 'grammar'];
@@ -592,6 +592,23 @@ export async function renderReview(container) {
   }
 
   let historyHasContent = false;
+  function clearHistoryButton() {
+    const button = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Clear history', attrs: { type: 'button', 'aria-label': 'Clear all review history' } });
+    button.addEventListener('click', () => {
+      confirmDialog({
+        title: 'Clear review history?',
+        description: 'This permanently deletes all your review sessions. This cannot be undone.',
+        confirmLabel: 'Clear all',
+        onConfirm: async () => {
+          await apiRequest('/api/review/sessions', { method: 'DELETE' });
+          sessionModalCache.clear();
+          showToast('Review history cleared.');
+          await loadHistory();
+        }
+      });
+    });
+    return button;
+  }
   async function loadHistory() {
     if (!historyHasContent) {
       historyBlock.replaceChildren(loadingState('Loading…'));
@@ -602,7 +619,10 @@ export async function renderReview(container) {
       const sessions = Array.isArray(data?.items) ? data.items : [];
       const header = element('div', { className: 'flex items-center justify-between gap-3' }, [
         element('h2', { className: 'font-semibold text-ink', text: 'Recent review sessions' }),
-        reloadSectionButton('Reload recent review sessions', loadHistory)
+        element('div', { className: 'flex gap-2' }, [
+          reloadSectionButton('Reload recent review sessions', loadHistory),
+          clearHistoryButton()
+        ])
       ]);
       if (!sessions.length) {
         historyBlock.replaceChildren(
@@ -622,16 +642,36 @@ export async function renderReview(container) {
           const date = session.startedAt ? formattedDate(session.startedAt) : '';
           const summary = `${Number(session.total || 0)} items · ${Number(session.byResult?.Good || 0)} comfortable · ${Number(session.byResult?.Hard || 0)} difficult · ${Number(session.byResult?.Again || 0)} revisit`;
           const scope = `Kanji ${Number(session.byType?.kanji || 0)} · Vocabulary ${Number(session.byType?.vocabulary || 0)} · Grammar ${Number(session.byType?.grammar || 0)}`;
-          const row = element('li', { className: 'cursor-pointer rounded-xl border border-stone bg-paper px-3 py-2.5 text-sm transition hover:border-vermilion', attrs: { role: 'button', tabindex: '0', 'aria-label': `Open details for session ${date || session.id}` } }, [
-            element('p', { className: 'font-semibold text-ink' }, [
-              ...(date ? [element('time', { text: date, attrs: { dateTime: iso } })] : [element('span', { text: 'Session' })]),
-              element('span', { text: session.completedAt ? ' · completed' : ' · in progress' })
+          const deleteButton = element('button', { className: 'icon-button icon-button--danger shrink-0', attrs: { type: 'button', 'aria-label': `Delete session ${date || session.id}` } }, [icon('trash', { size: 18 })]);
+          deleteButton.addEventListener('click', (event) => {
+            if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+            confirmDialog({
+              title: 'Delete this session?',
+              description: `This permanently deletes the session${date ? ` from ${date}` : ''} and its queued items. This cannot be undone.`,
+              onConfirm: async () => {
+                await apiRequest(`/api/review/sessions/${session.id}`, { method: 'DELETE' });
+                sessionModalCache.delete(session.id);
+                showToast('Session deleted.');
+                await loadHistory();
+              }
+            });
+          });
+          const row = element('li', { className: 'flex cursor-pointer items-start gap-2 rounded-xl border border-stone bg-paper px-3 py-2.5 text-sm transition hover:border-vermilion', attrs: { role: 'button', tabindex: '0', 'aria-label': `Open details for session ${date || session.id}` } }, [
+            element('div', { className: 'min-w-0 flex-1' }, [
+              element('p', { className: 'font-semibold text-ink' }, [
+                ...(date ? [element('time', { text: date, attrs: { dateTime: iso } })] : [element('span', { text: 'Session' })]),
+                element('span', { text: session.completedAt ? ' · completed' : ' · in progress' })
+              ]),
+              element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: summary }),
+              element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: scope })
             ]),
-            element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: summary }),
-            element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: scope })
+            deleteButton
           ]);
           row.addEventListener('click', () => { openSessionModal(session); });
           row.addEventListener('keydown', (event) => {
+            try {
+              if (event.target && event.target !== row && typeof event.target.closest === 'function' && event.target.closest('button')) return;
+            } catch { /* target guard is best-effort */ }
             if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openSessionModal(session); }
           });
           return row;

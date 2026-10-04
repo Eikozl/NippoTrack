@@ -130,3 +130,4 @@ DB viva (no contra el baseline). LecciÃ³n: smokes live antes de asumir DDL.
 - Git: dev limpio salvo .opencode/ + pnpm-lock.yaml (untracked
   permitidos); master 3c7a422 intacto; sin merges; sin deps nuevas
 - Post-cierre: JLT_DECK_SHARE_SECRET generado en server/.env.development (gitignored, solo dev) + API reiniciada; Share/Import dejan el 503. Practice strokes también en recognition-kanji (antes solo recall).
+- Congelado 5.3b: Watch order en escritura (replay trazo a trazo con dash animation + reduced-motion, reutiliza STROKE_DRAW_MS/PAUSE); Practice strokes también en recognition-kanji; borrado de historial (trash por fila con confirm + Clear history general con confirm; DELETE /sessions/:id y DELETE /sessions owner-scoped, cascadas verificadas en DDL; roundtrip live crear?borrar?404 + foreign 404, cero residuo).

@@ -3,7 +3,7 @@
 // reference overlay); each drawn stroke is matched to a model stroke by its
 // start point, and the drawn sequence must follow the model order.
 import { element } from './ui.js';
-import { STROKE_SVG_NS, STROKE_SVG_VIEWBOX, loadStrokePaths } from './strokeOrder.js';
+import { STROKE_DRAW_MS, STROKE_PAUSE_MS, STROKE_SVG_NS, STROKE_SVG_VIEWBOX, loadStrokePaths } from './strokeOrder.js';
 import {
   MODEL_SPACE,
   START_TOLERANCE,
@@ -136,6 +136,33 @@ export function mountKanjiWriting(container, { character = '', onDone = null } =
     canvas.addEventListener('pointerup', endStroke);
     canvas.addEventListener('pointercancel', () => { current = null; redraw(); });
 
+    // Ringotan-style replay: dim the model, then draw each stroke in order.
+    // Reduced motion shows the final state instantly (the static overlay).
+    const watch = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-sm', text: 'Watch order', attrs: { type: 'button' } });
+    watch.addEventListener('click', () => {
+      let reduceMotion = false;
+      try {
+        reduceMotion = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
+      } catch { /* motion query is best-effort */ }
+      const modelPaths = [...svg.querySelectorAll('path')];
+      modelPaths.forEach((modelPath) => { modelPath.style.opacity = reduceMotion ? '' : '0.12'; });
+      if (reduceMotion) return;
+      modelPaths.forEach((modelPath, modelIndex) => {
+        let length = 300;
+        try { length = modelPath.getTotalLength() || 300; } catch { /* measure is best-effort */ }
+        modelPath.style.strokeDasharray = String(length);
+        modelPath.style.strokeDashoffset = String(length);
+        modelPath.style.opacity = '1';
+        try {
+          modelPath.animate(
+            [{ strokeDashoffset: length }, { strokeDashoffset: 0 }],
+            { duration: STROKE_DRAW_MS, delay: modelIndex * (STROKE_DRAW_MS + STROKE_PAUSE_MS), easing: 'ease-out', fill: 'forwards' }
+          );
+        } catch {
+          modelPath.style.strokeDashoffset = '0';
+        }
+      });
+    });
     const clear = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-sm', text: 'Clear', attrs: { type: 'button' } });
     clear.addEventListener('click', () => {
       drawnStrokes.length = 0;
@@ -157,10 +184,10 @@ export function mountKanjiWriting(container, { character = '', onDone = null } =
     const next = element('button', { className: 'button-primary min-h-9 px-3 py-1.5 text-sm', text: 'Done', attrs: { type: 'button' } });
     next.addEventListener('click', () => { if (typeof onDone === 'function') onDone(); });
     wrap.append(
-      element('p', { className: 'text-sm leading-6 text-muted', text: `Trace ${character} in stroke order (${paths.length} strokes). Only the order is checked — shape is yours.` }),
+      element('p', { className: 'text-sm leading-6 text-muted', text: `Watch the order first, then trace ${character} (${paths.length} strokes). Only the order is checked — shape is yours.` }),
       stage,
       verdict,
-      element('div', { className: 'flex flex-col gap-2 sm:flex-row' }, [clear, retry, next])
+      element('div', { className: 'flex flex-col gap-2 sm:flex-row' }, [watch, clear, retry, next])
     );
     container.appendChild(wrap);
   }).catch((error) => {

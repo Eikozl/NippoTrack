@@ -307,6 +307,11 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
   const speechCancelCalls = [];
   const speechListeners = new Map();
   const mountCalls = [];
+  const confirmCalls = [];
+  const confirmDialog = (options = {}) => {
+    confirmCalls.push(options);
+    return () => {};
+  };
   const ui = makeUi(doc, toasts);
   const apiRequest = async (url, opts = {}) => {
     apiCalls.push({ url, options: opts });
@@ -378,6 +383,13 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
       if (typeof completePayload === 'function') return completePayload(url);
       return completePayload ?? { total: 0, byType: {}, byResult: {} };
     }
+    if (url === '/api/review/sessions' && opts.method === 'DELETE') {
+      return { success: true, deleted: 1 };
+    }
+    const sessionDeleteMatch = url.match(/^\/api\/review\/sessions\/(\d+)$/);
+    if (sessionDeleteMatch && opts.method === 'DELETE') {
+      return { success: true, deletedId: Number(sessionDeleteMatch[1]) };
+    }
     throw new Error(`unexpected apiRequest ${url}`);
   };
   let code = reviewSource
@@ -428,7 +440,7 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
       : null
   );
   const factory = new Function(
-    'apiRequest', 'queryString', 'kanjiReferenceRoute', 'icon', 'element', 'emptyState', 'errorState', 'loadingState', 'openDetailModal', 'openDialog', 'pageHeader', 'setActionPending', 'showToast', 'withPendingAction', 'document', 'window', 'mountKanjiWriting',
+    'apiRequest', 'queryString', 'kanjiReferenceRoute', 'icon', 'element', 'emptyState', 'errorState', 'loadingState', 'openDetailModal', 'openDialog', 'pageHeader', 'setActionPending', 'showToast', 'withPendingAction', 'document', 'window', 'mountKanjiWriting', 'confirmDialog',
     code
   );
   const fakeWindow = {
@@ -454,9 +466,9 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
     }
   };
   const { renderReview } = factory(
-    apiRequest, queryString, kanjiReferenceRoute, icon, ui.element, ui.emptyState, ui.errorState, ui.loadingState, openDetailModal, openDialog, ui.pageHeader, setActionPending, ui.showToast, ui.withPendingAction, doc, fakeWindow, (...args) => { mountCalls.push(args); return () => {}; }
+    apiRequest, queryString, kanjiReferenceRoute, icon, ui.element, ui.emptyState, ui.errorState, ui.loadingState, openDetailModal, openDialog, ui.pageHeader, setActionPending, ui.showToast, ui.withPendingAction, doc, fakeWindow, (...args) => { mountCalls.push(args); return () => {}; }, confirmDialog
   );
-  return { doc, toasts, apiCalls, dialogs, renderReview, ui, openDialogCalls, speechCalls, speechCancelCalls, speechListeners, fakeWindow, mountCalls };
+  return { doc, toasts, apiCalls, dialogs, renderReview, ui, openDialogCalls, speechCalls, speechCancelCalls, speechListeners, fakeWindow, mountCalls, confirmCalls };
 }
 
 // ---------------------------------------------------------------- fixtures
@@ -1268,6 +1280,64 @@ test('Review Hub HISTORY: clicking a row opens the session modal with title, ite
   await clickAndSettle(rows[0]);
   assert.equal(dialogs.length, 2, 'second click re-opens the modal');
   assert.equal(apiCalls.filter((c) => c.url === '/api/review/sessions/55').length, 1, 're-open reuses the cache');
+});
+
+test('Review Hub HISTORY: per-row trash asks confirm and deletes the session', async () => {
+  let loads = 0;
+  const harness = loadReviewModule({
+    candidatesPayload: { groups: {} },
+    historyPayload: () => {
+      loads += 1;
+      return loads > 1
+        ? { items: [], total: 0, page: 1, limit: 10 }
+        : { items: [historySessionFixture()], total: 1, page: 1, limit: 10 };
+    },
+    sessionDetailPayload: historyDetailFixture()
+  });
+  const { doc, renderReview, apiCalls, confirmCalls } = harness;
+  const container = doc.createElement('div');
+  doc.body.appendChild(container);
+  await renderReview(container);
+  await sleep(15);
+  assert.equal(historyRows(container).length, 1, 'one row before delete');
+  const trash = [...container.querySelectorAll('button')]
+    .find((node) => String(node.getAttribute ? node.getAttribute('aria-label') : '').startsWith('Delete session'));
+  assert.ok(trash, 'row carries a trash button');
+  await clickAndSettle(trash);
+  assert.equal(confirmCalls.length, 1, 'delete asks for confirmation first');
+  assert.match(confirmCalls[0].title, /Delete this session/);
+  await confirmCalls[0].onConfirm();
+  await sleep(15);
+  assert.ok(apiCalls.some((call) => call.url === '/api/review/sessions/55' && call.options.method === 'DELETE'), 'single session deleted');
+  assert.equal(historyRows(container).length, 0, 'row gone after delete');
+  assert.match(textOf(container), /No review sessions yet/, 'empty state shown');
+});
+
+test('Review Hub HISTORY: Clear history asks confirm and clears all', async () => {
+  let loads = 0;
+  const harness = loadReviewModule({
+    candidatesPayload: { groups: {} },
+    historyPayload: () => {
+      loads += 1;
+      return loads > 1
+        ? { items: [], total: 0, page: 1, limit: 10 }
+        : { items: [historySessionFixture()], total: 1, page: 1, limit: 10 };
+    }
+  });
+  const { doc, renderReview, apiCalls, confirmCalls } = harness;
+  const container = doc.createElement('div');
+  doc.body.appendChild(container);
+  await renderReview(container);
+  await sleep(15);
+  const clear = findFirstButtonByText(container, 'Clear history');
+  assert.ok(clear, 'header offers Clear history');
+  await clickAndSettle(clear);
+  assert.equal(confirmCalls.length, 1, 'clear-all asks for confirmation first');
+  assert.match(confirmCalls[0].title, /Clear review history/);
+  await confirmCalls[0].onConfirm();
+  await sleep(15);
+  assert.ok(apiCalls.some((call) => call.url === '/api/review/sessions' && call.options.method === 'DELETE'), 'clear-all endpoint called');
+  assert.match(textOf(container), /No review sessions yet/, 'empty state shown after clear');
 });
 
 test('Review Hub HISTORY: detail fetch failure toasts an error and opens no modal', async () => {

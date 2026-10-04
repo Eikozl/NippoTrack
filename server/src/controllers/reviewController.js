@@ -815,4 +815,30 @@ async function listDifficultItems(req, res) {
   }
 }
 
-module.exports = { createReviewItem, listDueReviews, listDueReviewCards, recordReview, createReviewSession, completeReviewSession, gradeEntity, listCandidates, listReviewSessions, getReviewSession, getReviewSessionItems, listDifficultItems, getReviewTypes, putReviewPreferences, getReviewPatterns };
+async function deleteReviewSession(req, res) {
+  try {
+    const id = parseIdParam(req, 'review session');
+    const [result] = await pool.execute(
+      'DELETE FROM review_sessions WHERE id_review_session = ? AND user_id = ?',
+      [id, req.user.id]
+    );
+    if (!result.affectedRows) return res.status(404).json({ error: 'review session not found' });
+    return res.json({ success: true, deletedId: id });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to delete the review session.' });
+  }
+}
+
+async function clearReviewSessions(req, res) {
+  try {
+    const [result] = await pool.execute(
+      'DELETE FROM review_sessions WHERE user_id = ?',
+      [req.user.id]
+    );
+    return res.json({ success: true, deleted: Number(result.affectedRows || 0) });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to clear review history.' });
+  }
+}
+
+module.exports = { createReviewItem, listDueReviews, listDueReviewCards, recordReview, createReviewSession, completeReviewSession, gradeEntity, listCandidates, listReviewSessions, getReviewSession, getReviewSessionItems, deleteReviewSession, clearReviewSessions, listDifficultItems, getReviewTypes, putReviewPreferences, getReviewPatterns };
