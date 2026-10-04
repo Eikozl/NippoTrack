@@ -23,6 +23,7 @@ const insightsRoutes = require('./routes/insights');
 const shareRoutes = require('./routes/share');
 const decksRoutes = require('./routes/decks');
 const usersRoutes = require('./routes/users');
+const storiesRoutes = require('./routes/stories');
 const collectionsRoutes = require('./routes/collections');
 const authRoutes = require('./routes/auth');
 const { requireAuthentication } = require('./middleware/authentication');
@@ -105,6 +106,11 @@ app.get('/api', (req, res) => {
       'DELETE /api/collections/:id/decks/:deckId',
       'PUT /api/collections/:id/decks',
       'POST /api/collections/:id/share',
+      'POST /api/stories/extract-preview',
+      'POST /api/stories',
+      'POST /api/stories/:id/extract',
+      'POST /api/stories/:id/enroll-srs',
+      'GET /api/stories/:id/embed',
       'GET /api/share/deck/:code',
       'POST /api/share/deck/:code/import',
       'POST /api/analyze/text',
@@ -153,6 +159,7 @@ app.use('/api/insights', insightsRoutes);
 app.use('/api/share', shareRoutes);
 app.use('/api/decks', decksRoutes);
 app.use('/api/users', usersRoutes);
+app.use('/api/stories', storiesRoutes);
 app.use('/api/collections', collectionsRoutes);
 app.use('/api/level', levelRoutes);
 app.use('/api/first-experience', firstExperienceRoutes);

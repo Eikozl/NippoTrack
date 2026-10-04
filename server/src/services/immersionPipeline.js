@@ -618,8 +618,15 @@ module.exports = {
   // truncation stay single-sourced.
   attachVocabularyGlosses,
   createImmersionSession,
+  // Reused by the story registry (V5.6): same deterministic analysis and
+  // idempotent entity creation, new review/session/link assembly.
+  ensureGrammarEntities,
+  ensureKanjiEntities,
+  ensureVocabularyEntities,
   estimateDifficultyLevel,
+  intersectSelected,
   listImmersionSessions,
   normalizeJlpt,
+  runAnalysis,
   truncateCodePoints
 };

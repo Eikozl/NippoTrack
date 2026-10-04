@@ -28,7 +28,7 @@ test('navigation renders grouped destinations in the approved order', () => {
   assert.deepEqual(pages, [
     'dashboard', 'review', 'sessions', 'goals',
     'vocabulary', 'kanji', 'grammar', 'community', 'notes', 'content',
-    'analyzer', 'immersion', 'reading', 'statistics'
+    'analyzer', 'immersion', 'reading', 'stories', 'statistics'
   ]);
   for (const group of ['Study', 'Library', 'Tools', 'System']) {
     assert.ok(source.includes(`data-i18n="${group}"`), `group label ${group} present`);
