@@ -191,7 +191,7 @@ function deckCard(deck, actions = []) {
     ...(creator ? [creator] : []),
     ...(deck.description ? [element('p', { className: 'mt-1 text-sm leading-6 text-muted', text: deck.description })] : []),
     element('p', { className: 'mt-2 text-xs font-medium text-muted', text: `${deck.itemCount ?? '?'} items` }),
-    ...(actions.length ? [element('div', { className: 'mt-3 flex flex-row flex-wrap items-center gap-2 sm:pr-12' }, actions)] : [])
+    ...(actions.length ? [element('div', { className: 'mt-3 flex flex-row flex-wrap items-center gap-2' }, actions)] : [])
   ]);
 }
 
@@ -227,7 +227,7 @@ function starWidget(deck) {
       paint();
     }).catch((error) => showToast(error?.message || 'Unable to like the deck.', 'error'));
   });
-  const wrap = element('div', { className: 'flex shrink-0 flex-col items-center gap-0.5 sm:absolute sm:bottom-3 sm:right-3' }, [star, countNode]);
+  const wrap = element('div', { className: 'absolute bottom-3 right-3 flex shrink-0 flex-col items-center gap-0.5 sm:static' }, [star, countNode]);
   return wrap;
 }
 
@@ -267,13 +267,13 @@ export async function renderCommunity(container) {
     (!query || `${deck.title} ${deck.description || ''}`.toLowerCase().includes(query)));
   const buildFeedCard = (deck, withPreview) => {
     const view = smallButton('Open deck', `Open ${deck.title}`);
-    view.classList.add('flex-1');
+    view.classList.add('flex-1', 'sm:flex-none', 'sm:basis-3/4');
     view.addEventListener('click', () => itemsDialog(deck.id, deck.title, deck.entityType));
     const card = deckCard(deck, [view, starWidget(deck)]);
     if (withPreview) {
       const previewItems = (deck.previewItems || []).slice(0, 3);
       if (previewItems.length) {
-        card.append(element('ul', { className: 'mt-2 flex flex-wrap gap-1.5', attrs: { role: 'list' } }, [
+        card.append(element('ul', { className: 'pr-10 sm:pr-0 mt-2 flex flex-wrap gap-1.5', attrs: { role: 'list' } }, [
           ...previewItems.map((text) => element('li', { className: 'status-pill text-xs', text })),
           ...((deck.itemCount || 0) > previewItems.length ? [element('li', { className: 'text-xs text-muted', text: `+${deck.itemCount - previewItems.length} more` })] : [])
         ]));
