@@ -456,8 +456,10 @@ export async function renderReview(container) {
   function formattedDate(dateIso) {
     if (!dateIso) return 'unknown date';
     const d = new Date(dateIso);
-    const options = { year: 'numeric', month: 'long', day: 'numeric' };
-    return d.toLocaleDateString(undefined, options);
+    if (Number.isNaN(d.getTime())) return 'unknown date';
+    // Pinned to US English ("September 1, 2026"): history dates stay put
+    // no matter the device locale.
+    return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
   }
 
   function sessionTypeLabel(items) {
@@ -601,7 +603,7 @@ export async function renderReview(container) {
         element('h2', { className: 'font-semibold text-ink', text: 'Recent review sessions' }),
         element('p', { className: 'mt-1 text-sm text-muted', text: 'When you studied, how much you reviewed, and how it felt.' }),
         element('ul', { className: 'mt-4 grid gap-2' }, sessions.map((session) => {
-          const date = String(session.startedAt || '').slice(0, 10);
+          const date = session.startedAt ? formattedDate(session.startedAt) : '';
           const summary = `${Number(session.total || 0)} items · ${Number(session.byResult?.Good || 0)} comfortable · ${Number(session.byResult?.Hard || 0)} difficult · ${Number(session.byResult?.Again || 0)} revisit`;
           const scope = `Kanji ${Number(session.byType?.kanji || 0)} · Vocabulary ${Number(session.byType?.vocabulary || 0)} · Grammar ${Number(session.byType?.grammar || 0)}`;
           const row = element('li', { className: 'cursor-pointer rounded-xl border border-stone bg-paper px-3 py-2.5 text-sm transition hover:border-vermilion', attrs: { role: 'button', tabindex: '0', 'aria-label': `Open details for session ${date || session.id}` } }, [

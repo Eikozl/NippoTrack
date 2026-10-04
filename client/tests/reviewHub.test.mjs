@@ -1248,12 +1248,12 @@ test('Review Hub HISTORY: clicking a row opens the session modal with title, ite
 
   const rows = historyRows(container);
   assert.equal(rows.length, 1, 'history renders one clickable row');
-  assert.match(textOf(rows[0]), /2026-09-01/, 'row shows the session date');
+  assert.match(textOf(rows[0]), /September \d{1,2}, 2026/, 'row shows the session date in English');
 
   await clickAndSettle(rows[0]);
   assert.equal(dialogs.length, 1, 'click opens the session modal');
   assert.match(dialogs[0].title, /^Mixed Review Session • /, 'mixed session gets the Mixed title');
-  assert.match(dialogs[0].title, /2026/, 'title carries the session year');
+  assert.match(dialogs[0].title, /September \d{1,2}, 2026/, 'modal title carries the English date');
   const modalText = dialogs[0].content.map(textOf).join(' ');
   assert.match(modalText, /TEMO-GRAMMAR/, 'grammar display shown');
   assert.match(modalText, /even if/, 'meaning shown');
