@@ -191,6 +191,7 @@ function selectDeckItems(deck, selected) {
 module.exports = {
   DECK_TTL_MS,
   DECK_VERSION,
+  ENTITY,
   MAX_DECK_ITEMS,
   createDeckShare,
   deckPreview,

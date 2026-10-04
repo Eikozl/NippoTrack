@@ -21,6 +21,8 @@ const gradedReaderRoutes = require('./routes/gradedReader');
 const smartGoalsRoutes = require('./routes/smartGoals');
 const insightsRoutes = require('./routes/insights');
 const shareRoutes = require('./routes/share');
+const decksRoutes = require('./routes/decks');
+const usersRoutes = require('./routes/users');
 const authRoutes = require('./routes/auth');
 const { requireAuthentication } = require('./middleware/authentication');
 const { createRateLimiter } = require('./middleware/rateLimit');
@@ -79,6 +81,13 @@ app.get('/api', (req, res) => {
       'POST /api/share/deck',
       'POST /api/share/deck/preview',
       'POST /api/share/deck/import',
+      'GET /api/users/:username/public',
+      'GET /api/users/:username/decks',
+      'POST /api/decks',
+      'GET /api/decks',
+      'GET /api/decks/:id',
+      'POST /api/decks/:id/follow',
+      'DELETE /api/decks/:id/follow',
       'GET /api/share/deck/:code',
       'POST /api/share/deck/:code/import',
       'POST /api/analyze/text',
@@ -125,6 +134,8 @@ app.use('/api/reading', gradedReaderRoutes);
 app.use('/api/goals', smartGoalsRoutes);
 app.use('/api/insights', insightsRoutes);
 app.use('/api/share', shareRoutes);
+app.use('/api/decks', decksRoutes);
+app.use('/api/users', usersRoutes);
 app.use('/api/level', levelRoutes);
 app.use('/api/first-experience', firstExperienceRoutes);
 app.use('/api/profile', profileRoutes);
