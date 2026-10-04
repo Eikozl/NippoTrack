@@ -1,8 +1,9 @@
 // Decks hub: the single home for everything decks (feed-style). Publishing,
-// sharing, importing, browsing, collections and profile live here — entity
-// tabs no longer carry deck actions. Vanilla, fail-open sections.
+// sharing, importing, browsing and collections live here — entity tabs carry
+// no deck actions. Public identity lives in Settings → Profile.
 import { apiRequest } from '../api';
-import { element, emptyState, openDialog, pageHeader, showToast, withPendingAction } from '../ui';
+import { element, emptyState, openDialog, confirmDialog, pageHeader, showToast, withPendingAction } from '../ui';
+import { icon } from '../icons';
 import { speakJapanese } from '../speech.js';
 import { loadStrokePaths, STROKE_SVG_NS, STROKE_SVG_VIEWBOX } from '../strokeOrder.js';
 import { mountKanjiWriting } from '../kanjiWriting.js';
@@ -178,11 +179,16 @@ function section(title, description) {
 
 function deckCard(deck, actions = []) {
   const pill = element('span', { className: 'status-pill shrink-0 text-xs', text: deck.entityType || '' });
+  const creatorName = deck.ownerDisplay || (deck.ownerUsername ? `@${deck.ownerUsername}` : null);
+  const creator = creatorName
+    ? element('p', { className: 'mt-1 text-xs text-muted', text: `by ${creatorName}` })
+    : null;
   return element('article', { className: 'rounded-xl border border-stone bg-paper p-4' }, [
     element('div', { className: 'flex items-start justify-between gap-3' }, [
       element('h3', { className: 'break-words text-lg font-semibold text-ink', text: deck.title }),
       pill
     ]),
+    ...(creator ? [creator] : []),
     ...(deck.description ? [element('p', { className: 'mt-1 text-sm leading-6 text-muted', text: deck.description })] : []),
     element('p', { className: 'mt-2 text-xs font-medium text-muted', text: `${deck.itemCount ?? '?'} items · ${deck.followers ?? 0} followers` }),
     ...(actions.length ? [element('div', { className: 'mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap' }, actions)] : [])
@@ -195,7 +201,7 @@ const PICKER_TYPES = [
   { key: 'grammar', label: 'Grammar', endpoint: '/api/grammar/options', idKey: 'id_grammar', titleOf: (row) => row.grammar_point, subOf: (row) => [row.meaning].filter(Boolean).join(' · ') }
 ];
 
-export async function renderDecks(container) {
+export async function renderCommunity(container) {
   container.replaceChildren(pageHeader({
     eyebrow: 'Social',
     title: 'Decks',
@@ -206,8 +212,7 @@ export async function renderDecks(container) {
   const share = section('Share & import', 'Signed codes: share your own items, import codes as new rows.');
   const mine = section('My decks', 'Your publications with suggestions and analytics.');
   const collections = section('Collections', 'Group decks into playlists and share them as one code.');
-  const profile = section('Public profile', 'Claim a username to be followable. Only what you publish is public.');
-  container.append(feed.wrap, publish.wrap, share.wrap, mine.wrap, collections.wrap, profile.wrap);
+  container.append(feed.wrap, publish.wrap, share.wrap, mine.wrap, collections.wrap);
 
   // ---- Feed
   const filterRow = element('div', { className: 'flex flex-col gap-2 sm:flex-row' });
@@ -279,6 +284,10 @@ export async function renderDecks(container) {
   const tabs = element('div', { className: 'flex flex-col gap-2 sm:flex-row', attrs: { role: 'group', 'aria-label': 'Pick item type' } });
   let pickerType = PICKER_TYPES[0];
   const search = element('input', { className: 'field-control', attrs: { type: 'search', 'aria-label': 'Search your collection', placeholder: 'Search your collection…' } });
+  const jlptFilter = element('select', { className: 'field-control sm:max-w-36', attrs: { 'aria-label': 'Filter picker by JLPT level' } }, [
+    element('option', { text: 'Any level', attrs: { value: '' } }),
+    ...['N5', 'N4', 'N3', 'N2', 'N1'].map((level) => element('option', { text: level, attrs: { value: level } }))
+  ]);
   const results = element('div', { className: 'grid gap-1.5' });
   const tray = element('div', { className: 'flex flex-wrap gap-1.5', attrs: { 'aria-live': 'polite' } });
   const titleInput = element('input', { className: 'field-control', attrs: { type: 'text', 'aria-label': 'Deck title', placeholder: 'Deck title', maxLength: '120' } });
@@ -298,7 +307,8 @@ export async function renderDecks(container) {
     const query = String(search.value || '').trim();
     results.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Searching…' }));
     try {
-      const data = await apiRequest(`${pickerType.endpoint}?search=${encodeURIComponent(query)}&limit=30`);
+      const jlpt = jlptFilter.value ? `&jlpt=${encodeURIComponent(jlptFilter.value)}` : '';
+      const data = await apiRequest(`${pickerType.endpoint}?search=${encodeURIComponent(query)}&limit=30${jlpt}`);
       const rows = Array.isArray(data?.items) ? data.items : [];
       if (!rows.length) {
         results.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Nothing found.' }));
@@ -330,6 +340,7 @@ export async function renderDecks(container) {
     if (searchTimer) clearTimeout(searchTimer);
     searchTimer = setTimeout(runSearch, 250);
   });
+  jlptFilter.addEventListener('change', runSearch);
   for (const type of PICKER_TYPES) {
     const tab = element('button', {
       className: `button-secondary min-h-9 px-3 py-1.5 text-sm${type.key === pickerType.key ? ' font-bold' : ''}`,
@@ -364,7 +375,7 @@ export async function renderDecks(container) {
       descriptionInput.value = '';
     }).catch((error) => showToast(error?.message || 'Unable to publish the deck.', 'error'));
   });
-  publish.body.append(tabs, search, results, tray, titleInput, descriptionInput, publishButton);
+  publish.body.append(tabs, element('div', { className: 'flex flex-col gap-2 sm:flex-row' }, [search, jlptFilter]), results, tray, titleInput, descriptionInput, publishButton);
   syncTray();
   runSearch();
 
@@ -428,22 +439,84 @@ export async function renderDecks(container) {
     codeInput, previewImport, importPreview
   );
 
-  // ---- My decks + suggestions + analytics
-  mine.body.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Loading your decks…' }));
-  try {
-    const data = await apiRequest('/api/decks?mine=true&limit=50');
-    const decks = Array.isArray(data?.items) ? data.items : [];
-    if (!decks.length) {
-      mine.body.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Nothing published yet — use the composer above.' }));
-    } else {
+  // ---- My decks: click a card to open it; trash deletes (confirmed),
+  // checkboxes enable multi-delete.
+  const selectedDecks = new Set();
+  const deleteSelected = smallButton('Delete selected', 'Delete selected decks');
+  deleteSelected.disabled = true;
+  const syncDeleteSelected = () => {
+    deleteSelected.disabled = selectedDecks.size === 0;
+    deleteSelected.textContent = selectedDecks.size ? `Delete selected (${selectedDecks.size})` : 'Delete selected';
+  };
+  deleteSelected.addEventListener('click', () => {
+    if (!selectedDecks.size) return;
+    confirmDialog({
+      title: `Delete ${selectedDecks.size} deck${selectedDecks.size > 1 ? 's' : ''}?`,
+      description: 'This permanently deletes the selected decks, their items, follows and suggestions. This cannot be undone.',
+      onConfirm: async () => {
+        for (const id of [...selectedDecks]) {
+          await apiRequest(`/api/decks/${id}`, { method: 'DELETE' });
+        }
+        selectedDecks.clear();
+        showToast('Selected decks deleted.');
+        await loadMine();
+      }
+    });
+  });
+  const loadMine = async () => {
+    selectedDecks.clear();
+    syncDeleteSelected();
+    mine.body.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Loading your decks…' }));
+    try {
+      const data = await apiRequest('/api/decks?mine=true&limit=50');
+      const decks = Array.isArray(data?.items) ? data.items : [];
+      if (!decks.length) {
+        mine.body.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Nothing published yet — use the composer above.' }));
+        return;
+      }
       const cards = [];
       for (const deck of decks) {
         const suggestionsBox = element('div', { className: 'grid gap-2' });
         const analyticsLine = element('p', { className: 'mt-1 text-xs text-muted', text: 'Loading analytics…' });
+        const selectBox = element('input', { attrs: { type: 'checkbox', 'aria-label': `Select ${deck.title} for deletion` } });
+        selectBox.addEventListener('click', (event) => {
+          if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+        });
+        selectBox.addEventListener('change', () => {
+          if (selectBox.checked) selectedDecks.add(deck.id);
+          else selectedDecks.delete(deck.id);
+          syncDeleteSelected();
+        });
+        const remove = element('button', { className: 'icon-button icon-button--danger shrink-0', attrs: { type: 'button', 'aria-label': `Delete ${deck.title}` } }, [icon('trash', { size: 18 })]);
+        remove.addEventListener('click', (event) => {
+          if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+          confirmDialog({
+            title: `Delete ${deck.title}?`,
+            description: 'This permanently deletes the deck, its items, follows and suggestions. This cannot be undone.',
+            onConfirm: async () => {
+              await apiRequest(`/api/decks/${deck.id}`, { method: 'DELETE' });
+              showToast('Deck deleted.');
+              await loadMine();
+            }
+          });
+        });
         const card = deckCard(deck, []);
-        const view = smallButton('View items', `View items of ${deck.title}`);
-        view.addEventListener('click', () => itemsDialog(deck.id, deck.title, deck.entityType));
-        card.append(view, analyticsLine, suggestionsBox);
+        card.setAttribute('role', 'button');
+        card.setAttribute('tabindex', '0');
+        card.setAttribute('aria-label', `Open ${deck.title}`);
+        card.classList.add('cursor-pointer');
+        card.addEventListener('click', () => itemsDialog(deck.id, deck.title, deck.entityType));
+        card.addEventListener('keydown', (event) => {
+          try {
+            if (event.target && event.target !== card && typeof event.target.closest === 'function' && event.target.closest('button,input')) return;
+          } catch { /* target guard is best-effort */ }
+          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); itemsDialog(deck.id, deck.title, deck.entityType); }
+        });
+        card.append(
+          element('div', { className: 'mt-2 flex items-center gap-2' }, [selectBox, remove]),
+          analyticsLine,
+          suggestionsBox
+        );
         cards.push(card);
         apiRequest(`/api/decks/${deck.id}/analytics?period=30d`)
           .then((analytics) => {
@@ -467,8 +540,14 @@ export async function renderDecks(container) {
                   suggestionsBox.replaceChildren();
                 }).catch((error) => showToast(error?.message || 'Unable to decide.', 'error'));
               };
-              accept.addEventListener('click', () => decide('accept'));
-              reject.addEventListener('click', () => decide('reject'));
+              accept.addEventListener('click', (event) => {
+                if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+                decide('accept');
+              });
+              reject.addEventListener('click', (event) => {
+                if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+                decide('reject');
+              });
               suggestionsBox.append(element('div', { className: 'rounded-md border border-stone p-2' }, [
                 element('p', { className: 'text-sm text-ink', text: changes || 'No changes listed.' }),
                 element('div', { className: 'mt-2 flex gap-2' }, [accept, reject])
@@ -477,11 +556,12 @@ export async function renderDecks(container) {
           })
           .catch(() => {});
       }
-      mine.body.replaceChildren(element('div', { className: 'grid gap-4 md:grid-cols-2' }, cards));
+      mine.body.replaceChildren(deleteSelected, element('div', { className: 'grid gap-4 md:grid-cols-2' }, cards));
+    } catch {
+      mine.body.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Your decks are unavailable.' }));
     }
-  } catch {
-    mine.body.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Your decks are unavailable.' }));
-  }
+  };
+  await loadMine();
 
   // ---- Collections
   collections.body.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Loading collections…' }));
@@ -489,6 +569,11 @@ export async function renderDecks(container) {
     try {
       const data = await apiRequest('/api/collections?scope=mine&limit=20');
       const items = Array.isArray(data?.items) ? data.items : [];
+      let ownDecks = [];
+      try {
+        const mineData = await apiRequest('/api/decks?mine=true&limit=50');
+        ownDecks = Array.isArray(mineData?.items) ? mineData.items : [];
+      } catch { /* member picker degrades to id input */ }
       const createTitle = element('input', { className: 'field-control', attrs: { type: 'text', 'aria-label': 'New collection title', placeholder: 'New collection title', maxLength: '120' } });
       const create = smallButton('Create collection', 'Create collection');
       create.addEventListener('click', () => {
@@ -501,6 +586,48 @@ export async function renderDecks(container) {
         }).catch((error) => showToast(error?.message || 'Unable to create the collection.', 'error'));
       });
       const list = element('div', { className: 'grid gap-3' }, items.map((collection) => {
+        const membersBox = element('div', { className: 'grid gap-1.5' });
+        const memberSelect = element('select', { className: 'field-control', attrs: { 'aria-label': `Add deck to ${collection.title}` } }, [
+          element('option', { text: 'Pick one of your decks…', attrs: { value: '' } }),
+          ...ownDecks.map((deck) => element('option', { text: `${deck.title} · ${deck.entityType}`, attrs: { value: String(deck.id) } }))
+        ]);
+        const addMember = smallButton('Add deck', `Add deck to ${collection.title}`);
+        addMember.addEventListener('click', () => {
+          const deckId = Number(memberSelect.value);
+          if (!Number.isInteger(deckId) || deckId <= 0) { showToast('Pick one of your decks first.', 'error'); return; }
+          withPendingAction(addMember, async () => {
+            await apiRequest(`/api/collections/${collection.id}/decks`, { method: 'POST', body: { deckId } });
+            showToast('Deck added.');
+            await refreshCollectionMembers();
+          }).catch((error) => showToast(error?.message || 'Unable to add the deck.', 'error'));
+        });
+        const refreshCollectionMembers = async () => {
+          try {
+            const detail = await apiRequest(`/api/collections/${collection.id}`);
+            const members = Array.isArray(detail?.decks) ? detail.decks : [];
+            if (!members.length) {
+              membersBox.replaceChildren(element('p', { className: 'text-xs text-muted', text: 'No decks yet — add yours above.' }));
+              return;
+            }
+            membersBox.replaceChildren(element('ul', { className: 'grid gap-1', attrs: { role: 'list' } }, members.map((member) => {
+              const remove = smallButton('Remove', `Remove ${member.title} from ${collection.title}`);
+              remove.addEventListener('click', () => {
+                withPendingAction(remove, async () => {
+                  await apiRequest(`/api/collections/${collection.id}/decks/${member.id}`, { method: 'DELETE' });
+                  showToast('Deck removed.');
+                  await refreshCollectionMembers();
+                }).catch((error) => showToast(error?.message || 'Unable to remove the deck.', 'error'));
+              });
+              return element('li', { className: 'flex items-center justify-between gap-2 text-sm text-ink' }, [
+                element('span', { text: `${member.title} · ${member.entityType}` }),
+                remove
+              ]);
+            })));
+          } catch {
+            membersBox.replaceChildren(element('p', { className: 'text-xs text-muted', text: 'Members unavailable.' }));
+          }
+        };
+        refreshCollectionMembers();
         const shareCollection = smallButton('Share', `Share collection ${collection.title}`);
         shareCollection.addEventListener('click', () => {
           apiRequest(`/api/collections/${collection.id}/share`, { method: 'POST' })
@@ -517,7 +644,12 @@ export async function renderDecks(container) {
             })
             .catch((error) => showToast(error?.message || 'Unable to share the collection.', 'error'));
         });
-        return deckCard({ title: collection.title, description: collection.description, entityType: 'collection', itemCount: `${collection.deckCount} decks`, followers: '' }, [shareCollection]);
+        const card = deckCard({ title: collection.title, description: collection.description, entityType: 'collection', itemCount: `${collection.deckCount} decks`, followers: '' }, [shareCollection]);
+        card.append(
+          membersBox,
+          element('div', { className: 'mt-2 flex flex-col gap-2 sm:flex-row' }, [memberSelect, addMember])
+        );
+        return card;
       }));
       collections.body.replaceChildren(
         element('div', { className: 'flex flex-col gap-2 sm:flex-row' }, [createTitle, create]),
@@ -528,32 +660,4 @@ export async function renderDecks(container) {
     }
   };
   await refreshCollections();
-
-  // ---- Profile
-  const usernameInput = element('input', { className: 'field-control', attrs: { type: 'text', 'aria-label': 'Username', placeholder: 'username (2-30, lowercase, hyphens)', maxLength: '30' } });
-  const displayInput = element('input', { className: 'field-control', attrs: { type: 'text', 'aria-label': 'Display name', placeholder: 'Display name (optional)', maxLength: '50' } });
-  const bioInput = element('textarea', { className: 'field-control', attrs: { 'aria-label': 'Bio', placeholder: 'Bio (optional)', maxLength: '500' } });
-  const publicBox = element('input', { attrs: { type: 'checkbox', 'aria-label': 'Public profile' } });
-  const save = smallButton('Save profile', 'Save public profile');
-  save.addEventListener('click', () => {
-    withPendingAction(save, async () => {
-      const saved = await apiRequest('/api/users/me', {
-        method: 'PUT',
-        body: {
-          username: String(usernameInput.value || '').trim(),
-          display_name: displayInput.value,
-          bio: bioInput.value,
-          is_public: publicBox.checked
-        }
-      });
-      usernameInput.value = saved.username || '';
-      displayInput.value = saved.displayName || '';
-      bioInput.value = saved.bio || '';
-      publicBox.checked = Boolean(saved.isPublic);
-      showToast(saved.username ? `Public profile: ${saved.username}.` : 'Profile saved (private).');
-    }).catch((error) => showToast(error?.message || 'Unable to save the profile.', 'error'));
-  });
-  profile.body.append(usernameInput, displayInput, bioInput,
-    element('label', { className: 'flex items-center gap-2 text-sm text-ink' }, [publicBox, element('span', { text: 'Public profile' })]),
-    save);
 }

@@ -52,13 +52,16 @@ async function publishDeck(executor, ownerId, { entityType, ids, title, descript
 async function getDeckPublication(executor, deckId, viewerId) {
   const [rows] = await executor.execute(
     `SELECT d.id_deck_publication AS id, d.owner_id, d.title, d.description, d.entity_type, d.is_public, d.created_at,
+       p.username AS owner_username, p.display_name AS owner_display,
        (SELECT COUNT(*) FROM deck_follows f WHERE f.id_deck_publication = d.id_deck_publication) AS followers
-     FROM deck_publications d WHERE d.id_deck_publication = ?`,
+     FROM deck_publications d
+     LEFT JOIN user_profile p ON p.user_id = d.owner_id
+     WHERE d.id_deck_publication = ?`,
     [deckId]
   );
   const deck = Array.isArray(rows) ? rows[0] : null;
   if (!deck) return null;
-  if (!deck.is_public && deck.is_public !== 1 && String(deck.owner_id) !== String(viewerId)) return null;
+  if ((!deck.is_public && deck.is_public !== 1) && String(deck.owner_id) !== String(viewerId)) return null;
   const [items] = await executor.execute(
     'SELECT position, item_json FROM deck_publication_items WHERE id_deck_publication = ? ORDER BY position ASC',
     [deckId]
@@ -66,6 +69,8 @@ async function getDeckPublication(executor, deckId, viewerId) {
   return {
     id: Number(deck.id),
     ownerId: deck.owner_id,
+    ownerUsername: deck.owner_username || null,
+    ownerDisplay: deck.owner_display || null,
     title: deck.title,
     description: deck.description,
     entityType: deck.entity_type,
@@ -94,9 +99,12 @@ async function listPublicDecks(executor, { entityType = null, limit = 20, offset
   }
   const [rows] = await executor.execute(
     `SELECT d.id_deck_publication AS id, d.title, d.description, d.entity_type, d.is_public, d.created_at,
+       p.username AS owner_username, p.display_name AS owner_display,
        (SELECT COUNT(*) FROM deck_follows f WHERE f.id_deck_publication = d.id_deck_publication) AS followers,
        (SELECT COUNT(*) FROM deck_publication_items i WHERE i.id_deck_publication = d.id_deck_publication) AS items
-     FROM deck_publications d WHERE ${where.join(' AND ')}
+     FROM deck_publications d
+     LEFT JOIN user_profile p ON p.user_id = d.owner_id
+     WHERE ${where.join(' AND ')}
      ORDER BY followers DESC, d.id_deck_publication DESC LIMIT ? OFFSET ?`,
     [...params, safeLimit, safeOffset]
   );
@@ -106,10 +114,23 @@ async function listPublicDecks(executor, { entityType = null, limit = 20, offset
     description: row.description,
     entityType: row.entity_type,
     isPublic: Boolean(row.is_public),
+    ownerUsername: row.owner_username || null,
+    ownerDisplay: row.owner_display || null,
     createdAt: row.created_at,
     followers: Number(row.followers || 0),
     itemCount: Number(row.items || 0)
   }));
+}
+
+async function deleteDeckPublication(executor, deckId, viewerId) {
+  const [rows] = await executor.execute(
+    'SELECT owner_id FROM deck_publications WHERE id_deck_publication = ?',
+    [deckId]
+  );
+  const deck = Array.isArray(rows) ? rows[0] : null;
+  if (!deck || String(deck.owner_id) !== String(viewerId)) return null;
+  await executor.execute('DELETE FROM deck_publications WHERE id_deck_publication = ?', [deckId]);
+  return { deletedId: Number(deckId) };
 }
 
 async function setDeckFollow(executor, deckId, followerId, follow) {
@@ -217,6 +238,7 @@ async function getPublicProfile(executor, username) {
 }
 
 module.exports = {
+  deleteDeckPublication,
   displayOf,
   getDeckAnalytics,
   getDeckPublication,

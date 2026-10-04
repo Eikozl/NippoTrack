@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  deleteDeckPublication,
   getDeckAnalytics,
   getDeckPublication,
   getPublicProfile,
@@ -30,7 +31,7 @@ function fakeStore({ deck = null, items = [], publicDecks = [], profile = null, 
       if (/COUNT\(\*\) AS total FROM deck_publications WHERE owner_id/.test(sql)) {
         return [[{ total: publicDecks.length }]];
       }
-      if (/FROM deck_publications d WHERE d.id_deck_publication/.test(sql)) return [deck ? [deck] : []];
+      if (/LEFT JOIN user_profile/.test(sql)) return [deck ? [deck] : []];
       if (/FROM deck_publication_items/.test(sql)) {
         return [state.items.map((entry) => ({ position: entry.position, item_json: entry.item_json }))];
       }
@@ -125,4 +126,19 @@ test('deck analytics are owner-only with daily follows and suggestion counts', a
   ]);
   assert.equal(await getDeckAnalytics(executor, 7, 'stranger-9', {}), null);
   assert.equal((await getDeckAnalytics(executor, 7, 'owner-1', { period: 'bogus' })).period, '30d');
+});
+
+test('deck deletion is owner-only', async () => {
+  const executor = {
+    async execute(sql, params) {
+      if (/FROM deck_publications WHERE id_deck_publication/.test(sql)) {
+        return [params[0] === 7 ? [{ owner_id: 'owner-1' }] : []];
+      }
+      if (/DELETE FROM deck_publications/.test(sql)) return [[{ affectedRows: 1 }]];
+      throw new Error(`unexpected SQL in delete test: ${sql.slice(0, 60)}`);
+    }
+  };
+  assert.deepEqual(await deleteDeckPublication(executor, 7, 'owner-1'), { deletedId: 7 });
+  assert.equal(await deleteDeckPublication(executor, 7, 'stranger-9'), null);
+  assert.equal(await deleteDeckPublication(executor, 999, 'owner-1'), null);
 });

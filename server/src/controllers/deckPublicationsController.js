@@ -4,6 +4,7 @@ const pool = require('../config/db');
 const { ValidationError, sendRouteError } = require('../errors/http');
 const { parseIdParam } = require('../validation');
 const {
+  deleteDeckPublication,
   getDeckAnalytics,
   getDeckPublication,
   getPublicProfile,
@@ -41,6 +42,17 @@ async function getDeck(req, res) {
     return res.json(deck);
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load the deck.' });
+  }
+}
+
+async function deleteDeck(req, res) {
+  try {
+    const id = parseIdParam(req, 'deck');
+    const result = await deleteDeckPublication(pool, id, req.user.id);
+    if (!result) return res.status(404).json({ error: 'deck not found' });
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to delete the deck.' });
   }
 }
 
@@ -132,6 +144,25 @@ async function getPublicUser(req, res) {
     return res.json(profile);
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load the public profile.' });
+  }
+}
+
+async function getOwnProfile(req, res) {
+  try {
+    const [rows] = await pool.execute(
+      'SELECT username, display_name, bio, avatar_url, is_public FROM user_profile WHERE user_id = ?',
+      [req.user.id]
+    );
+    const row = Array.isArray(rows) ? rows[0] : {};
+    return res.json({
+      username: row?.username || null,
+      displayName: row?.display_name || null,
+      bio: row?.bio || null,
+      avatarUrl: row?.avatar_url || null,
+      isPublic: Boolean(row?.is_public)
+    });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load the profile.' });
   }
 }
 
@@ -228,9 +259,12 @@ async function listPublicUserDecks(req, res) {
 }
 
 module.exports = {
+  deleteDeck,
   deleteFollow,
   getAnalytics,
   getDeck,
+  getOwnProfile,
+  getPublicUser,
   getPublicUser,
   listDecks,
   listPublicUserDecks,

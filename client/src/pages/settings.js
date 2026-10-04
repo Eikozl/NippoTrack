@@ -145,8 +145,58 @@ async function renderProfileSection(slot) {
   slot.replaceChildren(sectionSurface('Profile', 'How you appear inside NippoTrack.', [
     element('div', { className: 'account-identity-preview mt-6' }, [identityPreview(profile)]),
     form,
+    publicProfileBlock(),
     ...(loadError ? [element('p', { className: 'mt-4 text-sm text-muted', text: 'Profile could not be loaded. You can still try saving a display name.' })] : [])
   ]));
+}
+
+// Community handle + visibility for Decks. Separate save from the
+// display-name form; fail-open with toasts.
+function publicProfileBlock() {
+  const usernameInput = element('input', {
+    className: 'field-control', attrs: { id: 'profile-username', name: 'username', type: 'text', maxlength: '30', autocomplete: 'username', placeholder: 'username', 'aria-describedby': 'profile-username-hint' }
+  });
+  const bioInput = element('textarea', {
+    className: 'field-control', attrs: { id: 'profile-bio', name: 'bio', maxlength: '500', placeholder: 'A short bio (optional)' }
+  });
+  const publicBox = element('input', { attrs: { id: 'profile-public', name: 'is_public', type: 'checkbox' } });
+  const saveButton = element('button', { className: 'button-secondary', text: 'Save public profile', attrs: { type: 'button' } });
+  const status = element('p', { className: 'min-h-5 text-sm text-muted', attrs: { 'aria-live': 'polite' } });
+  const block = element('div', { className: 'mt-8 grid max-w-2xl gap-4 border-t border-stone pt-6' }, [
+    element('h3', { className: 'text-base font-semibold text-ink', text: 'Public profile' }),
+    element('p', { className: 'text-sm text-muted', attrs: { id: 'profile-username-hint' }, text: 'Claim a username to be followable in Decks. Only what you publish is public.' }),
+    element('label', { className: 'field', attrs: { for: 'profile-username' } }, [element('span', { text: 'Username (2–30, lowercase, hyphens)' }), usernameInput]),
+    element('label', { className: 'field', attrs: { for: 'profile-bio' } }, [element('span', { text: 'Bio' }), bioInput]),
+    element('label', { className: 'flex items-center gap-2 text-sm text-ink', attrs: { for: 'profile-public' } }, [publicBox, element('span', { text: 'Public profile' })]),
+    status,
+    element('div', { className: 'flex justify-end' }, [saveButton])
+  ]);
+  apiRequest('/api/users/me').then((saved) => {
+    usernameInput.value = saved.username || '';
+    bioInput.value = saved.bio || '';
+    publicBox.checked = Boolean(saved.isPublic);
+  }).catch(() => {});
+  saveButton.addEventListener('click', () => {
+    withPendingAction(saveButton, async () => {
+      status.textContent = 'Saving…';
+      const saved = await apiRequest('/api/users/me', {
+        method: 'PUT',
+        body: {
+          username: String(usernameInput.value || '').trim(),
+          bio: bioInput.value,
+          is_public: publicBox.checked
+        }
+      });
+      usernameInput.value = saved.username || '';
+      bioInput.value = saved.bio || '';
+      publicBox.checked = Boolean(saved.isPublic);
+      status.textContent = saved.username ? `Public profile: ${saved.username}.` : 'Profile saved (private).';
+    }, { pendingLabel: 'Saving…' }).catch((error) => {
+      status.textContent = '';
+      showToast(error?.message || 'Unable to save the public profile.', 'error');
+    });
+  });
+  return block;
 }
 
 async function renderLearningSection(slot) {

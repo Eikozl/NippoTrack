@@ -98,7 +98,7 @@ async function listVocabularyOptions(req, res) {
     const candidates = buildSearchCandidates(search || '');
     const normalizedWord = normalizedJapaneseSql('word');
     const normalizedReading = normalizedJapaneseSql('reading');
-    let query = 'SELECT id_vocabulary, word, reading, meaning FROM vocabulary WHERE user_id = ?';
+    let query = 'SELECT id_vocabulary, word, reading, meaning, jlpt_level FROM vocabulary WHERE user_id = ?';
     let params = [req.user.id, limit];
 
     if (search) {
@@ -128,6 +128,14 @@ async function listVocabularyOptions(req, res) {
       ];
     } else {
       query += ' ORDER BY id_vocabulary DESC LIMIT ?';
+    }
+
+    const jlpt = normalizeText(req.query.jlpt, 2, 'jlpt');
+    if (jlpt) {
+      const level = jlpt.toUpperCase();
+      if (!JLPT_LEVELS.includes(level)) return res.status(400).json({ error: 'Invalid JLPT level' });
+      query = query.replace(' ORDER BY', ' AND jlpt_level = ? ORDER BY');
+      params.splice(params.length - 1, 0, level);
     }
 
     const [rows] = await pool.execute(query, params);
