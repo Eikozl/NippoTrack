@@ -660,10 +660,11 @@ export async function renderCommunity(container) {
             .catch((error) => showToast(error?.message || 'Unable to share the collection.', 'error'));
         });
         const card = deckCard({ title: collection.title, description: collection.description, entityType: 'collection', itemCount: `${collection.deckCount} decks`, followers: '' }, [shareCollection]);
+        memberSelect.classList.add('min-w-0', 'flex-1');
+        addMember.classList.add('shrink-0');
         card.append(
           membersBox,
-          element('div', { className: 'mt-2 flex flex-col gap-2 sm:flex-row' }, [memberSelect, addMember]),
-          element('div', { className: 'mt-2 flex items-center gap-2' }, [removeCollection])
+          element('div', { className: 'mt-2 flex items-center gap-2' }, [memberSelect, addMember, removeCollection])
         );
         return card;
       }));
