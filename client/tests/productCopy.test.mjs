@@ -121,13 +121,14 @@ test('Target Amount enforces whole numbers 1–999 without clamping', () => {
   assert.ok(ui.includes('inputmode'), 'field helper passes inputmode through');
 });
 
-test('Notes and Content Log hide manual vocabulary/kanji/grammar linking', () => {
+test('Notes hide manual vocabulary/kanji/grammar linking; Content Log links sessions', () => {
   const source = readSource('src/pages/v2Pages.js');
   const notesBlock = source.slice(source.indexOf('notes: {'), source.indexOf('tags: {'));
   assert.ok(notesBlock.includes("linkGroups: ['sessions']"), 'notes keep session linking only');
   assert.ok(!notesBlock.includes('sharedLinkGroups'), 'notes no longer use the full linking set');
   const contentBlock = source.slice(source.indexOf('content: {'), source.indexOf('notes: {'));
-  assert.ok(!contentBlock.includes('linkGroups'), 'content log exposes no Links button');
+  assert.ok(contentBlock.includes("linkGroups: ['sessions']"), 'content log links study sessions (user-approved V5.6)');
+  assert.ok(!contentBlock.includes('sharedLinkGroups'), 'content log still hides vocab/kanji/grammar manual linking');
   const tagsBlock = source.slice(source.indexOf('tags: {'));
   assert.ok(tagsBlock.includes('linkGroups: sharedLinkGroups'), 'tags backend relations preserved');
   const server = readSource('../server/src/controllers/v2Controller.js');

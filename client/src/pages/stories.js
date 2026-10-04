@@ -22,7 +22,7 @@ function candidateLabel(kind, entry) {
   return `${entry.pattern} · ${entry.meaning || '?'}`;
 }
 
-export function openEnrollDialog(storyId, storyTitle, preview) {
+export function openEnrollDialog(storyId, storyTitle, preview, meta = {}) {
   const groups = [
     { kind: 'kanji', label: 'Kanji', entries: Array.isArray(preview?.kanji) ? preview.kanji : [] },
     { kind: 'vocab', label: 'Vocabulary', entries: Array.isArray(preview?.vocab) ? preview.vocab : [] },
@@ -58,21 +58,89 @@ export function openEnrollDialog(storyId, storyTitle, preview) {
     showToast('Nothing detected to enroll.', 'error');
     return;
   }
+  const resultBox = element('div', { className: 'grid gap-2', attrs: { 'aria-live': 'polite' } });
   const enroll = element('button', { className: 'button-primary min-h-9 px-3 py-1.5 text-sm', text: 'Enroll selected', attrs: { type: 'button' } });
   enroll.addEventListener('click', () => {
     const selected = picks.flat().filter(({ box }) => box.checked).map(({ id }) => id).filter(Boolean);
     if (!selected.length) { showToast('Select at least one candidate.', 'error'); return; }
     withPendingAction(enroll, async () => {
       const result = await apiRequest(`/api/stories/${storyId}/enroll-srs`, { method: 'POST', body: { selected } });
-      showToast(`Enrolled ${result.created} review items.`);
+      const items = Array.isArray(result.items) ? result.items : [];
+      const reviewNow = element('button', { className: 'button-primary min-h-9 px-3 py-1.5 text-sm', text: 'Review these now', attrs: { type: 'button' } });
+      reviewNow.addEventListener('click', () => {
+        try {
+          if (typeof window !== 'undefined' && window.sessionStorage && result.reviewSessionId && Array.isArray(result.queueItems)) {
+            window.sessionStorage.setItem('jlt-immersion-review-queue', JSON.stringify({
+              reviewSessionId: Number(result.reviewSessionId),
+              items: result.queueItems
+            }));
+            window.location.hash = `#review?reviewSessionId=${Number(result.reviewSessionId)}`;
+            return;
+          }
+        } catch { /* storage blocked: fall back to the review page */ }
+        if (typeof window !== 'undefined') window.location.hash = 'review';
+      });
+      resultBox.replaceChildren(
+        element('p', { className: 'text-sm font-semibold text-ink', text: `Enrolled ${result.created} review item${result.created === 1 ? '' : 's'}:` }),
+        ...(items.length ? [element('ul', { className: 'grid gap-1 text-sm text-ink', attrs: { role: 'list' } }, items.map((item) => element('li', { text: `${item.entityType}: ${item.display}` })))] : []),
+        reviewNow
+      );
     }).catch((error) => showToast(error?.message || 'Unable to enroll.', 'error'));
   });
   openDialog({
     title: `Enroll from ${storyTitle}`,
     description: 'Checked rows become SRS review items. Practice only until graded.',
-    content: [...sections, enroll],
+    content: [...sourceBlock(meta), ...sections, enroll, resultBox],
     submitLabel: 'Close',
     onSubmit: async (form, close) => { close(); }
   });
+}
+
+// Source context: the text being mined, its URL, and a YouTube player when
+// the URL points at a video. Sandbox stays tight (scripts + same-origin for
+// playback, presentation for fullscreen).
+export function youtubeVideoId(url) {
+  try {
+    const parsed = new URL(String(url || ''));
+    const host = parsed.hostname.replace(/^www\./, '');
+    if (host === 'youtu.be') return parsed.pathname.slice(1).split(/[?#]/)[0] || null;
+    if (host === 'youtube.com' || host === 'youtube-nocookie.com' || host.endsWith('.youtube.com')) {
+      if (parsed.pathname === '/watch') return parsed.searchParams.get('v');
+      const match = parsed.pathname.match(/^\/(shorts|embed|live)\/([^/?#]+)/);
+      if (match) return match[2];
+    }
+  } catch { /* invalid URL means no embed */ }
+  return null;
+}
+
+function sourceBlock(meta = {}) {
+  const nodes = [];
+  const videoId = youtubeVideoId(meta.sourceUrl);
+  if (videoId) {
+    const frame = element('iframe', {
+      className: 'aspect-video w-full rounded-md bg-ink/10',
+      attrs: {
+        src: `https://www.youtube-nocookie.com/embed/${videoId}`,
+        title: 'Story video preview',
+        sandbox: 'allow-scripts allow-same-origin allow-presentation',
+        allow: 'accelerometer; encrypted-media; picture-in-picture',
+        allowfullscreen: '',
+        loading: 'lazy'
+      }
+    });
+    nodes.push(frame);
+  } else if (meta.sourceUrl) {
+    nodes.push(element('a', {
+      className: 'text-sm font-medium text-vermilion underline underline-offset-4 hover:no-underline',
+      text: meta.sourceUrl, attrs: { href: meta.sourceUrl, target: '_blank', rel: 'noopener noreferrer' }
+    }));
+  }
+  if (meta.sourceText) {
+    nodes.push(element('details', { className: 'rounded-md bg-paper p-3' }, [
+      element('summary', { className: 'cursor-pointer text-sm font-semibold text-ink', text: 'Source text' }),
+      element('p', { className: 'mt-2 max-h-44 overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-ink/80', text: meta.sourceText })
+    ]));
+  }
+  return nodes;
 }
 

@@ -32,7 +32,17 @@ const { createRateLimiter } = require('./middleware/rateLimit');
 const app = express();
 
 app.set('trust proxy', 1);
-app.use(helmet({ contentSecurityPolicy: true }));
+// Story embeds: the default helmet CSP blocks all frames, which would kill
+// YouTube previews. youtube-nocookie is the only third-party frame host;
+// everything else stays at helmet defaults (script-src untouched).
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+      'frame-src': ["'self'", 'https://www.youtube-nocookie.com']
+    }
+  }
+}));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false }));
 app.use(cors);

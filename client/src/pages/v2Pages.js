@@ -63,9 +63,10 @@ export const CONFIGS = {
   },
   content: {
     endpoint: '/api/content', id: 'id_content_entry', eyebrow: 'Log', title: 'Content Log', singular: 'content entry', description: 'Record what you watched, read, listened to, or used for study. Sessions record focused study time.', emptyDescription: 'Content entries record the Japanese media or conversations you spend time with, so you can remember what you studied and how it felt.',
-    // Manual linking controls are hidden from the normal Content Log UX
-    // (Content Log is not merged with Sessions). Backend link endpoints,
-    // relation tables, and stored relationships are fully preserved.
+    linkGroups: ['sessions'],
+    // Stories link to study sessions from the Content Log UX (user-approved
+    // V5.6 addition). Backend link endpoints, relation tables, and stored
+    // relationships are fully preserved.
     fields: [
       { name: 'title', label: 'Title', required: true, maxLength: 255 },
       { name: 'content_type', label: 'Type', required: true, options: options(['Anime', 'Manga', 'Book', 'Article', 'YouTube', 'Podcast', 'Game', 'Conversation'], 'Choose a type') },
@@ -255,7 +256,10 @@ export function renderV2Page(container, kind) {
     if (extract) extract.addEventListener('click', async () => {
       try {
         const result = await apiRequest(`/api/stories/${record[config.id]}/extract`, { method: 'POST' });
-        openEnrollDialog(record[config.id], record.title, result?.extracted);
+        openEnrollDialog(record[config.id], record.title, result?.extracted, {
+          sourceText: record.source_text || null,
+          sourceUrl: record.source_url || null
+        });
       } catch (error) { showToast(error?.message || 'Story has no text to extract from.', 'error'); }
     });
     const del = element('button', { className: 'button-danger', text: 'Delete', attrs: { type: 'button' } }); del.addEventListener('click', () => remove(record));
