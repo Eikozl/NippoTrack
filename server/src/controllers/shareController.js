@@ -5,10 +5,12 @@ const pool = require('../config/db');
 const { ValidationError, sendRouteError } = require('../errors/http');
 const {
   createDeckShare,
+  deckPreview,
   fetchOwnedItems,
   importDeckItems,
   parseDeckShare,
-  sanitizeDeckInput
+  sanitizeDeckInput,
+  selectDeckItems
 } = require('../services/deckSharing');
 
 function signingSecret() {
@@ -50,7 +52,44 @@ async function getDeck(req, res) {
   }
 }
 
+async function postDeckPreview(req, res) {
+  try {
+    const secret = signingSecret();
+    if (!secret) {
+      return res.status(503).json({ error: 'Deck sharing is not configured on this server.' });
+    }
+    const code = req.body?.shareCode;
+    if (typeof code !== 'string' || !code) throw new ValidationError('shareCode must be a non-empty string');
+    const deck = parseDeckShare(code, secret);
+    if (!deck) return res.status(404).json({ error: 'Share code is invalid or expired.' });
+    return res.json(deckPreview(deck));
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to preview the share deck.' });
+  }
+}
+
 async function postDeckImport(req, res) {
+  try {
+    const secret = signingSecret();
+    if (!secret) {
+      return res.status(503).json({ error: 'Deck sharing is not configured on this server.' });
+    }
+    const code = req.body?.shareCode;
+    if (typeof code !== 'string' || !code) throw new ValidationError('shareCode must be a non-empty string');
+    const deck = parseDeckShare(code, secret);
+    if (!deck) return res.status(404).json({ error: 'Share code is invalid or expired.' });
+    const selected = req.body?.selectedItems;
+    const items = selectDeckItems(deck, selected);
+    const result = await importDeckItems(pool, { ...deck, items }, req.user.id);
+    const imported = { vocabulary: 0, kanji: 0, grammar: 0 };
+    imported[deck.entityType] = result.imported;
+    return res.json({ entityType: deck.entityType, imported, skipped: result.skipped, errors: [] });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to import the share deck.' });
+  }
+}
+
+async function postDeckImportByCode(req, res) {
   try {
     const secret = signingSecret();
     if (!secret) {
@@ -65,4 +104,4 @@ async function postDeckImport(req, res) {
   }
 }
 
-module.exports = { getDeck, postDeck, postDeckImport };
+module.exports = { getDeck, postDeck, postDeckImport, postDeckImportByCode, postDeckPreview };

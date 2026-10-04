@@ -2,6 +2,7 @@
 // code as NEW rows in the importer's collection (ids never cross users).
 // HMAC-SHA256 over canonical JSON; the secret is injected (never stored).
 const { createHash, createHmac, timingSafeEqual } = require('node:crypto');
+const { ValidationError } = require('../errors/http');
 
 const DECK_VERSION = 1;
 const DECK_TTL_MS = 90 * 86400000;
@@ -155,13 +156,47 @@ async function importDeckItems(executor, deck, userId) {
   return { imported, skipped };
 }
 
+function deckPreview(deck, ttlMs = DECK_TTL_MS) {
+  const displayOf = (entry) => entry.word || entry.character_kanji || entry.grammar_point || 'item';
+  const readingOf = (entry) => entry.reading || entry.onyomi || entry.kunyomi || null;
+  const createdAt = deck.createdAt;
+  return {
+    title: deck.title || 'Shared deck',
+    description: deck.description || '',
+    itemCount: deck.items.length,
+    items: deck.items.map((entry) => ({
+      entityType: deck.entityType,
+      display: displayOf(entry),
+      reading: readingOf(entry),
+      meaning: entry.meaning || null
+    })),
+    creator: { creatorHash: deck.creator, createdAt },
+    expiresAt: new Date(Date.parse(createdAt) + ttlMs).toISOString()
+  };
+}
+
+// Subset import by 0-based item indices. Throws ValidationError on any
+// out-of-range or non-integer index; duplicates removed, order kept.
+function selectDeckItems(deck, selected) {
+  if (selected === undefined) return deck.items;
+  if (!Array.isArray(selected)) throw new ValidationError('selectedItems must be an array of valid item indices');
+  for (const index of selected) {
+    if (!Number.isInteger(index) || index < 0 || index >= deck.items.length) {
+      throw new ValidationError('selectedItems must be an array of valid item indices');
+    }
+  }
+  return [...new Set(selected)].map((index) => deck.items[index]);
+}
+
 module.exports = {
   DECK_TTL_MS,
   DECK_VERSION,
   MAX_DECK_ITEMS,
   createDeckShare,
+  deckPreview,
   fetchOwnedItems,
   importDeckItems,
   parseDeckShare,
-  sanitizeDeckInput
+  sanitizeDeckInput,
+  selectDeckItems
 };

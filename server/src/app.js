@@ -77,6 +77,8 @@ app.get('/api', (req, res) => {
       'GET /api/insights/history',
       'POST /api/insights/generate',
       'POST /api/share/deck',
+      'POST /api/share/deck/preview',
+      'POST /api/share/deck/import',
       'GET /api/share/deck/:code',
       'POST /api/share/deck/:code/import',
       'POST /api/analyze/text',
