@@ -66,3 +66,4 @@ la fÃ³rmula con nueva spec (rompe los pins verbatim actuales).
 - `node dev.js --integration` full con env cliente integration.
 - Smoke runtime (jlt_runtime) en prod tras desplegar la app.
 - Migraciones 021â€“029 ya en prod: marcar runbook como aplicado.
+- V5.5: INIT_TIMEOUT_MS=60s separado del parseo (3s) en japaneseParser: la carga fría del diccionario es I/O (10-30s en este equipo), no parseo roto; dicts ausentes siguen fallando rápido por el builder. Las 4 suites parser (japanese-parser 8/8 + lexical/context 43/43) pasan.
