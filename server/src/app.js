@@ -23,6 +23,7 @@ const insightsRoutes = require('./routes/insights');
 const shareRoutes = require('./routes/share');
 const decksRoutes = require('./routes/decks');
 const usersRoutes = require('./routes/users');
+const collectionsRoutes = require('./routes/collections');
 const authRoutes = require('./routes/auth');
 const { requireAuthentication } = require('./middleware/authentication');
 const { createRateLimiter } = require('./middleware/rateLimit');
@@ -91,6 +92,14 @@ app.get('/api', (req, res) => {
       'POST /api/decks/:id/suggest',
       'GET /api/decks/:id/suggestions',
       'POST /api/decks/suggestions/:id/decision',
+      'POST /api/collections',
+      'GET /api/collections',
+      'POST /api/collections/import',
+      'GET /api/collections/:id',
+      'POST /api/collections/:id/decks',
+      'DELETE /api/collections/:id/decks/:deckId',
+      'PUT /api/collections/:id/decks',
+      'POST /api/collections/:id/share',
       'GET /api/share/deck/:code',
       'POST /api/share/deck/:code/import',
       'POST /api/analyze/text',
@@ -139,6 +148,7 @@ app.use('/api/insights', insightsRoutes);
 app.use('/api/share', shareRoutes);
 app.use('/api/decks', decksRoutes);
 app.use('/api/users', usersRoutes);
+app.use('/api/collections', collectionsRoutes);
 app.use('/api/level', levelRoutes);
 app.use('/api/first-experience', firstExperienceRoutes);
 app.use('/api/profile', profileRoutes);
