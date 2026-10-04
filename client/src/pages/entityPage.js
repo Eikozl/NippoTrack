@@ -21,6 +21,7 @@ import {
   withPendingAction
 } from '../ui';
 import { iconForTitle, iconTile } from '../icons';
+import { speakJapanese } from '../speech.js';
 
 const JLPT_OPTIONS = [
   { value: '', label: 'Any / not set' },
@@ -129,6 +130,14 @@ export const ENTITY_CONFIGS = {
           ...(example.translation ? [element('p', { className: 'mt-2 text-sm text-muted', text: example.translation })] : []),
           element('button', { className: 'button-secondary mt-3 min-h-9 px-3 py-1.5', text: 'Edit example', attrs: { type: 'button', 'data-example-action': 'edit', 'data-example-id': example.id_usage_example } })
         ]))) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No examples recorded yet.' })
+      ]),
+      element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'data-vocab-cloze': 'true' } }, [
+        element('h3', { className: 'font-semibold text-ink', text: 'Cloze Practice' }),
+        element('p', { className: 'mt-2 text-sm text-muted', text: 'Loading cloze sentences from your saved examples…' })
+      ]),
+      element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'data-vocab-tags': 'true' } }, [
+        element('h3', { className: 'font-semibold text-ink', text: 'Tags' }),
+        element('p', { className: 'mt-2 text-sm text-muted', text: 'Loading tags…' })
       ]),
       element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'data-grammar-example-context': 'true' } }, [
         element('h3', { className: 'font-semibold text-ink', text: 'Grammar in your examples' }),
@@ -885,6 +894,119 @@ export function renderEntityPage(container, config) {
           });
           if (data.truncated) grammarSlot.append(element('p', { className: 'mt-2 text-xs text-muted', text: 'Only the first bounded set of saved examples was analyzed.' }));
         }).catch(() => grammarSlot.replaceChildren(element('h3', { className: 'font-semibold text-ink', text: 'Grammar in your examples' }), element('p', { className: 'mt-2 text-sm text-muted', text: 'Grammar analysis is unavailable.' })));
+      }
+      const clozeSlot = content.querySelector('[data-vocab-cloze]');
+      if (clozeSlot && config === ENTITY_CONFIGS.vocabulary) {
+        const vocabId = record.id_vocabulary;
+        const foldKana = (value) => String(value || '').replace(/[ァ-ヶ]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0x60));
+        const normAnswer = (value) => foldKana(String(value || '').trim().toLowerCase()).replace(/\s+/g, '');
+        const playCloze = (sentence) => {
+          const verdict = speakJapanese(sentence, {
+            synthesis: typeof window !== 'undefined' ? window.speechSynthesis : null,
+            Utterance: typeof window !== 'undefined' ? window.SpeechSynthesisUtterance : null
+          });
+          if (!verdict.ok) showToast(verdict.message || 'Audio playback is unavailable.', 'error');
+        };
+        apiRequest(`/api/vocabulary/${vocabId}/cloze`).then((data) => {
+          const sentences = Array.isArray(data?.sentences) ? data.sentences : [];
+          clozeSlot.replaceChildren(element('h3', { className: 'font-semibold text-ink', text: 'Cloze Practice' }));
+          if (!sentences.length) {
+            clozeSlot.append(element('p', { className: 'mt-2 text-sm text-muted', text: 'No cloze sentences yet — add a usage example containing this word.' }));
+            return;
+          }
+          clozeSlot.append(element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: 'Fill the blank from memory. Practice only — nothing is graded.' }));
+          clozeSlot.append(element('div', { className: 'mt-3 grid gap-3' }, sentences.map((entry) => {
+            const answer = String(data?.item?.word || '');
+            const reading = String(data?.item?.reading || '');
+            const input = element('input', { className: 'field-control', attrs: { type: 'text', 'aria-label': 'Type the missing word', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' } });
+            const verdict = element('p', { className: 'text-sm leading-6 text-ink', attrs: { 'aria-live': 'polite' } });
+            verdict.hidden = true;
+            const reveal = element('p', { className: 'break-words font-jp text-sm leading-7 text-ink', attrs: { lang: 'ja' } });
+            reveal.hidden = true;
+            const check = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-sm', text: 'Check', attrs: { type: 'button' } });
+            const runCheck = () => {
+              const typed = input.value || '';
+              if (!String(typed).trim()) {
+                verdict.hidden = false;
+                verdict.textContent = 'Type something first.';
+                return;
+              }
+              const want = [answer, reading].map(normAnswer).filter(Boolean);
+              if (want.includes(normAnswer(typed))) {
+                verdict.hidden = false;
+                verdict.textContent = 'That matches! The full sentence is below.';
+                reveal.hidden = false;
+                reveal.textContent = entry.sentence;
+              } else {
+                verdict.hidden = false;
+                verdict.textContent = 'Not quite — try again.';
+                reveal.hidden = true;
+              }
+            };
+            check.addEventListener('click', runCheck);
+            input.addEventListener('keydown', (event) => {
+              if (event.key === 'Enter') { event.preventDefault(); check.click(); }
+            });
+            const play = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-sm', text: 'Play', attrs: { type: 'button', 'aria-label': `Play cloze sentence aloud` } });
+            play.addEventListener('click', () => playCloze(entry.sentence));
+            return element('article', { className: 'rounded-md bg-paper p-3' }, [
+              element('p', { className: 'break-words font-jp text-base leading-8 text-ink', text: entry.cloze, attrs: { lang: 'ja' } }),
+              ...(entry.translation ? [element('p', { className: 'mt-1 text-sm text-muted', text: entry.translation })] : []),
+              element('div', { className: 'mt-2 flex flex-col gap-2 sm:flex-row' }, [input, check, play]),
+              verdict,
+              reveal
+            ]);
+          })));
+        }).catch(() => clozeSlot.replaceChildren(
+          element('h3', { className: 'font-semibold text-ink', text: 'Cloze Practice' }),
+          element('p', { className: 'mt-2 text-sm text-muted', text: 'Cloze sentences are unavailable.' })
+        ));
+      }
+      const tagsSlot = content.querySelector('[data-vocab-tags]');
+      if (tagsSlot && config === ENTITY_CONFIGS.vocabulary) {
+        const vocabId = record.id_vocabulary;
+        const renderTags = (tags) => {
+          const assigned = Array.isArray(tags?.assigned) ? tags.assigned : [];
+          const suggested = Array.isArray(tags?.suggested) ? tags.suggested : [];
+          tagsSlot.replaceChildren(
+            element('h3', { className: 'font-semibold text-ink', text: 'Tags' }),
+            element('div', { className: 'mt-2 flex flex-wrap gap-2' }, assigned.length
+              ? assigned.map((tag) => element('span', { className: 'status-pill text-xs', text: tag.name }))
+              : [element('p', { className: 'text-sm text-muted', text: 'No tags yet.' })])
+          );
+          if (suggested.length) {
+            tagsSlot.append(element('p', { className: 'mt-3 text-xs font-semibold text-muted uppercase tracking-wide', text: 'Suggested' }));
+            const row = element('div', { className: 'mt-1 flex flex-wrap gap-2' });
+            for (const name of suggested) {
+              const add = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: `Add ${name}`, attrs: { type: 'button' } });
+              add.addEventListener('click', () => {
+                const current = assigned.map((tag) => tag.name).concat([name]);
+                apiRequest(`/api/vocabulary/${vocabId}/tags`, { method: 'PUT', body: { tags: current } })
+                  .then((saved) => renderTags({ assigned: saved.assigned, suggested: suggested.filter((entry) => entry !== name) }))
+                  .catch((error) => showToast(error?.message || 'Unable to add tag.', 'error'));
+              });
+              row.appendChild(add);
+            }
+            tagsSlot.appendChild(row);
+          }
+          const custom = element('input', { className: 'field-control mt-3', attrs: { type: 'text', 'aria-label': 'Add a custom tag', placeholder: 'Custom tag…', maxLength: '60' } });
+          const addCustom = element('button', { className: 'button-secondary mt-2 min-h-9 px-3 py-1.5 text-sm', text: 'Add tag', attrs: { type: 'button' } });
+          addCustom.addEventListener('click', () => {
+            const name = String(custom.value || '').trim();
+            if (!name) return;
+            const current = assigned.map((tag) => tag.name).concat([name]);
+            apiRequest(`/api/vocabulary/${vocabId}/tags`, { method: 'PUT', body: { tags: current } })
+              .then((saved) => renderTags({ assigned: saved.assigned, suggested }))
+              .catch((error) => showToast(error?.message || 'Unable to add tag.', 'error'));
+          });
+          tagsSlot.append(custom, addCustom);
+        };
+        apiRequest(`/api/vocabulary/${vocabId}/tags`)
+          .then(renderTags)
+          .catch(() => tagsSlot.replaceChildren(
+            element('h3', { className: 'font-semibold text-ink', text: 'Tags' }),
+            element('p', { className: 'mt-2 text-sm text-muted', text: 'Tags are unavailable.' })
+          ));
       }
       const vocabularySlot = content.querySelector('[data-vocabulary-example-context]');
       if (vocabularySlot && config === ENTITY_CONFIGS.grammar) {

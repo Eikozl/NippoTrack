@@ -8,6 +8,8 @@ router.post('/autofill/entry', autofillController.postAutofillEntry);
 router.post('/autofill', autofillController.postAutofill);
 router.get('/options', controller.listVocabularyOptions);
 router.get('/:id/grammar-context', controller.getVocabularyGrammarContext);
+router.get('/:id/cloze', controller.getVocabularyCloze);
+router.route('/:id/tags').get(controller.getVocabularyTags).put(controller.putVocabularyTags);
 router.route('/').get(controller.listVocabulary).post(controller.createVocabulary);
 router.post('/:id/examples', controller.createVocabularyExample);
 router.put('/:id/examples/:exampleId', controller.updateVocabularyExample);
