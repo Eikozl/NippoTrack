@@ -129,3 +129,4 @@ DB viva (no contra el baseline). LecciÃ³n: smokes live antes de asumir DDL.
 - Verifier dev: 48 tablas / 52 policies / 23 triggers / failures []
 - Git: dev limpio salvo .opencode/ + pnpm-lock.yaml (untracked
   permitidos); master 3c7a422 intacto; sin merges; sin deps nuevas
+- Post-cierre: JLT_DECK_SHARE_SECRET generado en server/.env.development (gitignored, solo dev) + API reiniciada; Share/Import dejan el 503. Practice strokes también en recognition-kanji (antes solo recall).

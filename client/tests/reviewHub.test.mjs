@@ -1563,6 +1563,23 @@ test('Review 3.0 recall kanji: Practice strokes opens the writing overlay', asyn
   assert.match(harness.openDialogCalls[harness.openDialogCalls.length - 1]?.title || '', /Practice strokes/, 'practice opens in a dialog');
 });
 
+test('Review 3.0 recognition kanji: Practice strokes also offered', async () => {
+  const item = candidateItem({ entityType: 'kanji', entityId: 62, display: '水', reading: 'すい', meaning: 'water', strength: 'strong' });
+  const { harness, container } = await startWithSingleItem({
+    item,
+    typesPayload: {
+      availableTypes: ['recognition', 'recall'],
+      userPreferences: { cardTypes: ['recognition'], weights: {}, engineMode: 'fixed', autoPick: false }
+    }
+  });
+  assert.match(pillText(container), /Recognition/);
+  const practice = findFirstButtonByText(container, 'Practice strokes');
+  assert.ok(practice, 'recognition kanji front offers stroke practice');
+  await clickAndSettle(practice);
+  assert.equal(harness.mountCalls.length, 1, 'writing overlay mounted once');
+  assert.equal(harness.mountCalls[0][1]?.character, '水', 'overlay receives the kanji');
+});
+
 test('Review 3.0 audio: mismatch keeps reveal locked and never discloses the word', async () => {
   const item = candidateItem({ entityType: 'vocabulary', entityId: 74, display: '水', reading: 'みず', meaning: 'water', strength: 'strong' });
   const { harness, container } = await startWithSingleItem({

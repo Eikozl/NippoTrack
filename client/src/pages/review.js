@@ -1696,8 +1696,8 @@ const CARD_TYPE_DESCRIPTIONS = {
     function buildAnswer() {
       if (answerBuilt) return;
       answerBuilt = true;
-      if (cardType === 'cloze') {
-        filledLine = element('p', { className: 'break-words text-base leading-8 text-ink', text: clozeFilled || String(item.display || ''), attrs: { lang: 'ja' } });
+    if (cardType === 'cloze') {
+      filledLine = element('p', { className: 'break-words text-base leading-8 text-ink', text: clozeFilled || String(item.display || ''), attrs: { lang: 'ja' } });
         answerWrap.appendChild(filledLine);
       }
       if (cardType !== 'recognition') {
@@ -1746,6 +1746,26 @@ const CARD_TYPE_DESCRIPTIONS = {
       }
     });
 
+    // Kanji cards (recognition and recall) can open the handwriting
+    // overlay: order-only practice, grading stays with the buttons.
+    const singleKanji = item.entityType === 'kanji' && typeof item.display === 'string' && /^\p{Script=Han}$/u.test(item.display);
+    const appendStrokePractice = () => {
+      if (!singleKanji) return;
+      const practiceButton = element('button', { className: 'button-secondary min-h-10 px-4 py-2 text-sm', text: 'Practice strokes', attrs: { type: 'button' } });
+      practiceButton.addEventListener('click', () => {
+        const holder = element('div', { className: 'grid gap-3' });
+        const closePractice = openDialog({
+          title: `Practice strokes: ${item.display}`,
+          description: 'Trace in stroke order. Practice only — nothing is graded.',
+          content: [holder],
+          submitLabel: 'Done',
+          onSubmit: async (form, closeDialog) => { closeDialog(); }
+        });
+        mountKanjiWriting(holder, { character: item.display, onDone: closePractice });
+      });
+      frontWrap.append(practiceButton);
+    };
+
     if (cardType === 'cloze') {
       const sentenceLine = element('p', { className: 'mb-3 break-words text-base leading-8 text-ink', text: 'Loading sentence…', attrs: { lang: 'ja' } });
       frontWrap.appendChild(sentenceLine);
@@ -1768,23 +1788,7 @@ const CARD_TYPE_DESCRIPTIONS = {
     } else if (cardType === 'recall') {
       const built = buildAnswerInput();
       frontWrap.append(built.row, frontResult);
-      // Kanji recall can open the handwriting overlay (order-only practice;
-      // grading stays with the buttons).
-      if (item.entityType === 'kanji' && typeof item.display === 'string' && /^\p{Script=Han}$/u.test(item.display)) {
-        const practiceButton = element('button', { className: 'button-secondary min-h-10 px-4 py-2 text-sm', text: 'Practice strokes', attrs: { type: 'button' } });
-        practiceButton.addEventListener('click', () => {
-          const holder = element('div', { className: 'grid gap-3' });
-          const closePractice = openDialog({
-            title: `Practice strokes: ${item.display}`,
-            description: 'Trace in stroke order. Practice only — nothing is graded.',
-            content: [holder],
-            submitLabel: 'Done',
-            onSubmit: async (form, closeDialog) => { closeDialog(); }
-          });
-          mountKanjiWriting(holder, { character: item.display, onDone: closePractice });
-        });
-        frontWrap.append(practiceButton);
-      }
+      appendStrokePractice();
       frontWrap.append(revealButton);
     } else if (cardType === 'audio') {
       // No Japanese voice on the device: the listening task is impossible,
@@ -1851,6 +1855,7 @@ const CARD_TYPE_DESCRIPTIONS = {
         if (audioVoiceStatus() === 'unknown') confirmVoicesInBackground();
       }
     } else {
+      appendStrokePractice();
       frontWrap.appendChild(revealButton);
     }
 
