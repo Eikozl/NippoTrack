@@ -130,6 +130,55 @@ async function setDeckFollow(executor, deckId, followerId, follow) {
   return { following: Boolean(follow), followers: Number(count?.[0]?.followers || 0) };
 }
 
+// Owner-only analytics from data the platform actually holds: follows over
+// time (deck_follows is timestamped), suggestion decisions, item count.
+// No geography/device tracking by design (privacy-first); per-item follower
+// performance is unavailable because snapshots carry no shared identity.
+async function getDeckAnalytics(executor, deckId, viewerId, { period = '30d' } = {}) {
+  const validPeriods = { '7d': 7, '30d': 30, '90d': 90, all: null };
+  const days = Object.hasOwn(validPeriods, period) ? validPeriods[period] : 30;
+  const [rows] = await executor.execute(
+    'SELECT id_deck_publication AS id, owner_id, title FROM deck_publications WHERE id_deck_publication = ?',
+    [deckId]
+  );
+  const deck = Array.isArray(rows) ? rows[0] : null;
+  if (!deck || String(deck.owner_id) !== String(viewerId)) return null;
+  const since = days === null ? null : new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  const [follows] = await executor.execute(
+    `SELECT COUNT(*) AS total FROM deck_follows WHERE id_deck_publication = ?${since ? ' AND created_at >= ?' : ''}`,
+    since ? [deckId, since] : [deckId]
+  );
+  const [daily] = await executor.execute(
+    `SELECT SUBSTRING(CAST(created_at AS VARCHAR), 1, 10) AS day, COUNT(*) AS follows
+     FROM deck_follows WHERE id_deck_publication = ?${since ? ' AND created_at >= ?' : ''}
+     GROUP BY 1 ORDER BY 1 ASC`,
+    since ? [deckId, since] : [deckId]
+  );
+  const [suggestions] = await executor.execute(
+    `SELECT status, COUNT(*) AS total FROM deck_suggestions WHERE id_deck_publication = ? GROUP BY status`,
+    [deckId]
+  );
+  const [items] = await executor.execute(
+    'SELECT COUNT(*) AS total FROM deck_publication_items WHERE id_deck_publication = ?',
+    [deckId]
+  );
+  const byStatus = { pending: 0, accepted: 0, rejected: 0 };
+  for (const row of Array.isArray(suggestions) ? suggestions : []) {
+    if (row.status in byStatus) byStatus[row.status] = Number(row.total || 0);
+  }
+  return {
+    deckId: Number(deck.id),
+    title: deck.title,
+    period: days === null ? 'all' : `${days}d`,
+    overview: {
+      followers: Number(follows?.[0]?.total || 0),
+      suggestions: byStatus,
+      items: Number(items?.[0]?.total || 0)
+    },
+    followersByDay: (Array.isArray(daily) ? daily : []).map((row) => ({ date: row.day, follows: Number(row.follows || 0) }))
+  };
+}
+
 const USERNAME_PATTERN = /^[a-z0-9][a-z0-9-]{1,29}$/;
 
 async function getPublicProfile(executor, username) {
@@ -162,6 +211,7 @@ async function getPublicProfile(executor, username) {
 
 module.exports = {
   displayOf,
+  getDeckAnalytics,
   getDeckPublication,
   getPublicProfile,
   listPublicDecks,

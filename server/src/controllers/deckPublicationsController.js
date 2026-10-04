@@ -4,6 +4,7 @@ const pool = require('../config/db');
 const { sendRouteError } = require('../errors/http');
 const { parseIdParam } = require('../validation');
 const {
+  getDeckAnalytics,
   getDeckPublication,
   getPublicProfile,
   listPublicDecks,
@@ -40,6 +41,17 @@ async function getDeck(req, res) {
     return res.json(deck);
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load the deck.' });
+  }
+}
+
+async function getAnalytics(req, res) {
+  try {
+    const id = parseIdParam(req, 'deck');
+    const analytics = await getDeckAnalytics(pool, id, req.user.id, { period: req.query?.period });
+    if (!analytics) return res.status(404).json({ error: 'deck not found' });
+    return res.json(analytics);
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load deck analytics.' });
   }
 }
 
@@ -158,6 +170,7 @@ async function listPublicUserDecks(req, res) {
 
 module.exports = {
   deleteFollow,
+  getAnalytics,
   getDeck,
   getPublicUser,
   listDecks,

@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  getDeckAnalytics,
   getDeckPublication,
   getPublicProfile,
   listPublicDecks,
@@ -95,4 +96,33 @@ test('public profiles gate on username, visibility and format', async () => {
   assert.equal(upper?.username, 'upper', 'usernames normalize to lowercase');
   assert.equal(await getPublicProfile(store, 'has space'), null);
   assert.equal(await getPublicProfile(store, 'x'), null);
+});
+
+test('deck analytics are owner-only with daily follows and suggestion counts', async () => {
+  const deck = { id: 7, owner_id: 'owner-1', title: 'Open' };
+  const executor = {
+    async execute(sql) {
+      if (/FROM deck_publications WHERE id_deck_publication/.test(sql)) return [[deck]];
+      if (/FROM deck_follows WHERE id_deck_publication/.test(sql) && /GROUP BY/.test(sql)) {
+        return [[{ day: '2026-09-30', follows: 2 }, { day: '2026-10-01', follows: 1 }]];
+      }
+      if (/FROM deck_follows WHERE id_deck_publication/.test(sql)) return [[{ total: 3 }]];
+      if (/FROM deck_suggestions WHERE/.test(sql)) {
+        return [[{ status: 'pending', total: 1 }, { status: 'accepted', total: 2 }]];
+      }
+      if (/FROM deck_publication_items WHERE/.test(sql)) return [[{ total: 10 }]];
+      throw new Error(`unexpected SQL in analytics test: ${sql.slice(0, 60)}`);
+    }
+  };
+  const analytics = await getDeckAnalytics(executor, 7, 'owner-1', { period: '7d' });
+  assert.equal(analytics.period, '7d');
+  assert.equal(analytics.overview.followers, 3);
+  assert.deepEqual(analytics.overview.suggestions, { pending: 1, accepted: 2, rejected: 0 });
+  assert.equal(analytics.overview.items, 10);
+  assert.deepEqual(analytics.followersByDay, [
+    { date: '2026-09-30', follows: 2 },
+    { date: '2026-10-01', follows: 1 }
+  ]);
+  assert.equal(await getDeckAnalytics(executor, 7, 'stranger-9', {}), null);
+  assert.equal((await getDeckAnalytics(executor, 7, 'owner-1', { period: 'bogus' })).period, '30d');
 });

@@ -5,6 +5,7 @@ const router = express.Router();
 router.post('/', controller.postPublish);
 router.get('/', controller.listDecks);
 router.get('/:id', controller.getDeck);
+router.get('/:id/analytics', controller.getAnalytics);
 router.post('/:id/follow', controller.postFollow);
 router.delete('/:id/follow', controller.deleteFollow);
 router.post('/:id/suggest', controller.postSuggest);

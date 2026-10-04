@@ -645,7 +645,9 @@ export function renderEntityPage(container, config) {
   const shareableType = { '/api/vocabulary': 'vocabulary', '/api/kanji': 'kanji', '/api/grammar': 'grammar' }[config.endpoint] || null;
   const deckBar = shareableType ? element('div', { className: 'mb-5 flex flex-col gap-2 sm:flex-row' }, [
     element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-sm', text: 'Share deck', attrs: { type: 'button', 'data-deck-action': 'share' } }),
-    element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-sm', text: 'Import deck', attrs: { type: 'button', 'data-deck-action': 'import' } })
+    element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-sm', text: 'Import deck', attrs: { type: 'button', 'data-deck-action': 'import' } }),
+    element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-sm', text: 'Publish deck', attrs: { type: 'button', 'data-deck-action': 'publish' } }),
+    element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-sm', text: 'Browse decks', attrs: { type: 'button', 'data-deck-action': 'browse' } })
   ]) : null;
   const page = element('section', {}, [
     pageHeader({ eyebrow: config.eyebrow, title: config.title, description: config.description, action: addButton }),
@@ -834,6 +836,97 @@ export function renderEntityPage(container, config) {
   };
   deckBar?.querySelector('[data-deck-action="share"]')?.addEventListener('click', openShareDeck);
   deckBar?.querySelector('[data-deck-action="import"]')?.addEventListener('click', openImportDeck);
+  const openPublishDeck = () => {
+    if (!lastItems.length) { showToast('Nothing to publish on this page.', 'error'); return; }
+    const boxes = lastItems.map((item) => {
+      const box = element('input', { attrs: { type: 'checkbox', 'aria-label': `Include ${config.primary(item)}` } });
+      box.checked = true;
+      return { id: item[config.idKey], label: config.primary(item), box };
+    });
+    const titleInput = element('input', { className: 'field-control', attrs: { type: 'text', 'aria-label': 'Deck title', placeholder: 'Deck title', maxLength: '120' } });
+    const descriptionInput = element('textarea', { className: 'field-control', attrs: { 'aria-label': 'Deck description', placeholder: 'Description (optional)', maxLength: '500' } });
+    const publish = element('button', { className: 'button-primary min-h-9 px-3 py-1.5 text-sm', text: 'Publish', attrs: { type: 'button' } });
+    publish.addEventListener('click', () => {
+      const ids = boxes.filter(({ box }) => box.checked).map(({ id }) => id);
+      const title = String(titleInput.value || '').trim();
+      if (!ids.length) { showToast('Select at least one item.', 'error'); return; }
+      if (!title) { showToast('Give the deck a title.', 'error'); return; }
+      withPendingAction(publish, async () => {
+        const deck = await apiRequest('/api/decks', { method: 'POST', body: { entityType: shareableType, ids, title, description: descriptionInput.value } });
+        showToast(`Deck published (${deck.itemCount} items).`);
+      }).catch((error) => showToast(error?.message || 'Unable to publish the deck.', 'error'));
+    });
+    openDialog({
+      title: `Publish ${config.title} deck`,
+      description: 'Published decks are public and followable. Items are snapshotted — later edits stay yours.',
+      content: [
+        element('div', { className: 'grid gap-1.5' }, boxes.map(({ label, box }) => element('label', { className: 'flex items-center gap-2 text-sm text-ink' }, [box, element('span', { text: label })]))),
+        titleInput,
+        descriptionInput,
+        publish
+      ],
+      submitLabel: 'Close',
+      onSubmit: async (form, close) => { close(); }
+    });
+  };
+  const openBrowseDecks = () => {
+    const list = element('div', { className: 'grid gap-2' }, [
+      element('p', { className: 'text-sm text-muted', text: 'Loading public decks…' })
+    ]);
+    const renderBrowser = (decks) => {
+      if (!decks.length) {
+        list.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'No public decks yet. Publish the first one.' }));
+        return;
+      }
+      list.replaceChildren(element('div', { className: 'grid gap-3' }, decks.map((deck) => {
+        const follow = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Follow', attrs: { type: 'button' } });
+        follow.addEventListener('click', () => {
+          withPendingAction(follow, async () => {
+            const result = await apiRequest(`/api/decks/${deck.id}/follow`, { method: 'POST' });
+            showToast(`Following (${result.followers} followers).`);
+          }).catch((error) => showToast(error?.message || 'Unable to follow the deck.', 'error'));
+        });
+        const view = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'View items', attrs: { type: 'button' } });
+        view.addEventListener('click', () => {
+          apiRequest(`/api/decks/${deck.id}`)
+            .then((detail) => {
+              const items = Array.isArray(detail.items) ? detail.items : [];
+              openDialog({
+                title: detail.title || 'Deck',
+                description: detail.description || '',
+                content: [
+                  element('ul', { className: 'grid max-h-56 gap-1 overflow-y-auto text-sm text-ink', attrs: { role: 'list' } }, items.map((entry) => {
+                    const item = entry.word || entry.character_kanji || entry.grammar_point || 'item';
+                    return element('li', { text: item });
+                  }))
+                ],
+                submitLabel: 'Close',
+                onSubmit: async (form, close) => { close(); }
+              });
+            })
+            .catch((error) => showToast(error?.message || 'Unable to load the deck.', 'error'));
+        });
+        return element('article', { className: 'rounded-md bg-paper p-3' }, [
+          element('p', { className: 'font-medium text-ink', text: `${deck.title} · ${deck.entityType}` }),
+          ...(deck.description ? [element('p', { className: 'mt-1 text-sm text-muted', text: deck.description })] : []),
+          element('p', { className: 'mt-1 text-xs text-muted', text: `${deck.itemCount} items · ${deck.followers} followers` }),
+          element('div', { className: 'mt-2 flex flex-col gap-2 sm:flex-row' }, [follow, view])
+        ]);
+      })));
+    };
+    apiRequest('/api/decks?limit=20')
+      .then((data) => renderBrowser(Array.isArray(data?.items) ? data.items : []))
+      .catch(() => list.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Public decks are unavailable.' })));
+    openDialog({
+      title: 'Browse public decks',
+      description: 'Follow decks you like. Publishing snapshots your items.',
+      content: [list],
+      submitLabel: 'Close',
+      onSubmit: async (form, close) => { close(); }
+    });
+  };
+  deckBar?.querySelector('[data-deck-action="publish"]')?.addEventListener('click', openPublishDeck);
+  deckBar?.querySelector('[data-deck-action="browse"]')?.addEventListener('click', openBrowseDecks);
 
   async function saveRecord(record, form, close, { onDuplicateKanji } = {}) {
     const id = record?.[config.idKey];

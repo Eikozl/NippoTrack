@@ -87,6 +87,7 @@ app.get('/api', (req, res) => {
       'POST /api/decks',
       'GET /api/decks',
       'GET /api/decks/:id',
+      'GET /api/decks/:id/analytics',
       'POST /api/decks/:id/follow',
       'DELETE /api/decks/:id/follow',
       'POST /api/decks/:id/suggest',
