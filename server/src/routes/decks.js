@@ -7,5 +7,8 @@ router.get('/', controller.listDecks);
 router.get('/:id', controller.getDeck);
 router.post('/:id/follow', controller.postFollow);
 router.delete('/:id/follow', controller.deleteFollow);
+router.post('/:id/suggest', controller.postSuggest);
+router.get('/:id/suggestions', controller.listSuggest);
+router.post('/suggestions/:id/decision', controller.postDecide);
 
 module.exports = router;

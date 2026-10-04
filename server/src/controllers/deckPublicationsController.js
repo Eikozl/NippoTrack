@@ -10,6 +10,11 @@ const {
   publishDeck,
   setDeckFollow
 } = require('../services/deckPublications');
+const {
+  createSuggestion,
+  decideSuggestion,
+  listSuggestions
+} = require('../services/deckSuggestions');
 
 async function postPublish(req, res) {
   try {
@@ -73,6 +78,39 @@ async function deleteFollow(req, res) {
   }
 }
 
+async function postSuggest(req, res) {
+  try {
+    const id = parseIdParam(req, 'deck');
+    const result = await createSuggestion(pool, id, req.user.id, req.body?.suggestedChanges);
+    if (!result) return res.status(404).json({ error: 'deck not found' });
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to submit the suggestion.' });
+  }
+}
+
+async function listSuggest(req, res) {
+  try {
+    const id = parseIdParam(req, 'deck');
+    const items = await listSuggestions(pool, id, req.user.id);
+    if (!items) return res.status(404).json({ error: 'deck not found' });
+    return res.json({ items });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to list suggestions.' });
+  }
+}
+
+async function postDecide(req, res) {
+  try {
+    const id = parseIdParam(req, 'suggestion');
+    const result = await decideSuggestion(pool, id, req.user.id, req.body || {});
+    if (!result) return res.status(404).json({ error: 'suggestion not found' });
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to decide the suggestion.' });
+  }
+}
+
 async function getPublicUser(req, res) {
   try {
     const profile = await getPublicProfile(pool, req.params.username);
@@ -124,6 +162,9 @@ module.exports = {
   getPublicUser,
   listDecks,
   listPublicUserDecks,
+  listSuggest,
+  postDecide,
   postFollow,
-  postPublish
+  postPublish,
+  postSuggest
 };
