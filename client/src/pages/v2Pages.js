@@ -254,13 +254,23 @@ export function renderV2Page(container, kind) {
     links?.addEventListener('click', () => openLinks(record));
     const extract = kind === 'content' ? element('button', { className: 'button-secondary min-h-9 px-3 py-1.5', text: 'Extract', attrs: { type: 'button', 'aria-label': `Extract linguistic value from ${record.title || 'entry'}` } }) : null;
     if (extract) extract.addEventListener('click', async () => {
+      // Cold engine init can take ~30s: visible progress so the click never
+      // feels dead. Restored in finally, success or failure.
+      const original = extract.textContent;
+      extract.disabled = true;
+      extract.textContent = 'Extracting…';
       try {
         const result = await apiRequest(`/api/stories/${record[config.id]}/extract`, { method: 'POST' });
         openEnrollDialog(record[config.id], record.title, result?.extracted, {
           sourceText: record.source_text || null,
           sourceUrl: record.source_url || null
         });
-      } catch (error) { showToast(error?.message || 'Story has no text to extract from.', 'error'); }
+      } catch (error) {
+        showToast(error?.message || 'Story has no text to extract from.', 'error');
+      } finally {
+        extract.disabled = false;
+        extract.textContent = original;
+      }
     });
     const del = element('button', { className: 'button-danger', text: 'Delete', attrs: { type: 'button' } }); del.addEventListener('click', () => remove(record));
     const actions = [links, extract, del, edit].filter(Boolean);

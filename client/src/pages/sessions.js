@@ -532,7 +532,8 @@ export function renderSessions(container) {
           relatedList('Vocabulary', record.vocabulary, (item) => item.word, (item) => item.meaning),
           relatedList('Kanji', record.kanji, (item) => item.character_kanji, (item) => item.meaning),
           relatedList('Grammar', record.grammar, (item) => item.grammar_point, (item) => item.meaning)
-        ])
+        ]),
+        ...((record.stories || []).length ? [relatedList('Stories', record.stories, (item) => item.title, (item) => item.content_type)] : [])
       ]);
       openDialog({ title: 'Study session detail', content: [details], submitLabel: 'Close', onSubmit: async (form, close) => close() });
     } catch (error) {

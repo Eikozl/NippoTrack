@@ -2,6 +2,7 @@
 // checkboxes with TTS preview, server-id enrollment. No fetching here.
 import { apiRequest } from '../api';
 import { element, openDialog, showToast, withPendingAction } from '../ui';
+import { icon } from '../icons';
 import { speakJapanese } from '../speech.js';
 
 function smallButton(label, ariaLabel) {
@@ -40,7 +41,7 @@ export function openEnrollDialog(storyId, storyTitle, preview, meta = {}) {
     return element('div', { className: 'grid gap-1.5' }, [
       element('p', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: `${label} (${entries.length})` }),
       element('div', { className: 'grid max-h-44 gap-1 overflow-y-auto' }, entries.map((entry, index) => {
-        const play = smallButton('Play', `Play ${candidateLabel(kind, entry)} aloud`);
+        const play = element('button', { className: 'icon-button shrink-0', attrs: { type: 'button', 'aria-label': `Play ${candidateLabel(kind, entry)} aloud` } }, [icon('volume', { size: 18 })]);
         play.addEventListener('click', () => {
           const word = kind === 'kanji' ? entry.char : kind === 'vocab' ? entry.word : entry.pattern;
           const verdict = speakJapanese(word, { ...speechPieces() });
@@ -67,6 +68,21 @@ export function openEnrollDialog(storyId, storyTitle, preview, meta = {}) {
       const result = await apiRequest(`/api/stories/${storyId}/enroll-srs`, { method: 'POST', body: { selected } });
       const items = Array.isArray(result.items) ? result.items : [];
       const reviewNow = element('button', { className: 'button-primary min-h-9 px-3 py-1.5 text-sm', text: 'Review these now', attrs: { type: 'button' } });
+      const closeEnroll = openDialog({
+        title: `Enroll from ${storyTitle}`,
+        description: 'Checked rows become SRS review items. Practice only until graded.',
+        content: [dialogStackLike()],
+        submitLabel: 'Close',
+        onSubmit: async (form, close) => { close(); }
+      });
+      function dialogStackLike() {
+        return element('div', { className: 'grid gap-3 sm:col-span-2' }, [
+          ...sourceBlock(meta),
+          ...sections,
+          enroll,
+          resultBox
+        ]);
+      }
       reviewNow.addEventListener('click', () => {
         try {
           if (typeof window !== 'undefined' && window.sessionStorage && result.reviewSessionId && Array.isArray(result.queueItems)) {
@@ -74,11 +90,15 @@ export function openEnrollDialog(storyId, storyTitle, preview, meta = {}) {
               reviewSessionId: Number(result.reviewSessionId),
               items: result.queueItems
             }));
+            closeEnroll();
             window.location.hash = `#review?reviewSessionId=${Number(result.reviewSessionId)}`;
             return;
           }
         } catch { /* storage blocked: fall back to the review page */ }
-        if (typeof window !== 'undefined') window.location.hash = 'review';
+        if (typeof window !== 'undefined') {
+          closeEnroll();
+          window.location.hash = 'review';
+        }
       });
       resultBox.replaceChildren(
         element('p', { className: 'text-sm font-semibold text-ink', text: `Enrolled ${result.created} review item${result.created === 1 ? '' : 's'}:` }),
@@ -87,13 +107,6 @@ export function openEnrollDialog(storyId, storyTitle, preview, meta = {}) {
       );
     }).catch((error) => showToast(error?.message || 'Unable to enroll.', 'error'));
   });
-  openDialog({
-    title: `Enroll from ${storyTitle}`,
-    description: 'Checked rows become SRS review items. Practice only until graded.',
-    content: [...sourceBlock(meta), ...sections, enroll, resultBox],
-    submitLabel: 'Close',
-    onSubmit: async (form, close) => { close(); }
-  });
 }
 
 // Source context: the text being mined, its URL, and a YouTube player when
@@ -101,7 +114,7 @@ export function openEnrollDialog(storyId, storyTitle, preview, meta = {}) {
 // playback, presentation for fullscreen).
 export function youtubeVideoId(url) {
   try {
-    const parsed = new URL(String(url || ''));
+    const parsed = new URL(String(url || '').trim());
     const host = parsed.hostname.replace(/^www\./, '');
     if (host === 'youtu.be') return parsed.pathname.slice(1).split(/[?#]/)[0] || null;
     if (host === 'youtube.com' || host === 'youtube-nocookie.com' || host.endsWith('.youtube.com')) {

@@ -12,6 +12,12 @@ function smallButton(label, ariaLabel) {
   return element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: label, attrs: { type: 'button', 'aria-label': ariaLabel || label } });
 }
 
+// openDialog lays content in a 2-column grid on sm+: custom bodies must
+// arrive as ONE full-width node or the grid tears them apart.
+function dialogStack(nodes) {
+  return element('div', { className: 'grid gap-3 sm:col-span-2' }, nodes);
+}
+
 function speechPieces() {
   const hasWindow = typeof window !== 'undefined';
   return {
@@ -63,13 +69,13 @@ function readingOf(entry) {
   return entry.reading || entry.onyomi || entry.kunyomi || null;
 }
 
-// Rich item detail: snapshot facts + spoken word + owned examples when the
-// snapshot carries an id + stroke preview and practice for kanji.
-function openItemDetail(entry, entityType) {
+// Rich item detail as an inline view (never a nested dialog: openDialog is
+// single-instance and a second dialog would destroy the list beneath).
+function itemDetailView(entry, entityType) {
   const display = displayOf(entry);
   const reading = readingOf(entry);
   const body = element('div', { className: 'grid gap-3' });
-  const play = smallButton('Play', `Play ${display} aloud`);
+  const play = element('button', { className: 'icon-button shrink-0', attrs: { type: 'button', 'aria-label': `Play ${display} aloud` } }, [icon('volume', { size: 20 })]);
   play.addEventListener('click', () => playQueue([display], () => {}));
   body.append(
     element('p', { className: 'font-jp text-2xl font-semibold text-ink', text: display, attrs: { lang: 'ja' } }),
@@ -123,13 +129,7 @@ function openItemDetail(entry, entityType) {
       ]))));
     }).catch(() => {});
   }
-  openDialog({
-    title: display,
-    description: reading || entityType,
-    content: [body],
-    submitLabel: 'Close',
-    onSubmit: async (form, close) => { close(); }
-  });
+  return body;
 }
 
 function itemsDialog(deckId, title, entityType) {
@@ -137,7 +137,7 @@ function itemsDialog(deckId, title, entityType) {
     .then((detail) => {
       const items = Array.isArray(detail.items) ? detail.items : [];
       const progress = element('p', { className: 'text-xs text-muted', attrs: { 'aria-live': 'polite' } });
-      const playAll = smallButton('Play all', 'Play every item aloud in order');
+      const playAll = element('button', { className: 'icon-button shrink-0', attrs: { type: 'button', 'aria-label': 'Play every item aloud in order' } }, [icon('volume', { size: 20 })]);
       playAll.addEventListener('click', () => {
         playQueue(items.map((entry) => displayOf(entry)), (index, total, text) => {
           progress.textContent = index < 0 ? '' : `Playing ${index + 1} of ${total}: ${text}`;
@@ -148,18 +148,29 @@ function itemsDialog(deckId, title, entityType) {
         stopQueue();
         progress.textContent = '';
       });
+      const view = element('div', { className: 'grid gap-2' });
+      const renderList = () => {
+        view.replaceChildren(
+          element('ul', { className: 'grid max-h-56 gap-1 overflow-y-auto text-sm text-ink', attrs: { role: 'list' } }, items.map((entry) => {
+            const open = smallButton(displayOf(entry), `Details for ${displayOf(entry)}`);
+            open.addEventListener('click', () => {
+              const back = smallButton('Back to items', 'Back to items');
+              back.addEventListener('click', renderList);
+              view.replaceChildren(back, itemDetailView(entry, entityType || detail.entityType));
+            });
+            return element('li', {}, [open]);
+          }))
+        );
+      };
+      renderList();
       openDialog({
         title: title || 'Deck',
         description: `${items.length} items. Select one for details, examples and strokes.`,
-        content: [
+        content: [dialogStack([
           element('div', { className: 'flex flex-col gap-2 sm:flex-row sm:items-center' }, [playAll, stop]),
           progress,
-          element('ul', { className: 'grid max-h-56 gap-1 overflow-y-auto text-sm text-ink', attrs: { role: 'list' } }, items.map((entry) => {
-            const open = smallButton(displayOf(entry), `Details for ${displayOf(entry)}`);
-            open.addEventListener('click', () => openItemDetail(entry, entityType || detail.entityType));
-            return element('li', {}, [open]);
-          }))
-        ],
+          view
+        ])],
         submitLabel: 'Close',
         onSubmit: async (form, close) => { stopQueue(); close(); }
       });
@@ -185,7 +196,7 @@ function deckCard(deck, actions = []) {
     : null;
   return element('article', { className: 'relative min-w-0 overflow-hidden rounded-xl border border-stone bg-paper p-4' }, [
     element('div', { className: 'flex min-w-0 items-start justify-between gap-3' }, [
-      element('h3', { className: 'min-w-0 break-words text-lg font-semibold text-ink', text: deck.title }),
+      element('h3', { className: 'min-w-0 flex-1 break-words text-lg font-semibold text-ink', text: deck.title }),
       pill
     ]),
     ...(creator ? [creator] : []),
@@ -304,7 +315,7 @@ export async function renderCommunity(container) {
     ]);
     dialogType.value = initialType || '';
     const dialogSearch = element('input', { className: 'field-control', attrs: { type: 'search', 'aria-label': 'Filter decks by text', placeholder: 'Filter by title…', value: initialQuery || '' } });
-    const dialogList = element('div', { className: 'grid max-h-[50vh] gap-4 overflow-y-auto md:grid-cols-2' });
+    const dialogList = element('div', { className: 'grid max-h-[50vh] gap-4 overflow-y-auto' });
     const renderDialogList = () => {
       const query = String(dialogSearch.value || '').trim().toLowerCase();
       const visible = filterFeedDecks(dialogType.value, query);
@@ -318,10 +329,10 @@ export async function renderCommunity(container) {
     openDialog({
       title: 'All public decks',
       description: 'Filter by title and type, same as the feed.',
-      content: [
+      content: [dialogStack([
         element('div', { className: 'flex flex-col gap-2 sm:flex-row sm:items-center' }, [dialogType, dialogSearch]),
         dialogList
-      ],
+      ])],
       submitLabel: 'Close',
       onSubmit: async (form, close) => { close(); }
     });
