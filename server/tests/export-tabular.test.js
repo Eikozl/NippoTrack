@@ -4,12 +4,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  ankiRow,
   buildXlsx,
   csvCell,
   csvRow,
   eachEntityPage,
   metadataRow,
+  obsidianDocument,
   parseEntities,
+  tsvRow,
   xlsxEscape
 } = require('../src/services/exportService');
 
@@ -82,4 +85,34 @@ test('xlsx writer caps runaway sheets', () => {
     /exceeds 50000 rows/
   );
   assert.equal(xlsxEscape('a<b>"c"&'), 'a&lt;b&gt;&quot;c&quot;&amp;');
+});
+
+test('anki rows map front/back per entity with quoted tabs', () => {
+  const vocabHeaders = ['id', 'word', 'reading', 'meaning', 'jlpt', 'status', 'notes', 'created_at'];
+  assert.deepEqual(
+    ankiRow('vocabulary', vocabHeaders, [1, '水', 'みず', 'water', 'N5', 'New', null, '2026-01-01']),
+    ['水', 'みず\nwater']
+  );
+  const kanjiHeaders = ['id', 'character', 'meaning', 'onyomi', 'kunyomi', 'jlpt', 'status', 'notes'];
+  assert.deepEqual(
+    ankiRow('kanji', kanjiHeaders, [2, '日', 'day', 'ニチ', 'ひ', 'N5', 'New', null]),
+    ['日', 'day\nニチ · ひ']
+  );
+  const line = tsvRow(ankiRow('vocabulary', vocabHeaders, [1, 'a\tb', 'みず', 'water', 'N5', 'New', null, 'x']));
+  assert.ok(line.includes('"a\tb"'), 'embedded tabs stay quoted');
+  assert.ok(line.endsWith('\n') && !line.includes(','));
+});
+
+test('obsidian documents nest items under headers with facts', () => {
+  const doc = obsidianDocument(
+    'vocabulary',
+    ['id', 'word', 'reading', 'meaning'],
+    [[1, '水', 'みず', 'water']],
+    { exportedAt: '2026-10-04T00:00:00Z', hash: 'abc123' }
+  );
+  assert.match(doc, /^# NippoTrack vocabulary export/m);
+  assert.match(doc, /user abc123/);
+  assert.match(doc, /^## 水/m);
+  assert.match(doc, /- reading: みず/);
+  assert.match(doc, /- meaning: water/);
 });

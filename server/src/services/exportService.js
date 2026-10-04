@@ -53,11 +53,74 @@ function userHash(userId) {
 function csvCell(value) {
   if (value === null || value === undefined) return '';
   const text = String(value);
-  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  return /[",\r\n\t]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
 function csvRow(cells) {
   return `${cells.map(csvCell).join(',')}\r\n`;
+}
+
+// Anki plain-text import: tab-separated front/back, no header row (Anki
+// reads lines literally). Newlines inside a cell stay quoted.
+function tsvRow(cells) {
+  return `${cells.map(csvCell).join('\t')}\n`;
+}
+
+function columnIndex(headers, name) {
+  return headers.indexOf(name);
+}
+
+// Front/back per entity for Anki Basic cards. Vocabulary carries the
+// reading on the answer side; kanji answers add both readings.
+function ankiRow(label, headers, values) {
+  const at = (name) => {
+    const index = columnIndex(headers, name);
+    return index >= 0 ? values[index] : null;
+  };
+  const text = (value) => (value === null || value === undefined ? '' : String(value));
+  if (label === 'kanji') {
+    const readings = [at('onyomi'), at('kunyomi')].map(text).filter(Boolean).join(' · ');
+    return [text(at('character')), [text(at('meaning')), readings].filter(Boolean).join('\n')];
+  }
+  if (label === 'grammar') {
+    return [text(at('grammar_point')), [text(at('meaning')), text(at('structure'))].filter(Boolean).join('\n')];
+  }
+  if (label === 'sessions') {
+    return [`${at('date') || ''} · ${at('category') || ''}`, `${at('duration') || 0} min${at('notes') ? `\n${at('notes')}` : ''}`];
+  }
+  if (label === 'notes') {
+    return [text(at('title')) || '(untitled)', text(at('body'))];
+  }
+  return [text(at('word')), [text(at('reading')), text(at('meaning'))].filter(Boolean).join('\n')];
+}
+
+// One Obsidian-friendly Markdown document per entity: H1 title, H2 item,
+// bullet facts. Deterministic, no frontmatter dialect assumed.
+function obsidianDocument(label, headers, rows, { exportedAt, hash } = {}) {
+  const lines = [`# NippoTrack ${label} export`, '', `_Exported ${exportedAt || ''} · user ${hash || ''} · version 1_`, ''];
+  const at = (values, name) => {
+    const index = columnIndex(headers, name);
+    return index >= 0 ? values[index] : null;
+  };
+  const fact = (name, value) => {
+    const text = value === null || value === undefined || value === '' ? null : String(value).replace(/\r?\n/g, ' / ');
+    return text ? `- ${name}: ${text}` : null;
+  };
+  for (const values of rows) {
+    const title = label === 'kanji' ? at(values, 'character')
+      : label === 'grammar' ? at(values, 'grammar_point')
+      : label === 'sessions' ? `${at(values, 'date') || ''} · ${at(values, 'category') || ''}`
+      : label === 'notes' ? at(values, 'title') || '(untitled)'
+      : at(values, 'word');
+    lines.push(`## ${String(title || 'item').replace(/\r?\n/g, ' ')}`);
+    for (const name of headers) {
+      if (['word', 'character', 'grammar_point', 'title'].includes(name) && label !== 'sessions') continue;
+      const line = fact(name, at(values, name));
+      if (line) lines.push(line);
+    }
+    lines.push('');
+  }
+  return lines.join('\n');
 }
 
 function metadataRow(exportedAt, hash) {
@@ -227,13 +290,16 @@ module.exports = {
   ENTITIES,
   PAGE_SIZE,
   XLSX_MAX_ROWS_PER_SHEET,
+  ankiRow,
   buildXlsx,
   csvCell,
   csvRow,
   eachEntityPage,
   metadataRow,
+  obsidianDocument,
   parseEntities,
   sheetXml,
+  tsvRow,
   userHash,
   xlsxEscape,
   zipStore

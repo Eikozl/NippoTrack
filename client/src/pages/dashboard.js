@@ -5,6 +5,7 @@ import { element, errorState, formatDate, loadingState, pageHeader } from '../ui
 import { profileStore } from '../accountProfile.js';
 import { dashboardWelcomeModel, localDayKey, readVisitRecord, recordDashboardVisit } from '../dashboardWelcome.js';
 import { smartGoalsWidget } from '../smartGoals.js';
+import { weeklyInsightsWidget } from '../weeklyInsightsWidget.js';
 import { CONFIGS } from './v2Pages';
 
 function metric(iconName, label, value, note, page = null, featured = false) {
@@ -171,6 +172,7 @@ export async function renderDashboard(container) {
         ...(previewGoals.length ? [goalsPreview(previewGoals, eligibleGoals.length > 3)] : []),
         element('div', { className: 'dashboard-panels mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]' }, [recentSessions(data.recentSessions), activityCalendar(activity.calendar)]),
         smartGoalsWidget(),
+        weeklyInsightsWidget(),
         element('p', { className: 'dashboard-footnote mt-5 text-center text-sm' }, [element('a', { className: 'font-semibold text-vermilion hover:underline', text: 'View detailed analytics in Statistics', attrs: { href: '#statistics' } })])
       );
     } catch (error) { content.replaceChildren(errorState(error, load)); }
