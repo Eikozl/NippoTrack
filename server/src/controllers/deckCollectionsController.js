@@ -8,6 +8,7 @@ const {
   addDeckToCollection,
   createCollection,
   createCollectionShare,
+  deleteCollection,
   getCollection,
   importCollectionShare,
   parseCollectionShare,

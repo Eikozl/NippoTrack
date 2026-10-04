@@ -663,10 +663,7 @@ export async function renderCommunity(container) {
         card.append(
           membersBox,
           element('div', { className: 'mt-2 flex flex-col gap-2 sm:flex-row' }, [memberSelect, addMember]),
-          element('div', { className: 'mt-2 flex items-center gap-2' }, [
-            element('span', { className: 'text-xs text-muted', text: 'Danger zone:' }),
-            removeCollection
-          ])
+          element('div', { className: 'mt-2 flex items-center gap-2' }, [removeCollection])
         );
         return card;
       }));

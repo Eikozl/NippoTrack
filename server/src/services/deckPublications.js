@@ -54,7 +54,7 @@ async function getDeckPublication(executor, deckId, viewerId) {
     `SELECT d.id_deck_publication AS id, d.owner_id, d.title, d.description, d.entity_type, d.is_public, d.created_at,
        p.username AS owner_username, p.display_name AS owner_display,
        (SELECT COUNT(*) FROM deck_follows f WHERE f.id_deck_publication = d.id_deck_publication) AS followers,
-       CASE WHEN ? IS NULL THEN NULL ELSE EXISTS (SELECT 1 FROM deck_follows f WHERE f.id_deck_publication = d.id_deck_publication AND f.follower_id = ?) END AS viewer_following
+       CASE WHEN ?::uuid IS NULL THEN NULL ELSE EXISTS (SELECT 1 FROM deck_follows f WHERE f.id_deck_publication = d.id_deck_publication AND f.follower_id = ?) END AS viewer_following
      FROM deck_publications d
      LEFT JOIN user_profile p ON p.user_id = d.owner_id
      WHERE d.id_deck_publication = ?`,
@@ -104,7 +104,7 @@ async function listPublicDecks(executor, { entityType = null, limit = 20, offset
        p.username AS owner_username, p.display_name AS owner_display,
        (SELECT COUNT(*) FROM deck_follows f WHERE f.id_deck_publication = d.id_deck_publication) AS followers,
        (SELECT COUNT(*) FROM deck_publication_items i WHERE i.id_deck_publication = d.id_deck_publication) AS items,
-       CASE WHEN ? IS NULL THEN NULL ELSE EXISTS (SELECT 1 FROM deck_follows f WHERE f.id_deck_publication = d.id_deck_publication AND f.follower_id = ?) END AS viewer_following
+       CASE WHEN ?::uuid IS NULL THEN NULL ELSE EXISTS (SELECT 1 FROM deck_follows f WHERE f.id_deck_publication = d.id_deck_publication AND f.follower_id = ?) END AS viewer_following
      FROM deck_publications d
      LEFT JOIN user_profile p ON p.user_id = d.owner_id
      WHERE ${where.join(' AND ')}
