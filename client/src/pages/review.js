@@ -1044,6 +1044,22 @@ const CARD_TYPE_DESCRIPTIONS = {
     }
   }
 
+  // Tri-state probe for audio cards: 'ready' when a Japanese voice is
+  // listed, 'missing' when speech is absent or a loaded list has none,
+  // 'unknown' while the list has not loaded (never judged as missing).
+  function audioVoiceStatus() {
+    try {
+      if (typeof window === 'undefined' || !window.speechSynthesis) return 'missing';
+    } catch { return 'missing'; }
+    try { warmCachedVoices(); } catch { /* warm-up is best-effort */ }
+    let voices = [];
+    try {
+      voices = readVoices(window.speechSynthesis);
+    } catch { return 'unknown'; }
+    if (!Array.isArray(voices) || voices.length === 0) return 'unknown';
+    return hasJapaneseVoice(voices) ? 'ready' : 'missing';
+  }
+
   async function loadPatterns() {
     try {
       const data = await apiRequest('/api/review/patterns');
@@ -1537,12 +1553,18 @@ const CARD_TYPE_DESCRIPTIONS = {
       }
     }
 
-    function buildAnswerInput() {
+    function buildAnswerInput(options = {}) {
+      const concealMismatch = Boolean(options && options.conceal);
+      const onMatch = typeof options.onMatch === 'function' ? options.onMatch : null;
       const answerInput = element('input', {
         className: 'field-control',
         attrs: { type: 'text', 'aria-label': 'Type the answer', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' }
       });
       const checkButton = element('button', { className: 'button-secondary min-h-10 px-4 py-2 text-sm', text: 'Check', attrs: { type: 'button' } });
+      const confirmMatch = () => {
+        showCheck({ matched: true, typed: String(answerInput.value || '').trim() });
+        if (onMatch) onMatch();
+      };
       const runCheck = () => {
         const typed = answerInput.value || '';
         if (!String(typed).trim()) {
@@ -1556,7 +1578,14 @@ const CARD_TYPE_DESCRIPTIONS = {
         const verdict = matchTypedAnswer(typed, item);
         if (verdict.empty) return;
         if (verdict.matched) {
-          showCheck({ matched: true, typed: String(typed).trim() });
+          confirmMatch();
+        } else if (concealMismatch) {
+          // Listening exercise: never disclose the word here; the locked
+          // Reveal stays shut until the heard word is typed.
+          frontResult.hidden = false;
+          frontResult.textContent = 'Not quite — listen again.';
+          answerResult.hidden = false;
+          answerResult.textContent = 'Not quite — listen again.';
         } else {
           showCheck({ matched: false, typed: String(typed).trim() });
         }
@@ -1568,6 +1597,14 @@ const CARD_TYPE_DESCRIPTIONS = {
           checkButton.click();
         }
       });
+      if (onMatch) {
+        // Unlock as soon as the heard word is typed; Check stays for
+        // explicit feedback and keyboard users.
+        answerInput.addEventListener('input', () => {
+          const verdict = matchTypedAnswer(answerInput.value || '', item);
+          if (!verdict.empty && verdict.matched) confirmMatch();
+        });
+      }
       const row = element('div', { className: 'flex flex-col gap-2 sm:flex-row' }, [answerInput, checkButton]);
       return { answerInput, checkButton, row };
     }
@@ -1650,10 +1687,48 @@ const CARD_TYPE_DESCRIPTIONS = {
       const built = buildAnswerInput();
       frontWrap.append(built.row, frontResult, revealButton);
     } else if (cardType === 'audio') {
-      frontWrap.append(
-        element('p', { className: 'text-sm leading-6 text-muted', text: 'Tap the speaker to hear it.' }),
-        revealButton
-      );
+      // No Japanese voice on the device: the listening task is impossible,
+      // so the card is presented as plain recognition instead.
+      const renderAudioAsRecognition = () => {
+        title.textContent = String(item.display || '');
+        revealButton.removeAttribute('disabled');
+        frontWrap.replaceChildren();
+        frontWrap.append(
+          element('p', { className: 'text-sm leading-6 text-muted', text: 'Audio is unavailable on this device, so this card is shown as recognition.' }),
+          revealButton
+        );
+      };
+      if (audioVoiceStatus() === 'missing') {
+        renderAudioAsRecognition();
+      } else {
+        // Gated listen-and-recall: Reveal stays locked until the heard
+        // word is typed (practice only; grading stays with the buttons).
+        revealButton.setAttribute('disabled', '');
+        const built = buildAnswerInput({
+          conceal: true,
+          onMatch: () => { revealButton.removeAttribute('disabled'); }
+        });
+        frontWrap.append(
+          element('p', { className: 'text-sm leading-6 text-muted', text: 'Tap the speaker to hear it, then type what you hear.' }),
+          built.row,
+          frontResult,
+          revealButton
+        );
+        if (audioVoiceStatus() === 'unknown') {
+          // The voice list may still be loading: confirm in the background
+          // and only step down a card that is still on its front.
+          const myIndex = currentIndex;
+          const myItem = item;
+          try {
+            waitForVoices(window.speechSynthesis).then((voices) => {
+              if (revealed || currentIndex !== myIndex || queue[myIndex] !== myItem) return;
+              if (Array.isArray(voices) && voices.length && !hasJapaneseVoice(voices)) {
+                renderAudioAsRecognition();
+              }
+            });
+          } catch { /* stepping down is best-effort */ }
+        }
+      }
     } else {
       frontWrap.appendChild(revealButton);
     }

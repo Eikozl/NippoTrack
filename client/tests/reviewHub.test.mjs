@@ -1421,7 +1421,7 @@ function answerInputOf(container) {
   const all = findInputs(container, (n) => n.getAttribute('aria-label') === 'Type the answer');
   return all[0] || null;
 }
-async function startWithSingleItem({ item, typesPayload, clozeSentence, sessionId = 101 }) {
+async function startWithSingleItem({ item, typesPayload, clozeSentence, sessionId = 101, speechVoices }) {
   const groups = {
     kanji: { items: [], total: 0, truncated: false },
     vocabulary: { items: [], total: 0, truncated: false },
@@ -1435,6 +1435,7 @@ async function startWithSingleItem({ item, typesPayload, clozeSentence, sessionI
     typesPayload,
     clozeSentence,
     sessionId,
+    speechVoices,
     completePayload: { total: 1, byType: { kanji: 0, vocabulary: 0, grammar: 0 }, byResult: { Good: 0, Hard: 0, Again: 0 } }
   });
   const container = await gotoSetup(harness);
@@ -1504,7 +1505,7 @@ test('Review 3.0 auto-pick: engine is weight-aware and anti-repeat guarded (stat
   assert.match(reviewSource, /autoPick !== false|autoPick === false/, 'autoPick flag branches legacy vs auto');
 });
 
-test('Review 3.0 audio: speaker icon in front and after reveal, click speaks, no Play audio button', async () => {
+test('Review 3.0 audio: speaker icon in front and after reveal, gated input unlocks reveal, no Play audio button', async () => {
   const item = candidateItem({ entityType: 'vocabulary', entityId: 71, display: '水', reading: 'みず', meaning: 'water', strength: 'strong' });
   const { harness, container } = await startWithSingleItem({
     item,
@@ -1512,6 +1513,16 @@ test('Review 3.0 audio: speaker icon in front and after reveal, click speaks, no
   });
   assert.match(pillText(container), /Audio/);
   assert.equal(findButtonsByText(container, 'Play audio').length, 0, 'legacy Play audio button replaced');
+  const input = answerInputOf(container);
+  assert.ok(input, 'audio front has answer input');
+  let reveal = findFirstButtonByText(container, 'Reveal answer');
+  assert.ok(reveal.hasAttribute('disabled'), 'reveal locked until the heard word is typed');
+  input.value = '水';
+  input.dispatchEvent({ type: 'input', target: input, preventDefault() {} });
+  await sleep(10);
+  reveal = findFirstButtonByText(container, 'Reveal answer');
+  assert.ok(!reveal.hasAttribute('disabled'), 'typing the heard word unlocks reveal');
+  assert.match(textOf(container), /That matches/, 'match confirms');
   let speakers = speakerButtons(container).filter(isVisible);
   assert.ok(speakers.length >= 1, 'speaker present in front');
   const beforeRef = speakers[0];
@@ -1527,6 +1538,68 @@ test('Review 3.0 audio: speaker icon in front and after reveal, click speaks, no
   await clickAndSettle(speakers[0]);
   await sleep(120);
   assert.equal(harness.speechCalls.length, 2, 'answer speaker still replays');
+});
+
+test('Review 3.0 audio: mismatch keeps reveal locked and never discloses the word', async () => {
+  const item = candidateItem({ entityType: 'vocabulary', entityId: 74, display: '水', reading: 'みず', meaning: 'water', strength: 'strong' });
+  const { harness, container } = await startWithSingleItem({
+    item,
+    typesPayload: { availableTypes: ['recognition', 'recall', 'cloze', 'audio'], userPreferences: { cardTypes: ['audio'], weights: {}, engineMode: 'fixed', autoPick: true } }
+  });
+  const input = answerInputOf(container);
+  assert.ok(input, 'audio front has answer input');
+  const check = findFirstButtonByText(container, 'Check');
+  assert.ok(check, 'audio front has Check');
+  const gradesBefore = harness.apiCalls.filter((c) => c.url === '/api/review/grade').length;
+  input.value = 'zzz-nope';
+  await clickAndSettle(check);
+  assert.match(textOf(container), /Not quite/, 'mismatch asks to listen again');
+  const notices = [...container.querySelectorAll('p')].map((n) => n.textContent || '').filter((t) => t.startsWith('Not quite'));
+  assert.ok(notices.length >= 1, 'mismatch notice rendered');
+  for (const notice of notices) {
+    assert.equal(notice, 'Not quite — listen again.', 'mismatch never discloses the word up front');
+  }
+  const reveal = findFirstButtonByText(container, 'Reveal answer');
+  assert.ok(reveal.hasAttribute('disabled'), 'reveal stays locked after mismatch');
+  assert.equal(harness.apiCalls.filter((c) => c.url === '/api/review/grade').length, gradesBefore, 'Check never grades');
+});
+
+test('Review 3.0 audio: device without Japanese voice renders the card as recognition', async () => {
+  const item = candidateItem({ entityType: 'vocabulary', entityId: 75, display: '水', reading: 'みず', meaning: 'water', strength: 'strong' });
+  const { harness, container } = await startWithSingleItem({
+    item,
+    typesPayload: { availableTypes: ['recognition', 'recall', 'cloze', 'audio'], userPreferences: { cardTypes: ['audio'], weights: {}, engineMode: 'fixed', autoPick: true } },
+    speechVoices: [{ lang: 'en-US' }]
+  });
+  assert.match(pillText(container), /Audio/, 'card stays an audio card');
+  assert.equal(answerInputOf(container), null, 'no typing gate when listening is impossible');
+  assert.match(textOf(container), /水/, 'word shown as recognition');
+  assert.match(textOf(container), /shown as recognition/, 'fallback explained');
+  const reveal = findFirstButtonByText(container, 'Reveal answer');
+  assert.ok(reveal && !reveal.hasAttribute('disabled'), 'reveal immediately available');
+  await clickAndSettle(reveal);
+  await sleep(10);
+  assert.ok(findFirstButtonByText(container, 'Good'), 'grades reachable from the fallback');
+});
+
+test('Review 3.0 audio: late confirmation of no Japanese voice steps a waiting card down', async () => {
+  const liveVoices = [];
+  const item = candidateItem({ entityType: 'vocabulary', entityId: 76, display: '水', reading: 'みず', meaning: 'water', strength: 'strong' });
+  const { harness, container } = await startWithSingleItem({
+    item,
+    typesPayload: { availableTypes: ['recognition', 'recall', 'cloze', 'audio'], userPreferences: { cardTypes: ['audio'], weights: {}, engineMode: 'fixed', autoPick: true } },
+    speechVoices: () => liveVoices.slice()
+  });
+  assert.ok(answerInputOf(container), 'gated input while the voice list is unloaded');
+  liveVoices.push({ lang: 'en-US' });
+  for (const handler of [...(harness.speechListeners.get('voiceschanged') || [])]) {
+    try { handler(); } catch { /* harness listeners are best-effort */ }
+  }
+  await sleep(200);
+  assert.equal(answerInputOf(container), null, 'gate removed once absence is confirmed');
+  assert.match(textOf(container), /shown as recognition/, 'waiting card stepped down');
+  const reveal = findFirstButtonByText(container, 'Reveal answer');
+  assert.ok(reveal && !reveal.hasAttribute('disabled'), 'reveal available after step-down');
 });
 
 test('Review 3.0 recall: right answer shows confirmation, wrong shows answer with hint, Check never grades, Enter works', async () => {
