@@ -13,9 +13,11 @@ function smallButton(label, ariaLabel) {
 }
 
 // openDialog lays content in a 2-column grid on sm+: custom bodies must
-// arrive as ONE full-width node or the grid tears them apart.
+// arrive as ONE full-width node or the grid tears them apart. grid-cols-1
+// pins the inner track to minmax(0,1fr) so wide rows can never push the
+// panel past the viewport.
 function dialogStack(nodes) {
-  return element('div', { className: 'grid gap-3 sm:col-span-2' }, nodes);
+  return element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-3 sm:col-span-2' }, nodes);
 }
 
 function speechPieces() {
@@ -74,16 +76,16 @@ function readingOf(entry) {
 function itemDetailView(entry, entityType) {
   const display = displayOf(entry);
   const reading = readingOf(entry);
-  const body = element('div', { className: 'grid gap-3' });
+  const body = element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-3' });
   const play = element('button', { className: 'icon-button shrink-0', attrs: { type: 'button', 'aria-label': `Play ${display} aloud` } }, [icon('volume', { size: 20 })]);
   play.addEventListener('click', () => playQueue([display], () => {}));
   body.append(
-    element('p', { className: 'font-jp text-2xl font-semibold text-ink', text: display, attrs: { lang: 'ja' } }),
-    ...(reading ? [element('p', { className: 'text-sm text-muted', text: reading })] : []),
-    ...(entry.meaning ? [element('p', { className: 'text-base leading-7 text-ink', text: entry.meaning })] : []),
+    element('p', { className: 'min-w-0 wrap-anywhere break-words font-jp text-2xl font-semibold text-ink', text: display, attrs: { lang: 'ja' } }),
+    ...(reading ? [element('p', { className: 'min-w-0 wrap-anywhere break-words text-sm text-muted', text: reading })] : []),
+    ...(entry.meaning ? [element('p', { className: 'min-w-0 wrap-anywhere break-words text-base leading-7 text-ink', text: entry.meaning })] : []),
     play
   );
-  const extras = element('div', { className: 'grid gap-3' });
+  const extras = element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-3' });
   body.appendChild(extras);
   const itemId = Number(entry.id);
   if (entityType === 'kanji' && /^\p{Script=Han}$/u.test(display)) {
@@ -123,7 +125,7 @@ function itemDetailView(entry, entityType) {
       const examples = Array.isArray(detail?.examples) ? detail.examples : [];
       if (!examples.length) return;
       extras.append(element('p', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Usage examples' }));
-      extras.append(element('ul', { className: 'grid gap-2', attrs: { role: 'list' } }, examples.slice(0, 3).map((example) => element('li', { className: 'rounded-md bg-paper p-2 text-sm' }, [
+      extras.append(element('ul', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-2', attrs: { role: 'list' } }, examples.slice(0, 3).map((example) => element('li', { className: 'min-w-0 max-w-full wrap-anywhere break-words rounded-md bg-paper p-2 text-sm' }, [
         element('p', { className: 'font-jp text-ink', text: example.sentence, attrs: { lang: 'ja' } }),
         ...(example.translation ? [element('p', { className: 'mt-1 text-xs text-muted', text: example.translation })] : [])
       ]))));
@@ -132,42 +134,103 @@ function itemDetailView(entry, entityType) {
   return body;
 }
 
-function itemsDialog(deckId, title, entityType) {
+// Type pill renders FROM DATA: whatever entityType the backend sent
+// (vocabulary, kanji or grammar today; unknown values such as 'reading'
+// render as-is). No list of known types lives here.
+function typePill(value) {
+  const label = String(value || '').trim() || 'deck';
+  return element('span', { className: 'status-pill max-w-full shrink-0 wrap-anywhere break-words text-xs', text: label });
+}
+
+function authorNameOf(deck) {
+  if (!deck) return null;
+  if (deck.ownerDisplay) return String(deck.ownerDisplay);
+  if (deck.ownerUsername) return `@${deck.ownerUsername}`;
+  return null;
+}
+
+// Compact list row for the feed and the "Ver más" dialog: title plus
+// "by {author}" only. The whole row is one real <button> (keyboard
+// focusable, visible focus from the global button ring). Pills,
+// descriptions, counts and stars live in the detail dialog only, so rows
+// can never push the list track wider than the dialog.
+function deckRowButton(deck, onOpen) {
+  const titleText = String(deck?.title || 'Deck');
+  const author = authorNameOf(deck);
+  const label = author ? `Open ${titleText} by ${author}` : `Open ${titleText}`;
+  const row = element('button', {
+    className: 'flex min-w-0 w-full max-w-full items-center gap-3 overflow-hidden rounded-xl border border-stone bg-paper p-3 text-left wrap-anywhere',
+    attrs: { type: 'button', 'aria-label': label }
+  }, [
+    element('span', { className: 'flex min-w-0 flex-1 flex-col gap-0.5' }, [
+      element('span', { className: 'min-w-0 wrap-anywhere break-words text-sm font-semibold text-ink', text: titleText }),
+      ...(author ? [element('span', { className: 'min-w-0 wrap-anywhere break-words text-xs text-muted', text: `by ${author}` })] : [])
+    ])
+  ]);
+  row.addEventListener('click', onOpen);
+  return row;
+}
+
+// Single deck detail dialog: header metadata (author, description, type
+// pill from data, inline likes) plus the collected items with play-all,
+// drill-down, examples and strokes. Unknown entity types render the pill
+// as-is and the items section stays fail-open through the existing
+// toast-on-error path (no per-type detail backend is built here).
+function itemsDialog(deckId, title, entityType, deckRef = null) {
   apiRequest(`/api/decks/${deckId}`)
     .then((detail) => {
       const items = Array.isArray(detail.items) ? detail.items : [];
-      const progress = element('p', { className: 'text-xs text-muted', attrs: { 'aria-live': 'polite' } });
+      const effectiveType = detail.entityType || entityType || deckRef?.entityType || 'deck';
+      const author = authorNameOf(detail) || authorNameOf(deckRef);
+      const description = detail.description || deckRef?.description || null;
+      const progress = element('p', { className: 'min-w-0 wrap-anywhere break-words text-xs text-muted', attrs: { 'aria-live': 'polite' } });
       const playAll = element('button', { className: 'icon-button shrink-0', attrs: { type: 'button', 'aria-label': 'Play every item aloud in order' } }, [icon('volume', { size: 20 })]);
       playAll.addEventListener('click', () => {
         playQueue(items.map((entry) => displayOf(entry)), (index, total, text) => {
           progress.textContent = index < 0 ? '' : `Playing ${index + 1} of ${total}: ${text}`;
         });
       });
-      const stop = smallButton('Stop', 'Stop playback');
+      const stop = element('button', { className: 'icon-button shrink-0', attrs: { type: 'button', 'aria-label': 'Stop playback' } }, [icon('stop', { size: 20 })]);
       stop.addEventListener('click', () => {
         stopQueue();
         progress.textContent = '';
       });
-      const view = element('div', { className: 'grid gap-2' });
+      const starEnd = element('div', { className: 'ml-auto shrink-0' }, [starWidget({
+        id: Number(deckId),
+        title: detail.title || title || 'Deck',
+        followers: detail.followers ?? deckRef?.followers ?? 0,
+        viewerFollowing: detail.viewerFollowing ?? deckRef?.viewerFollowing ?? false
+      })]);
+      const view = element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-2' });
       const renderList = () => {
         view.replaceChildren(
-          element('ul', { className: 'grid max-h-56 gap-1 overflow-y-auto text-sm text-ink', attrs: { role: 'list' } }, items.map((entry) => {
+          element('ul', { className: 'grid max-h-56 w-full min-w-0 max-w-full grid-cols-1 gap-1 overflow-x-hidden overflow-y-auto text-sm text-ink', attrs: { role: 'list' } }, items.map((entry) => {
             const open = smallButton(displayOf(entry), `Details for ${displayOf(entry)}`);
+            open.classList.add('max-w-full', 'wrap-anywhere', 'break-words');
             open.addEventListener('click', () => {
               const back = smallButton('Back to items', 'Back to items');
               back.addEventListener('click', renderList);
-              view.replaceChildren(back, itemDetailView(entry, entityType || detail.entityType));
+              view.replaceChildren(back, itemDetailView(entry, effectiveType));
             });
-            return element('li', {}, [open]);
+            return element('li', { className: 'min-w-0 max-w-full' }, [open]);
           }))
         );
       };
       renderList();
+      const header = element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-2' }, [
+        element('div', { className: 'flex min-w-0 max-w-full flex-wrap items-center gap-2' }, [
+          typePill(effectiveType),
+          element('span', { className: 'min-w-0 wrap-anywhere break-words text-xs text-muted', text: `${items.length} items` })
+        ]),
+        ...(author ? [element('p', { className: 'min-w-0 wrap-anywhere break-words text-sm text-muted', text: `by ${author}` })] : []),
+        ...(description ? [element('p', { className: 'min-w-0 wrap-anywhere break-words text-sm leading-6 text-ink', text: description })] : [])
+      ]);
       openDialog({
-        title: title || 'Deck',
+        title: detail.title || title || 'Deck',
         description: `${items.length} items. Select one for details, examples and strokes.`,
         content: [dialogStack([
-          element('div', { className: 'flex flex-col gap-2 sm:flex-row sm:items-center' }, [playAll, stop]),
+          header,
+          element('div', { className: 'flex min-w-0 max-w-full flex-row flex-nowrap items-center gap-2' }, [playAll, stop, starEnd]),
           progress,
           view
         ])],
@@ -188,25 +251,29 @@ function section(title, description) {
   return { wrap, body };
 }
 
+// Full card stays for owner-managed contexts (My decks, Collections) where
+// selection, analytics, suggestions and member controls need the room.
+// Feed and Ver-más lists use deckRowButton instead.
 function deckCard(deck, actions = []) {
-  const pill = element('span', { className: 'status-pill shrink-0 text-xs', text: deck.entityType || '' });
-  const creatorName = deck.ownerDisplay || (deck.ownerUsername ? `@${deck.ownerUsername}` : null);
+  const pill = typePill(deck.entityType);
+  const creatorName = authorNameOf(deck);
   const creator = creatorName
-    ? element('p', { className: 'mt-1 text-xs text-muted', text: `by ${creatorName}` })
+    ? element('p', { className: 'mt-1 min-w-0 wrap-anywhere break-words text-xs text-muted', text: `by ${creatorName}` })
     : null;
-  return element('article', { className: 'relative min-w-0 overflow-hidden rounded-xl border border-stone bg-paper p-4' }, [
-    element('div', { className: 'flex min-w-0 items-start justify-between gap-3' }, [
-      element('h3', { className: 'min-w-0 flex-1 break-words text-lg font-semibold text-ink', text: deck.title }),
+  return element('article', { className: 'relative min-w-0 w-full max-w-full overflow-hidden wrap-anywhere rounded-xl border border-stone bg-paper p-4' }, [
+    element('div', { className: 'flex min-w-0 max-w-full items-start justify-between gap-3' }, [
+      element('h3', { className: 'min-w-0 flex-1 wrap-anywhere break-words text-lg font-semibold text-ink', text: deck.title }),
       pill
     ]),
     ...(creator ? [creator] : []),
-    ...(deck.description ? [element('p', { className: 'mt-1 break-words text-sm leading-6 text-muted', text: deck.description })] : []),
-    element('p', { className: 'mt-2 text-xs font-medium text-muted', text: `${deck.itemCount ?? '?'} items` }),
-    ...(actions.length ? [element('div', { className: 'mt-3 flex flex-row flex-wrap items-center gap-2' }, actions)] : [])
+    ...(deck.description ? [element('p', { className: 'mt-1 min-w-0 wrap-anywhere break-words text-sm leading-6 text-muted', text: deck.description })] : []),
+    element('p', { className: 'mt-2 min-w-0 wrap-anywhere break-words text-xs font-medium text-muted', text: `${deck.itemCount ?? '?'} items` }),
+    ...(actions.length ? [element('div', { className: 'mt-3 flex min-w-0 max-w-full flex-row flex-wrap items-center gap-2' }, actions)] : [])
   ]);
 }
 
-// GitHub-style like: star above, count right below it, bottom-right corner.
+// Inline like control. It renders only inside the deck detail dialog, so it
+// stays in normal flow (no absolute positioning, no card padding hack).
 function starWidget(deck) {
   let liked = Boolean(deck.viewerFollowing);
   let count = Number(deck.followers || 0);
@@ -238,7 +305,7 @@ function starWidget(deck) {
       paint();
     }).catch((error) => showToast(error?.message || 'Unable to like the deck.', 'error'));
   });
-  const wrap = element('div', { className: 'absolute bottom-3 right-3 flex shrink-0 flex-col items-center gap-0.5' }, [star, countNode]);
+  const wrap = element('div', { className: 'flex min-w-0 shrink-0 flex-row items-center gap-1.5' }, [star, countNode]);
   return wrap;
 }
 
@@ -252,10 +319,10 @@ export async function renderCommunity(container) {
   container.replaceChildren(pageHeader({
     eyebrow: 'Social',
     title: 'Decks',
-    description: 'Discover, publish, share and collect decks. Everything decks lives here.'
+    description: 'Discover, publish, share and collect decks and reading texts. Everything social lives here.'
   }));
   const feed = section('Feed', 'Public decks. Filter, listen, open details, follow.');
-  const publish = section('Publish', 'Pick items from your collection and publish a deck.');
+  const publish = section('Publish', 'Pick items from your collection and publish a deck — or pick a text tab to publish reading texts.');
   const share = section('Share & import', 'Signed codes: share your own items, import codes as new rows.');
   const mine = section('My decks', 'Your publications with suggestions and analytics.');
   const collections = section('Collections', 'Group decks into playlists and share them as one code.');
@@ -269,30 +336,14 @@ export async function renderCommunity(container) {
   ]);
   const textFilter = element('input', { className: 'field-control', attrs: { type: 'search', 'aria-label': 'Filter decks by text', placeholder: 'Filter by title…' } });
   filterRow.append(typeFilter, textFilter);
-  const feedList = element('div', { className: 'grid gap-4' });
+  const feedList = element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-4' });
   feed.body.append(filterRow, feedList);
   let feedDecks = [];
   const FEED_VISIBLE = 3;
   const filterFeedDecks = (type, query) => feedDecks.filter((deck) =>
     (!type || deck.entityType === type) &&
     (!query || `${deck.title} ${deck.description || ''}`.toLowerCase().includes(query)));
-  const buildFeedCard = (deck, withPreview) => {
-    const view = smallButton('Open deck', `Open ${deck.title}`);
-    view.classList.add('flex-1');
-    view.addEventListener('click', () => itemsDialog(deck.id, deck.title, deck.entityType));
-    const card = deckCard(deck, [view, starWidget(deck)]);
-    card.classList.add('pb-16');
-    if (withPreview) {
-      const previewItems = (deck.previewItems || []).slice(0, 3);
-      if (previewItems.length) {
-        card.append(element('ul', { className: 'mt-2 flex flex-wrap gap-1.5', attrs: { role: 'list' } }, [
-          ...previewItems.map((text) => element('li', { className: 'status-pill text-xs', text })),
-          ...((deck.itemCount || 0) > previewItems.length ? [element('li', { className: 'text-xs text-muted', text: `+${deck.itemCount - previewItems.length} more` })] : [])
-        ]));
-      }
-    }
-    return card;
-  };
+  const buildFeedRow = (deck) => deckRowButton(deck, () => itemsDialog(deck.id, deck.title, deck.entityType, deck));
   const renderFeed = () => {
     const query = String(textFilter.value || '').trim().toLowerCase();
     const visible = filterFeedDecks(typeFilter.value, query);
@@ -301,7 +352,7 @@ export async function renderCommunity(container) {
       return;
     }
     const shown = visible.slice(0, FEED_VISIBLE);
-    feedList.replaceChildren(element('div', { className: 'grid gap-4 md:grid-cols-2' }, shown.map((deck) => buildFeedCard(deck, true))));
+    feedList.replaceChildren(element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-2 overflow-x-hidden' }, shown.map((deck) => buildFeedRow(deck))));
     if (visible.length > FEED_VISIBLE) {
       const more = smallButton(`Ver más (${visible.length - FEED_VISIBLE} more)`, 'View all matching decks');
       more.addEventListener('click', () => openAllDecksDialog(typeFilter.value, query));
@@ -315,12 +366,12 @@ export async function renderCommunity(container) {
     ]);
     dialogType.value = initialType || '';
     const dialogSearch = element('input', { className: 'field-control', attrs: { type: 'search', 'aria-label': 'Filter decks by text', placeholder: 'Filter by title…', value: initialQuery || '' } });
-    const dialogList = element('div', { className: 'grid max-h-[50vh] gap-4 overflow-y-auto' });
+    const dialogList = element('div', { className: 'grid max-h-[50vh] w-full min-w-0 max-w-full grid-cols-1 gap-2 overflow-x-hidden overflow-y-auto' });
     const renderDialogList = () => {
       const query = String(dialogSearch.value || '').trim().toLowerCase();
       const visible = filterFeedDecks(dialogType.value, query);
       dialogList.replaceChildren(...(visible.length
-        ? visible.map((deck) => buildFeedCard(deck, false))
+        ? visible.map((deck) => deckRowButton(deck, () => itemsDialog(deck.id, deck.title, deck.entityType, deck)))
         : [element('p', { className: 'text-sm text-muted', text: 'No decks match.' })]));
     };
     dialogType.addEventListener('change', renderDialogList);
@@ -343,17 +394,98 @@ export async function renderCommunity(container) {
   try {
     const data = await apiRequest('/api/decks?limit=30');
     feedDecks = Array.isArray(data?.items) ? data.items : [];
-    // Item previews come from each deck detail (bounded: first 6 decks get previews).
-    await Promise.all(feedDecks.slice(0, 6).map(async (deck) => {
-      try {
-        const detail = await apiRequest(`/api/decks/${deck.id}`);
-        deck.previewItems = (Array.isArray(detail.items) ? detail.items : []).slice(0, 3).map(displayOf);
-      } catch { /* previews are best-effort */ }
-    }));
     renderFeed();
   } catch {
     feedList.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Public decks are unavailable.' }));
   }
+
+  // ---- Community reading texts (Reading <-> Community)
+  const texts = section('Texts', 'Community reading texts. Open a preview, import copies into your reader library.');
+  container.insertBefore(texts.wrap, publish.wrap);
+  const textsSearch = element('input', { className: 'field-control', attrs: { type: 'search', 'aria-label': 'Filter texts by title', placeholder: 'Filter by title…' } });
+  const textsList = element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-2 overflow-x-hidden' });
+  texts.body.append(textsSearch, textsList);
+  let feedTexts = [];
+  const renderTexts = () => {
+    const query = String(textsSearch.value || '').trim().toLowerCase();
+    const visible = feedTexts.filter((pub) =>
+      !query || `${pub.title} ${pub.description || ''}`.toLowerCase().includes(query));
+    if (!visible.length) {
+      textsList.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'No community texts yet. Publish one from the reader.' }));
+      return;
+    }
+    textsList.replaceChildren(...visible.slice(0, 30).map((pub) => deckRowButton(pub, () => textDetailDialog(pub))));
+  };
+  textsSearch.addEventListener('input', renderTexts);
+  const textDetailDialog = (pub) => {
+    apiRequest(`/api/reading/publications/${pub.id}`)
+      .then((detail) => {
+        const points = Array.from(String(detail.text || ''));
+        const preview = points.length > 1500 ? `${points.slice(0, 1500).join('')}…` : points.join('');
+        const meta = [
+          detail.level || null,
+          `${points.length} chars`,
+          detail.translations && Object.keys(detail.translations).length ? 'with translations' : null
+        ].filter(Boolean).join(' · ');
+        const importButton = smallButton('Import text', `Import ${detail.title} into your library`);
+        importButton.addEventListener('click', () => {
+          withPendingAction(importButton, async () => {
+            const result = await apiRequest(`/api/reading/publications/${detail.id}/import`, { method: 'POST' });
+            return result;
+          }).then((result) => {
+            if (result && result.id) {
+              closeDetail();
+              window.location.hash = `#reading?id=${result.id}`;
+            }
+          }).catch((error) => showToast(error?.message || 'Unable to import.', 'error'));
+        });
+        const actions = [importButton];
+        if (detail.mine) {
+          const deleteButton = smallButton('Delete', `Delete ${detail.title} from Community`);
+          deleteButton.addEventListener('click', () => {
+            confirmDialog({
+              title: `Delete ${detail.title}?`,
+              description: 'Removes it from Community. Imported copies stay in their libraries.',
+              confirmLabel: 'Delete',
+              onConfirm: async () => {
+                try {
+                  await apiRequest(`/api/reading/publications/${detail.id}`, { method: 'DELETE' });
+                  closeDetail();
+                  showToast('Publication deleted.');
+                  loadTexts();
+                } catch (error) {
+                  showToast(error?.message || 'Unable to delete.', 'error');
+                }
+              }
+            });
+          });
+          actions.push(deleteButton);
+        }
+        const closeDetail = openDialog({
+          title: detail.title,
+          description: `${detail.ownerDisplay || (detail.ownerUsername ? `@${detail.ownerUsername}` : 'Community')} · ${meta}`,
+          content: [dialogStack([
+            ...(detail.description ? [element('p', { className: 'min-w-0 break-words text-sm leading-6 text-ink', text: detail.description })] : []),
+            element('p', { className: 'max-h-64 min-w-0 overflow-y-auto whitespace-pre-wrap break-words font-jp text-sm leading-7 text-ink', text: preview, attrs: { lang: 'ja' } }),
+            element('div', { className: 'flex flex-wrap gap-2' }, actions)
+          ])],
+          submitLabel: 'Close',
+          onSubmit: async (form, close) => { close(); }
+        });
+      })
+      .catch((error) => showToast(error?.message || 'Unable to load the text.', 'error'));
+  };
+  const loadTexts = async () => {
+    textsList.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Loading community texts…' }));
+    try {
+      const data = await apiRequest('/api/reading/publications?limit=30');
+      feedTexts = Array.isArray(data?.items) ? data.items : [];
+      renderTexts();
+    } catch {
+      textsList.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Community texts are unavailable.' }));
+    }
+  };
+  loadTexts();
 
   // ---- Publish composer
   const tabs = element('div', { className: 'flex flex-col gap-2 sm:flex-row sm:items-center', attrs: { role: 'group', 'aria-label': 'Pick item type' } });
@@ -379,6 +511,7 @@ export async function renderCommunity(container) {
     ])));
   };
   const runSearch = async () => {
+    if (textsMode) { renderTextsPicker(); return; }
     const query = String(search.value || '').trim();
     results.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Searching…' }));
     try {
@@ -420,23 +553,112 @@ export async function renderCommunity(container) {
     const tab = element('button', {
       className: `button-secondary min-h-9 px-3 py-1.5 text-sm${type.key === pickerType.key ? ' font-bold' : ''}`,
       text: type.label,
-      attrs: { type: 'button', 'aria-pressed': String(type.key === pickerType.key) }
+      attrs: { type: 'button', 'aria-pressed': String(type.key === pickerType.key) },
+      dataset: { pickerKey: type.key }
     });
     tab.addEventListener('click', () => {
       pickerType = type;
+      textsMode = false;
+      jlptFilter.hidden = false;
+      publishButton.textContent = 'Publish deck';
+      publishButton.setAttribute('aria-label', 'Publish deck');
       selected.clear();
       syncTray();
-      [...tabs.children].forEach((node, index) => {
-        const active = PICKER_TYPES[index].key === type.key;
-        node.setAttribute('aria-pressed', String(active));
-        node.classList.toggle('font-bold', active);
-      });
+      paintPickerTabs();
       runSearch();
     });
     tabs.appendChild(tab);
   }
+  const paintPickerTabs = () => {
+    [...tabs.children].forEach((node) => {
+      const key = node.dataset ? node.dataset.pickerKey : null;
+      const active = textsMode ? key === 'texts' : key === pickerType.key;
+      node.setAttribute('aria-pressed', String(active));
+      node.classList.toggle('font-bold', active);
+    });
+  };
+  // Texts tab (Reading <-> Community): single-select one OWNED library text
+  // (shared rows carry mine false and the server 404s them) and publish it
+  // as a snapshot. Reuses search/title/description inputs; deck state stays
+  // untouched while this mode is active.
+  let textsMode = false;
+  let libraryTexts = [];
+  let libraryLoaded = false;
+  let selectedTextId = null;
+  const renderTextsPicker = () => {
+    const query = String(search.value || '').trim().toLowerCase();
+    const own = libraryTexts.filter((item) => item.mine === true);
+    const visible = own.filter((item) => !query || String(item.title || '').toLowerCase().includes(query));
+    if (!visible.length) {
+      results.replaceChildren(element('p', { className: 'text-sm text-muted', text: libraryLoaded ? 'No own texts match. Create one from the reader.' : 'Loading your texts…' }));
+      return;
+    }
+    results.replaceChildren(element('div', { className: 'grid max-h-56 gap-1.5 overflow-y-auto' }, visible.map((item) => {
+      const radio = element('input', { attrs: { type: 'radio', name: 'publish-text-choice', value: String(item.id), 'aria-label': `Publish ${item.title}` } });
+      radio.checked = selectedTextId === Number(item.id);
+      radio.addEventListener('change', () => {
+        if (!radio.checked) return;
+        selectedTextId = Number(item.id);
+        if (!String(titleInput.value || '').trim()) titleInput.value = item.title || '';
+      });
+      return element('label', { className: 'flex items-center gap-2 text-sm text-ink' }, [
+        radio,
+        element('span', {}, [
+          element('span', { className: 'font-medium', text: item.title }),
+          element('span', { className: 'text-muted', text: ` — ${Number(item.characterCount || 0)} chars${item.level ? ` · ${item.level}` : ''}` })
+        ])
+      ]);
+    })));
+  };
+  const loadLibraryTexts = async () => {
+    results.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Loading your texts…' }));
+    try {
+      const data = await apiRequest('/api/reading/library?limit=50');
+      libraryTexts = Array.isArray(data?.items) ? data.items : [];
+      libraryLoaded = true;
+      renderTextsPicker();
+    } catch {
+      results.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Library is unavailable.' }));
+    }
+  };
+  const textsTab = element('button', {
+    className: 'button-secondary min-h-9 px-3 py-1.5 text-sm',
+    text: 'Texts',
+    attrs: { type: 'button', 'aria-pressed': 'false' },
+    dataset: { pickerKey: 'texts' }
+  });
+  textsTab.addEventListener('click', () => {
+    textsMode = true;
+    selected.clear();
+    syncTray();
+    jlptFilter.hidden = true;
+    publishButton.textContent = 'Publish text';
+    publishButton.setAttribute('aria-label', 'Publish text');
+    paintPickerTabs();
+    if (!libraryLoaded) loadLibraryTexts();
+    else renderTextsPicker();
+  });
+  tabs.appendChild(textsTab);
   const publishButton = smallButton('Publish deck', 'Publish deck');
+  const publishSelectedText = () => {
+    const title = String(titleInput.value || '').trim();
+    const description = String(descriptionInput.value || '').trim();
+    if (!selectedTextId) { showToast('Select a text first.', 'error'); return; }
+    withPendingAction(publishButton, async () => {
+      await apiRequest('/api/reading/publications', {
+        method: 'POST',
+        body: { textId: selectedTextId, ...(title ? { title } : {}), ...(description ? { description } : {}) }
+      });
+      showToast('Text published to Community.');
+      selectedTextId = null;
+      titleInput.value = '';
+      descriptionInput.value = '';
+      renderTextsPicker();
+      loadTexts();
+    }).catch((error) => showToast(error?.message || 'Unable to publish the text.', 'error'));
+  };
   publishButton.addEventListener('click', () => {
+    if (textsMode) { publishSelectedText(); return; }
     const ids = [...selected.values()].map(({ id }) => id);
     const title = String(titleInput.value || '').trim();
     if (!ids.length) { showToast('Select at least one item.', 'error'); return; }
@@ -560,12 +782,12 @@ export async function renderCommunity(container) {
         card.setAttribute('tabindex', '0');
         card.setAttribute('aria-label', `Open ${deck.title}`);
         card.classList.add('cursor-pointer');
-        card.addEventListener('click', () => itemsDialog(deck.id, deck.title, deck.entityType));
+        card.addEventListener('click', () => itemsDialog(deck.id, deck.title, deck.entityType, deck));
         card.addEventListener('keydown', (event) => {
           try {
             if (event.target && event.target !== card && typeof event.target.closest === 'function' && event.target.closest('button,input')) return;
           } catch { /* target guard is best-effort */ }
-          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); itemsDialog(deck.id, deck.title, deck.entityType); }
+          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); itemsDialog(deck.id, deck.title, deck.entityType, deck); }
         });
         card.append(
           element('div', { className: 'mt-2 flex items-center gap-2' }, [selectBox, remove]),

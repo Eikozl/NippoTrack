@@ -104,6 +104,28 @@ export function listReadingProgress({ page, limit } = {}) {
   return apiRequest(`/api/reading/progress${queryString({ page, limit })}`);
 }
 
+// Community reading texts: publish owned texts, browse the feed, import
+// copies into the reader library. Thin wrappers, same contract style.
+export function listReadingPublications({ limit, offset, ownerId } = {}) {
+  return apiRequest(`/api/reading/publications${queryString({ limit, offset, ownerId })}`);
+}
+
+export function getReadingPublication(id) {
+  return apiRequest(`/api/reading/publications/${encodeURIComponent(id)}`);
+}
+
+export function publishReadingText({ textId, title, description } = {}) {
+  return apiRequest('/api/reading/publications', { method: 'POST', body: { textId, title, description } });
+}
+
+export function deleteReadingPublication(id) {
+  return apiRequest(`/api/reading/publications/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export function importReadingPublication(id) {
+  return apiRequest(`/api/reading/publications/${encodeURIComponent(id)}/import`, { method: 'POST' });
+}
+
 export function queryString(values) {
   const params = new URLSearchParams();
 

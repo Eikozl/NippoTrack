@@ -4,7 +4,8 @@ const ID_COLUMNS = {
   vocabulary: 'id_vocabulary', kanji: 'id_kanji', grammar_points: 'id_grammar', study_sessions: 'id_session',
   session_writings: 'id_session_writing', usage_examples: 'id_usage_example', grammar_examples: 'id_grammar_example', goals: 'id_goal',
   content_entries: 'id_content_entry', notes: 'id_note', tags: 'id_tag', review_items: 'id_review_item', review_events: 'id_review_event',
-  deck_publications: 'id_deck_publication', deck_publication_items: 'id_deck_publication_item', deck_suggestions: 'id_deck_suggestion', deck_collections: 'id_deck_collection'
+  deck_publications: 'id_deck_publication', deck_publication_items: 'id_deck_publication_item', deck_suggestions: 'id_deck_suggestion', deck_collections: 'id_deck_collection',
+  reading_publications: 'id_reading_publication'
 };
 
 function placeholders(sql) {

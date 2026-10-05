@@ -13,14 +13,18 @@ const { ValidationError } = require('../errors/http');
 const { JLPT_LEVELS } = require('../constants');
 const {
   attachVocabularyGlosses,
+  ensureGrammarEntities,
+  ensureKanjiEntities,
+  ensureVocabularyEntities,
   estimateDifficultyLevel,
+  intersectSelected,
   normalizeJlpt,
   truncateCodePoints
 } = require('./immersionPipeline');
 const { extractHanOccurrences } = require('./textKanjiAnalysis');
 const { MAX_LEXICAL_TEXT_LENGTH, engineMetadata, parseJapanese } = require('./japaneseParser');
-const { adaptTokens } = require('./lexicalTokenAdapter');
-const { buildLexicalCandidates, matchOwnedVocabulary } = require('./lexicalCandidates');
+const { adaptTokens, classifyCandidate } = require('./lexicalTokenAdapter');
+const { buildLexicalCandidates, candidateIdentity, matchOwnedVocabulary, reconstructObservedSurface } = require('./lexicalCandidates');
 const { detectGrammar } = require('./grammarDetector');
 const { hydrateGrammarMatches } = require('./grammarReferenceStore');
 const { isValidDateString } = require('../validation');
@@ -31,6 +35,14 @@ const MAX_ANNOTATIONS = 500;
 const MAX_LIBRARY_LIMIT = 50;
 const MAX_IMPORT_ITEMS = 20;
 const MAX_DATABASE_IN_VALUES = 1000;
+const MAX_READING_ENROLL_ITEMS = 200;
+// P0 payload bound: per-occurrence tokens scale with text length (tens of
+// thousands on 100k-char Aozora imports). The reader degrades explicitly
+// past this cap (truncated:true) instead of serving MB-scale JSON.
+const MAX_TOKENS = 2000;
+// Editorial translations are user-authored content (reader "Tap to reveal
+// English"), not parser output: bounded like notes, never fabricated.
+const MAX_TRANSLATION_LENGTH = 2000;
 const SOURCE_TIMEOUT_MS = 8000;
 // Minimum text length for a level estimate. Below ~50 code points (a couple
 // of sentences) the sentence-length and grammar adjustments are single-sample
@@ -102,11 +114,18 @@ function extractInsertId(result) {
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
+// Token-layer sentences carry stable numeric ids plus code-point bounds so the
+// reader can slice with Array.from(text).slice(start, end) (astral-plane
+// safe). `start`/`text` keep their legacy meaning; `id`/`end` are additive.
 function splitSentences(text) {
   const points = Array.from(text);
   if (!points.length) return [];
   const sentences = [];
   let start = 0;
+  let id = 0;
+  const pushSentence = (sentenceText, sentenceStart) => {
+    sentences.push({ id: id++, text: sentenceText, start: sentenceStart, end: sentenceStart + Array.from(sentenceText).length });
+  };
   for (let index = 0; index < points.length; index += 1) {
     if (!/[。！？!?\n\r]/u.test(points[index])) continue;
     const end = index + 1;
@@ -116,7 +135,7 @@ function splitSentences(text) {
     let trailing = sentencePoints.length;
     while (trailing > leading && /\s/u.test(sentencePoints[trailing - 1])) trailing -= 1;
     const sentence = sentencePoints.slice(leading, trailing).join('');
-    if (sentence) sentences.push({ text: sentence, start: start + leading });
+    if (sentence) pushSentence(sentence, start + leading);
     start = end;
   }
   if (start < points.length) {
@@ -126,13 +145,15 @@ function splitSentences(text) {
     let trailing = tailPoints.length;
     while (trailing > leading && /\s/u.test(tailPoints[trailing - 1])) trailing -= 1;
     const tail = tailPoints.slice(leading, trailing).join('');
-    if (tail) sentences.push({ text: tail, start: start + leading });
+    if (tail) pushSentence(tail, start + leading);
   }
   return sentences;
 }
 
 // Keep sentence boundaries where possible; very long sentences are split by
 // code point without ever crossing MAX_LEXICAL_TEXT_LENGTH UTF-16 code units.
+// Segments carry their parent sentenceId so per-occurrence tokens can be
+// attributed without re-scanning sentence bounds.
 function parserSegments(sentences) {
   const segments = [];
   for (const sentence of sentences) {
@@ -141,14 +162,14 @@ function parserSegments(sentences) {
     let offset = sentence.start;
     for (const character of Array.from(sentence.text)) {
       if (content && content.length + character.length > MAX_LEXICAL_TEXT_LENGTH) {
-        segments.push({ text: content, start: segmentStart });
+        segments.push({ text: content, start: segmentStart, sentenceId: sentence.id });
         segmentStart = offset;
         content = '';
       }
       content += character;
       offset += 1;
     }
-    if (content) segments.push({ text: content, start: segmentStart });
+    if (content) segments.push({ text: content, start: segmentStart, sentenceId: sentence.id });
   }
   return segments;
 }
@@ -216,6 +237,7 @@ function grammarMatchKey(match) {
 async function collectLexicalAnalysis(executor, userId, sentences) {
   const vocabularyByKey = new Map();
   const grammarByKey = new Map();
+  const lexicalTokens = [];
   for (const segment of parserSegments(sentences)) {
     let tokens;
     try {
@@ -225,6 +247,15 @@ async function collectLexicalAnalysis(executor, userId, sentences) {
       // A parser failure only degrades lexical/grammar annotations for this
       // bounded segment. Kanji analysis remains independent and authoritative.
       continue;
+    }
+    for (const token of tokens) {
+      if (!token || typeof token.surface !== 'string') continue;
+      lexicalTokens.push({
+        ...token,
+        start: (Number.isInteger(token.start) ? token.start : 0) + segment.start,
+        end: (Number.isInteger(token.end) ? token.end : (Number.isInteger(token.start) ? token.start : 0) + Array.from(token.surface || '').length) + segment.start,
+        sentenceId: segment.sentenceId
+      });
     }
     const { candidates } = buildLexicalCandidates(tokens);
     if (candidates.length) {
@@ -249,11 +280,193 @@ async function collectLexicalAnalysis(executor, userId, sentences) {
       // Grammar rules are best-effort; lexical analysis and kanji results stay.
     }
   }
+  lexicalTokens.sort((a, b) => (a.start ?? 0) - (b.start ?? 0) || (a.end ?? 0) - (b.end ?? 0));
   const vocabulary = [...vocabularyByKey.values()].sort((a, b) => a.firstStart - b.firstStart);
   await attachVocabularyGlosses(executor, vocabulary);
   const grammarMatches = [...grammarByKey.values()];
   const grammar = await hydrateGrammarMatches(userId, grammarMatches, executor);
-  return { vocabulary, grammar };
+  return { vocabulary, grammar, lexicalTokens };
+}
+
+// Deterministic candidate id shapes shared by tokens[] and enroll. Vocabulary
+// mirrors immersionPipeline (`vocabulary::<canonical>::<reading>`); kanji and
+// grammar mirror the immersion/story enroll keys.
+function vocabularyCandidateId(canonical, reading) {
+  return `vocabulary::${canonical}::${reading || ''}`;
+}
+
+function kanjiCandidateId(character) {
+  return `kanji::${character}`;
+}
+
+function grammarCandidateId(slug) {
+  return `grammar::${slug}`;
+}
+
+function vocabularyReadingFor(candidateOrToken) {
+  if (!candidateOrToken || typeof candidateOrToken !== 'object') return null;
+  return candidateOrToken.lemmaReading || candidateOrToken.surfaceReading || null;
+}
+
+function findSentenceId(sentences, offset) {
+  if (!Array.isArray(sentences) || !sentences.length) return null;
+  for (const sentence of sentences) {
+    if (Number.isInteger(sentence.start) && Number.isInteger(sentence.end) && offset >= sentence.start && offset < sentence.end) {
+      return sentence.id;
+    }
+  }
+  return null;
+}
+
+// Per-occurrence vocabulary tokens (1 logical entry per content head, with
+// aux/copula continuations folded into the head via the shared
+// reconstructObservedSurface — never reinvented here). Continuation tokens
+// are skipped so offsets never overlap and Array.from slicing stays exact.
+// Non-content tokens (particles/aux/copula/symbols/numerals/proper-nouns/
+// suffixes) pass through 1:1 with tappable false.
+function buildVocabularyTokens(lexicalTokens, vocabulary) {
+  const list = Array.isArray(lexicalTokens) ? lexicalTokens : [];
+  const aggregates = Array.isArray(vocabulary) ? vocabulary : [];
+  const byKey = new Map();
+  const idByKey = new Map();
+  for (const candidate of aggregates) {
+    const key = candidate.key || `${candidate.pos}::${candidate.canonical}`;
+    byKey.set(key, candidate);
+    idByKey.set(key, vocabularyCandidateId(candidate.canonical, vocabularyReadingFor(candidate)));
+  }
+  const tokens = [];
+  const skipped = new Set();
+  for (let index = 0; index < list.length; index += 1) {
+    if (skipped.has(index)) continue;
+    const token = list[index];
+    if (!token || typeof token.surface !== 'string') continue;
+    const verdict = classifyCandidate(token);
+    const tappable = verdict.candidate === true;
+    if (!token.isContentWord) {
+      const canonical = token.lemma || token.surface;
+      tokens.push({
+        surface: token.surface,
+        lemma: token.lemma || null,
+        surfaceReading: token.surfaceReading || null,
+        lemmaReading: token.lemmaReading || null,
+        gloss: null,
+        entityKind: 'vocabulary',
+        candidateId: vocabularyCandidateId(canonical, vocabularyReadingFor(token)),
+        start: token.start,
+        end: token.end,
+        sentenceId: token.sentenceId,
+        tappable: false,
+        known: false,
+        level: null
+      });
+      continue;
+    }
+    const expanded = reconstructObservedSurface(list, index);
+    const consumed = Number.isInteger(expanded.consumed) && expanded.consumed > 0 ? expanded.consumed : 1;
+    for (let skip = index + 1; skip < index + consumed && skip < list.length; skip += 1) skipped.add(skip);
+    const last = list[index + consumed - 1] || token;
+    const surface = expanded.surface;
+    const surfaceReading = expanded.surfaceReading || null;
+    const key = candidateIdentity(token);
+    const aggregate = byKey.get(key) || null;
+    const hasAggregate = Boolean(aggregate) && tappable;
+    const candidateId = hasAggregate
+      ? idByKey.get(key)
+      : vocabularyCandidateId(token.lemma || token.surface, vocabularyReadingFor(token));
+    tokens.push({
+      surface,
+      lemma: token.lemma || null,
+      surfaceReading,
+      lemmaReading: token.lemmaReading || null,
+      gloss: hasAggregate ? (aggregate.gloss || null) : null,
+      entityKind: 'vocabulary',
+      candidateId,
+      start: token.start,
+      end: last && Number.isInteger(last.end) ? last.end : token.start + Array.from(surface).length,
+      sentenceId: token.sentenceId,
+      tappable,
+      known: hasAggregate ? aggregate.match?.state === 'existing' : false,
+      level: null
+    });
+  }
+  return tokens;
+}
+
+function buildKanjiTokens(text, sentences, kanjiData) {
+  const points = Array.from(text || '');
+  const tokens = [];
+  const referenceByCharacter = kanjiData?.referenceByCharacter || new Map();
+  const ownedCharacters = kanjiData?.ownedCharacters || new Set();
+  for (let offset = 0; offset < points.length; offset += 1) {
+    const character = points[offset];
+    if (!/\p{Script=Han}/u.test(character)) continue;
+    const reference = referenceByCharacter.get(character) || null;
+    const meanings = Array.isArray(reference?.meanings) ? reference.meanings : [];
+    tokens.push({
+      surface: character,
+      lemma: null,
+      surfaceReading: null,
+      lemmaReading: null,
+      gloss: meanings[0] || null,
+      entityKind: 'kanji',
+      candidateId: kanjiCandidateId(character),
+      start: offset,
+      end: offset + 1,
+      sentenceId: findSentenceId(sentences, offset),
+      tappable: true,
+      known: ownedCharacters.has(character),
+      level: normalizeJlpt(reference?.jlpt_level)
+    });
+  }
+  return tokens;
+}
+
+function buildGrammarTokens(text, sentences, grammar) {
+  const points = Array.from(text || '');
+  const tokens = [];
+  for (const match of Array.isArray(grammar) ? grammar : []) {
+    if (!match || match.status !== 'DETERMINATE' || !match.reference) continue;
+    const start = match.detected?.start;
+    const end = match.detected?.end;
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end > points.length) continue;
+    const reference = match.reference;
+    const surface = points.slice(start, end).join('');
+    if (!surface) continue;
+    tokens.push({
+      surface,
+      lemma: null,
+      surfaceReading: null,
+      lemmaReading: null,
+      gloss: reference.meaning || reference.summary || null,
+      entityKind: 'grammar',
+      candidateId: grammarCandidateId(reference.sourceSlug),
+      start,
+      end,
+      sentenceId: findSentenceId(sentences, start),
+      tappable: true,
+      known: match.collection?.inGrammar === true,
+      level: normalizeJlpt(reference.jlptLevel)
+    });
+  }
+  return tokens;
+}
+
+function buildTokenLayer(text, sentences, lexicalTokens, vocabulary, grammar, kanjiData) {
+  const vocabularyTokens = buildVocabularyTokens(lexicalTokens, vocabulary);
+  const kanjiTokens = buildKanjiTokens(text, sentences, kanjiData);
+  const grammarTokens = buildGrammarTokens(text, sentences, grammar);
+  // Spans stay unique per occurrence: a single-char Han already covered by a
+  // vocabulary token with the identical span/surface keeps the vocabulary
+  // entry (tappable state + JMdict gloss live there); the duplicate kanji
+  // entry is dropped so Array.from slicing keys stay 1:1. Multi-char
+  // vocabulary (学校 7-9) never collides with its single-char kanji parts
+  // (学 7-8, 校 8-9), so those kanji fallbacks are preserved.
+  const vocabSpans = new Set(vocabularyTokens.map((entry) => `${entry.start}-${entry.end}-${entry.surface}`));
+  const dedupedKanji = kanjiTokens.filter((entry) => !vocabSpans.has(`${entry.start}-${entry.end}-${entry.surface}`));
+  const priority = { vocabulary: 0, kanji: 1, grammar: 2 };
+  return [...vocabularyTokens, ...dedupedKanji, ...grammarTokens].sort(
+    (a, b) => (a.start ?? 0) - (b.start ?? 0) || (b.end ?? 0) - (a.end ?? 0) || (priority[a.entityKind] ?? 9) - (priority[b.entityKind] ?? 9)
+  );
 }
 
 function buildStats(text, kanjiPositions, kanjiEstimate, vocabulary, grammar) {
@@ -338,6 +551,9 @@ function makeAnnotations(kanjiPositions, kanjiData, vocabulary, grammar) {
       reading: reference.kana || null,
       meaning: reference.meaning || reference.summary || null,
       explanation: reference.summary || reference.meaning || null,
+      // Stable reference identity so the ownership overlay can refresh known
+      // without re-running detection+hydration on cache hits.
+      referenceSlug: reference.sourceSlug || null,
       info: { structures: reference.structures || [], pitfalls: reference.pitfalls || [] }
     });
   }
@@ -361,11 +577,16 @@ async function analyzeReading(executor, userId, rawText) {
   const stats = buildStats(text, positions, kanjiEstimate, lexical.vocabulary, lexical.grammar);
   const blended = deriveBlendedLevel(kanjiEstimate.level, kanjiEstimate.confidence, stats);
   const leveled = stats.characters >= MIN_LEVEL_CHARACTERS ? blended : { level: null, confidence: 0 };
+  const fullTokens = buildTokenLayer(text, sentences, lexical.lexicalTokens || [], lexical.vocabulary, lexical.grammar, kanjiData);
+  const truncated = fullTokens.length > MAX_TOKENS;
   return {
     level: leveled.level,
     confidence: leveled.confidence,
     stats,
-    annotations: makeAnnotations(positions, kanjiData, lexical.vocabulary, lexical.grammar)
+    annotations: makeAnnotations(positions, kanjiData, lexical.vocabulary, lexical.grammar),
+    sentences,
+    tokens: truncated ? fullTokens.slice(0, MAX_TOKENS) : fullTokens,
+    truncated
   };
 }
 
@@ -416,10 +637,11 @@ async function listReadingLibrary(executor, userId, {
     params
   );
   const [rows] = await executor.execute(
-    `SELECT rt.id_reading_text AS id, rt.title, rt.level, COALESCE(rs.type, 'user') AS "sourceType", rt.text, rt.created_at AS "createdAt"
-     FROM reading_texts rt LEFT JOIN reading_sources rs ON rs.id_reading_source = rt.source_id
-     WHERE ${whereSql} ORDER BY rt.created_at DESC, rt.id_reading_text DESC LIMIT ? OFFSET ?`,
-    [...params, limit, offset]
+    `SELECT rt.id_reading_text AS id, rt.title, rt.level, COALESCE(rs.type, 'user') AS "sourceType", rt.text, rt.created_at AS "createdAt",
+       (rt.user_id = ?) AS mine
+      FROM reading_texts rt LEFT JOIN reading_sources rs ON rs.id_reading_source = rt.source_id
+      WHERE ${whereSql} ORDER BY rt.created_at DESC, rt.id_reading_text DESC LIMIT ? OFFSET ?`,
+    [...params, userId, limit, offset]
   );
   const itemRows = rows || [];
   const characterSets = itemRows.map((row) => new Set(extractHanOccurrences(row.text || '').map(({ character }) => character)));
@@ -441,6 +663,7 @@ async function listReadingLibrary(executor, userId, {
       title: row.title,
       level: normalizeJlpt(row.level),
       sourceType: row.sourceType || 'user',
+      mine: row.mine === true || row.mine === 1,
       characterCount: codePointLength(row.text || ''),
       knownKanjiPct: characters.size ? Math.round((known / characters.size) * 1000) / 10 : 0
     };
@@ -459,18 +682,256 @@ function parseMetadata(value) {
   }
 }
 
+// Editorial sentence translations keyed by sentence id. Stored as a plain
+// map ({sentenceId: translation}); only non-empty strings survive, in read
+// and in write, so the reader/js can treat "present" as "revealed".
+function parseTranslations(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+  if (!source) return {};
+  const translations = {};
+  for (const [key, text] of Object.entries(source)) {
+    const sentenceId = Number(key);
+    if (!Number.isSafeInteger(sentenceId) || sentenceId < 0) continue;
+    if (typeof text !== 'string') continue;
+    const translation = text.trim();
+    if (!translation) continue;
+    translations[sentenceId] = translation.slice(0, MAX_TRANSLATION_LENGTH);
+  }
+  return translations;
+}
+
+async function saveSentenceTranslations(executor, userId, textId, translations) {
+  const [rows] = await executor.execute(
+    'SELECT id_reading_text, text FROM reading_texts WHERE id_reading_text = ? AND (user_id IS NULL OR user_id = ?)',
+    [textId, userId]
+  );
+  const row = rows?.[0];
+  if (!row) return null;
+  if (!Array.isArray(translations)) throw new ValidationError('translations must be an array of {sentenceId, translation}.');
+  const sentences = splitSentences(row.text || '');
+  const validIds = new Set(sentences.map((sentence) => sentence.id));
+  const merged = {};
+  for (const entry of translations) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new ValidationError('each translation must be a {sentenceId, translation} object.');
+    }
+    if (!Number.isSafeInteger(entry.sentenceId) || entry.sentenceId < 0 || !validIds.has(entry.sentenceId)) {
+      throw new ValidationError(`sentenceId ${entry?.sentenceId} does not exist in this text.`);
+    }
+    if (typeof entry.translation !== 'string') {
+      throw new ValidationError('translation must be a string.');
+    }
+    const text = entry.translation.trim();
+    if (!text) continue;
+    if (Array.from(text).length > MAX_TRANSLATION_LENGTH) {
+      throw new ValidationError(`translation must not exceed ${MAX_TRANSLATION_LENGTH} characters.`);
+    }
+    merged[entry.sentenceId] = text;
+  }
+  await executor.execute(
+    'UPDATE reading_texts SET sentence_translations_json = ?::jsonb WHERE id_reading_text = ? AND (user_id IS NULL OR user_id = ?)',
+    [JSON.stringify(merged), textId, userId]
+  );
+  return merged;
+}
+
+// Token-layer cache: sentences/tokens/annotations are user-independent except
+// for the known flags, so GET serves the stored artifact and refreshes ONLY
+// known via cheap batched ownership lookups (≤5 queries) instead of
+// recomputing kuromoji + gloss + per-segment ownership (~100 queries).
+// Baked known flags are never trusted (reset both ways by the overlay).
+function parseTokenCache(row) {
+  try {
+    const annotations = row?.annotations_json;
+    const sentences = row?.sentences_json;
+    const layer = row?.tokens_json;
+    if (!Array.isArray(annotations) || !Array.isArray(sentences)) return null;
+    if (!layer || typeof layer !== 'object' || Array.isArray(layer) || !Array.isArray(layer.tokens)) return null;
+    return {
+      annotations,
+      sentences,
+      tokens: layer.tokens,
+      truncated: layer.truncated === true
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function canonicalFromVocabularyId(candidateId) {
+  const prefix = 'vocabulary::';
+  const rest = String(candidateId || '');
+  if (!rest.startsWith(prefix)) return null;
+  const body = rest.slice(prefix.length);
+  const separator = body.lastIndexOf('::');
+  const canonical = (separator < 0 ? body : body.slice(0, separator)).trim();
+  return canonical || null;
+}
+
+function slugFromGrammarId(candidateId) {
+  const prefix = 'grammar::';
+  const rest = String(candidateId || '');
+  if (!rest.startsWith(prefix)) return null;
+  const slug = rest.slice(prefix.length).trim();
+  return slug || null;
+}
+
+async function applyOwnershipOverlay(executor, userId, analysis) {
+  const annotations = Array.isArray(analysis?.annotations) ? analysis.annotations : [];
+  const tokens = Array.isArray(analysis?.tokens) ? analysis.tokens : [];
+  // Vocabulary: group cached entries by canonical and reuse the tested
+  // matcher once (max 2 bounded queries). Only content-word entries went
+  // through candidates in the analyze path (tappable), so only those flip.
+  const byCanonical = new Map();
+  const trackVocab = (canonical, lemma, surface) => {
+    if (!canonical) return null;
+    let entry = byCanonical.get(canonical);
+    if (!entry) {
+      entry = { lemma: lemma || null, canonical, surfaces: new Set(), tokens: [], annotations: [] };
+      byCanonical.set(canonical, entry);
+    }
+    if (lemma && !entry.lemma) entry.lemma = lemma;
+    if (surface) entry.surfaces.add(surface);
+    return entry;
+  };
+  for (const token of tokens) {
+    if (token?.entityKind !== 'vocabulary' || token.tappable !== true) continue;
+    const canonical = canonicalFromVocabularyId(token.candidateId) || token.lemma || token.surface;
+    const entry = trackVocab(canonical, token.lemma, token.surface);
+    if (entry) entry.tokens.push(token);
+  }
+  for (const annotation of annotations) {
+    if (annotation?.type !== 'vocabulary' || typeof annotation.word !== 'string' || !annotation.word) continue;
+    const entry = trackVocab(annotation.word, annotation.word, null);
+    if (entry) entry.annotations.push(annotation);
+  }
+  const pseudos = [...byCanonical.values()].map((entry) => ({
+    lemma: entry.lemma,
+    canonical: entry.canonical,
+    observed: [...entry.surfaces].map((surface) => ({ surface })),
+    match: { state: 'new', possibleMatches: [] }
+  }));
+  for (const group of batches(pseudos, MAX_DATABASE_IN_VALUES)) {
+    if (group.length) await matchOwnedVocabulary(executor, userId, group);
+  }
+  for (const pseudo of pseudos) {
+    const known = pseudo.match?.state === 'existing';
+    const entry = byCanonical.get(pseudo.canonical);
+    if (!entry) continue;
+    for (const token of entry.tokens) token.known = known;
+    for (const annotation of entry.annotations) annotation.known = known;
+  }
+  // Kanji: single batched owned-characters lookup.
+  const characters = new Set();
+  for (const token of tokens) {
+    if (token?.entityKind === 'kanji' && typeof token.surface === 'string' && Array.from(token.surface).length === 1) {
+      characters.add(token.surface);
+    }
+  }
+  for (const annotation of annotations) {
+    if (annotation?.type === 'kanji' && typeof annotation.char === 'string' && annotation.char) characters.add(annotation.char);
+  }
+  const ownedCharacters = new Set();
+  for (const group of batches([...characters])) {
+    if (!group.length) break;
+    const placeholders = group.map(() => '?').join(', ');
+    const [rows] = await executor.execute(
+      `SELECT character_kanji FROM kanji WHERE user_id = ? AND character_kanji IN (${placeholders})`,
+      [userId, ...group]
+    );
+    for (const row of rows || []) {
+      if (row && typeof row.character_kanji === 'string') ownedCharacters.add(row.character_kanji);
+    }
+  }
+  for (const token of tokens) {
+    if (token?.entityKind === 'kanji') token.known = ownedCharacters.has(token.surface);
+  }
+  for (const annotation of annotations) {
+    if (annotation?.type === 'kanji') annotation.known = ownedCharacters.has(annotation.char);
+  }
+  // Grammar: slug → reference → user ownership (mirrors hydrateGrammarMatches).
+  const slugs = new Set();
+  for (const token of tokens) {
+    if (token?.entityKind !== 'grammar') continue;
+    const slug = slugFromGrammarId(token.candidateId);
+    if (slug) slugs.add(slug);
+  }
+  for (const annotation of annotations) {
+    if (annotation?.type !== 'grammar') continue;
+    if (typeof annotation.referenceSlug === 'string' && annotation.referenceSlug) slugs.add(annotation.referenceSlug);
+  }
+  const ownedSlugs = new Set();
+  for (const group of batches([...slugs])) {
+    if (!group.length) break;
+    const placeholders = group.map(() => '?').join(', ');
+    const [references] = await executor.execute(
+      `SELECT id_grammar_reference, source_slug FROM grammar_reference WHERE source = 'nihongo-mono' AND source_slug IN (${placeholders})`,
+      group
+    );
+    const ids = [];
+    const idBySlug = new Map();
+    for (const row of references || []) {
+      if (!row || typeof row.source_slug !== 'string') continue;
+      idBySlug.set(row.source_slug, Number(row.id_grammar_reference));
+      ids.push(Number(row.id_grammar_reference));
+    }
+    if (!ids.length) continue;
+    const [owned] = await executor.execute(
+      `SELECT reference_id FROM grammar_points WHERE user_id = ? AND reference_id IN (${ids.map(() => '?').join(', ')})`,
+      [userId, ...ids]
+    );
+    const ownedIds = new Set((owned || []).map((row) => Number(row?.reference_id)));
+    for (const [slug, id] of idBySlug) {
+      if (ownedIds.has(id)) ownedSlugs.add(slug);
+    }
+  }
+  for (const token of tokens) {
+    if (token?.entityKind !== 'grammar') continue;
+    token.known = ownedSlugs.has(slugFromGrammarId(token.candidateId));
+  }
+  for (const annotation of annotations) {
+    if (annotation?.type !== 'grammar') continue;
+    annotation.known = typeof annotation.referenceSlug === 'string' && ownedSlugs.has(annotation.referenceSlug);
+  }
+}
+
+async function persistTokenCache(executor, userId, textId, analysis) {
+  await executor.execute(
+    'UPDATE reading_texts SET sentences_json = ?::jsonb, tokens_json = ?::jsonb WHERE id_reading_text = ? AND (user_id IS NULL OR user_id = ?)',
+    [
+      JSON.stringify(Array.isArray(analysis?.sentences) ? analysis.sentences : []),
+      JSON.stringify({ tokens: Array.isArray(analysis?.tokens) ? analysis.tokens : [], truncated: analysis?.truncated === true }),
+      textId,
+      userId
+    ]
+  );
+}
+
 async function getReadingText(executor, userId, id) {
   const [rows] = await executor.execute(
-    `SELECT rt.id_reading_text AS id, rt.title, rt.level, COALESCE(rs.type, 'user') AS "sourceType", rs.metadata,
-       rt.text, p.position, p.completed_at AS "completedAt", p.time_spent_seconds AS "timeSpentSeconds"
-     FROM reading_texts rt LEFT JOIN reading_sources rs ON rs.id_reading_source = rt.source_id
+    `SELECT rt.id_reading_text AS id, rt.user_id AS "ownerId", rt.title, rt.level, COALESCE(rs.type, 'user') AS "sourceType", rs.metadata,
+       rt.text, rt.annotations_json, rt.sentences_json, rt.tokens_json, rt.sentence_translations_json, p.position, p.completed_at AS "completedAt", p.time_spent_seconds AS "timeSpentSeconds"
+      FROM reading_texts rt LEFT JOIN reading_sources rs ON rs.id_reading_source = rt.source_id
      LEFT JOIN user_reading_progress p ON p.text_id = rt.id_reading_text AND p.user_id = ?
      WHERE rt.id_reading_text = ? AND (rt.user_id IS NULL OR rt.user_id = ?)`,
     [userId, id, userId]
   );
   const row = rows?.[0];
   if (!row) return null;
-  const annotations = await buildAnnotations(executor, userId, row.text);
+  // Cached artifact when present: sentences/tokens/annotations are
+  // user-independent except for known flags, so only the cheap ownership
+  // overlay runs per GET. On a miss the full analysis runs once and fills
+  // the cache for every later reader (shared rows included).
+  let analysis = parseTokenCache(row);
+  if (analysis) {
+    await applyOwnershipOverlay(executor, userId, analysis);
+  } else {
+    const fresh = await analyzeReading(executor, userId, row.text);
+    analysis = { annotations: fresh.annotations, sentences: fresh.sentences, tokens: fresh.tokens, truncated: fresh.truncated };
+    await persistTokenCache(executor, userId, row.id, analysis).catch(() => {
+      // Best-effort: a failed cache write only costs a recompute next GET.
+    });
+  }
   const progress = row.position === null || row.position === undefined ? null : {
     position: Number(row.position),
     timeSpentSeconds: Number(row.timeSpentSeconds) || 0,
@@ -480,11 +941,16 @@ async function getReadingText(executor, userId, id) {
   return {
     id: Number(row.id),
     title: row.title,
+    mine: row.ownerId ? String(row.ownerId) === String(userId) : false,
     level: normalizeJlpt(row.level),
     sourceType: row.sourceType || 'user',
     metadata: parseMetadata(row.metadata),
     text: row.text,
-    annotations,
+    annotations: analysis.annotations,
+    sentences: analysis.sentences,
+    tokens: analysis.tokens,
+    truncated: analysis.truncated === true,
+    translations: parseTranslations(row.sentence_translations_json),
     progress
   };
 }
@@ -503,8 +969,8 @@ async function createUserReadingText(executor, userId, { text: rawText, title: r
     const sourceId = extractInsertId(sourceResult);
     if (!sourceId) throw new Error('Failed to create reading source.');
     const [textResult] = await connection.execute(
-      'INSERT INTO reading_texts (source_id, user_id, text, title, level, annotations_json) VALUES (?, ?, ?, ?, ?, ?::jsonb) RETURNING id_reading_text AS insertId',
-      [sourceId, userId, text, title, analysis.level, JSON.stringify(analysis.annotations)]
+      'INSERT INTO reading_texts (source_id, user_id, text, title, level, annotations_json, sentences_json, tokens_json) VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb) RETURNING id_reading_text AS insertId',
+      [sourceId, userId, text, title, analysis.level, JSON.stringify(analysis.annotations), JSON.stringify(analysis.sentences), JSON.stringify({ tokens: analysis.tokens, truncated: analysis.truncated === true })]
     );
     const id = extractInsertId(textResult);
     if (!id) throw new Error('Failed to create reading text.');
@@ -606,6 +1072,212 @@ async function upsertReadingProgress(executor, userId, textId, {
     timeSpentSeconds: timeSpentSeconds ?? 0,
     completed: completed ?? false
   };
+}
+
+// Reading enroll (mirrors POST /api/stories/:id/enroll-srs): the client only
+// supplies stable candidate id keys; the server re-runs the deterministic
+// graded-reader analysis on the stored text and intersects by id. Unknown or
+// forged ids intersect to nothing and are never written. Vocabulary ids use
+// the immersion shape (vocabulary::<canonical>::<reading>), kanji
+// (kanji::<char>), grammar (grammar::<slug>).
+const REVIEW_TARGET_COLUMN = Object.freeze({ vocabulary: 'id_vocabulary', kanji: 'id_kanji', grammar: 'id_grammar' });
+
+function buildEnrollableReadingCandidates(vocabulary, grammar, kanjiData) {
+  const enrollableVocabulary = [];
+  const seenVocabularyIds = new Set();
+  for (const candidate of Array.isArray(vocabulary) ? vocabulary : []) {
+    const reading = vocabularyReadingFor(candidate);
+    const id = vocabularyCandidateId(candidate.canonical, reading);
+    if (seenVocabularyIds.has(id)) continue;
+    seenVocabularyIds.add(id);
+    enrollableVocabulary.push({
+      id,
+      display: candidate.canonical,
+      reading: reading || null,
+      meaning: candidate.gloss || null,
+      jlpt: null,
+      known: candidate.match?.state === 'existing'
+    });
+  }
+  const referenceByCharacter = kanjiData?.referenceByCharacter || new Map();
+  const ownedCharacters = kanjiData?.ownedCharacters || new Set();
+  const enrollableKanji = [];
+  const seenKanjiIds = new Set();
+  for (const [character] of referenceByCharacter) {
+    const id = kanjiCandidateId(character);
+    if (seenKanjiIds.has(id)) continue;
+    seenKanjiIds.add(id);
+    const reference = referenceByCharacter.get(character) || null;
+    const onyomi = Array.isArray(reference?.onyomi) ? reference.onyomi : [];
+    const meanings = Array.isArray(reference?.meanings) ? reference.meanings : [];
+    enrollableKanji.push({
+      id,
+      display: character,
+      reading: onyomi[0] || null,
+      meaning: meanings[0] || null,
+      jlpt: normalizeJlpt(reference?.jlpt_level),
+      known: ownedCharacters.has(character)
+    });
+  }
+  // Characters with no reference row are still enrollable as kanji::char so
+  // the reader's kanji tokens stay selectable; reference lookups stay null.
+  if (kanjiData && Array.isArray(kanjiData.allCharacters)) {
+    for (const character of kanjiData.allCharacters) {
+      const id = kanjiCandidateId(character);
+      if (seenKanjiIds.has(id)) continue;
+      seenKanjiIds.add(id);
+      enrollableKanji.push({ id, display: character, reading: null, meaning: null, jlpt: null, known: false });
+    }
+  }
+  const enrollableGrammar = [];
+  const grammarInternals = new Map();
+  const seenGrammarIds = new Set();
+  for (const match of Array.isArray(grammar) ? grammar : []) {
+    if (!match || match.status !== 'DETERMINATE' || !match.reference) continue;
+    const reference = match.reference;
+    const id = grammarCandidateId(reference.sourceSlug);
+    if (seenGrammarIds.has(id)) continue;
+    seenGrammarIds.add(id);
+    grammarInternals.set(id, {
+      referenceId: reference.referenceId,
+      grammarPoint: reference.grammarPoint,
+      meaning: reference.meaning || reference.summary || null,
+      jlpt: normalizeJlpt(reference.jlptLevel)
+    });
+    enrollableGrammar.push({
+      id,
+      display: reference.grammarPoint,
+      reading: reference.kana || null,
+      meaning: reference.meaning || null,
+      jlpt: normalizeJlpt(reference.jlptLevel),
+      known: match.collection?.inGrammar === true
+    });
+  }
+  return { vocabulary: enrollableVocabulary, kanji: enrollableKanji, grammar: enrollableGrammar, grammarInternals, referenceByCharacter };
+}
+
+async function enrollReadingItems(executor, userId, textId, selectedIds) {
+  if (!Array.isArray(selectedIds) || selectedIds.length < 1 || selectedIds.length > MAX_READING_ENROLL_ITEMS) {
+    throw new ValidationError(`selected must be an array of 1 to ${MAX_READING_ENROLL_ITEMS} candidate id strings.`);
+  }
+  const selectedKeys = new Set();
+  for (const key of selectedIds) {
+    if (typeof key !== 'string' || !key) {
+      throw new ValidationError('selected must contain only non-empty candidate id strings.');
+    }
+    selectedKeys.add(key);
+  }
+  const [textRows] = await executor.execute(
+    'SELECT id_reading_text, text FROM reading_texts WHERE id_reading_text = ? AND (user_id IS NULL OR user_id = ?)',
+    [textId, userId]
+  );
+  const textRow = textRows?.[0];
+  if (!textRow) return null;
+  if (typeof textRow.text !== 'string' || !textRow.text.trim()) {
+    throw new ValidationError('reading text has no text to enroll from.');
+  }
+  const text = textRow.text;
+  const sentences = splitSentences(text);
+  const positions = firstKanjiPositions(text);
+  const kanjiCharacters = [...positions.keys()];
+  const kanjiData = await loadKanjiData(executor, userId, kanjiCharacters);
+  kanjiData.allCharacters = kanjiCharacters;
+  const lexical = await collectLexicalAnalysis(executor, userId, sentences);
+  const enrollable = buildEnrollableReadingCandidates(lexical.vocabulary, lexical.grammar, kanjiData);
+  const chosen = {
+    vocabulary: intersectSelected(enrollable.vocabulary, selectedKeys),
+    kanji: intersectSelected(enrollable.kanji, selectedKeys),
+    grammar: intersectSelected(enrollable.grammar, selectedKeys)
+  };
+  const connection = typeof executor.getConnection === 'function' ? await executor.getConnection() : executor;
+  const db = connection;
+  const ownsConnection = connection && connection !== executor && typeof connection.beginTransaction === 'function';
+  try {
+    if (ownsConnection) await connection.beginTransaction();
+    const vocabularyResult = await ensureVocabularyEntities(db, userId, chosen.vocabulary);
+    const kanjiResult = await ensureKanjiEntities(db, userId, chosen.kanji, enrollable.referenceByCharacter);
+    const grammarResult = await ensureGrammarEntities(db, userId, chosen.grammar, enrollable.grammarInternals);
+    const targets = ['vocabulary', 'kanji', 'grammar'].flatMap((entityType) => {
+      const ids = { vocabulary: vocabularyResult.ids, kanji: kanjiResult.ids, grammar: grammarResult.ids }[entityType];
+      return [...ids.values()].map((entityId) => [REVIEW_TARGET_COLUMN[entityType], entityType, entityId]);
+    });
+    for (const [targetColumn, , targetId] of targets) {
+      await db.execute(
+        `INSERT INTO review_items (${targetColumn}, due_on, interval_days) VALUES (?, CURRENT_DATE, 0) ON CONFLICT (${targetColumn}) DO NOTHING`,
+        [targetId]
+      );
+    }
+    const createdIds = [];
+    for (const [targetColumn, entityType, targetId] of targets) {
+      const [rows] = await db.execute(`SELECT id_review_item FROM review_items WHERE ${targetColumn} = ?`, [targetId]);
+      const row = Array.isArray(rows) ? rows[0] : null;
+      if (row && Number.isInteger(Number(row.id_review_item))) {
+        createdIds.push({ entityType, reviewItemId: Number(row.id_review_item) });
+      }
+    }
+    let reviewSessionId = null;
+    const displayByKey = new Map();
+    for (const [entityType, candidates, ids] of [
+      ['vocabulary', chosen.vocabulary, vocabularyResult.ids],
+      ['kanji', chosen.kanji, kanjiResult.ids],
+      ['grammar', chosen.grammar, grammarResult.ids]
+    ]) {
+      for (const candidate of candidates) {
+        const entityId = ids.get(candidate.id);
+        if (Number.isInteger(entityId)) displayByKey.set(`${entityType}::${entityId}`, candidate);
+      }
+    }
+    const queueItems = [];
+    if (targets.length) {
+      const [sessionResult] = await db.execute(
+        'INSERT INTO review_sessions (user_id, source_from, source_to) VALUES (?, CURRENT_DATE, CURRENT_DATE) RETURNING id_review_session AS insertId',
+        [userId]
+      );
+      const rawId = sessionResult?.insertId ?? (Array.isArray(sessionResult) ? sessionResult[0]?.insertId : null);
+      reviewSessionId = Number(rawId);
+      if (!Number.isInteger(reviewSessionId)) throw new Error('Unable to start the review session.');
+      const seen = new Set();
+      for (const [, entityType, targetId] of targets) {
+        const key = `${entityType}::${targetId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const candidate = displayByKey.get(key) || {};
+        queueItems.push({
+          entityType,
+          entityId: targetId,
+          display: candidate.display || '',
+          reading: candidate.reading || null,
+          meaning: candidate.meaning || null
+        });
+      }
+      await db.execute(
+        `INSERT INTO review_session_items (id_review_session, entity_type, entity_id, position) VALUES ${queueItems.map(() => '(?, ?, ?, ?)').join(', ')}`,
+        queueItems.flatMap(({ entityType, entityId }, position) => [reviewSessionId, entityType, entityId, position])
+      );
+    }
+    if (ownsConnection && typeof connection.commit === 'function') await connection.commit();
+    if (ownsConnection && typeof connection.release === 'function') {
+      try { await connection.release(); } catch (_) { /* release is best-effort */ }
+    }
+    return {
+      created: createdIds.length,
+      reviewItems: createdIds,
+      reviewSessionId,
+      queueItems,
+      items: queueItems.map(({ entityType, entityId, display }) => ({ entityType, entityId, display })),
+      entities: { vocabulary: vocabularyResult.created, kanji: kanjiResult.created, grammar: grammarResult.created }
+    };
+  } catch (error) {
+    if (ownsConnection) {
+      if (typeof connection.rollback === 'function') {
+        try { await connection.rollback(); } catch (_) { /* rollback is best-effort */ }
+      }
+      if (typeof connection.release === 'function') {
+        try { await connection.release(); } catch (_) { /* release is best-effort */ }
+      }
+    }
+    throw error;
+  }
 }
 
 // User-scoped reading progress listing (library/stats feed). Joins text
@@ -1021,7 +1693,7 @@ async function persistImportItem(connection, sourceType, item, text, analysis) {
   const existingTextId = Number(existingTextRows?.[0]?.id_reading_text) || null;
   if (existingTextId) {
     await connection.execute(
-      "UPDATE reading_texts SET text = ?, title = ?, level = ?, annotations_json = '[]'::jsonb WHERE id_reading_text = ? AND user_id IS NULL",
+      "UPDATE reading_texts SET text = ?, title = ?, level = ?, annotations_json = '[]'::jsonb, sentences_json = NULL, tokens_json = NULL, sentence_translations_json = NULL WHERE id_reading_text = ? AND user_id IS NULL",
       [text, item.title, analysis.level, existingTextId]
     );
   } else {
@@ -1215,14 +1887,18 @@ module.exports = {
   MAX_ANNOTATIONS,
   MAX_IMPORT_ITEMS,
   MAX_LIBRARY_LIMIT,
+  MAX_READING_ENROLL_ITEMS,
   MAX_READING_TEXT_LENGTH,
   MAX_READING_TITLE_LENGTH,
+  MAX_TOKENS,
+  MAX_TRANSLATION_LENGTH,
   MIN_LEVEL_CHARACTERS,
   buildAnnotations,
   analyzeTextForReading,
   classifyLevel,
   createUserReadingText,
   deleteUserReadingText,
+  enrollReadingItems,
   extractAozoraText,
   extractHukuStory,
   extractHukuTitle,
@@ -1237,8 +1913,12 @@ module.exports = {
   normalizeAnalysisText,
   normalizeReadingText,
   normalizeTitle,
+  parseMetadata,
+  parseTranslations,
   previewAozoraSources,
   previewHukuSources,
+  saveSentenceTranslations,
+  splitSentences,
   syncReadingSources,
   upsertReadingProgress
 };

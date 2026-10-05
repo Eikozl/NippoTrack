@@ -60,6 +60,17 @@ function clampGoal(value) {
   return Math.min(1000, Math.max(1, Math.round(value)));
 }
 
+// The postgres driver hands timestamptz/timestamp columns back as Date
+// objects; String(date).slice(0, 10) yields "Sun Oct 04" and silently fails
+// the ISO-date regex downstream (streaks and weekly buckets dropped to 0).
+// Normalizes Date | ISO string | YYYY-MM-DD to a UTC YYYY-MM-DD (or null).
+function isoDateOnly(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+}
+
 function adjustWeeklyGoal(current, last4Weeks) {
   const goal = clampGoal(Number(current) || DEFAULT_WEEKLY_GOAL);
   const weeks = Array.isArray(last4Weeks) ? last4Weeks.map((count) => Number(count) || 0) : [];
@@ -81,8 +92,8 @@ function toIsoWeekKey(date) {
 function checkStreak(dates, graceDays = 1) {
   const grace = Number.isInteger(graceDays) ? Math.max(0, Math.min(2, graceDays)) : 1;
   const unique = [...new Set((Array.isArray(dates) ? dates : [])
-    .map((value) => String(value || '').slice(0, 10))
-    .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value)))]
+    .map((value) => isoDateOnly(value))
+    .filter((value) => value && /^\d{4}-\d{2}-\d{2}$/.test(value)))]
     .sort();
   if (!unique.length) return { streak: 0, graceUsed: 0 };
   const daySet = new Set(unique);
@@ -218,7 +229,7 @@ async function getActivitySnapshot(executor, userId) {
     `${ACTIVITY_EVENTS_SQL} ORDER BY re.reviewed_at DESC LIMIT 500`,
     [userId, userId, userId, userId, userId, userId]
   );
-  const dates = (eventRows || []).map((row) => String(row.reviewed_at || '').slice(0, 10));
+  const dates = (eventRows || []).map((row) => isoDateOnly(row.reviewed_at)).filter(Boolean);
   const [kanjiRows] = await executor.execute('SELECT COUNT(*) AS total FROM kanji WHERE user_id = ?', [userId]);
   return {
     dates,

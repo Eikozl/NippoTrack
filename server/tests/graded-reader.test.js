@@ -743,3 +743,438 @@ test('reading progress listing is user-scoped, joined with text metadata, and pa
   await controller.listProgress({ query: { limit: '999' }, user: { id: USER_ID } }, tooLarge.res);
   assert.equal(tooLarge.status(), 400);
 });
+
+test('token layer exposes sentences with code-point bounds and per-occurrence tokens with exact offsets', async () => {
+  const text = '今日は暑くて、学校に行く。';
+  const points = Array.from(text);
+  await withPoolStubs({ execute: analysisPool() }, async () => {
+    const first = await gradedReader.analyzeTextForReading(pool, USER_ID, text);
+    const second = await gradedReader.analyzeTextForReading(pool, USER_ID, text);
+    assert.ok(Array.isArray(first.sentences) && first.sentences.length > 0);
+    assert.ok(Array.isArray(first.tokens) && first.tokens.length > 0);
+    for (const sentence of first.sentences) {
+      assert.equal(typeof sentence.id, 'number');
+      assert.equal(typeof sentence.text, 'string');
+      assert.ok(Number.isInteger(sentence.start) && Number.isInteger(sentence.end));
+      assert.equal(points.slice(sentence.start, sentence.end).join(''), sentence.text);
+      assert.equal(sentence.end - sentence.start, Array.from(sentence.text).length);
+    }
+    const wanted = ['surface', 'lemma', 'surfaceReading', 'lemmaReading', 'gloss', 'entityKind', 'candidateId', 'start', 'end', 'sentenceId', 'tappable', 'known', 'level'];
+    for (const token of first.tokens) {
+      assert.deepEqual(Object.keys(token).sort(), wanted.sort());
+      assert.equal(typeof token.surface, 'string');
+      assert.ok(token.surface.length > 0);
+      assert.equal(points.slice(token.start, token.end).join(''), token.surface);
+      assert.ok(['vocabulary', 'kanji', 'grammar'].includes(token.entityKind));
+      assert.equal(typeof token.candidateId, 'string');
+      assert.ok(token.candidateId.length > 0);
+      assert.equal(typeof token.tappable, 'boolean');
+      assert.equal(typeof token.known, 'boolean');
+      if (token.entityKind === 'vocabulary') assert.equal(token.level, null);
+    }
+    // Inflected fixture: 暑く (observed) vs 暑い (dictionary form).
+    const atsui = first.tokens.find((entry) => entry.entityKind === 'vocabulary' && entry.lemma === '暑い');
+    assert.ok(atsui, 'inflected adjective present');
+    assert.notEqual(atsui.surface, atsui.lemma);
+    assert.equal(points.slice(atsui.start, atsui.end).join(''), atsui.surface);
+    assert.equal(atsui.surfaceReading, 'あつく');
+    assert.equal(atsui.lemmaReading, null);
+    assert.equal(atsui.tappable, true);
+    assert.match(atsui.candidateId, /^vocabulary::暑い::/);
+    // Deterministic: same text yields identical token and sentence layers.
+    assert.deepEqual(second.sentences, first.sentences);
+    assert.deepEqual(second.tokens, first.tokens);
+    // Legacy annotations stay untouched alongside the new layer.
+    assert.ok(Array.isArray(first.annotations));
+  });
+});
+
+test('token layer withholds readings for proper nouns and unknown spans', async () => {
+  const text = '田中さんがxyzを買う。';
+  await withPoolStubs({ execute: analysisPool() }, async () => {
+    const result = await gradedReader.analyzeTextForReading(pool, USER_ID, text);
+    const points = Array.from(text);
+    const tanaka = result.tokens.find((entry) => entry.entityKind === 'vocabulary' && entry.surface === '田中');
+    assert.ok(tanaka, 'proper-noun token present');
+    assert.equal(tanaka.surfaceReading, null);
+    assert.equal(tanaka.lemmaReading, null);
+    assert.equal(tanaka.tappable, false);
+    const unknown = result.tokens.find((entry) => entry.surface === 'xyz');
+    assert.ok(unknown, 'unknown token present');
+    assert.equal(unknown.surfaceReading, null);
+    assert.equal(unknown.lemmaReading, null);
+    assert.equal(unknown.tappable, false);
+    assert.equal(points.slice(unknown.start, unknown.end).join(''), 'xyz');
+  });
+});
+
+test('token layer marks particles symbols numerals and suffixes as not tappable', async () => {
+  const text = '田中さんが３本買う。';
+  await withPoolStubs({ execute: analysisPool() }, async () => {
+    const result = await gradedReader.analyzeTextForReading(pool, USER_ID, text);
+    const bySurface = (value) => result.tokens.find((entry) => entry.entityKind === 'vocabulary' && entry.surface === value);
+    for (const value of ['が', '。', '３', 'さん', '本']) {
+      const token = bySurface(value);
+      assert.ok(token, `token present for ${value}`);
+      assert.equal(token.tappable, false);
+    }
+    const numeral = bySurface('３');
+    assert.match(numeral.candidateId, /^vocabulary::３::/);
+    const symbol = bySurface('。');
+    assert.equal(symbol.surfaceReading, null);
+    assert.equal(symbol.lemmaReading, null);
+    const kau = result.tokens.find((entry) => entry.entityKind === 'vocabulary' && entry.lemma === '買う');
+    assert.ok(kau);
+    assert.equal(kau.tappable, true);
+    assert.equal(kau.surfaceReading, 'かう');
+  });
+});
+
+test('token layer keeps vocabulary level null while kanji carries reference bands', async () => {
+  const text = '学校に行く。学校が好き。';
+  await withPoolStubs({ execute: analysisPool() }, async () => {
+    const result = await gradedReader.analyzeTextForReading(pool, USER_ID, text);
+    for (const token of result.tokens) {
+      if (token.entityKind === 'vocabulary') assert.equal(token.level, null);
+    }
+    const gakko = result.tokens.filter((entry) => entry.entityKind === 'vocabulary' && entry.display === undefined && entry.surface === '学校');
+    assert.ok(gakko.length >= 2, 'repeat occurrences share one deterministic id');
+    assert.equal(gakko[0].candidateId, gakko[1].candidateId);
+    assert.match(gakko[0].candidateId, /^vocabulary::学校::/);
+    assert.notEqual(gakko[0].sentenceId, gakko[1].sentenceId);
+    const gakuKanji = result.tokens.find((entry) => entry.entityKind === 'kanji' && entry.surface === '学');
+    assert.ok(gakuKanji);
+    assert.equal(gakuKanji.candidateId, 'kanji::学');
+    assert.equal(gakuKanji.level, 'N5');
+    assert.equal(gakuKanji.known, true);
+  });
+});
+
+test('token layer aligns astral-plane offsets via Array.from', async () => {
+  const text = 'A𠀋学校B。';
+  const points = Array.from(text);
+  assert.equal(points.length, 6);
+  await withPoolStubs({ execute: analysisPool() }, async () => {
+    const result = await gradedReader.analyzeTextForReading(pool, USER_ID, text);
+    assert.equal(result.sentences.length, 1);
+    assert.equal(result.sentences[0].start, 0);
+    assert.equal(result.sentences[0].end, points.length);
+    for (const token of result.tokens) {
+      assert.equal(points.slice(token.start, token.end).join(''), token.surface);
+    }
+  });
+});
+
+test('reading enroll intersects server analysis ignores unknown ids and returns shaped payload', async () => {
+  const text = '学校に行く。';
+  let analysisExecutor;
+  await withPoolStubs({ execute: analysisPool() }, async () => {
+    analysisExecutor = pool.execute;
+    const analysis = await gradedReader.analyzeTextForReading(pool, USER_ID, text);
+    const vocabId = analysis.tokens.find((entry) => entry.entityKind === 'vocabulary' && entry.tappable).candidateId;
+    const kanjiId = analysis.tokens.find((entry) => entry.entityKind === 'kanji').candidateId;
+    assert.ok(vocabId.startsWith('vocabulary::'));
+    assert.ok(kanjiId.startsWith('kanji::'));
+
+    const calls = [];
+    const connection = {
+      async beginTransaction() { calls.push('BEGIN'); },
+      async commit() { calls.push('COMMIT'); },
+      async rollback() { calls.push('ROLLBACK'); },
+      release() {},
+      async execute(sql, params = []) {
+        calls.push(sql.slice(0, 48));
+        if (/INSERT INTO vocabulary/i.test(sql)) return [{ insertId: 201 }];
+        if (/INSERT INTO kanji/i.test(sql)) return [{ insertId: 202 }];
+        if (/INSERT INTO grammar_points/i.test(sql)) return [{ insertId: 203 }];
+        if (/INSERT INTO review_items/i.test(sql)) return [[{ affectedRows: 1 }]];
+        if (/INSERT INTO review_sessions/i.test(sql)) return [{ insertId: 401 }];
+        if (/INSERT INTO review_session_items/i.test(sql)) return [[{ affectedRows: 1 }]];
+        if (/FROM review_items WHERE/i.test(sql)) return [[{ id_review_item: 301 }]];
+        return analysisPool()(sql, params);
+      }
+    };
+    const executor = {
+      execute: async (sql, params = []) => {
+        if (/FROM reading_texts WHERE id_reading_text/i.test(sql)) {
+          assert.ok(params.includes(USER_ID));
+          return [[{ id_reading_text: 77, text }]];
+        }
+        return analysisPool()(sql, params);
+      },
+      getConnection: async () => connection
+    };
+    const result = await gradedReader.enrollReadingItems(executor, USER_ID, 77, [vocabId, kanjiId, 'vocabulary::bogus::yomi']);
+    assert.equal(typeof result.reviewSessionId, 'number');
+    assert.ok(Array.isArray(result.queueItems) && result.queueItems.length === 2);
+    assert.equal(result.created, 2);
+    assert.ok(Array.isArray(result.items) && result.items.length === 2);
+    for (const item of result.items) {
+      assert.ok(['vocabulary', 'kanji', 'grammar'].includes(item.entityType));
+      assert.equal(typeof item.entityId, 'number');
+      assert.equal(typeof item.display, 'string');
+    }
+    for (const item of result.queueItems) {
+      assert.ok(item.display);
+      assert.ok(Number.isInteger(item.entityId));
+    }
+    assert.deepEqual(calls[0], 'BEGIN');
+    assert.ok(calls.includes('COMMIT'));
+  });
+});
+
+test('reading enroll validates selection shape and hides foreign texts', async () => {
+  await withPoolStubs({ execute: async (sql) => {
+    if (/FROM reading_texts WHERE id_reading_text/i.test(sql)) return [[]];
+    throw new Error(`Unexpected enroll lookup SQL: ${sql}`);
+  } }, async () => {
+    assert.equal(await gradedReader.enrollReadingItems(pool, USER_ID, 999, ['vocabulary::学校::がっこう']), null);
+    await assert.rejects(gradedReader.enrollReadingItems(pool, USER_ID, 999, []), /selected must be an array/);
+    await assert.rejects(gradedReader.enrollReadingItems(pool, USER_ID, 999, new Array(201).fill('vocabulary::学校::がっこう')), /selected must be an array/);
+    await assert.rejects(gradedReader.enrollReadingItems(pool, USER_ID, 999, [42]), /non-empty candidate id strings/);
+  });
+
+  await withPoolStubs({ execute: async (sql) => {
+    if (/FROM reading_texts WHERE id_reading_text/i.test(sql)) return [[]];
+    throw new Error(`Unexpected foreign enroll SQL: ${sql}`);
+  } }, async () => {
+    const response = mockRes();
+    await controller.enrollText({ params: { id: '999' }, body: { selected: ['vocabulary::学校::がっこう'] }, user: { id: USER_ID } }, response.res);
+    assert.equal(response.status(), 404);
+  });
+
+  const badShape = mockRes();
+  await controller.enrollText({ params: { id: '77' }, body: { selected: [] }, user: { id: USER_ID } }, badShape.res);
+  assert.equal(badShape.status(), 400);
+
+  const badField = mockRes();
+  await controller.enrollText({ params: { id: '77' }, body: { selected: ['vocabulary::学校::がっこう'], extra: 1 }, user: { id: USER_ID } }, badField.res);
+  assert.equal(badField.status(), 400);
+});
+
+test('token cache hit serves the stored artifact and refreshes only ownership', async () => {
+  const calls = [];
+  const cachedTokens = [
+    { surface: '学校', lemma: '学校', surfaceReading: 'がっこう', lemmaReading: 'がっこう', gloss: 'school', entityKind: 'vocabulary', candidateId: 'vocabulary::学校::がっこう', start: 0, end: 2, sentenceId: 0, tappable: true, known: false, level: null },
+    { surface: '学', lemma: null, surfaceReading: null, lemmaReading: null, gloss: 'study', entityKind: 'kanji', candidateId: 'kanji::学', start: 0, end: 1, sentenceId: 0, tappable: true, known: false, level: 'N5' }
+  ];
+  const cachedAnnotations = [
+    { type: 'vocabulary', word: '学校', position: 0, level: null, known: false, reading: 'がっこう', meaning: 'school' },
+    { type: 'kanji', char: '学', position: 0, level: 'N5', known: false, reading: 'ガク', meaning: 'study', info: { onyomi: ['ガク'], kunyomi: [] } }
+  ];
+  await withPoolStubs({ execute: async (sql, params = []) => {
+    calls.push({ sql, params });
+    if (/FROM reading_texts rt LEFT JOIN/i.test(sql)) {
+      return [[{ id: 7, title: 'cached', level: 'N5', sourceType: 'user', metadata: {}, text: '学校に行く。', annotations_json: cachedAnnotations, sentences_json: [{ id: 0, text: '学校に行く。', start: 0, end: 6 }], tokens_json: { tokens: cachedTokens, truncated: false }, position: null, completedAt: null, timeSpentSeconds: 0 }]];
+    }
+    if (/FROM vocabulary WHERE user_id/i.test(sql)) {
+      assert.ok(params.includes(USER_ID));
+      return [[{ word: '学校', reading: 'がっこう' }]];
+    }
+    if (/FROM kanji WHERE user_id/i.test(sql)) return [[{ character_kanji: '学' }]];
+    if (/FROM grammar_reference/i.test(sql)) return [[]];
+    if (/FROM grammar_points/i.test(sql)) return [[]];
+    throw new Error(`Unexpected cache-hit SQL: ${sql.slice(0, 80)}`);
+  } }, async () => {
+    const data = await gradedReader.getReadingText(pool, USER_ID, 7);
+    assert.deepEqual(data.tokens, cachedTokens.map((token) => ({ ...token, known: true })), 'cached tokens served with refreshed known');
+    assert.deepEqual(data.annotations, cachedAnnotations.map((item) => ({ ...item, known: true })));
+    assert.deepEqual(data.sentences, [{ id: 0, text: '学校に行く。', start: 0, end: 6 }]);
+    assert.equal(data.truncated, false);
+    assert.ok(!calls.some(({ sql }) => /kanji_reference|jmdict/i.test(sql)), 'no reference/gloss analysis queries on a hit');
+    assert.ok(calls.length <= 6, `bounded overlay queries, saw ${calls.length}`);
+  });
+});
+
+test('token cache miss analyzes once and persists the artifact', async () => {
+  const calls = [];
+  const updated = [];
+  const base = analysisPool(calls);
+  await withPoolStubs({ execute: async (sql, params = []) => {
+    if (/FROM reading_texts rt LEFT JOIN/i.test(sql)) {
+      calls.push({ sql, params });
+      return [[{ id: 9, title: 'fresh', level: null, sourceType: 'user', metadata: {}, text: '学校に行く。', annotations_json: null, sentences_json: null, tokens_json: null, position: null, completedAt: null, timeSpentSeconds: 0 }]];
+    }
+    if (/UPDATE reading_texts SET sentences_json/i.test(sql)) {
+      calls.push({ sql, params });
+      updated.push(params);
+      return [{ affectedRows: 1 }];
+    }
+    return base(sql, params);
+  } }, async () => {
+    const data = await gradedReader.getReadingText(pool, USER_ID, 9);
+    assert.ok(Array.isArray(data.tokens) && data.tokens.length > 0, 'fresh analysis served');
+    assert.equal(data.truncated, false);
+    assert.equal(updated.length, 1, 'cache persisted once');
+    assert.deepEqual(updated[0].slice(2), [9, USER_ID], 'persist scoped to the owned text');
+    const persisted = JSON.parse(updated[0][1]);
+    assert.ok(Array.isArray(persisted.tokens) && persisted.tokens.length > 0, 'tokens stored');
+    assert.equal(persisted.truncated, false);
+  });
+});
+
+test('token layer caps unbounded texts with truncated:true', async () => {
+  assert.equal(gradedReader.MAX_TOKENS, 2000);
+  const calls = [];
+  await withPoolStubs({ execute: analysisPool(calls) }, async () => {
+    const data = await gradedReader.analyzeTextForReading(pool, USER_ID, '学'.repeat(2101));
+    assert.equal(data.tokens.length, gradedReader.MAX_TOKENS);
+    assert.equal(data.truncated, true);
+    const points = Array.from('学'.repeat(2101));
+    for (const token of data.tokens) {
+      assert.equal(points.slice(token.start, token.end).join(''), token.surface, 'capped tokens still slice exact');
+    }
+    const small = await gradedReader.analyzeTextForReading(pool, USER_ID, '学校に行く。');
+    assert.ok(small.tokens.length > 0 && small.tokens.length < gradedReader.MAX_TOKENS);
+    assert.equal(small.truncated, false);
+  });
+});
+
+test('ownership overlay never trusts baked known flags', async () => {
+  const cachedTokens = [
+    { surface: '学校', lemma: '学校', surfaceReading: 'がっこう', lemmaReading: 'がっこう', gloss: 'school', entityKind: 'vocabulary', candidateId: 'vocabulary::学校::がっこう', start: 0, end: 2, sentenceId: 0, tappable: true, known: true, level: null }
+  ];
+  const cachedAnnotations = [
+    { type: 'vocabulary', word: '学校', position: 0, level: null, known: true, reading: 'がっこう', meaning: 'school' }
+  ];
+  await withPoolStubs({ execute: async (sql) => {
+    if (/FROM reading_texts rt LEFT JOIN/i.test(sql)) {
+      return [[{ id: 11, title: 'stale', level: null, sourceType: 'user', metadata: {}, text: '学校。', annotations_json: cachedAnnotations, sentences_json: [{ id: 0, text: '学校。', start: 0, end: 3 }], tokens_json: { tokens: cachedTokens, truncated: false }, position: null, completedAt: null, timeSpentSeconds: 0 }]];
+    }
+    if (/FROM (vocabulary|kanji|grammar_points|grammar_reference)/i.test(sql)) return [[]];
+    throw new Error(`Unexpected stale-overlay SQL: ${sql.slice(0, 80)}`);
+  } }, async () => {
+    const data = await gradedReader.getReadingText(pool, USER_ID, 11);
+    assert.ok(data.tokens.every((token) => token.known === false), 'stale token flags reset');
+    assert.ok(data.annotations.every((item) => item.known === false), 'stale annotation flags reset');
+  });
+});
+
+test('sentence translations validate shape ids and length', async () => {
+  const row = [[{ id_reading_text: 5, text: '学校に行く。' }]];
+  await withPoolStubs({ execute: async (sql) => {
+    if (/FROM reading_texts WHERE id_reading_text/i.test(sql)) return row;
+    if (/UPDATE reading_texts SET sentence_translations_json/i.test(sql)) return [{ affectedRows: 1 }];
+    throw new Error(`Unexpected translation SQL: ${sql.slice(0, 80)}`);
+  } }, async () => {
+    await assert.rejects(gradedReader.saveSentenceTranslations(pool, USER_ID, 5, 'nope'), /must be an array/);
+    await assert.rejects(gradedReader.saveSentenceTranslations(pool, USER_ID, 5, [null]), /must be a \{sentenceId, translation\} object/);
+    await assert.rejects(gradedReader.saveSentenceTranslations(pool, USER_ID, 5, [{ sentenceId: 9, translation: 'x' }]), /does not exist in this text/);
+    await assert.rejects(gradedReader.saveSentenceTranslations(pool, USER_ID, 5, [{ sentenceId: 0, translation: 42 }]), /must be a string/);
+    await assert.rejects(
+      gradedReader.saveSentenceTranslations(pool, USER_ID, 5, [{ sentenceId: 0, translation: 'x'.repeat(gradedReader.MAX_TRANSLATION_LENGTH + 1) }]),
+      /must not exceed/
+    );
+    const cleared = await gradedReader.saveSentenceTranslations(pool, USER_ID, 5, [{ sentenceId: 0, translation: '   ' }]);
+    assert.deepEqual(cleared, {}, 'blank entries clear instead of storing whitespace');
+    const dupes = await gradedReader.saveSentenceTranslations(pool, USER_ID, 5, [{ sentenceId: 0, translation: 'a' }, { sentenceId: 0, translation: 'b' }]);
+    assert.deepEqual(dupes, { 0: 'b' }, 'duplicate ids keep the last value');
+  });
+
+  await withPoolStubs({ execute: async (sql) => {
+    if (/FROM reading_texts WHERE id_reading_text/i.test(sql)) return [[]];
+    throw new Error(`Unexpected foreign translation SQL: ${sql.slice(0, 80)}`);
+  } }, async () => {
+    assert.equal(await gradedReader.saveSentenceTranslations(pool, USER_ID, 999, [{ sentenceId: 0, translation: 'x' }]), null);
+  });
+});
+
+test('sentence translations save scoped and merge into GET', async () => {
+  const calls = [];
+  const base = analysisPool(calls);
+  await withPoolStubs({ execute: async (sql, params = []) => {
+    if (/FROM reading_texts WHERE id_reading_text/i.test(sql)) {
+      calls.push({ sql, params });
+      return [[{ id_reading_text: 5, text: '学校に行く。' }]];
+    }
+    if (/UPDATE reading_texts SET sentence_translations_json/i.test(sql)) {
+      calls.push({ sql, params });
+      assert.ok(params.includes(USER_ID), 'persist stays user-scoped');
+      return [{ affectedRows: 1 }];
+    }
+    if (/FROM reading_texts rt LEFT JOIN/i.test(sql)) {
+      calls.push({ sql, params });
+      return [[{ id: 5, title: 'T', level: null, sourceType: 'user', metadata: {}, text: '学校に行く。', annotations_json: null, sentences_json: null, tokens_json: null, sentence_translations_json: { 0: 'Go to school.' }, position: null, completedAt: null, timeSpentSeconds: 0 }]];
+    }
+    if (/UPDATE reading_texts SET sentences_json/i.test(sql)) {
+      calls.push({ sql, params });
+      return [{ affectedRows: 1 }];
+    }
+    return base(sql, params);
+  } }, async () => {
+    const saved = await gradedReader.saveSentenceTranslations(pool, USER_ID, 5, [{ sentenceId: 0, translation: '  Go to school. ' }]);
+    assert.deepEqual(saved, { 0: 'Go to school.' }, 'trimmed map returned');
+    const data = await gradedReader.getReadingText(pool, USER_ID, 5);
+    assert.deepEqual(data.translations, { 0: 'Go to school.' }, 'stored map merged into GET');
+  });
+});
+
+test('translations endpoint validates rejects unknown fields and hides foreign texts', async () => {
+  const row = [[{ id_reading_text: 5, text: '学校に行く。' }]];
+  const stub = async (sql) => {
+    if (/FROM reading_texts WHERE id_reading_text/i.test(sql)) return row;
+    if (/UPDATE reading_texts SET sentence_translations_json/i.test(sql)) return [{ affectedRows: 1 }];
+    throw new Error(`Unexpected translations endpoint SQL: ${sql.slice(0, 80)}`);
+  };
+  await withPoolStubs({ execute: stub }, async () => {
+    const badShape = mockRes();
+    await controller.putTranslations({ params: { id: '5' }, body: { translations: 'nope' }, user: { id: USER_ID } }, badShape.res);
+    assert.equal(badShape.status(), 400);
+
+    const badField = mockRes();
+    await controller.putTranslations({ params: { id: '5' }, body: { translations: [], extra: 1 }, user: { id: USER_ID } }, badField.res);
+    assert.equal(badField.status(), 400);
+
+    const happy = mockRes();
+    await controller.putTranslations({ params: { id: '5' }, body: { translations: [{ sentenceId: 0, translation: 'Go.' }] }, user: { id: USER_ID } }, happy.res);
+    assert.equal(happy.status(), 200);
+    assert.equal(happy.body().text_id, 5);
+    assert.deepEqual(happy.body().translations, { 0: 'Go.' });
+  });
+
+  await withPoolStubs({ execute: async () => [[]] }, async () => {
+    const foreign = mockRes();
+    await controller.putTranslations({ params: { id: '999' }, body: { translations: [] }, user: { id: USER_ID } }, foreign.res);
+    assert.equal(foreign.status(), 404);
+  });
+});
+
+test('re-import refresh resets cached analysis columns and translations', async () => {
+  const pages = new Map([
+    [gradedReader.AOZORA_LISTING_URL, '<a href="/cards/000002/card2.html">Two</a>'],
+    ['https://www.aozora.gr.jp/cards/000002/card2.html', '<a href="./files/2_1.html">2_1.html</a>'],
+    ['https://www.aozora.gr.jp/cards/000002/files/2_1.html', '<div class="main_text"><p>読む。</p></div>']
+  ]);
+  const fetchStub = async (url) => {
+    const page = pages.get(String(url));
+    if (!page) throw new Error(`unlisted source URL: ${url}`);
+    return { ok: true, headers: { get: () => String(Buffer.byteLength(page)) }, text: async () => page };
+  };
+  const analyze = analysisPool();
+  const calls = [];
+  const connection = {
+    async beginTransaction() {},
+    async commit() {},
+    async rollback() {},
+    release() {},
+    async execute(sql, params = []) {
+      calls.push({ sql, params });
+      if (/pg_advisory_xact_lock/i.test(sql)) return [[]];
+      if (/FROM reading_sources WHERE type/i.test(sql)) return [[{ id_reading_source: 71 }]];
+      if (/UPDATE reading_sources/i.test(sql)) return [{ affectedRows: 1 }];
+      if (/FROM reading_texts WHERE source_id/i.test(sql)) return [[{ id_reading_text: 72 }]];
+      if (/UPDATE reading_texts SET text/i.test(sql)) return [{ affectedRows: 1 }];
+      return analyze(sql, params);
+    }
+  };
+  const executor = { execute: (sql, params) => analyze(sql, params), getConnection: async () => connection };
+  const result = await gradedReader.syncReadingSources(executor, USER_ID, 'aozora', {
+    fetch: fetchStub,
+    urls: ['https://www.aozora.gr.jp/cards/000002/card2.html']
+  });
+  assert.equal(result.status, 'ok');
+  const refresh = calls.find(({ sql }) => /UPDATE reading_texts SET text/i.test(sql));
+  assert.ok(refresh, 'existing text refreshed via UPDATE');
+  assert.match(refresh.sql, /sentence_translations_json = NULL/, 'stale translations reset on refresh');
+  assert.match(refresh.sql, /sentences_json = NULL/, 'stale token cache reset on refresh');
+});

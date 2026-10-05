@@ -134,6 +134,7 @@ app.get('/api', (req, res) => {
       'POST /api/reading/analyze',
       'POST /api/reading/user-text',
       'PUT /api/reading/text/:id/progress',
+      'POST /api/reading/text/:id/enroll',
       'POST /api/reading/import',
       'POST /api/reading/import/url',
       'GET /api/reading/import/preview',

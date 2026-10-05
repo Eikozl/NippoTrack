@@ -20,9 +20,17 @@
 // Kanji coverage stats ("% kanji known") intentionally live on the Statistics
 // page (existing /api/level/progress data); this page links there instead of
 // duplicating that computation.
+//
+// Token layer (additive, feature-detected): GET /api/reading/text/:id may
+// also return sentences[] and tokens[] with per-occurrence code-point
+// offsets. When present, blocks come from sentences[] and words render from
+// tokens[] (astral-safe slicing, whole-token ruby from surfaceReading,
+// enroll via POST .../enroll with a collection-POST fallback). When absent,
+// the annotation path below renders exactly as before — both orders work.
 
-import { apiRequest, listReadingLibrary, getReadingText, createUserReadingText, deleteReadingText, updateReadingProgress, importReadingSources, importReadingUrl, previewReadingImport, listReadingProgress } from '../api';
+import { apiRequest, listReadingLibrary, getReadingText, createUserReadingText, deleteReadingText, updateReadingProgress, importReadingSources, importReadingUrl, previewReadingImport, listReadingProgress, publishReadingText } from '../api';
 import { icon } from '../icons';
+import { speakJapanese } from '../speech.js';
 import { element, pageHeader, showToast, withPendingAction, paginationControls, openDetailModal, openDialog, confirmDialog, emptyState, errorState, loadingState } from '../ui';
 
 const LIBRARY_PAGE_SIZE = 12;
@@ -54,7 +62,7 @@ function selectControl({ name, label, value, options }) {
   ]);
 }
 
-function levelBadge(level) {
+function levelPill(level) {
   if (!level) return null;
   return element('span', { className: 'status-pill', text: level, attrs: { 'aria-label': `Estimated level ${level}` } });
 }
@@ -118,7 +126,7 @@ async function renderLibraryView(container) {
       }, [
         element('div', { className: 'flex items-center justify-between gap-2' }, [
           element('span', { className: 'text-xs uppercase tracking-wide text-muted', text: item.sourceType || 'user' }),
-          levelBadge(item.level) || element('span', { className: 'text-xs text-muted', text: '—' })
+          levelPill(item.level) || element('span', { className: 'text-xs text-muted', text: '—' })
         ]),
         element('p', { className: 'font-semibold text-ink', text: item.title }),
         element('p', { className: 'text-xs leading-5 text-muted', text: `${Number(item.characterCount || 0).toLocaleString()} characters · you know ${known}% of its kanji` })
@@ -482,6 +490,61 @@ async function renderLibraryView(container) {
 
 let cleanupReader = null;
 
+function speechPieces() {
+  const hasWindow = typeof window !== 'undefined';
+  return {
+    synthesis: hasWindow ? window.speechSynthesis : null,
+    Utterance: hasWindow ? window.SpeechSynthesisUtterance : null
+  };
+}
+
+// Story-view paragraph segmentation (presentation chunking only): split after
+// 。！？!? or a line break and trim, mirroring the server splitter's
+// boundaries. Offsets stay in Unicode code points so annotation positions
+// line up with the slice each word renders.
+function splitStoryParagraphs(text) {
+  const points = Array.from(String(text || ''));
+  const paragraphs = [];
+  let start = 0;
+  const push = (end) => {
+    let from = start;
+    let to = end;
+    while (from < to && /\s/u.test(points[from])) from += 1;
+    while (to > from && /\s/u.test(points[to - 1])) to -= 1;
+    if (to > from) paragraphs.push({ text: points.slice(from, to).join(''), start: from, end: to });
+    start = end;
+  };
+  for (let index = 0; index < points.length; index += 1) {
+    if (/[。！？!?\n\r]/u.test(points[index])) push(index + 1);
+  }
+  if (start < points.length) push(points.length);
+  if (!paragraphs.length && String(text || '').trim()) {
+    paragraphs.push({ text: String(text).trim(), start: 0, end: points.length });
+  }
+  return paragraphs;
+}
+
+const READER_FURIGANA_KEY = 'jlt-reading-furigana';
+const READER_MODES = ['read', 'study', 'review'];
+
+// Voice speed mirrors the Review page (same shared preference): discrete
+// per-block selectors beside every Listen button, kept in sync, applied
+// instantly and persisted in the background with revert on failure.
+const SPEECH_RATES = [0.25, 0.5, 1, 1.5];
+const MIN_SPEECH_RATE = 0.25;
+const MAX_SPEECH_RATE = 1.5;
+
+function sanitizeSpeechRate(value) {
+  const rate = Number(value);
+  return Number.isFinite(rate) && rate >= MIN_SPEECH_RATE && rate <= MAX_SPEECH_RATE
+    ? rate
+    : 1;
+}
+// Han detection for token ruby: whole-token ruby only when the rendered
+// surface contains at least one Han character. Kana-only surfaces render
+// plain (no ruby element at all).
+const HAN_RE = /\p{Script=Han}/u;
+
 async function renderReader(container, textId) {
   if (cleanupReader) { cleanupReader(); cleanupReader = null; }
   container.replaceChildren(loadingState('Loading reading text.'));
@@ -502,8 +565,116 @@ async function renderReader(container, textId) {
   let completed = Boolean(data.progress?.completed);
   const sessionStart = Date.now();
   const addedKeys = new Set();
-  let annotationsVisible = true;
+  const savedMetas = [];
+  // Token layer, feature-detected (additive backend fields). hasTokenLayer
+  // gates every token use below; without tokens[] the annotation path stays
+  // exactly as before. sentences[] (when a non-empty array) becomes the
+  // block list, otherwise splitStoryParagraphs remains the fallback.
+  const hasTokenLayer = Array.isArray(data.tokens) && data.tokens.length > 0;
+  const sentenceRows = (Array.isArray(data.sentences) ? data.sentences : []).filter((row) => row
+    && typeof row.text === 'string'
+    && Number.isInteger(row.start) && Number.isInteger(row.end)
+    && row.start >= 0 && row.end > row.start);
+  const sentenceById = new Map();
+  for (const row of sentenceRows) {
+    if (row.id !== undefined && row.id !== null && !sentenceById.has(row.id)) sentenceById.set(row.id, row.text);
+  }
+  const validTokens = hasTokenLayer ? data.tokens.filter((token) => token
+    && Number.isInteger(token.start) && Number.isInteger(token.end)
+    && token.start >= 0 && token.end > token.start && token.start < total)
+    .sort((a, b) => a.start - b.start || b.end - a.end) : [];
+  let latestReviewSession = null;
+  const placed = hasTokenLayer ? [] : placedAnnotations();
+  const paragraphs = sentenceRows.length > 0
+    ? sentenceRows.map((row) => ({ text: row.text, start: Math.max(0, row.start), end: Math.min(total, Math.max(row.start + 1, row.end)) }))
+    : splitStoryParagraphs(data.text || '');
+  const paragraphCount = paragraphs.length;
+  // Editorial translations (server sentence ids → English). Blocks resolve
+  // through paragraphSentenceIds so reveals always match the server
+  // segmentation, never the fallback split.
+  const paragraphSentenceIds = sentenceRows.length > 0
+    ? sentenceRows.map((row) => (Number.isInteger(row.id) ? row.id : null))
+    : paragraphs.map(() => null);
+  let localTranslations = data.translations && typeof data.translations === 'object' && !Array.isArray(data.translations)
+    ? { ...data.translations }
+    : {};
+  const translationFor = (index) => {
+    const sentenceId = paragraphSentenceIds[index];
+    if (sentenceId === null || sentenceId === undefined) return null;
+    const value = localTranslations[sentenceId];
+    return typeof value === 'string' && value.trim() ? value : null;
+  };
+  const revealedTranslations = new Set();
+  const seen = new Set();
+  let blockWrappers = [];
+  let mode = 'study';
+  let furiganaOn = true;
+  try {
+    furiganaOn = window.localStorage.getItem(READER_FURIGANA_KEY) !== 'off';
+  } catch {
+    furiganaOn = true;
+  }
   let lastSaveAt = 0;
+  // Shared voice-speed preference with the Review page: selects apply
+  // instantly for the next utterance; persistence needs a server-loaded
+  // snapshot (PUT requires the full preferences object), otherwise the
+  // change stays local to this session instead of clobbering card types.
+  let readerPreferences = { cardTypes: ['recognition'], weights: {}, engineMode: 'fixed', autoPick: true, speechRate: 1 };
+  let speechPrefsLoaded = false;
+  const speechRateSelects = [];
+  function currentSpeechRate() {
+    return sanitizeSpeechRate(readerPreferences.speechRate);
+  }
+  function syncSpeechRateSelects(rate) {
+    for (const select of speechRateSelects) {
+      try {
+        if (!select || !select.isConnected) continue;
+        select.value = String(rate);
+      } catch { /* detached nodes are best-effort */ }
+    }
+  }
+  async function applySpeechRate(changedSelect) {
+    const previous = currentSpeechRate();
+    const rate = sanitizeSpeechRate(changedSelect ? changedSelect.value : previous);
+    readerPreferences = { ...readerPreferences, speechRate: rate };
+    syncSpeechRateSelects(rate);
+    if (!speechPrefsLoaded) return;
+    try {
+      const saved = await apiRequest('/api/review/preferences', {
+        method: 'PUT',
+        body: {
+          cardTypes: Array.isArray(readerPreferences.cardTypes) ? readerPreferences.cardTypes : ['recognition'],
+          weights: readerPreferences.weights && typeof readerPreferences.weights === 'object' ? readerPreferences.weights : {},
+          autoPick: readerPreferences.autoPick !== false,
+          speechRate: rate
+        }
+      });
+      const preferences = saved?.userPreferences;
+      readerPreferences = { ...readerPreferences, speechRate: sanitizeSpeechRate(preferences ? preferences.speechRate : rate) };
+      syncSpeechRateSelects(currentSpeechRate());
+    } catch (error) {
+      readerPreferences = { ...readerPreferences, speechRate: previous };
+      syncSpeechRateSelects(previous);
+      showToast(error?.message || 'Could not save voice speed.', 'error');
+    }
+  }
+  async function loadSpeechRate() {
+    try {
+      const data = await apiRequest('/api/review/types');
+      const preferences = data?.userPreferences;
+      if (preferences) {
+        readerPreferences = {
+          cardTypes: Array.isArray(preferences.cardTypes) ? preferences.cardTypes : readerPreferences.cardTypes,
+          weights: preferences.weights && typeof preferences.weights === 'object' ? preferences.weights : {},
+          engineMode: preferences.engineMode || 'fixed',
+          autoPick: preferences.autoPick !== false,
+          speechRate: sanitizeSpeechRate(preferences.speechRate)
+        };
+        speechPrefsLoaded = true;
+        syncSpeechRateSelects(currentSpeechRate());
+      }
+    } catch { /* fail-open: default 1× until review preferences load */ }
+  }
 
   function annotationLength(annotation) {
     if (annotation.type === 'kanji') return Array.from(annotation.char || '').length;
@@ -535,49 +706,201 @@ async function renderReader(container, textId) {
     return Math.max(1, baseTime + Math.round((Date.now() - sessionStart) / 1000));
   }
 
-  function annotationSpan(annotation, length) {
-    const surface = codePoints.slice(annotation.position, annotation.position + length).join('');
-    const key = `${annotation.type}:${annotation.position}`;
-    const alreadyAdded = addedKeys.has(key) || annotation.known === true;
-    const decoration = !annotationsVisible
-      ? ''
-      : annotation.type === 'kanji'
-        ? ' border-b border-dotted border-ink/60'
-        : annotation.type === 'vocabulary'
-          ? ' underline decoration-ink/60 underline-offset-4'
-          : ' bg-ink/10';
-    const span = element('span', {
-      className: `cursor-pointer transition-opacity hover:opacity-80${decoration}${alreadyAdded ? ' opacity-50' : ''}`,
-      text: surface,
-      attrs: {
-        role: 'button',
-        tabindex: '0',
-        'data-annotation-type': annotation.type,
-        'aria-label': `${annotation.type === 'kanji' ? annotation.char : annotation.type === 'vocabulary' ? annotation.word : annotation.pattern} — open details`,
-        ...(annotation.type === 'kanji' && annotation.meaning ? { title: `${annotation.char} — ${annotation.meaning}` } : {})
-      }
-    });
-    const open = () => openAnnotationModal(annotation, key, span);
-    span.addEventListener('click', open);
-    span.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        open();
-      }
-    });
-    return span;
+  function annotationDisplay(annotation) {
+    if (annotation.type === 'kanji') return annotation.char;
+    if (annotation.type === 'vocabulary') return annotation.word;
+    return annotation.pattern;
   }
 
-  function renderAnnotatedText() {
-    const nodes = [];
-    let cursor = 0;
-    for (const { annotation, length } of placedAnnotations()) {
-      if (annotation.position > cursor) nodes.push(document.createTextNode(codePoints.slice(cursor, annotation.position).join('')));
-      nodes.push(annotationSpan(annotation, length));
-      cursor = annotation.position + length;
+  function annotationTypeLabel(annotation) {
+    if (annotation.type === 'kanji') return 'Kanji';
+    if (annotation.type === 'vocabulary') return 'Vocabulary';
+    return 'Grammar';
+  }
+
+  // Token-layer helpers (used only when tokens[] is present). entityKind
+  // uses the backend vocab (maps to the vocabulary decoration/endpoint);
+  // unknown kinds render with the vocabulary styling as a neutral default.
+  function tokenKind(token) {
+    if (token.entityKind === 'kanji') return 'kanji';
+    if (token.entityKind === 'grammar') return 'grammar';
+    return 'vocabulary';
+  }
+
+  function tokenKindLabel(token) {
+    if (token.entityKind === 'kanji') return 'Kanji';
+    if (token.entityKind === 'grammar') return 'Grammar';
+    return 'Vocabulary';
+  }
+
+  function hasCandidateId(token) {
+    return token.candidateId !== undefined && token.candidateId !== null && token.candidateId !== '';
+  }
+
+  // Token rendering. The surface is sliced from code-point offsets
+  // (astral-safe), which keeps inflected forms aligned where a lemma-length
+  // slice would drift. Ruby is whole-token from surfaceReading only: it
+  // needs the toggle on, a reading, Han in the surface, and a non-kanji
+  // kind (kanji readings stay sheet-only, as in the annotation path).
+  // tappable === false renders a decorated but non-interactive span.
+  function tokenNode(token, surface, paragraph, key) {
+    const kind = tokenKind(token);
+    const dimmed = addedKeys.has(key) || token.known === true;
+    const decoration = kind === 'kanji'
+      ? ' border-b border-dotted border-ink/60'
+      : kind === 'vocabulary'
+        ? ' underline decoration-ink/60 underline-offset-4'
+        : ' bg-ink/10';
+    let inner;
+    if (furiganaOn && kind !== 'kanji' && token.surfaceReading && HAN_RE.test(surface)) {
+      const ruby = element('ruby', { className: 'font-jp' });
+      ruby.appendChild(document.createTextNode(surface));
+      ruby.appendChild(element('rt', { className: 'text-xs text-muted', text: token.surfaceReading }));
+      inner = ruby;
+    } else {
+      inner = document.createTextNode(surface);
     }
-    if (cursor < total) nodes.push(document.createTextNode(codePoints.slice(cursor).join('')));
-    textBody.replaceChildren(...nodes);
+    if (mode !== 'study' || token.tappable === false) {
+      return element('span', { className: `rounded px-0.5${decoration}${dimmed ? ' opacity-50' : ''}` }, [inner]);
+    }
+    const display = token.surface || surface;
+    const node = element('button', {
+      className: `min-w-0 rounded px-0.5 align-baseline${decoration}${dimmed ? ' opacity-50' : ''}`,
+      attrs: {
+        type: 'button',
+        'aria-label': `${display} — open details${token.surfaceReading ? `, reading ${token.surfaceReading}` : ''}${token.gloss ? `, ${token.gloss}` : ''}`
+      }
+    }, [inner]);
+    node.addEventListener('click', () => openTokenSheet(token, surface, paragraph, key));
+    return node;
+  }
+
+  // Inline word rendering. Ruby uses server-provided readings only:
+  // vocabulary/grammar readings are parser-derived for the running text,
+  // while single-kanji reference readings are context-free and stay in the
+  // sheet instead of risking a mismatched furigana line.
+  function wordNode(annotation, length, paragraph) {
+    const surface = codePoints.slice(annotation.position, annotation.position + length).join('');
+    const key = `${annotation.type}:${annotation.position}`;
+    const dimmed = addedKeys.has(key) || annotation.known === true;
+    const decoration = annotation.type === 'kanji'
+      ? ' border-b border-dotted border-ink/60'
+      : annotation.type === 'vocabulary'
+        ? ' underline decoration-ink/60 underline-offset-4'
+        : ' bg-ink/10';
+    let inner;
+    if (furiganaOn && annotation.type !== 'kanji' && annotation.reading) {
+      const ruby = element('ruby', { className: 'font-jp' });
+      ruby.appendChild(document.createTextNode(surface));
+      ruby.appendChild(element('rt', { className: 'text-xs text-muted', text: annotation.reading }));
+      inner = ruby;
+    } else {
+      inner = document.createTextNode(surface);
+    }
+    if (mode !== 'study') {
+      return element('span', { className: `rounded px-0.5${decoration}${dimmed ? ' opacity-50' : ''}` }, [inner]);
+    }
+    const node = element('button', {
+      className: `min-w-0 rounded px-0.5 align-baseline${decoration}${dimmed ? ' opacity-50' : ''}`,
+      attrs: {
+        type: 'button',
+        'aria-label': `${annotationDisplay(annotation)} — open details${annotation.reading ? `, reading ${annotation.reading}` : ''}${annotation.meaning ? `, ${annotation.meaning}` : ''}`
+      }
+    }, [inner]);
+    node.addEventListener('click', () => openWordSheet(annotation, surface, paragraph.text, key));
+    return node;
+  }
+
+  // Paragraph blocks (frames 03–04): large Japanese type inside one story
+  // card, each paragraph its own block. Annotated words render inline via
+  // wordNode; anything unannotated stays plain text.
+  function renderParagraphs() {
+    storyBlocks.replaceChildren(...paragraphs.map((paragraph, index) => {
+      const nodes = [];
+      const hintGlosses = [];
+      const hintSeen = new Set();
+      const collectHint = (gloss) => {
+        if (typeof gloss !== 'string') return;
+        const hint = gloss.trim();
+        if (!hint || hintSeen.has(hint) || hintGlosses.length >= 8) return;
+        hintSeen.add(hint);
+        hintGlosses.push(hint);
+      };
+      let cursor = paragraph.start;
+      if (hasTokenLayer) {
+        for (const token of validTokens) {
+          if (token.end <= paragraph.start || token.start >= paragraph.end) continue;
+          const sliceStart = Math.max(token.start, cursor, paragraph.start);
+          const sliceEnd = Math.min(token.end, paragraph.end);
+          if (sliceEnd <= sliceStart) continue;
+          if (token.start > cursor) nodes.push(document.createTextNode(codePoints.slice(cursor, Math.min(token.start, paragraph.end)).join('')));
+          const surface = codePoints.slice(sliceStart, sliceEnd).join('');
+          const key = hasCandidateId(token) ? `token:${token.candidateId}:${token.start}:${token.end}` : `token:${token.start}:${token.end}`;
+          nodes.push(tokenNode(token, surface, paragraph, key));
+          if (token.tappable === true) collectHint(token.gloss);
+          cursor = Math.max(cursor, sliceEnd);
+        }
+      } else {
+        for (const { annotation, length } of placed) {
+          const spanStart = annotation.position;
+          const spanEnd = spanStart + length;
+          if (spanEnd <= paragraph.start || spanStart >= paragraph.end) continue;
+          if (spanStart > cursor) nodes.push(document.createTextNode(codePoints.slice(cursor, spanStart).join('')));
+          nodes.push(wordNode(annotation, length, paragraph));
+          collectHint(annotation.meaning || annotation.explanation);
+          cursor = Math.max(cursor, spanEnd);
+        }
+      }
+      if (cursor < paragraph.end) nodes.push(document.createTextNode(codePoints.slice(cursor, paragraph.end).join('')));
+      const line = element('p', {
+        className: `min-w-0 break-words font-jp leading-loose text-ink${index > 0 ? ' border-t border-stone pt-5' : ''}`,
+        attrs: { lang: 'ja' }
+      });
+      line.append(...nodes);
+      const children = [line];
+      const listen = element('button', { className: 'icon-button shrink-0', attrs: { type: 'button', 'aria-label': `Listen to paragraph ${index + 1}` } }, [icon('volume', { size: 18 })]);
+      listen.addEventListener('click', () => {
+        const verdict = speakJapanese(paragraph.text, { rate: currentSpeechRate(), ...speechPieces() });
+        if (!verdict.ok) showToast(verdict.message || 'Audio playback is unavailable.', 'error');
+      });
+      const speedSelect = element('select', {
+        className: 'rounded-lg border border-stone bg-paper px-1.5 py-1 text-xs font-semibold text-muted',
+        attrs: { 'aria-label': `Voice speed for paragraph ${index + 1}`, 'data-speech-rate': '' }
+      }, SPEECH_RATES.map((rate) => element('option', {
+        text: `${rate}×`,
+        attrs: { value: String(rate), ...(rate === currentSpeechRate() ? { selected: '' } : {}) }
+      })));
+      speedSelect.addEventListener('change', () => { applySpeechRate(speedSelect); });
+      speechRateSelects.push(speedSelect);
+      children.push(element('div', { className: 'mt-2 flex min-w-0 items-center gap-2' }, [listen, speedSelect]));
+      const translation = translationFor(index);
+      if (translation !== null) {
+        const english = element('p', { className: 'mt-2 min-w-0 break-words text-sm leading-6 text-muted', text: translation });
+        const revealed = revealedTranslations.has(index);
+        english.hidden = !revealed;
+        const toggle = element('button', {
+          className: 'mt-2 text-xs font-medium text-vermilion hover:underline',
+          text: revealed ? 'Hide English' : 'Tap to reveal English',
+          attrs: { type: 'button', 'aria-expanded': String(revealed) }
+        });
+        toggle.addEventListener('click', () => {
+          if (revealedTranslations.has(index)) revealedTranslations.delete(index);
+          else revealedTranslations.add(index);
+          const nowRevealed = revealedTranslations.has(index);
+          english.hidden = !nowRevealed;
+          toggle.textContent = nowRevealed ? 'Hide English' : 'Tap to reveal English';
+          toggle.setAttribute('aria-expanded', String(nowRevealed));
+        });
+        children.push(toggle, english);
+      } else if (hintGlosses.length) {
+        children.push(element('details', { className: 'mt-2 min-w-0' }, [
+          element('summary', { className: 'cursor-pointer text-xs font-medium text-vermilion hover:underline', text: 'Word hints (not a translation)' }),
+          element('p', { className: 'mt-1 min-w-0 break-words text-xs leading-5 text-muted', text: hintGlosses.join(' · '), attrs: { title: 'Hints composed from dictionary glosses — not a translation' } })
+        ]));
+      }
+      return element('div', { className: index > 0 ? 'mt-5' : '', attrs: { 'data-paragraph-block': String(index) } }, children);
+    }));
+    blockWrappers = [...storyBlocks.children];
   }
 
   function detailRow(label, value) {
@@ -588,122 +911,497 @@ async function renderReader(container, textId) {
     ]);
   }
 
-  function openAnnotationModal(annotation, key, span) {
-    const display = annotation.type === 'kanji' ? annotation.char : annotation.type === 'vocabulary' ? annotation.word : annotation.pattern;
+  // Collection save shared by the word sheet: the same per-type endpoints
+  // the previous annotation dialog used, with server-owned fields only.
+  async function saveAnnotation(annotation, key) {
+    if (annotation.type === 'vocabulary') {
+      await apiRequest('/api/vocabulary', { method: 'POST', body: { word: annotation.word, reading: annotation.reading || '', meaning: annotation.meaning } });
+    } else if (annotation.type === 'kanji') {
+      await apiRequest('/api/kanji', {
+        method: 'POST',
+        body: {
+          character_kanji: annotation.char,
+          meaning: annotation.meaning,
+          ...(annotation.level ? { jlpt_level: annotation.level } : {})
+        }
+      });
+    } else {
+      await apiRequest('/api/grammar', {
+        method: 'POST',
+        body: { grammar_point: annotation.pattern, meaning: annotation.meaning || annotation.explanation, ...(annotation.level ? { jlpt_level: annotation.level } : {}) }
+      });
+    }
+    addedKeys.add(key);
+    savedMetas.push({
+      key,
+      type: annotation.type,
+      display: annotationDisplay(annotation),
+      reading: annotation.reading || null,
+      meaning: annotation.meaning || annotation.explanation || null
+    });
+  }
+
+  // Token save (token layer only). Enroll by candidateId when available;
+  // any enroll problem falls back to the same per-type collection endpoints
+  // the annotation path uses. Only server-owned fields are ever sent —
+  // readings and meanings are never invented client-side.
+  async function enrollToken(token) {
+    const result = await apiRequest(`/api/reading/text/${encodeURIComponent(textId)}/enroll`, {
+      method: 'POST',
+      body: { selected: [token.candidateId] }
+    });
+    if (result && result.reviewSessionId && Array.isArray(result.queueItems)) {
+      latestReviewSession = { reviewSessionId: result.reviewSessionId, queueItems: result.queueItems };
+    }
+    return result;
+  }
+
+  async function saveTokenToCollection(token, surface) {
+    const kind = tokenKind(token);
+    const word = token.lemma || token.surface || surface;
+    if (kind === 'kanji') {
+      await apiRequest('/api/kanji', {
+        method: 'POST',
+        body: {
+          character_kanji: token.surface || token.lemma || surface,
+          meaning: token.gloss,
+          ...(token.level ? { jlpt_level: token.level } : {})
+        }
+      });
+    } else if (kind === 'vocabulary') {
+      await apiRequest('/api/vocabulary', {
+        method: 'POST',
+        body: { word, reading: token.lemmaReading || token.surfaceReading || '', meaning: token.gloss }
+      });
+    } else {
+      await apiRequest('/api/grammar', {
+        method: 'POST',
+        body: { grammar_point: word, meaning: token.gloss, ...(token.level ? { jlpt_level: token.level } : {}) }
+      });
+    }
+  }
+
+  function markTokenSaved(token, surface, key) {
+    addedKeys.add(key);
+    savedMetas.push({
+      key,
+      type: tokenKind(token),
+      display: token.surface || surface,
+      reading: token.surfaceReading || token.lemmaReading || null,
+      meaning: token.gloss || null
+    });
+  }
+
+  // Token sheet (token layer only): same shape as the annotation sheet.
+  // The kana line shows surfaceReading when present; the dictionary-form
+  // line shows lemma + lemmaReading only when the surface differs from the
+  // lemma (whole-word readings are never split across kanji). Story context
+  // prefers the token's sentence text when sentences[] is present.
+  function openTokenSheet(token, surface, paragraph, key) {
+    const display = token.surface || surface;
+    const alreadyAdded = addedKeys.has(key) || token.known === true;
+    const canAdd = !alreadyAdded && (hasCandidateId(token) || Boolean(token.gloss));
+    const contextText = (token.sentenceId !== undefined && token.sentenceId !== null && sentenceById.has(token.sentenceId))
+      ? sentenceById.get(token.sentenceId)
+      : paragraph.text;
+    const liveNote = element('p', { className: 'text-xs text-muted sm:col-span-2', attrs: { 'aria-live': 'polite' } });
+    const saveButton = element('button', {
+      className: 'button-primary min-h-9 px-4 py-2 text-xs sm:col-span-2 sm:justify-self-start',
+      text: alreadyAdded ? 'Saved to your collection' : 'Save word',
+      attrs: { type: 'button', 'aria-label': `Save ${display} to your collection`, ...((alreadyAdded || !canAdd) ? { disabled: '' } : {}) }
+    });
+    saveButton.addEventListener('click', () => withPendingAction(saveButton, async () => {
+      try {
+        if (hasCandidateId(token)) {
+          try {
+            await enrollToken(token);
+          } catch {
+            await saveTokenToCollection(token, surface);
+          }
+        } else {
+          await saveTokenToCollection(token, surface);
+        }
+        markTokenSaved(token, surface, key);
+        saveButton.textContent = 'Saved to your collection';
+        saveButton.disabled = true;
+        liveNote.textContent = `${display} is now in your collection.`;
+        showToast('Added to your collection.');
+        renderParagraphs();
+        renderSavedList();
+      } catch (error) {
+        showToast(error?.message || 'Unable to add this item.', 'error');
+      }
+    }, { pendingLabel: 'Saving…' }));
+    const keepReading = element('button', { className: 'button-secondary min-h-9 px-4 py-2 text-xs sm:col-span-2 sm:justify-self-start', text: 'Keep reading', attrs: { type: 'button' } });
+    const close = openDialog({
+      title: display,
+      description: `${tokenKindLabel(token)} · ${token.level || 'level unknown'}${alreadyAdded ? ' · already in your collection' : ''}`,
+      content: [
+        ...(token.surfaceReading ? [element('p', { className: 'font-jp text-sm text-muted sm:col-span-2', text: token.surfaceReading, attrs: { lang: 'ja' } })] : []),
+        element('div', { className: 'rounded-xl bg-vermilion-soft p-3 sm:col-span-2', attrs: { 'aria-label': 'Meaning' } }, [
+          element('p', { className: 'min-w-0 break-words text-sm leading-6 text-ink', text: token.gloss || 'No dictionary gloss is available for this item.' })
+        ]),
+        ...((token.lemma && surface && surface !== token.lemma)
+          ? [element('p', { className: 'min-w-0 break-words text-sm text-muted sm:col-span-2', text: `Dictionary form: ${token.lemma}${token.lemmaReading ? `・${token.lemmaReading}` : ''}` })]
+          : []),
+        saveButton,
+        liveNote,
+        element('details', { className: 'surface min-w-0 p-3 sm:col-span-2' }, [
+          element('summary', { className: 'cursor-pointer text-sm font-semibold text-vermilion', text: 'Examples and details' }),
+          element('div', { className: 'mt-1' }, [
+            detailRow('Reading', token.surfaceReading),
+            detailRow('Meaning', token.gloss),
+            detailRow('Level', token.level),
+            element('p', { className: 'mt-2 text-xs text-muted', text: alreadyAdded ? 'Already in your collection.' : 'Not in your collection yet.' })
+          ].filter(Boolean))
+        ]),
+        element('details', { className: 'surface min-w-0 p-3 sm:col-span-2' }, [
+          element('summary', { className: 'cursor-pointer text-sm font-semibold text-vermilion', text: 'Story context' }),
+          element('p', { className: 'mt-2 min-w-0 break-words font-jp text-sm leading-8 text-ink', text: contextText, attrs: { lang: 'ja' } })
+        ]),
+        keepReading,
+        ...(!canAdd && !alreadyAdded ? [element('p', { className: 'text-xs text-muted sm:col-span-2', text: 'No reference meaning is available for this item, so it cannot be added automatically. Add it manually with your own definition.' })] : [])
+      ],
+      showFooter: false
+    });
+    keepReading.addEventListener('click', close);
+  }
+
+  // Word sheet (frames 01–02): bottom sheet on mobile and dialog on desktop
+  // through openDialog's responsive panel. Large surface form, kana reading
+  // below, gloss box, a dictionary-form line only when the running surface
+  // differs from the base form, disclosure cards for details and story
+  // context, Save word with toast feedback, Keep reading to close.
+  function openWordSheet(annotation, surface, paragraphText, key) {
+    const display = annotationDisplay(annotation);
     const alreadyAdded = addedKeys.has(key) || annotation.known === true;
     const canAdd = !alreadyAdded
       && (annotation.type === 'kanji' ? Boolean(annotation.meaning)
         : annotation.type === 'vocabulary' ? Boolean(annotation.meaning)
           : Boolean(annotation.meaning || annotation.explanation));
-
-    const addButton = element('button', {
-      className: 'button-primary min-h-9 px-4 py-2 text-xs',
-      text: `Add ${annotation.type === 'kanji' ? 'kanji' : annotation.type === 'vocabulary' ? 'vocabulary' : 'grammar point'} to my collection`,
-      attrs: { type: 'button', ...(canAdd ? {} : { disabled: '' }) }
+    const baseForm = annotation.type === 'kanji' ? null : display;
+    const liveNote = element('p', { className: 'text-xs text-muted sm:col-span-2', attrs: { 'aria-live': 'polite' } });
+    const saveButton = element('button', {
+      className: 'button-primary min-h-9 px-4 py-2 text-xs sm:col-span-2 sm:justify-self-start',
+      text: alreadyAdded ? 'Saved to your collection' : 'Save word',
+      attrs: { type: 'button', 'aria-label': `Save ${display} to your collection`, ...((alreadyAdded || !canAdd) ? { disabled: '' } : {}) }
     });
-    const close = openDetailModal({
-      title: display,
-      subtitle: `${annotation.type === 'kanji' ? 'Kanji' : annotation.type === 'vocabulary' ? 'Vocabulary' : 'Grammar'} · ${annotation.level || 'level unknown'}${alreadyAdded ? ' · already in your collection' : ''}`,
-      content: [
-        element('div', { className: 'pb-2' }, [
-          element('p', { className: 'font-jp text-3xl text-ink', text: display }),
-          detailRow('Reading', annotation.reading),
-          detailRow('Meaning', annotation.meaning),
-          ...(annotation.type === 'grammar' ? [detailRow('Explanation', annotation.explanation)] : []),
-          ...(annotation.type === 'kanji' && annotation.info ? [detailRow('On readings', (annotation.info.onyomi || []).join('、')), detailRow('Kun readings', (annotation.info.kunyomi || []).join('、'))] : []),
-          ...(!canAdd && !alreadyAdded ? [element('p', { className: 'mt-2 text-xs text-muted', text: 'No reference meaning is available for this item, so it cannot be added automatically. Add it manually with your own definition.' })] : [])
-        ])
-      ],
-      actions: [addButton]
-    });
-    if (!canAdd) return;
-    addButton.addEventListener('click', () => withPendingAction(addButton, async () => {
+    saveButton.addEventListener('click', () => withPendingAction(saveButton, async () => {
       try {
-        if (annotation.type === 'vocabulary') {
-          await apiRequest('/api/vocabulary', { method: 'POST', body: { word: annotation.word, reading: annotation.reading || '', meaning: annotation.meaning } });
-        } else if (annotation.type === 'kanji') {
-          await apiRequest('/api/kanji', {
-            method: 'POST',
-            body: {
-              character_kanji: annotation.char,
-              meaning: annotation.meaning,
-              ...(annotation.level ? { jlpt_level: annotation.level } : {})
-            }
-          });
-        } else {
-          await apiRequest('/api/grammar', {
-            method: 'POST',
-            body: { grammar_point: annotation.pattern, meaning: annotation.meaning || annotation.explanation, ...(annotation.level ? { jlpt_level: annotation.level } : {}) }
-          });
-        }
-        addedKeys.add(key);
+        await saveAnnotation(annotation, key);
+        saveButton.textContent = 'Saved to your collection';
+        saveButton.disabled = true;
+        liveNote.textContent = `${display} is now in your collection.`;
         showToast('Added to your collection.');
-        renderAnnotatedText();
-        close();
+        renderParagraphs();
+        renderSavedList();
       } catch (error) {
         showToast(error?.message || 'Unable to add this item.', 'error');
       }
-    }));
-    void span;
+    }, { pendingLabel: 'Saving…' }));
+    const keepReading = element('button', { className: 'button-secondary min-h-9 px-4 py-2 text-xs sm:col-span-2 sm:justify-self-start', text: 'Keep reading', attrs: { type: 'button' } });
+    const close = openDialog({
+      title: display,
+      description: `${annotationTypeLabel(annotation)} · ${annotation.level || 'level unknown'}${alreadyAdded ? ' · already in your collection' : ''}`,
+      content: [
+        ...(annotation.reading ? [element('p', { className: 'font-jp text-sm text-muted sm:col-span-2', text: annotation.reading, attrs: { lang: 'ja' } })] : []),
+        element('div', { className: 'rounded-xl bg-vermilion-soft p-3 sm:col-span-2', attrs: { 'aria-label': 'Meaning' } }, [
+          element('p', { className: 'min-w-0 break-words text-sm leading-6 text-ink', text: annotation.meaning || annotation.explanation || 'No dictionary gloss is available for this item.' })
+        ]),
+        ...((baseForm && surface && surface !== baseForm)
+          ? [element('p', { className: 'min-w-0 break-words text-sm text-muted sm:col-span-2', text: `Dictionary form: ${baseForm}${annotation.reading ? `・${annotation.reading}` : ''}` })]
+          : []),
+        saveButton,
+        liveNote,
+        element('details', { className: 'surface min-w-0 p-3 sm:col-span-2' }, [
+          element('summary', { className: 'cursor-pointer text-sm font-semibold text-vermilion', text: 'Examples and details' }),
+          element('div', { className: 'mt-1' }, [
+            detailRow('Reading', annotation.reading),
+            detailRow('Meaning', annotation.meaning),
+            detailRow('Level', annotation.level),
+            ...(annotation.type === 'grammar' ? [detailRow('Explanation', annotation.explanation)] : []),
+            ...(annotation.type === 'kanji' && annotation.info ? [detailRow('On readings', (annotation.info.onyomi || []).join('、')), detailRow('Kun readings', (annotation.info.kunyomi || []).join('、'))] : []),
+            element('p', { className: 'mt-2 text-xs text-muted', text: alreadyAdded ? 'Already in your collection.' : 'Not in your collection yet.' })
+          ].filter(Boolean))
+        ]),
+        element('details', { className: 'surface min-w-0 p-3 sm:col-span-2' }, [
+          element('summary', { className: 'cursor-pointer text-sm font-semibold text-vermilion', text: 'Story context' }),
+          element('p', { className: 'mt-2 min-w-0 break-words font-jp text-sm leading-8 text-ink', text: paragraphText, attrs: { lang: 'ja' } })
+        ]),
+        keepReading,
+        ...(!canAdd && !alreadyAdded ? [element('p', { className: 'text-xs text-muted sm:col-span-2', text: 'No reference meaning is available for this item, so it cannot be added automatically. Add it manually with your own definition.' })] : [])
+      ],
+      showFooter: false
+    });
+    keepReading.addEventListener('click', close);
   }
 
-  const textBody = element('div', {
-    className: 'surface mt-4 p-6 leading-loose',
-    attrs: { 'aria-label': 'Reading text', lang: 'ja' }
-  });
-
-  const progressLabel = element('span', { className: 'text-xs font-medium tabular-nums text-muted', text: '0%' });
-  const progressBar = element('div', { className: 'h-2 w-28 overflow-hidden rounded-full bg-ink/10 sm:w-36' }, [
-    element('div', { className: 'h-full w-0 rounded-full bg-vermilion transition-all', attrs: { 'data-progress-fill': '' } })
-  ]);
+  // Story header card (frame 07): level + paragraph count, status line,
+  // progress bar with a real progressbar role, Read/Study/Review mode pills
+  // with distinct behavior, and a persisted furigana toggle.
+  const statusLine = element('p', { className: 'mt-1 text-xs text-muted', attrs: { 'aria-live': 'polite' } });
+  const countLine = element('span', { className: 'text-xs font-medium tabular-nums text-muted', text: '0 / 0 paragraphs' });
+  const percentLine = element('span', { className: 'text-xs font-medium tabular-nums text-muted', text: '0%' });
   const progressGroup = element('div', {
-    className: 'ml-auto flex items-center gap-2',
-    attrs: { role: 'progressbar', 'aria-label': 'Reading progress', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': '0' }
-  }, [progressBar, progressLabel]);
+    className: 'mt-1 grid gap-1.5',
+    attrs: { role: 'progressbar', 'aria-label': 'Story progress', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': '0' }
+  }, [
+    element('div', { className: 'flex items-baseline justify-between gap-2' }, [countLine, percentLine]),
+    element('div', { className: 'jlpt-progress-track w-full' }, [
+      element('div', { className: 'jlpt-progress-fill', attrs: { 'data-progress-fill': '', style: 'width:0%' } })
+    ])
+  ]);
 
-  const annotationsToggle = element('button', {
-    className: 'button-secondary min-h-9 px-3 py-1.5 text-xs',
-    text: 'Annotations on',
-    attrs: { type: 'button', 'aria-pressed': 'true' }
-  });
-  annotationsToggle.addEventListener('click', () => {
-    annotationsVisible = !annotationsVisible;
-    annotationsToggle.setAttribute('aria-pressed', String(annotationsVisible));
-    annotationsToggle.textContent = annotationsVisible ? 'Annotations on' : 'Annotations off';
-    renderAnnotatedText();
+  const modeButtons = {};
+  const modeGroup = element('div', { className: 'flex flex-wrap gap-2', attrs: { role: 'group', 'aria-label': 'Reading mode' } });
+  for (const value of READER_MODES) {
+    const label = value === 'read' ? 'Read' : value === 'study' ? 'Study' : 'Review';
+    const button = element('button', { className: 'filter-pill', text: label, attrs: { type: 'button', 'aria-pressed': 'false' } });
+    button.addEventListener('click', () => setMode(value));
+    modeButtons[value] = button;
+    modeGroup.appendChild(button);
+  }
+
+  // Modes change behavior, never just the label: Read is plain text without
+  // tap targets, Study enables tap-to-lookup, Review swaps the story for
+  // the words saved in this session with a path into review.
+  function setMode(next) {
+    mode = READER_MODES.includes(next) ? next : 'study';
+    for (const [value, button] of Object.entries(modeButtons)) {
+      const active = value === mode;
+      button.setAttribute('aria-pressed', String(active));
+      button.classList.toggle('filter-pill--active', active);
+    }
+    const reviewing = mode === 'review';
+    storyCard.hidden = reviewing;
+    savedCard.hidden = !reviewing;
+    if (reviewing) renderSavedList();
+    else renderParagraphs();
+  }
+
+  const furiganaButton = element('button', { className: 'filter-pill', attrs: { type: 'button' } });
+  function paintFuriganaButton() {
+    furiganaButton.textContent = furiganaOn ? 'Furigana on' : 'Furigana off';
+    furiganaButton.setAttribute('aria-pressed', String(furiganaOn));
+    furiganaButton.classList.toggle('filter-pill--active', furiganaOn);
+  }
+  furiganaButton.addEventListener('click', () => {
+    furiganaOn = !furiganaOn;
+    try {
+      window.localStorage.setItem(READER_FURIGANA_KEY, furiganaOn ? 'on' : 'off');
+    } catch { /* storage is best-effort */ }
+    paintFuriganaButton();
+    if (mode !== 'review') renderParagraphs();
   });
 
   const fontSlider = element('input', {
     className: 'h-1.5 w-full cursor-pointer accent-vermilion',
-    attrs: { id: 'reader-font-size', type: 'range', min: '14', max: '28', step: '1', value: '18', 'aria-label': 'Font size' }
+    attrs: { id: 'reader-font-size', type: 'range', min: '14', max: '28', step: '1', value: '20', 'aria-label': 'Font size' }
   });
-  fontSlider.addEventListener('input', () => { textBody.style.fontSize = `${fontSlider.value}px`; });
+  fontSlider.addEventListener('input', () => { storyBlocks.style.fontSize = `${fontSlider.value}px`; });
 
-  const completeButton = element('button', {
-    className: 'button-primary min-h-9 w-full px-4 py-2 text-xs sm:w-auto',
-    text: completed ? 'Completed' : 'Mark completed',
-    attrs: { type: 'button', ...(completed ? { disabled: '' } : {}) }
+  // Community publish (owners only): snapshots text + translations to the
+  // Texts feed. Shared library rows hide it (data.mine false, server 404s).
+  const publishButton = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Publish', attrs: { type: 'button', 'aria-label': `Publish ${data.title} to Community` } });
+  publishButton.hidden = data.mine !== true;
+  publishButton.addEventListener('click', () => {
+    const titleInput = element('input', { className: 'field-control', attrs: { value: data.title || '', maxlength: '200', 'aria-label': 'Publication title' } });
+    const descriptionInput = element('textarea', { className: 'field-control min-h-16 w-full', attrs: { rows: '2', maxlength: '500', placeholder: 'Short description', 'aria-label': 'Publication description' } });
+    openDialog({
+      title: `Publish · ${data.title}`,
+      description: 'Shares a snapshot (text + translations) to Community. Your library keeps the original.',
+      content: [element('div', { className: 'grid gap-3' }, [titleInput, descriptionInput])],
+      submitLabel: 'Publish text',
+      onSubmit: async (form, close) => {
+        try {
+          await publishReadingText({ textId, title: titleInput.value, description: descriptionInput.value });
+          showToast('Published to Community.');
+          close();
+        } catch (error) {
+          showToast(error?.message || 'Unable to publish.', 'error');
+        }
+      }
+    });
   });
-  completeButton.addEventListener('click', () => withPendingAction(completeButton, async () => {
+
+  const translateButton = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Add translations', attrs: { type: 'button' } });
+  const translationsNote = element('p', { className: 'mt-3 text-xs leading-5 text-muted', text: 'Paragraph translations are not provided by the reading API yet, so each block shows Japanese only.' });
+  function paintTranslationChrome() {
+    const translated = paragraphs.filter((_, paragraphIndex) => translationFor(paragraphIndex) !== null).length;
+    translationsNote.hidden = translated > 0;
+    translateButton.hidden = !(sentenceRows.length > 0 && translated < paragraphCount);
+  }
+  translateButton.addEventListener('click', () => {
+    const fields = [];
+    paragraphs.forEach((paragraph, index) => {
+      const sentenceId = paragraphSentenceIds[index];
+      if (sentenceId === null || sentenceId === undefined) return;
+      const area = element('textarea', { className: 'field-control min-h-16 w-full', attrs: { name: `translation-${sentenceId}`, rows: '2', maxlength: '2000', placeholder: 'English translation', 'aria-label': `English translation for paragraph ${index + 1}` } });
+      area.value = translationFor(index) || '';
+      fields.push(element('div', { className: 'grid min-w-0 gap-1' }, [
+        element('p', { className: 'min-w-0 break-words font-jp text-sm leading-7 text-ink', text: paragraph.text, attrs: { lang: 'ja' } }),
+        area
+      ]));
+    });
+    openDialog({
+      title: `Translations · ${data.title}`,
+      description: 'One English translation per paragraph. Empty fields stay Japanese-only.',
+      content: fields.length ? [element('div', { className: 'grid gap-4' }, fields)] : [element('p', { className: 'text-sm text-muted', text: 'No paragraphs to translate.' })],
+      submitLabel: 'Save translations',
+      onSubmit: async (form, close) => {
+        const payload = [...form.querySelectorAll('textarea[name^="translation-"]')].map((area) => ({
+          sentenceId: Number(area.name.slice('translation-'.length)),
+          translation: area.value
+        }));
+        try {
+          const saved = await apiRequest(`/api/reading/text/${encodeURIComponent(textId)}/translations`, { method: 'PUT', body: { translations: payload } });
+          localTranslations = saved && saved.translations && typeof saved.translations === 'object' && !Array.isArray(saved.translations)
+            ? { ...saved.translations }
+            : {};
+          renderParagraphs();
+          paintTranslationChrome();
+          showToast('Translations saved.');
+          close();
+        } catch (error) {
+          showToast(error?.message || 'Unable to save translations.', 'error');
+        }
+      }
+    });
+  });
+
+  const headerCard = element('div', { className: 'surface mt-3 grid min-w-0 gap-3 p-4' }, [
+    element('div', { className: 'flex min-w-0 flex-wrap items-start justify-between gap-3' }, [
+      element('div', { className: 'min-w-0' }, [
+        element('p', { className: 'break-words text-xs font-semibold uppercase tracking-[0.16em] text-vermilion', text: `${data.level || 'No level'} · ${paragraphCount} paragraph${paragraphCount === 1 ? '' : 's'}` }),
+        statusLine
+      ]),
+      modeGroup
+    ]),
+    progressGroup,
+    element('div', { className: 'flex min-w-0 flex-wrap items-center gap-2 border-t border-stone pt-3' }, [
+      furiganaButton,
+      element('label', { className: 'flex min-w-44 flex-1 items-center gap-2 text-xs text-muted', attrs: { for: 'reader-font-size' } }, [
+        element('span', { text: 'A', attrs: { 'aria-hidden': 'true' } }),
+        fontSlider,
+        element('span', { className: 'text-sm font-semibold', text: 'A', attrs: { 'aria-hidden': 'true' } })
+      ]),
+      translateButton,
+      publishButton
+    ])
+  ]);
+
+  const storyBlocks = element('div', { className: 'min-w-0' });
+  const storyCard = element('article', { className: 'surface mt-3 min-w-0 p-5 sm:p-6', attrs: { 'aria-label': 'Story text' } }, [storyBlocks]);
+
+  const savedCount = element('p', { className: 'text-xs text-muted', attrs: { 'aria-live': 'polite' } });
+  const savedList = element('div', { className: 'mt-3 min-w-0' });
+  // Review routing: when a token enroll returned a review session, both
+  // review buttons hand it off with the same sessionStorage shape the
+  // immersion flow uses; otherwise they keep the plain #review target.
+  function openReviewTarget() {
+    try {
+      if (typeof window !== 'undefined' && window.sessionStorage && latestReviewSession
+        && latestReviewSession.reviewSessionId && Array.isArray(latestReviewSession.queueItems)) {
+        window.sessionStorage.setItem('jlt-immersion-review-queue', JSON.stringify({
+          reviewSessionId: Number(latestReviewSession.reviewSessionId),
+          items: latestReviewSession.queueItems
+        }));
+        window.location.hash = `#review?reviewSessionId=${Number(latestReviewSession.reviewSessionId)}`;
+        return;
+      }
+    } catch { /* storage blocked: fall back to the review page */ }
+    if (typeof window !== 'undefined') {
+      window.location.hash = 'review';
+    }
+  }
+
+  const openReviewButton = element('button', { className: 'button-primary min-h-9 px-4 py-2 text-xs', text: 'Open review', attrs: { type: 'button' } });
+  openReviewButton.addEventListener('click', openReviewTarget);
+  const savedCard = element('section', { className: 'surface mt-3 min-w-0 p-5 sm:p-6', attrs: { 'aria-label': 'Saved words' } }, [
+    element('h2', { className: 'font-semibold text-ink', text: 'Saved words' }),
+    element('p', { className: 'mt-1 text-sm leading-6 text-muted', text: 'Words you save while studying land in your collection and become review material.' }),
+    element('div', { className: 'mt-3' }, [savedCount]),
+    savedList,
+    element('div', { className: 'mt-4' }, [openReviewButton])
+  ]);
+  savedCard.hidden = true;
+
+  function renderSavedList() {
+    if (!savedMetas.length) {
+      savedCount.textContent = '0 saved this session';
+      savedList.replaceChildren(element('p', { className: 'text-sm leading-6 text-muted', text: 'No saved words yet. Switch to Study and tap a word to save it.' }));
+      return;
+    }
+    savedCount.textContent = `${savedMetas.length} saved this session`;
+    savedList.replaceChildren(element('ul', { className: 'grid gap-2' }, savedMetas.map((meta) => element('li', { className: 'surface min-w-0 p-3' }, [
+      element('div', { className: 'flex flex-wrap items-baseline gap-x-2 gap-y-1' }, [
+        element('span', { className: 'min-w-0 break-words font-jp font-semibold text-ink', text: meta.display }),
+        ...(meta.reading ? [element('span', { className: 'break-words font-jp text-xs text-muted', text: meta.reading })] : []),
+        element('span', { className: 'status-pill', text: meta.type })
+      ]),
+      ...(meta.meaning ? [element('p', { className: 'mt-1 min-w-0 break-words text-sm text-muted', text: meta.meaning })] : [])
+    ]))));
+  }
+
+  // End-of-story card (frame 05): Finish story completes through the same
+  // progress endpoint the reader already used. Only destinations that
+  // resolve are offered — there is no lessons target in the API.
+  const finishButton = element('button', { className: 'button-primary min-h-9 px-4 py-2 text-xs', attrs: { type: 'button', ...(completed ? { disabled: '' } : {}) } }, [
+    icon('check', { size: 16 }),
+    element('span', { text: completed ? 'Finished' : 'Finish story' })
+  ]);
+  finishButton.addEventListener('click', () => withPendingAction(finishButton, async () => {
     try {
       await updateReadingProgress(textId, { position: Math.max(1, total), completed: true, timeSpentSeconds: accumulatedSeconds() });
       completed = true;
-      completeButton.textContent = 'Completed';
-      completeButton.disabled = true;
-      showToast('Marked as completed.');
+      finishButton.querySelector('span').textContent = 'Finished';
+      finishButton.disabled = true;
+      updateStoryProgressUI();
+      showToast('Story finished. Choose your next step below.');
     } catch (error) {
       showToast(error?.message || 'Unable to save progress.', 'error');
     }
   }));
+  const reviewSavedButton = element('button', { className: 'button-secondary min-h-9 px-4 py-2 text-xs', text: 'Review saved words', attrs: { type: 'button' } });
+  reviewSavedButton.addEventListener('click', openReviewTarget);
+  const anotherStoryButton = element('button', { className: 'button-secondary min-h-9 px-4 py-2 text-xs', text: 'Read another story', attrs: { type: 'button' } });
+  anotherStoryButton.addEventListener('click', () => { window.location.hash = 'reading'; });
+  const endCard = element('section', { className: 'surface mt-4 min-w-0 p-5 sm:p-6', attrs: { 'aria-label': 'End of story' } }, [
+    element('p', { className: 'text-xs font-semibold uppercase tracking-[0.16em] text-vermilion', text: 'You reached the end' }),
+    element('p', { className: 'mt-2 font-display text-lg font-semibold text-ink', text: 'Finish this story and choose your next step.' }),
+    element('div', { className: 'mt-4 grid gap-2 sm:justify-items-start' }, [finishButton, reviewSavedButton, anotherStoryButton])
+  ]);
+  endCard.hidden = true;
 
-  // Progress = furthest-read position. Seeded from the saved value so a
-  // reopened text shows its resume point instead of 0%; scrolling can only
-  // advance it, never regress it, and completed texts stop autosaving.
-  let highWaterPosition = total ? Math.max(0, Math.min(total, Number(data.progress?.position || 0))) : 0;
+  function updateStoryProgressUI() {
+    const seenCount = seen.size;
+    const percent = paragraphCount ? Math.min(100, Math.round((seenCount / paragraphCount) * 100)) : 100;
+    countLine.textContent = paragraphCount ? `${seenCount} / ${paragraphCount} paragraphs` : 'No paragraphs yet';
+    percentLine.textContent = `${percent}%`;
+    progressGroup.setAttribute('aria-valuenow', String(percent));
+    const fill = progressGroup.querySelector('[data-progress-fill]');
+    if (fill) fill.style.width = `${percent}%`;
+    const done = paragraphCount > 0 && seenCount >= paragraphCount;
+    if (paragraphCount === 0) statusLine.textContent = 'Nothing to read yet';
+    else if (done) statusLine.textContent = 'End reached · ready to finish';
+    else statusLine.textContent = `${seenCount} of ${paragraphCount} paragraphs read`;
+    endCard.hidden = !done;
+  }
 
-  function saveProgress() {
-    if (completed || !textBody.isConnected) {
-      if (!textBody.isConnected && cleanupReader) {
+  function markSeenFromViewport() {
+    const edge = (window.innerHeight || 1) * 0.85;
+    for (let index = 0; index < blockWrappers.length; index += 1) {
+      const rect = blockWrappers[index].getBoundingClientRect();
+      if (rect.top < edge && rect.bottom > 0) seen.add(index);
+    }
+  }
+
+  // Progress = furthest-read paragraph. PUT replaces the progress state, so
+  // every save sends position AND accumulated time together; the stored
+  // position only ever advances server-side, never regresses.
+  function saveStoryProgress() {
+    if (completed || !storyBlocks.isConnected) {
+      if (!storyBlocks.isConnected && cleanupReader) {
         cleanupReader();
         cleanupReader = null;
       }
@@ -712,59 +1410,48 @@ async function renderReader(container, textId) {
     const now = Date.now();
     if (now - lastSaveAt < 30000) return;
     lastSaveAt = now;
-    const rect = textBody.getBoundingClientRect();
-    const viewport = window.innerHeight || 1;
-    const scrolled = Math.max(viewport - rect.top, 0);
-    const fraction = rect.height ? scrolled / rect.height : 1;
-    const position = total ? Math.max(1, Math.min(total, Math.ceil(fraction * total))) : 1;
-    highWaterPosition = Math.max(highWaterPosition, position);
-    updateReadingProgress(textId, { position: highWaterPosition, timeSpentSeconds: accumulatedSeconds(), completed: false }).catch(() => { /* best-effort autosave */ });
-  }
-
-  function updateProgressUi() {
-    const rect = textBody.getBoundingClientRect();
-    const viewport = window.innerHeight || 1;
-    const scrolled = Math.max(viewport - rect.top, 0);
-    const scrollFraction = rect.height ? scrolled / rect.height : 1;
-    const fraction = total ? Math.max(scrollFraction, highWaterPosition / total) : scrollFraction;
-    const percent = Math.min(100, Math.round(fraction * 100));
-    progressLabel.textContent = `${percent}%`;
-    progressGroup.setAttribute('aria-valuenow', String(percent));
-    const fill = progressBar.querySelector('[data-progress-fill]');
-    if (fill) fill.style.width = `${percent}%`;
+    let furthest = -1;
+    seen.forEach((index) => { if (index > furthest) furthest = index; });
+    const position = furthest >= 0 ? Math.max(1, Math.min(total, paragraphs[furthest].end)) : 1;
+    updateReadingProgress(textId, { position, timeSpentSeconds: accumulatedSeconds(), completed: false }).catch(() => { /* best-effort autosave */ });
   }
 
   const onScroll = () => {
-    updateProgressUi();
-    saveProgress();
+    markSeenFromViewport();
+    updateStoryProgressUI();
+    saveStoryProgress();
   };
   window.addEventListener('scroll', onScroll, { passive: true });
   cleanupReader = () => window.removeEventListener('scroll', onScroll);
 
-  container.replaceChildren(element('section', { className: 'mx-auto w-full max-w-3xl' }, [
+  container.replaceChildren(element('section', { className: 'mx-auto w-full max-w-3xl min-w-0' }, [
     element('a', { className: 'text-sm font-medium text-muted underline-offset-4 hover:text-ink hover:underline', text: '← Back to library', attrs: { href: '#reading' } }),
     element('header', { className: 'mt-2 flex flex-wrap items-center gap-x-3 gap-y-2' }, [
       element('h1', { className: 'min-w-0 flex-1 break-words text-xl font-semibold text-ink', text: data.title }),
-      levelBadge(data.level) || element('span', { className: 'text-xs text-muted', text: data.sourceType || 'user' })
+      levelPill(data.level) || element('span', { className: 'text-xs text-muted', text: data.sourceType || 'user' })
     ]),
-    element('div', { className: 'surface mt-3 flex flex-col gap-3 p-4' }, [
-      element('div', { className: 'flex flex-wrap items-center gap-x-5 gap-y-3' }, [
-        annotationsToggle,
-        element('label', { className: 'flex min-w-44 flex-1 items-center gap-2 text-xs text-muted', attrs: { for: 'reader-font-size' } }, [
-          element('span', { text: 'A', attrs: { 'aria-hidden': 'true' } }),
-          fontSlider,
-          element('span', { className: 'text-sm font-semibold', text: 'A', attrs: { 'aria-hidden': 'true' } })
-        ]),
-        progressGroup
-      ]),
-      element('div', { className: 'border-t border-stone pt-3' }, [completeButton])
-    ]),
-    textBody
+    headerCard,
+    translationsNote,
+    ...(data.truncated === true ? [element('p', { className: 'mt-2 text-xs leading-5 text-muted', text: 'This long text carries tap-lookup for its first part only; later blocks show plain text.' })] : []),
+    storyCard,
+    savedCard,
+    endCard
   ]));
 
-  textBody.style.fontSize = '18px';
-  renderAnnotatedText();
-  updateProgressUi();
+  storyBlocks.style.fontSize = `${fontSlider.value}px`;
+  paintFuriganaButton();
+  paintTranslationChrome();
+  loadSpeechRate();
+  setMode('study');
+  if (completed) {
+    for (let index = 0; index < paragraphCount; index += 1) seen.add(index);
+  }
+  renderSavedList();
+  updateStoryProgressUI();
+  window.requestAnimationFrame(() => {
+    markSeenFromViewport();
+    updateStoryProgressUI();
+  });
 }
 
 // ---------------------------------------------------------------- progress

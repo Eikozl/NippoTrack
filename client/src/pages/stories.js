@@ -47,9 +47,9 @@ export function openEnrollDialog(storyId, storyTitle, preview, meta = {}) {
           const verdict = speakJapanese(word, { ...speechPieces() });
           if (!verdict.ok) showToast(verdict.message || 'Audio playback is unavailable.', 'error');
         });
-        return element('label', { className: 'flex items-center gap-2 text-sm text-ink' }, [
+        return element('label', { className: 'flex min-w-0 items-center gap-2 text-sm text-ink' }, [
           boxes[index].box,
-          element('span', { className: 'flex-1', text: candidateLabel(kind, entry) }),
+          element('span', { className: 'flex-1 min-w-0 wrap-anywhere', text: candidateLabel(kind, entry) }),
           play
         ]);
       }))
@@ -61,6 +61,15 @@ export function openEnrollDialog(storyId, storyTitle, preview, meta = {}) {
   }
   const resultBox = element('div', { className: 'grid gap-2', attrs: { 'aria-live': 'polite' } });
   const enroll = element('button', { className: 'button-primary min-h-9 px-3 py-1.5 text-sm', text: 'Enroll selected', attrs: { type: 'button' } });
+  function dialogStackLike() {
+    return element('div', { className: 'grid min-w-0 gap-3 sm:col-span-2' }, [
+      ...sourceBlock(meta),
+      ...sections,
+      enroll,
+      resultBox
+    ]);
+  }
+  let closeEnroll = null;
   enroll.addEventListener('click', () => {
     const selected = picks.flat().filter(({ box }) => box.checked).map(({ id }) => id).filter(Boolean);
     if (!selected.length) { showToast('Select at least one candidate.', 'error'); return; }
@@ -68,21 +77,6 @@ export function openEnrollDialog(storyId, storyTitle, preview, meta = {}) {
       const result = await apiRequest(`/api/stories/${storyId}/enroll-srs`, { method: 'POST', body: { selected } });
       const items = Array.isArray(result.items) ? result.items : [];
       const reviewNow = element('button', { className: 'button-primary min-h-9 px-3 py-1.5 text-sm', text: 'Review these now', attrs: { type: 'button' } });
-      const closeEnroll = openDialog({
-        title: `Enroll from ${storyTitle}`,
-        description: 'Checked rows become SRS review items. Practice only until graded.',
-        content: [dialogStackLike()],
-        submitLabel: 'Close',
-        onSubmit: async (form, close) => { close(); }
-      });
-      function dialogStackLike() {
-        return element('div', { className: 'grid gap-3 sm:col-span-2' }, [
-          ...sourceBlock(meta),
-          ...sections,
-          enroll,
-          resultBox
-        ]);
-      }
       reviewNow.addEventListener('click', () => {
         try {
           if (typeof window !== 'undefined' && window.sessionStorage && result.reviewSessionId && Array.isArray(result.queueItems)) {
@@ -90,13 +84,13 @@ export function openEnrollDialog(storyId, storyTitle, preview, meta = {}) {
               reviewSessionId: Number(result.reviewSessionId),
               items: result.queueItems
             }));
-            closeEnroll();
+            closeEnroll?.();
             window.location.hash = `#review?reviewSessionId=${Number(result.reviewSessionId)}`;
             return;
           }
         } catch { /* storage blocked: fall back to the review page */ }
         if (typeof window !== 'undefined') {
-          closeEnroll();
+          closeEnroll?.();
           window.location.hash = 'review';
         }
       });
@@ -106,6 +100,13 @@ export function openEnrollDialog(storyId, storyTitle, preview, meta = {}) {
         reviewNow
       );
     }).catch((error) => showToast(error?.message || 'Unable to enroll.', 'error'));
+  });
+  closeEnroll = openDialog({
+    title: `Enroll from ${storyTitle}`,
+    description: 'Checked rows become SRS review items. Practice only until graded.',
+    content: [dialogStackLike()],
+    submitLabel: 'Close',
+    onSubmit: async (form, close) => { close(); }
   });
 }
 
@@ -144,12 +145,12 @@ function sourceBlock(meta = {}) {
     nodes.push(frame);
   } else if (meta.sourceUrl) {
     nodes.push(element('a', {
-      className: 'text-sm font-medium text-vermilion underline underline-offset-4 hover:no-underline',
+      className: 'min-w-0 break-all text-sm font-medium text-vermilion underline underline-offset-4 hover:no-underline',
       text: meta.sourceUrl, attrs: { href: meta.sourceUrl, target: '_blank', rel: 'noopener noreferrer' }
     }));
   }
   if (meta.sourceText) {
-    nodes.push(element('details', { className: 'rounded-md bg-paper p-3' }, [
+    nodes.push(element('details', { className: 'min-w-0 rounded-md bg-paper p-3' }, [
       element('summary', { className: 'cursor-pointer text-sm font-semibold text-ink', text: 'Source text' }),
       element('p', { className: 'mt-2 max-h-44 overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-ink/80', text: meta.sourceText })
     ]));

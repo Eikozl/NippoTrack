@@ -63,6 +63,17 @@ function weekBefore(weekStart) {
   return { prevStart, prevEndExclusive: weekStart };
 }
 
+// A DATE string for `session_date` columns stays a bare date; timestamps
+// (review_events.reviewed_at, review_sessions.started_at) need the CLIENT's
+// local midnights as UTC instants. tzOffsetMinutes is browser
+// getTimezoneOffset() (UTC - local, e.g. 240 for UTC-4). Falsy/0 keeps the
+// legacy bare-date params (UTC midnight), byte-identical for API consumers
+// and tests that don't send an offset.
+function boundaryDate(isoDay, tzOffsetMinutes) {
+  if (!tzOffsetMinutes) return isoDay;
+  return new Date(Date.parse(`${isoDay}T00:00:00Z`) + tzOffsetMinutes * 60000).toISOString();
+}
+
 // One bounded user-scoped event pull, same ownership joins as the smart
 // activity snapshot. [fromInclusive, toExclusive) are UTC ISO dates.
 const WEEK_EVENTS_SQL = `SELECT re.reviewed_at, re.result,
@@ -97,17 +108,19 @@ function accuracyByType(events) {
   return stats;
 }
 
-async function generateWeeklyInsights(executor, userId, { weekStart, weekEnd }) {
+async function generateWeeklyInsights(executor, userId, { weekStart, weekEnd, now = new Date(), tzOffsetMinutes = 0, today = null }) {
   if (!userId) throw new Error('generateWeeklyInsights requires a userId.');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart || '') || !/^\d{4}-\d{2}-\d{2}$/.test(weekEnd || '')) {
     throw new Error('generateWeeklyInsights requires ISO weekStart/weekEnd dates.');
   }
+  const fromInstant = boundaryDate(weekStart, tzOffsetMinutes);
+  const toInstant = boundaryDate(dayAfter(weekEnd), tzOffsetMinutes);
   const toExclusive = dayAfter(weekEnd);
   const [events, prev, minutesRows, sessionsRows, snapshot, goals] = await Promise.all([
-    fetchWeekEvents(executor, userId, weekStart, toExclusive),
+    fetchWeekEvents(executor, userId, fromInstant, toInstant),
     (() => {
-      const { prevStart, prevEndExclusive } = weekBefore(weekStart);
-      return fetchWeekEvents(executor, userId, prevStart, prevEndExclusive);
+      const { prevStart } = weekBefore(weekStart);
+      return fetchWeekEvents(executor, userId, boundaryDate(prevStart, tzOffsetMinutes), fromInstant);
     })(),
     executor.execute(
       'SELECT COALESCE(SUM(duration_minutes), 0) AS minutes FROM study_sessions WHERE user_id = ? AND session_date >= ? AND session_date <= ?',
@@ -115,7 +128,7 @@ async function generateWeeklyInsights(executor, userId, { weekStart, weekEnd }) 
     ).then(([rows]) => rows),
     executor.execute(
       'SELECT COUNT(*) AS completed FROM review_sessions WHERE user_id = ? AND started_at >= ? AND started_at < ? AND completed_at IS NOT NULL',
-      [userId, weekStart, toExclusive]
+      [userId, fromInstant, toInstant]
     ).then(([rows]) => rows),
     getActivitySnapshot(executor, userId),
     getSmartGoalRow(executor, userId)
@@ -146,7 +159,14 @@ async function generateWeeklyInsights(executor, userId, { weekStart, weekEnd }) 
   }
 
   const anomalies = [];
-  if (prevTotal >= MIN_SAMPLE && totalReviews < prevTotal * ANOMALY_DROP_RATIO) {
+  // Only compare settled weeks: a fresh Monday (or a week that just rolled
+  // over) against a full previous week always looks like a collapse
+  // (44 → 3 hours into the new week). In-progress weeks stay quiet.
+  // `today` is the client's local date when provided (local week model);
+  // without it the UTC date of `now` decides.
+  const referenceDay = today || isoDate(new Date(now));
+  const weekComplete = weekEnd < referenceDay;
+  if (weekComplete && prevTotal >= MIN_SAMPLE && totalReviews < prevTotal * ANOMALY_DROP_RATIO) {
     anomalies.push({
       type: 'review_drop',
       severity: totalReviews === 0 ? 'high' : 'medium',
@@ -212,6 +232,32 @@ async function getCachedInsight(executor, userId, weekStart) {
   return { insights: row.insights_json, generatedAt: row.generated_at };
 }
 
+// A cached week is stale when the user graded anything inside that week
+// AFTER the doc was generated (reviewed_at is CURRENT_TIMESTAMP, so only
+// the in-progress week can ever go stale; completed weeks stay cached).
+// Same ownership joins as WEEK_EVENTS_SQL — strictly user-scoped.
+const REVIEWS_SINCE_SQL = `SELECT MAX(re.reviewed_at) AS last_at
+  FROM review_events re
+  JOIN review_items ri ON ri.id_review_item = re.id_review_item
+  LEFT JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary AND v.user_id = ?
+  LEFT JOIN kanji k ON k.id_kanji = ri.id_kanji AND k.user_id = ?
+  LEFT JOIN grammar_points g ON g.id_grammar = ri.id_grammar AND g.user_id = ?
+  WHERE (v.user_id = ? OR k.user_id = ? OR g.user_id = ?)
+    AND re.reviewed_at >= ? AND re.reviewed_at < ? AND re.reviewed_at > ?`;
+
+async function hasReviewsSince(executor, userId, { weekStart, weekEnd, since, tzOffsetMinutes = 0 }) {
+  const [rows] = await executor.execute(
+    REVIEWS_SINCE_SQL,
+    [
+      userId, userId, userId, userId, userId, userId,
+      boundaryDate(weekStart, tzOffsetMinutes),
+      boundaryDate(dayAfter(weekEnd), tzOffsetMinutes),
+      since
+    ]
+  );
+  return Boolean(rows?.[0]?.last_at);
+}
+
 async function saveCachedInsight(executor, userId, weekStart, insights) {
   await executor.execute(
     `INSERT INTO weekly_insights (user_id, week_start, insights_json)
@@ -226,9 +272,13 @@ module.exports = {
   MIN_SAMPLE,
   STRENGTH_ACCURACY,
   WEAKNESS_ACCURACY,
+  boundaryDate,
   currentWeekKey,
+  dayAfter,
   generateWeeklyInsights,
   getCachedInsight,
+  hasReviewsSince,
   parseWeekKey,
-  saveCachedInsight
+  saveCachedInsight,
+  weekKeyFor
 };

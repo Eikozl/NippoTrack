@@ -107,8 +107,10 @@ export async function renderDashboard(container) {
       // the dashboard stays a calm snapshot: metrics, recent sessions,
       // activity calendar, and quiet links outward.
       const [data, activity, review, goalsData] = await Promise.all([
-        apiRequest('/api/dashboard'),
-        apiRequest('/api/dashboard/activity'),
+        // `today` anchors server windows on the browser's local date: DB
+        // CURRENT_DATE is UTC and dropped evening sessions (0 minutes).
+        apiRequest(`/api/dashboard?today=${localDayKey()}`),
+        apiRequest(`/api/dashboard/activity?today=${localDayKey()}`),
         apiRequest('/api/review'),
         // One bounded request on the existing Goals endpoint; a failure
         // here skips the preview without failing the dashboard.

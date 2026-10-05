@@ -6,24 +6,75 @@ const {
   currentWeekKey,
   generateWeeklyInsights,
   getCachedInsight,
+  hasReviewsSince,
   parseWeekKey,
-  saveCachedInsight
+  saveCachedInsight,
+  weekKeyFor
 } = require('../services/weeklyInsights');
 
-function resolveWeek(query) {
-  const raw = query?.week;
-  if (raw === undefined || raw === null || raw === '') return parseWeekKey(currentWeekKey());
-  try {
-    return parseWeekKey(raw);
-  } catch {
-    throw new ValidationError(`Invalid week (expected YYYY-Www): ${raw}.`);
+// Local-week anchoring: the browser sends its calendar day (`today`) and
+// getTimezoneOffset() (`tzOffset`, UTC - local). Without them the legacy
+// UTC week applies. Sessions carry LOCAL dates, so the UTC week showed 0
+// minutes from Sunday 20:00 local onward.
+function resolveTodayLocal(query) {
+  const raw = query?.today;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const value = String(raw);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) {
+    throw new ValidationError('today must be a YYYY-MM-DD date.');
   }
+  return value;
+}
+
+function resolveTzOffset(query) {
+  const raw = query?.tzOffset;
+  if (raw === undefined || raw === null || raw === '') return 0;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < -840 || value > 840) {
+    throw new ValidationError('tzOffset must be an integer between -840 and 840 minutes.');
+  }
+  return value;
+}
+
+function addDays(iso, days) {
+  return new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+}
+
+function mondayOf(iso) {
+  const dow = (new Date(`${iso}T00:00:00Z`).getUTCDay() + 6) % 7;
+  return addDays(iso, -dow);
+}
+
+function resolveWeek(query) {
+  const today = resolveTodayLocal(query);
+  const tzOffsetMinutes = resolveTzOffset(query);
+  const raw = query?.week;
+  if (raw !== undefined && raw !== null && raw !== '') {
+    try {
+      return { ...parseWeekKey(raw), today, tzOffsetMinutes };
+    } catch {
+      throw new ValidationError(`Invalid week (expected YYYY-Www): ${raw}.`);
+    }
+  }
+  if (today) {
+    const weekStart = mondayOf(today);
+    return { key: weekKeyFor(weekStart), weekStart, weekEnd: addDays(weekStart, 6), today, tzOffsetMinutes };
+  }
+  return { ...parseWeekKey(currentWeekKey()), today, tzOffsetMinutes };
 }
 
 async function loadWeek(userId, range, { force = false } = {}) {
   if (!force) {
     const cached = await getCachedInsight(pool, userId, range.weekStart);
-    if (cached) return { ...cached.insights, cached: true, generatedAt: cached.generatedAt };
+    // Cached docs go stale the moment a review lands after generation;
+    // without this check the widget kept showing pre-review numbers forever.
+    const stale = !cached?.generatedAt || await hasReviewsSince(pool, userId, {
+      weekStart: range.weekStart,
+      weekEnd: range.weekEnd,
+      since: cached.generatedAt,
+      tzOffsetMinutes: range.tzOffsetMinutes
+    });
+    if (cached && !stale) return { ...cached.insights, cached: true, generatedAt: cached.generatedAt };
   }
   const insights = await generateWeeklyInsights(pool, userId, range);
   await saveCachedInsight(pool, userId, range.weekStart, insights);

@@ -1,16 +1,32 @@
 const pool = require('../config/db');
-const { sendRouteError } = require('../errors/http');
+const { ValidationError, sendRouteError } = require('../errors/http');
+
+// Sessions are stored with the browser's LOCAL date (native date inputs),
+// while the DB clock is UTC: after ~20:00 local in UTC-4 the dashboard's
+// CURRENT_DATE already pointed at tomorrow and evening sessions summed to 0.
+// `?today=` anchors every window on the client's local date; absent param
+// keeps the previous UTC behavior for API consumers.
+function resolveToday(query) {
+  const raw = query?.today;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const value = String(raw);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) {
+    throw new ValidationError('today must be a YYYY-MM-DD date.');
+  }
+  return value;
+}
 
 async function getDashboard(req, res) {
   try {
+    const today = resolveToday(req.query);
     const [rows] = await pool.query(`
       WITH user_sessions AS (SELECT id_session, session_date, category, duration_minutes FROM study_sessions WHERE user_id = ?),
       user_vocabulary AS (SELECT 1 FROM vocabulary WHERE user_id = ?),
       user_kanji AS (SELECT 1 FROM kanji WHERE user_id = ?),
       user_grammar AS (SELECT 1 FROM grammar_points WHERE user_id = ?)
       SELECT
-        COALESCE((SELECT SUM(duration_minutes) FROM user_sessions WHERE session_date = CURRENT_DATE), 0) AS minutes_today,
-        COALESCE((SELECT SUM(duration_minutes) FROM user_sessions WHERE session_date >= date_trunc('week', CURRENT_DATE)::date AND session_date <= CURRENT_DATE), 0) AS minutes_week,
+        COALESCE((SELECT SUM(duration_minutes) FROM user_sessions WHERE session_date = COALESCE(?::date, CURRENT_DATE)), 0) AS minutes_today,
+        COALESCE((SELECT SUM(duration_minutes) FROM user_sessions WHERE session_date >= date_trunc('week', COALESCE(?::date, CURRENT_DATE))::date AND session_date <= COALESCE(?::date, CURRENT_DATE)), 0) AS minutes_week,
         (SELECT COUNT(*) FROM user_vocabulary) AS vocabulary_count,
         (SELECT COUNT(*) FROM user_kanji) AS kanji_count,
         (SELECT COUNT(*) FROM user_grammar) AS grammar_count,
@@ -20,14 +36,14 @@ async function getDashboard(req, res) {
         ) recent), '[]'::json) AS recent_sessions,
         COALESCE((SELECT json_agg(row_to_json(weekly) ORDER BY weekly.date) FROM (
           SELECT session_date AS date, SUM(duration_minutes) AS minutes
-          FROM user_sessions WHERE session_date BETWEEN CURRENT_DATE - 6 AND CURRENT_DATE
+          FROM user_sessions WHERE session_date BETWEEN COALESCE(?::date, CURRENT_DATE) - 6 AND COALESCE(?::date, CURRENT_DATE)
           GROUP BY session_date ORDER BY session_date
         ) weekly), '[]'::json) AS weekly_activity,
         COALESCE((SELECT json_agg(row_to_json(distribution) ORDER BY distribution.minutes DESC) FROM (
           SELECT category, SUM(duration_minutes) AS minutes
           FROM user_sessions GROUP BY category ORDER BY minutes DESC
         ) distribution), '[]'::json) AS study_distribution
-    `, [req.user.id, req.user.id, req.user.id, req.user.id]);
+    `, [req.user.id, req.user.id, req.user.id, req.user.id, today, today, today, today, today]);
     const data = rows[0] || {};
 
     return res.json({
@@ -56,14 +72,23 @@ function dayNumber(value) {
   return Math.floor(Date.parse(`${value}T00:00:00Z`) / 86400000);
 }
 
+function shiftDays(iso, days) {
+  return new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+}
+
 async function getActivity(req, res) {
   try {
-    const [[todayRows], [dateRows], [calendarRows]] = await Promise.all([
-      pool.query("SELECT to_char(CURRENT_DATE, 'YYYY-MM-DD') AS today"),
+    // Same local-date anchor as getDashboard: streak and calendar windows
+    // follow the client's today, not the UTC server clock.
+    let today = resolveToday(req.query);
+    if (!today) {
+      const [todayRows] = await pool.query("SELECT to_char(CURRENT_DATE, 'YYYY-MM-DD') AS today");
+      today = isoDate(todayRows[0]?.today || new Date());
+    }
+    const [[dateRows], [calendarRows]] = await Promise.all([
       pool.query("SELECT to_char(session_date, 'YYYY-MM-DD') AS date FROM study_sessions WHERE user_id = ? GROUP BY session_date ORDER BY session_date ASC", [req.user.id]),
-      pool.query("SELECT to_char(session_date, 'YYYY-MM-DD') AS date, SUM(duration_minutes) AS minutes FROM study_sessions WHERE user_id = ? AND session_date BETWEEN CURRENT_DATE - 34 AND CURRENT_DATE GROUP BY session_date ORDER BY session_date ASC", [req.user.id])
+      pool.query("SELECT to_char(session_date, 'YYYY-MM-DD') AS date, SUM(duration_minutes) AS minutes FROM study_sessions WHERE user_id = ? AND session_date BETWEEN ?::date AND ?::date GROUP BY session_date ORDER BY session_date ASC", [req.user.id, shiftDays(today, -34), today])
     ]);
-    const today = isoDate(todayRows[0]?.today || new Date());
     const dates = dateRows.map((row) => isoDate(row.date));
     const active = new Set(dates);
     let currentStreak = 0;

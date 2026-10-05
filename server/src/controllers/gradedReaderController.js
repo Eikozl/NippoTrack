@@ -3,11 +3,13 @@ const { ValidationError, sendRouteError } = require('../errors/http');
 const { parseIdParam } = require('../validation');
 const {
   MAX_LIBRARY_LIMIT,
+  MAX_READING_ENROLL_ITEMS,
   MAX_READING_TEXT_LENGTH,
   MAX_READING_TITLE_LENGTH,
   analyzeTextForReading,
   createUserReadingText,
   deleteUserReadingText,
+  enrollReadingItems,
   getReadingText,
   importAozoraUrl,
   importHukuUrl,
@@ -15,6 +17,7 @@ const {
   listReadingProgress,
   previewAozoraSources,
   previewHukuSources,
+  saveSentenceTranslations,
   syncReadingSources,
   upsertReadingProgress
 } = require('../services/gradedReader');
@@ -158,6 +161,35 @@ async function deleteText(req, res) {
     return res.json({ id, deleted: true });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to delete reading text.' });
+  }
+}
+
+async function enrollText(req, res) {
+  try {
+    const id = parseIdParam(req, 'reading text');
+    const body = bodyObject(req.body);
+    rejectUnknownFields(body, ['selected']);
+    if (!Array.isArray(body.selected) || body.selected.length < 1 || body.selected.length > MAX_READING_ENROLL_ITEMS) {
+      throw new ValidationError(`selected must be an array of 1 to ${MAX_READING_ENROLL_ITEMS} candidate id strings.`);
+    }
+    const result = await enrollReadingItems(pool, req.user.id, id, body.selected);
+    if (!result) return res.status(404).json({ error: 'Reading text not found.' });
+    return res.json({ text_id: id, ...result });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to enroll reading items.' });
+  }
+}
+
+async function putTranslations(req, res) {
+  try {
+    const id = parseIdParam(req, 'reading text');
+    const body = bodyObject(req.body);
+    rejectUnknownFields(body, ['translations']);
+    const translations = await saveSentenceTranslations(pool, req.user.id, id, body.translations);
+    if (!translations) return res.status(404).json({ error: 'Reading text not found.' });
+    return res.json({ text_id: id, translations });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to save translations.' });
   }
 }
 
@@ -320,11 +352,13 @@ module.exports = {
   analyzeText,
   createUserText,
   deleteText,
+  enrollText,
   getText,
   importFromUrl,
   importSources,
   listLibrary,
   listProgress,
   previewImports,
+  putTranslations,
   updateProgress
 };

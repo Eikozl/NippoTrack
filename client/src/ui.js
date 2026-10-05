@@ -327,16 +327,20 @@ export function openDialog({ title, content, submitLabel = 'Save', submitClassNa
   const root = document.getElementById('modal-root');
   const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const overlay = element('div', {
-    className: 'dialog-overlay fixed inset-0 z-50 grid place-items-end bg-ink/35 p-0 sm:place-items-center sm:p-5',
+    className: 'dialog-overlay fixed inset-0 z-50 grid grid-cols-1 place-items-end bg-ink/35 p-0 sm:place-items-center sm:p-5',
     attrs: { role: 'presentation' }
   });
+  // grid-cols-1 pins the single track to minmax(0,1fr) so no amount of wide
+  // content can push the panel past the viewport; min-w-0 + wrap-anywhere let
+  // every descendant (long URLs, tokens, titles) wrap instead of stretching
+  // the panel's scroll area horizontally on small screens.
   const form = element('form', {
-    className: `dialog-panel max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-paper shadow-2xl sm:max-w-2xl sm:rounded-2xl${panelClass ? ` ${panelClass}` : ''}`,
+    className: `dialog-panel max-h-[92vh] w-full min-w-0 wrap-anywhere overflow-y-auto rounded-t-2xl bg-paper shadow-2xl sm:max-w-2xl sm:rounded-2xl${panelClass ? ` ${panelClass}` : ''}`,
     attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'dialog-title', ...(description ? { 'aria-describedby': 'dialog-description' } : {}) }
   });
-  const closeButton = element('button', { className: 'icon-button', attrs: { type: 'button', 'aria-label': 'Close dialog' } }, [icon('close', { size: 20 })]);
-  const submitButton = submitLabel ? element('button', { className: submitClassName, text: submitLabel, attrs: { type: 'submit' } }) : null;
-  const cancelButton = element('button', { className: 'button-secondary', text: cancelLabel, attrs: { type: 'button' } });
+  const closeButton = element('button', { className: 'icon-button shrink-0', attrs: { type: 'button', 'aria-label': 'Close dialog' } }, [icon('close', { size: 20 })]);
+  const submitButton = submitLabel ? element('button', { className: `${submitClassName} max-w-full`, text: submitLabel, attrs: { type: 'submit' } }) : null;
+  const cancelButton = element('button', { className: 'button-secondary max-w-full', text: cancelLabel, attrs: { type: 'button' } });
   let closed = false;
   const focusable = () => [...form.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')];
   const close = ({ silent = false } = {}) => {
@@ -378,11 +382,11 @@ export function openDialog({ title, content, submitLabel = 'Save', submitClassNa
   });
 
   form.append(
-    element('header', { className: 'dialog-header sticky top-0 z-10 flex items-center justify-between border-b border-stone bg-paper px-5 py-4 sm:px-6' }, [
-      element('h2', { className: 'dialog-title font-display text-lg font-semibold text-ink', text: title, attrs: { id: 'dialog-title' } }),
+    element('header', { className: 'dialog-header sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-stone bg-paper px-5 py-4 sm:px-6' }, [
+      element('h2', { className: 'dialog-title min-w-0 break-words font-display text-lg font-semibold text-ink', text: title, attrs: { id: 'dialog-title' } }),
       ...(showCloseButton ? [closeButton] : [])
     ]),
-    element('div', { className: 'grid gap-4 p-5 sm:grid-cols-2 sm:p-6' }, [
+    element('div', { className: 'grid gap-4 p-5 grid-cols-1 sm:grid-cols-2 sm:p-6' }, [
       ...(description ? [element('p', { className: 'text-sm leading-6 text-muted sm:col-span-2', text: description, attrs: { id: 'dialog-description' } })] : []),
       ...content
     ]),

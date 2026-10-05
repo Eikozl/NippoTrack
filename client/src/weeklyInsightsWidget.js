@@ -5,6 +5,7 @@
 // GET /api/insights/weekly.
 
 import { apiRequest } from './api';
+import { localDayKey } from './dashboardWelcome.js';
 import { element } from './ui';
 
 export function weeklyInsightsWidget() {
@@ -12,7 +13,10 @@ export function weeklyInsightsWidget() {
   wrap.hidden = true;
   (async () => {
     try {
-      const data = await apiRequest('/api/insights/weekly');
+      // Local-week anchor: sessions store the browser's calendar date, so
+      // the server needs today + getTimezoneOffset() or the UTC week shows
+      // 0 minutes from Sunday evening onward.
+      const data = await apiRequest(`/api/insights/weekly?today=${localDayKey()}&tzOffset=${new Date().getTimezoneOffset()}`);
       const summary = data?.summary || {};
       const predictions = data?.predictions || {};
       const jlpt = predictions.jlpt || {};

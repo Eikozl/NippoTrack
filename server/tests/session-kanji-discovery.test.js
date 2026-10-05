@@ -165,8 +165,9 @@ test('Phase 6: GET /api/sessions/:id adds bounded discovery without changing exi
     assert.deepEqual(states, { 今: 'availableToAdd', 日: 'availableToAdd', 学: 'alreadyInCollection', 校: 'availableToAdd', 行: 'alreadyInCollection' });
     assert.ok(body.kanjiDiscovery.kanji.every((entry) => entry.readingSegment === null));
     // Bounded query count: entry + vocab + kanji + grammar + writing +
-    // user-kanji + reference, regardless of discovered character count.
-    assert.ok(seen.length <= 7, `expected at most 7 queries, saw ${seen.length}`);
+    // linked stories (V5.5 session links) + user-kanji + reference,
+    // regardless of discovered character count.
+    assert.ok(seen.length <= 8, `expected at most 8 queries, saw ${seen.length}`);
     assert.equal(seen.filter(({ sql }) => /FROM kanji k WHERE/i.test(sql)).length, 1);
     assert.equal(seen.filter(({ sql }) => /FROM kanji_reference/i.test(sql)).length, 1);
   } finally {
