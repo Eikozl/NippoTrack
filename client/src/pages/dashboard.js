@@ -4,6 +4,8 @@ import { iconTile } from '../icons';
 import { element, errorState, formatDate, loadingState, pageHeader } from '../ui';
 import { profileStore } from '../accountProfile.js';
 import { dashboardWelcomeModel, localDayKey, readVisitRecord, recordDashboardVisit } from '../dashboardWelcome.js';
+import { smartGoalsWidget } from '../smartGoals.js';
+import { weeklyInsightsWidget } from '../weeklyInsightsWidget.js';
 import { CONFIGS } from './v2Pages';
 
 function metric(iconName, label, value, note, page = null, featured = false) {
@@ -77,14 +79,18 @@ function goalsPreview(items, showAll) {
 }
 
 function isEmptyDashboardSnapshot(data) {
-  // v5.1-A.4 first-use pre-check (mirrors shouldShowFirstUseDashboard's
-  // durable-data half): one cheap decision so an active learner never pays
-  // for the extra first-experience fetch below.
+  // Despite the legacy name, this is NOT an "empty dashboard" check: it
+  // answers "is the post-onboarding checklist incomplete?" (mirrors
+  // getFirstUseActionStates' durable-data half). One cheap decision so a
+  // learner with a FULLY completed checklist never pays for the extra
+  // first-experience fetch below. Partial progress (any action incomplete)
+  // still fetches so the checklist can render with per-action states.
   if (!data || typeof data !== 'object') return false;
-  if (Number(data.vocabularyCount) !== 0) return false;
-  if (Number(data.kanjiCount) !== 0) return false;
-  if (Number(data.grammarCount) !== 0) return false;
-  return Array.isArray(data.recentSessions) && data.recentSessions.length === 0;
+  const hasVocabulary = Number(data.vocabularyCount) > 0;
+  const hasCollection = hasVocabulary || Number(data.kanjiCount) > 0 || Number(data.grammarCount) > 0;
+  const hasSession = Array.isArray(data.recentSessions) && data.recentSessions.length > 0;
+  if (hasVocabulary && hasCollection && hasSession) return false;
+  return true;
 }
 
 export async function renderDashboard(container) {
@@ -101,8 +107,10 @@ export async function renderDashboard(container) {
       // the dashboard stays a calm snapshot: metrics, recent sessions,
       // activity calendar, and quiet links outward.
       const [data, activity, review, goalsData] = await Promise.all([
-        apiRequest('/api/dashboard'),
-        apiRequest('/api/dashboard/activity'),
+        // `today` anchors server windows on the browser's local date: DB
+        // CURRENT_DATE is UTC and dropped evening sessions (0 minutes).
+        apiRequest(`/api/dashboard?today=${localDayKey()}`),
+        apiRequest(`/api/dashboard/activity?today=${localDayKey()}`),
         apiRequest('/api/review'),
         // One bounded request on the existing Goals endpoint; a failure
         // here skips the preview without failing the dashboard.
@@ -165,6 +173,8 @@ export async function renderDashboard(container) {
         // no placeholder, no reserved space.
         ...(previewGoals.length ? [goalsPreview(previewGoals, eligibleGoals.length > 3)] : []),
         element('div', { className: 'dashboard-panels mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]' }, [recentSessions(data.recentSessions), activityCalendar(activity.calendar)]),
+        smartGoalsWidget(),
+        weeklyInsightsWidget(),
         element('p', { className: 'dashboard-footnote mt-5 text-center text-sm' }, [element('a', { className: 'font-semibold text-vermilion hover:underline', text: 'View detailed analytics in Statistics', attrs: { href: '#statistics' } })])
       );
     } catch (error) { content.replaceChildren(errorState(error, load)); }

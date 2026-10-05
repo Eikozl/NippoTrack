@@ -98,7 +98,7 @@ async function listKanjiOptions(req, res) {
     const candidates = buildSearchCandidates(search || '');
     const normalizedOnyomi = normalizedJapaneseSql('onyomi');
     const normalizedKunyomi = normalizedJapaneseSql('kunyomi');
-    let query = 'SELECT id_kanji, character_kanji, meaning, onyomi, kunyomi FROM kanji WHERE user_id = ?';
+    let query = 'SELECT id_kanji, character_kanji, meaning, onyomi, kunyomi, jlpt_level FROM kanji WHERE user_id = ?';
     let params = [req.user.id, limit];
 
     if (search) {
@@ -128,6 +128,14 @@ async function listKanjiOptions(req, res) {
       ];
     } else {
       query += ' ORDER BY id_kanji DESC LIMIT ?';
+    }
+
+    const jlpt = normalizeText(req.query.jlpt, 2, 'jlpt');
+    if (jlpt) {
+      const level = jlpt.toUpperCase();
+      if (!JLPT_LEVELS.includes(level)) return res.status(400).json({ error: 'Invalid JLPT level' });
+      query = query.replace(' ORDER BY', ' AND jlpt_level = ? ORDER BY');
+      params.splice(params.length - 1, 0, level);
     }
 
     const [rows] = await pool.execute(query, params);

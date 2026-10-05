@@ -21,6 +21,8 @@ import {
   withPendingAction
 } from '../ui';
 import { iconForTitle, iconTile } from '../icons';
+import { speakJapanese } from '../speech.js';
+import { mountKanjiWriting } from '../kanjiWriting.js';
 
 const JLPT_OPTIONS = [
   { value: '', label: 'Any / not set' },
@@ -28,10 +30,25 @@ const JLPT_OPTIONS = [
 ];
 const STATUS_OPTIONS = ['New', 'Learning', 'Familiar', 'Mastered'].map((value) => ({ value, label: value }));
 
+// Shared SRS date formatters for every entity detail (kanji keeps its own
+// local copies inside a richer layout; vocabulary/grammar reuse these).
+function formatSrsDate(iso) {
+  if (!iso) return '—';
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function formatSrsDateTime(iso) {
+  if (!iso) return '—';
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
 export const ENTITY_CONFIGS = {
   vocabulary: {
     endpoint: '/api/vocabulary',
     idKey: 'id_vocabulary',
+    exampleIdKey: 'id_usage_example',
     eyebrow: 'Lexicon',
     title: 'Vocabulary',
     singular: 'vocabulary entry',
@@ -49,6 +66,17 @@ export const ENTITY_CONFIGS = {
       const contextKanji = getContextKanji(item).map(formatKanjiContextEntry).filter(Boolean);
       const wordReading = readingContext?.wordReading?.value ?? item.reading;
       const kanjiNotice = readingContext?.notice || VOCAB_READING_NOTICE;
+      // SRS state (same shape as kanji detail, presentation only).
+      const review = item.review || null;
+      const srsSection = element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'aria-label': 'SRS review state' } }, [
+        element('h3', { className: 'font-semibold text-ink', text: 'SRS Review' }),
+        review ? element('dl', { className: 'mt-3 grid gap-3 text-sm sm:grid-cols-2' }, [
+          element('div', {}, [element('dt', { className: 'text-muted', text: 'Next Review' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatSrsDate(review.dueOn) })]),
+          element('div', {}, [element('dt', { className: 'text-muted', text: 'Interval' }), element('dd', { className: 'mt-1 font-medium text-ink', text: `${review.intervalDays || 0} days` })]),
+          element('div', {}, [element('dt', { className: 'text-muted', text: 'Last Reviewed' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatSrsDateTime(review.lastReviewedAt) })]),
+          element('div', {}, [element('dt', { className: 'text-muted', text: 'Last Result' }), element('dd', { className: 'mt-1 font-medium text-ink', text: review.lastResult || '—' })])
+        ]) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No review scheduled' })
+      ]);
       // Phase 5 enhancement: import targets are entries with reference
       // meanings (kanji creation requires a meaning). "Add all" appears only
       // when at least two such missing kanji exist.
@@ -60,6 +88,7 @@ export const ENTITY_CONFIGS = {
         element('div', {}, [element('dt', { className: 'text-muted', text: 'JLPT tag' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.jlpt_level || 'Not set' })]),
         element('div', {}, [element('dt', { className: 'text-muted', text: 'Status (self-reported)' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.status || 'New' })])
       ]),
+      srsSection,
       ...(item.notes ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Notes' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: item.notes })])] : []),
       element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'aria-label': 'Kanji reading context' } }, [
         element('div', { className: 'flex items-start justify-between gap-3' }, [
@@ -102,6 +131,14 @@ export const ENTITY_CONFIGS = {
           ...(example.translation ? [element('p', { className: 'mt-2 text-sm text-muted', text: example.translation })] : []),
           element('button', { className: 'button-secondary mt-3 min-h-9 px-3 py-1.5', text: 'Edit example', attrs: { type: 'button', 'data-example-action': 'edit', 'data-example-id': example.id_usage_example } })
         ]))) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No examples recorded yet.' })
+      ]),
+      element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'data-vocab-cloze': 'true' } }, [
+        element('h3', { className: 'font-semibold text-ink', text: 'Cloze Practice' }),
+        element('p', { className: 'mt-2 text-sm text-muted', text: 'Loading cloze sentences from your saved examples…' })
+      ]),
+      element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'data-vocab-tags': 'true' } }, [
+        element('h3', { className: 'font-semibold text-ink', text: 'Tags' }),
+        element('p', { className: 'mt-2 text-sm text-muted', text: 'Loading tags…' })
       ]),
       element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'data-grammar-example-context': 'true' } }, [
         element('h3', { className: 'font-semibold text-ink', text: 'Grammar in your examples' }),
@@ -166,6 +203,14 @@ renderDetail: (item) => {
         // JLPT/strokes metadata, and status all live here.
         buildKanjiIdentity(normalizeKanjiOwnedIdentity(item), element),
 
+        // Handwriting practice (MVP): stroke-order overlay + order-only
+        // check in a modal. Lazy + fail-open like the stroke slots above.
+        element('section', { className: 'kanji-detail-section surface p-5', attrs: { 'aria-label': 'Handwriting practice' } }, [
+          element('h3', { className: 'font-semibold text-ink', text: 'Handwriting Practice' }),
+          element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: 'Trace the character in stroke order. Only the order is checked.' }),
+          element('button', { className: 'button-secondary mt-3 min-h-9 px-3 py-1.5', text: 'Practice writing', attrs: { type: 'button', 'data-writing-practice': 'true' } })
+        ]),
+
         // 2 + 3. SRS Review + Encounter Intelligence side by side on wide
         // dialogs; stacked otherwise. Exposure stays exposure-only.
         element('div', { className: 'grid gap-4 lg:grid-cols-2' }, [
@@ -221,7 +266,7 @@ renderDetail: (item) => {
               wordExamples.length ? element('div', { className: 'mt-3 grid gap-2' }, wordExamples.map((ex) => element('div', { className: 'detail-panel p-2 text-xs' }, [
                 element('p', { className: 'whitespace-pre-wrap text-ink', text: ex.sentence }),
                 ex.translation && element('p', { className: 'mt-1 text-muted', text: ex.translation })
-              ]))) : null
+              ]))) : element('p', { className: 'mt-2 text-xs text-muted', text: 'No examples recorded yet.' })
             ]);
           })) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No connected vocabulary yet' })
         ]),
@@ -258,6 +303,7 @@ renderDetail: (item) => {
   grammar: {
     endpoint: '/api/grammar',
     idKey: 'id_grammar',
+    exampleIdKey: 'id_grammar_example',
     eyebrow: 'Patterns',
     title: 'Grammar',
     singular: 'grammar point',
@@ -268,21 +314,46 @@ renderDetail: (item) => {
     secondary: (item) => item.structure || 'Structure not recorded',
     detail: (item) => item.meaning,
     japaneseTextFields: { grammar_point: 'hiragana', structure: 'hiragana', example: 'hiragana' },
-    renderDetail: (item) => element('div', { className: 'sm:col-span-2' }, [
+    renderDetail: (item) => {
+      // SRS state (same shape as kanji detail, presentation only).
+      const grammarReview = item.review || null;
+      return element('div', { className: 'sm:col-span-2' }, [
       element('dl', { className: 'grid gap-3 text-sm sm:grid-cols-2' }, [
         element('div', {}, [element('dt', { className: 'text-muted', text: 'Grammar point' }), element('dd', { className: 'mt-1 font-jp font-medium text-ink', text: item.grammar_point })]),
         element('div', {}, [element('dt', { className: 'text-muted', text: 'Meaning' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.meaning })]),
         element('div', {}, [element('dt', { className: 'text-muted', text: 'JLPT tag' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.jlpt_level || 'Not set' })]),
         element('div', {}, [element('dt', { className: 'text-muted', text: 'Status (self-reported)' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.status || 'New' })])
       ]),
+      element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'aria-label': 'SRS review state' } }, [
+        element('h3', { className: 'font-semibold text-ink', text: 'SRS Review' }),
+        grammarReview ? element('dl', { className: 'mt-3 grid gap-3 text-sm sm:grid-cols-2' }, [
+          element('div', {}, [element('dt', { className: 'text-muted', text: 'Next Review' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatSrsDate(grammarReview.dueOn) })]),
+          element('div', {}, [element('dt', { className: 'text-muted', text: 'Interval' }), element('dd', { className: 'mt-1 font-medium text-ink', text: `${grammarReview.intervalDays || 0} days` })]),
+          element('div', {}, [element('dt', { className: 'text-muted', text: 'Last Reviewed' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatSrsDateTime(grammarReview.lastReviewedAt) })]),
+          element('div', {}, [element('dt', { className: 'text-muted', text: 'Last Result' }), element('dd', { className: 'mt-1 font-medium text-ink', text: grammarReview.lastResult || '—' })])
+        ]) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No review scheduled' })
+      ]),
       ...(item.structure ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Structure' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: item.structure })])] : []),
-      ...(item.example ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Example' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: item.example })])] : []),
+      // Legacy single example: hidden once managed examples exist (the
+      // migration backfills the legacy text as the first managed row, so
+      // showing both would duplicate it). Kept as fallback for records
+      // without managed rows.
+      ...((item.example && !item.examples?.length) ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Example' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: item.example })])] : []),
+      element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [
+        element('div', { className: 'flex items-center justify-between gap-3' }, [element('h3', { className: 'font-semibold text-ink', text: 'Examples' }), element('button', { className: 'button-secondary min-h-9 px-3 py-1.5', text: 'Add example', attrs: { type: 'button', 'data-example-action': 'add' } })]),
+        item.examples?.length ? element('div', { className: 'mt-3 grid gap-3' }, item.examples.map((example) => element('article', { className: 'rounded-md bg-paper p-3' }, [
+          element('p', { className: 'whitespace-pre-wrap text-sm leading-6 text-ink', text: example.sentence }),
+          ...(example.translation ? [element('p', { className: 'mt-2 text-sm text-muted', text: example.translation })] : []),
+          element('button', { className: 'button-secondary mt-3 min-h-9 px-3 py-1.5', text: 'Edit example', attrs: { type: 'button', 'data-example-action': 'edit', 'data-example-id': example.id_grammar_example } })
+        ]))) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No examples recorded yet.' })
+      ]),
       ...(item.notes ? [element('section', { className: 'mt-5 rounded-lg border border-stone p-4' }, [element('h3', { className: 'font-semibold text-ink', text: 'Notes' }), element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: item.notes })])] : []),
       element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'data-vocabulary-example-context': 'true' } }, [
         element('h3', { className: 'font-semibold text-ink', text: 'Vocabulary in this example' }),
         element('p', { className: 'mt-2 text-sm text-muted', text: 'Loading vocabulary found in this saved example…' })
       ])
-    ]),
+      ]);
+    },
     fields: [
       { name: 'grammar_point', label: 'Grammar point', required: true, maxLength: 100 },
       { name: 'meaning', label: 'Meaning', required: true, maxLength: 255 },
@@ -614,6 +685,7 @@ export function renderEntityPage(container, config) {
     }
   }
 
+
   async function saveRecord(record, form, close, { onDuplicateKanji } = {}) {
     const id = record?.[config.idKey];
     try {
@@ -702,7 +774,8 @@ export function renderEntityPage(container, config) {
         submitLabel: example ? 'Save example' : 'Add example',
         onSubmit: async (form, close) => {
           const data = new FormData(form);
-          const path = example ? `${config.endpoint}/${record[config.idKey]}/examples/${example.id_usage_example}` : `${config.endpoint}/${record[config.idKey]}/examples`;
+          const exampleId = example?.[config.exampleIdKey];
+          const path = example ? `${config.endpoint}/${record[config.idKey]}/examples/${exampleId}` : `${config.endpoint}/${record[config.idKey]}/examples`;
           await apiRequest(path, { method: example ? 'PUT' : 'POST', body: { sentence: data.get('sentence'), translation: data.get('translation'), notes: data.get('notes') } });
           close();
           showToast(example ? 'Usage example updated.' : 'Usage example added.');
@@ -711,7 +784,7 @@ export function renderEntityPage(container, config) {
       });
       const content = config.renderDetail ? config.renderDetail(record, { openExampleForm }) : element('div', { className: 'sm:col-span-2 text-sm text-muted', text: 'A detailed preview is not available for this record yet.' });
       content.querySelector('[data-example-action="add"]')?.addEventListener('click', () => openExampleForm());
-      content.querySelectorAll('[data-example-action="edit"]').forEach((button) => button.addEventListener('click', () => openExampleForm(record.examples.find((example) => example.id_usage_example === Number(button.dataset.exampleId)))));
+      content.querySelectorAll('[data-example-action="edit"]').forEach((button) => button.addEventListener('click', () => openExampleForm((record.examples || []).find((example) => example[config.exampleIdKey] === Number(button.dataset.exampleId)))));
       // Phase 5 enhancement (vocabulary only): explicit per-kanji import.
       // Uses the existing kanji creation endpoint (which resolves
       // reference_id, enforces ownership and duplicate rules), then
@@ -832,6 +905,119 @@ export function renderEntityPage(container, config) {
           if (data.truncated) grammarSlot.append(element('p', { className: 'mt-2 text-xs text-muted', text: 'Only the first bounded set of saved examples was analyzed.' }));
         }).catch(() => grammarSlot.replaceChildren(element('h3', { className: 'font-semibold text-ink', text: 'Grammar in your examples' }), element('p', { className: 'mt-2 text-sm text-muted', text: 'Grammar analysis is unavailable.' })));
       }
+      const clozeSlot = content.querySelector('[data-vocab-cloze]');
+      if (clozeSlot && config === ENTITY_CONFIGS.vocabulary) {
+        const vocabId = record.id_vocabulary;
+        const foldKana = (value) => String(value || '').replace(/[ァ-ヶ]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0x60));
+        const normAnswer = (value) => foldKana(String(value || '').trim().toLowerCase()).replace(/\s+/g, '');
+        const playCloze = (sentence) => {
+          const verdict = speakJapanese(sentence, {
+            synthesis: typeof window !== 'undefined' ? window.speechSynthesis : null,
+            Utterance: typeof window !== 'undefined' ? window.SpeechSynthesisUtterance : null
+          });
+          if (!verdict.ok) showToast(verdict.message || 'Audio playback is unavailable.', 'error');
+        };
+        apiRequest(`/api/vocabulary/${vocabId}/cloze-sentences`).then((data) => {
+          const sentences = Array.isArray(data) ? data : [];
+          clozeSlot.replaceChildren(element('h3', { className: 'font-semibold text-ink', text: 'Cloze Practice' }));
+          if (!sentences.length) {
+            clozeSlot.append(element('p', { className: 'mt-2 text-sm text-muted', text: 'No cloze sentences yet — add a usage example containing this word.' }));
+            return;
+          }
+          clozeSlot.append(element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: 'Fill the blank from memory. Practice only — nothing is graded.' }));
+          clozeSlot.append(element('div', { className: 'mt-3 grid gap-3' }, sentences.map((entry) => {
+            const answer = String(record.word || '');
+            const reading = String(record.reading || '');
+            const input = element('input', { className: 'field-control', attrs: { type: 'text', 'aria-label': 'Type the missing word', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' } });
+            const verdict = element('p', { className: 'text-sm leading-6 text-ink', attrs: { 'aria-live': 'polite' } });
+            verdict.hidden = true;
+            const reveal = element('p', { className: 'break-words font-jp text-sm leading-7 text-ink', attrs: { lang: 'ja' } });
+            reveal.hidden = true;
+            const check = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-sm', text: 'Check', attrs: { type: 'button' } });
+            const runCheck = () => {
+              const typed = input.value || '';
+              if (!String(typed).trim()) {
+                verdict.hidden = false;
+                verdict.textContent = 'Type something first.';
+                return;
+              }
+              const want = [answer, reading].map(normAnswer).filter(Boolean);
+              if (want.includes(normAnswer(typed))) {
+                verdict.hidden = false;
+                verdict.textContent = 'That matches! The full sentence is below.';
+                reveal.hidden = false;
+                reveal.textContent = entry.original;
+              } else {
+                verdict.hidden = false;
+                verdict.textContent = 'Not quite — try again.';
+                reveal.hidden = true;
+              }
+            };
+            check.addEventListener('click', runCheck);
+            input.addEventListener('keydown', (event) => {
+              if (event.key === 'Enter') { event.preventDefault(); check.click(); }
+            });
+            const play = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-sm', text: 'Play', attrs: { type: 'button', 'aria-label': `Play cloze sentence aloud` } });
+            play.addEventListener('click', () => playCloze(entry.original));
+            return element('article', { className: 'rounded-md bg-paper p-3' }, [
+              element('p', { className: 'break-words font-jp text-base leading-8 text-ink', text: entry.cloze, attrs: { lang: 'ja' } }),
+              ...(entry.translation ? [element('p', { className: 'mt-1 text-sm text-muted', text: entry.translation })] : []),
+              element('div', { className: 'mt-2 flex flex-col gap-2 sm:flex-row' }, [input, check, play]),
+              verdict,
+              reveal
+            ]);
+          })));
+        }).catch(() => clozeSlot.replaceChildren(
+          element('h3', { className: 'font-semibold text-ink', text: 'Cloze Practice' }),
+          element('p', { className: 'mt-2 text-sm text-muted', text: 'Cloze sentences are unavailable.' })
+        ));
+      }
+      const tagsSlot = content.querySelector('[data-vocab-tags]');
+      if (tagsSlot && config === ENTITY_CONFIGS.vocabulary) {
+        const vocabId = record.id_vocabulary;
+        const renderTags = (tags) => {
+          const assigned = Array.isArray(tags?.tags) ? tags.tags : [];
+          const suggested = Array.isArray(tags?.suggestedTags) ? tags.suggestedTags : [];
+          tagsSlot.replaceChildren(
+            element('h3', { className: 'font-semibold text-ink', text: 'Tags' }),
+            element('div', { className: 'mt-2 flex flex-wrap gap-2' }, assigned.length
+              ? assigned.map((name) => element('span', { className: 'status-pill text-xs', text: name }))
+              : [element('p', { className: 'text-sm text-muted', text: 'No tags yet.' })])
+          );
+          if (suggested.length) {
+            tagsSlot.append(element('p', { className: 'mt-3 text-xs font-semibold text-muted uppercase tracking-wide', text: 'Suggested' }));
+            const row = element('div', { className: 'mt-1 flex flex-wrap gap-2' });
+            for (const name of suggested) {
+              const add = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: `Add ${name}`, attrs: { type: 'button' } });
+              add.addEventListener('click', () => {
+                const current = assigned.concat([name]);
+                apiRequest(`/api/vocabulary/${vocabId}/tags`, { method: 'PUT', body: { tags: current } })
+                  .then((saved) => renderTags({ tags: saved.tags, suggestedTags: suggested.filter((entry) => entry !== name) }))
+                  .catch((error) => showToast(error?.message || 'Unable to add tag.', 'error'));
+              });
+              row.appendChild(add);
+            }
+            tagsSlot.appendChild(row);
+          }
+          const custom = element('input', { className: 'field-control mt-3', attrs: { type: 'text', 'aria-label': 'Add a custom tag', placeholder: 'Custom tag… (letters, numbers, hyphens)', maxLength: '20' } });
+          const addCustom = element('button', { className: 'button-secondary mt-2 min-h-9 px-3 py-1.5 text-sm', text: 'Add tag', attrs: { type: 'button' } });
+          addCustom.addEventListener('click', () => {
+            const name = String(custom.value || '').trim();
+            if (!name) return;
+            const current = assigned.concat([name]);
+            apiRequest(`/api/vocabulary/${vocabId}/tags`, { method: 'PUT', body: { tags: current } })
+              .then((saved) => renderTags({ tags: saved.tags, suggestedTags }))
+              .catch((error) => showToast(error?.message || 'Unable to add tag.', 'error'));
+          });
+          tagsSlot.append(custom, addCustom);
+        };
+        apiRequest(`/api/vocabulary/${vocabId}/tags`)
+          .then(renderTags)
+          .catch(() => tagsSlot.replaceChildren(
+            element('h3', { className: 'font-semibold text-ink', text: 'Tags' }),
+            element('p', { className: 'mt-2 text-sm text-muted', text: 'Tags are unavailable.' })
+          ));
+      }
       const vocabularySlot = content.querySelector('[data-vocabulary-example-context]');
       if (vocabularySlot && config === ENTITY_CONFIGS.grammar) {
         apiRequest(`/api/grammar/${record.id_grammar}/vocabulary-context`).then((data) => {
@@ -844,6 +1030,19 @@ export function renderEntityPage(container, config) {
         // B.2 stroke-order overlay: lazy + fail-open — the owned detail
         // never depends on it. Same shared module as the reference page.
         import('../strokeOrder.js').then((module) => module.mountStrokeSlots(content)).catch(() => {});
+        // Handwriting MVP: modal with the trace overlay + order check.
+        content.querySelector('[data-writing-practice]')?.addEventListener('click', () => {
+          const character = record.character_kanji || '';
+          const holder = element('div', { className: 'grid gap-3' });
+          const closeButton = element('button', { className: 'button-ghost', text: 'Close', attrs: { type: 'button' } });
+          const closePractice = openDetailModal({
+            title: character ? `Practice writing ${character}` : 'Practice writing',
+            content: [holder],
+            actions: [closeButton]
+          });
+          closeButton.addEventListener('click', closePractice);
+          mountKanjiWriting(holder, { character, onDone: closePractice });
+        });
       }
     } catch (error) {
       showToast(error.message, 'error');

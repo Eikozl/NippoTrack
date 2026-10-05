@@ -173,20 +173,26 @@ function makeLazyGradeConnection({ calls, entityTable, entityPk, entityId, sessi
         return [[{ id_review_item: reviewItemId }]];
       }
       if (step === 5) {
+        // V5.3a: interval resolution reads the user's preferences first; an
+        // empty row keeps engine_mode='fixed' (frozen 1/3/7 curve).
+        assert.match(sql, /FROM user_review_preferences WHERE user_id = \?/);
+        return [[]];
+      }
+      if (step === 6) {
         assert.match(sql, /FROM review_items ri/);
         const row = { id_review_item: reviewItemId, interval_days: intervalDays, id_vocabulary: null, id_kanji: null, id_grammar: null };
         row[fkColumn] = entityId;
         return [[row]];
       }
-      if (step === 6) {
+      if (step === 7) {
         assert.match(sql, /AND user_id = \?/);
         return [[{ 1: 1 }]];
       }
-      if (step === 7) {
+      if (step === 8) {
         assert.match(sql, /INSERT INTO review_events/i);
         return [{ affectedRows: 1 }];
       }
-      if (step === 8) {
+      if (step === 9) {
         assert.match(sql, /UPDATE review_items/i);
         return [{ affectedRows: 1 }];
       }

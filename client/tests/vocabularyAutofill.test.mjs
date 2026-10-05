@@ -407,13 +407,46 @@ test('analyzer proper-noun stays Needs-verification with no rescue', () => {
 });
 
 test('analyzer remainingCount drives "+N more" without inventing N', () => {
-  const candidate = { canonical: '行く', lemma: '行く', lemmaReading: 'いく', pos: 'verb', observed: [] };
+  const candidate = { canonical: '��O�??', lemma: '��O�??', lemmaReading: '�?"�??', pos: 'verb', observed: [] };
   const item = ambiguousIkuItem();
   item.interpretation.remainingCount = 4;
   const prefill = vaf.analyzerPrefillFromContext(candidate, item);
   assert.equal(prefill.moreMeanings, true);
   const capped = vaf.analyzerPrefillFromContext(candidate, ambiguousIkuItem());
   assert.equal(capped.moreMeanings, false);
+});
+
+// Pin fallback: the server's context diet never emits per-item pins; the
+// block-level dictionary (same pinned snapshot) must anchor entry expansion,
+// otherwise the MULTIPLE picker hits "This entry cannot be expanded." with
+// valid rows on screen (real JMdict: 学生 → MULTIPLE がくせい/がくしょう).
+test('analyzer expansion pin falls back to the context block dictionary snapshot', () => {
+  const candidate = { canonical: '�?��?-', lemma: '�?��?-', lemmaReading: null, pos: 'noun', observed: [] };
+  const item = multipleHashiItem(); // no per-item pin, as the server emits
+  assert.equal('pin' in item, false, 'fixture proves server ships no per-item pin');
+  const withoutFallback = vaf.analyzerPrefillFromContext(candidate, item);
+  assert.equal(withoutFallback.pin, null, 'no fabrication when no pin exists anywhere');
+  const blockDictionary = { source: 'JMdict', version: '3.6.2', fileDate: '2026-08-31', converter: 'jmdict-simplified', sourceId: '1' };
+  const blockPin = {
+    sourceId: String(blockDictionary.sourceId),
+    sourceName: blockDictionary.source,
+    converter: blockDictionary.converter,
+    converterVersion: blockDictionary.version,
+    fileDate: blockDictionary.fileDate
+  };
+  const withFallback = vaf.analyzerPrefillFromContext(candidate, item, blockPin);
+  assert.deepEqual(withFallback.pin, blockPin, 'block snapshot anchors the expansion');
+  assert.equal(withFallback.entryRows.length, 2);
+  assert.ok(withFallback.entryRows.every((row) => row.entryId != null), 'rows stay expandable via entry ids');
+  assert.ok(!String(withFallback.pin.sourceId).trim() === false, 'sourceId present for the expand call');
+});
+
+test('analyzer expansion pin prefers an item-level pin over the fallback', () => {
+  const candidate = { canonical: '�?��?-', lemma: '�?��?-', lemmaReading: null, pos: 'noun', observed: [] };
+  const item = multipleHashiItem();
+  item.pin = { sourceId: 'item-pin', sourceName: 'JMdict' };
+  const prefill = vaf.analyzerPrefillFromContext(candidate, item, { sourceId: 'block-pin' });
+  assert.equal(prefill.pin.sourceId, 'item-pin', 'item pin wins when the item carries one');
 });
 
 // ---------------------------------------------------------------- example gate

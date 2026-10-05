@@ -628,18 +628,22 @@ test('POST /api/review/:id records kanji review result', async () => {
       statements.push({ sql, params });
       queryStep++;
       if (queryStep === 1) {
+        // V5.3a interval resolution: preferences read (empty -> fixed mode).
+        return [[]];
+      }
+      if (queryStep === 2) {
         // SELECT FOR UPDATE
         return [[{ id_review_item: 99, interval_days: 3, id_vocabulary: null, id_kanji: 11, id_grammar: null }]];
       }
-      if (queryStep === 2) {
+      if (queryStep === 3) {
         // ownership check
         return [[{ 1: 1 }]];
       }
-      if (queryStep === 3) {
+      if (queryStep === 4) {
         // INSERT review_events
         return [{ affectedRows: 1 }];
       }
-      if (queryStep === 4) {
+      if (queryStep === 5) {
         // UPDATE review_items
         return [{ affectedRows: 1 }];
       }

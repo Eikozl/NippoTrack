@@ -11,9 +11,9 @@
 //     → { onboarding: { completed, studySources[] },
 //         placement: { status, estimate, source }, targetLevel }
 //
-// First-use holds exactly when onboarding.completed === true AND every
-// count is 0 AND recentSessions is empty. ANY durable data falls through
-// to the normal dashboard (untouched). This module only PRESENTS stored
+// First-use holds exactly when onboarding.completed === true AND at least
+// one checklist action is still incomplete (see actionCompleted below).
+// ANY fully-completed checklist falls through to the normal dashboard (untouched). This module only PRESENTS stored
 // state: target/estimate/sources rows render verbatim from the server,
 // the three action cards navigate through existing routes, and placement
 // entry reuses the A.3 enterPlacement hook — no duplicate quiz, no hidden
@@ -79,17 +79,46 @@ const FIRST_USE_ACTIONS = [
   }
 ];
 
-// DERIVED first-use condition (pure): onboarded AND zero durable data.
-// Placement status, target level, account age, and logins never gate —
-// they are presentation inputs only. Unknown/missing shapes fail OPEN to
-// the normal dashboard (return false).
+// DERIVED first-use condition (pure): onboarded AND at least one required
+// action still incomplete. Each action below has its own durable-evidence
+// state (no visit/click tracking — a page view never completes anything):
+//
+//   analyzer   → kept something from analysis (any collection count > 0)
+//   vocabulary → vocabularyCount > 0
+//   sessions   → recentSessions is non-empty
+//
+// The checklist stays visible while ANY action is incomplete and hides only
+// when ALL are complete. Unknown/missing shapes fail OPEN to the normal
+// dashboard (return false).
+function actionCompleted(route, dashboard) {
+  if (!dashboard || typeof dashboard !== 'object') return false;
+  if (route === 'vocabulary') return Number(dashboard.vocabularyCount) > 0;
+  if (route === 'sessions') {
+    return Array.isArray(dashboard.recentSessions) && dashboard.recentSessions.length > 0;
+  }
+  if (route === 'analyzer') {
+    return Number(dashboard.vocabularyCount) > 0
+      || Number(dashboard.kanjiCount) > 0
+      || Number(dashboard.grammarCount) > 0;
+  }
+  return false;
+}
+
+// Per-action checklist states, derived from the FIXED dashboard contract.
+// Exported pure so tests can guard the "one action must not dismiss all"
+// behavior without DOM.
+function getFirstUseActionStates(dashboard = null) {
+  return FIRST_USE_ACTIONS.map((action) => ({
+    route: action.route,
+    title: action.title,
+    completed: actionCompleted(action.route, dashboard)
+  }));
+}
+
 function shouldShowFirstUseDashboard({ firstExperience = null, dashboard = null } = {}) {
   if (firstExperience?.onboarding?.completed !== true) return false;
   if (!dashboard || typeof dashboard !== 'object') return false;
-  for (const count of [dashboard.vocabularyCount, dashboard.kanjiCount, dashboard.grammarCount]) {
-    if (Number(count) !== 0) return false;
-  }
-  return Array.isArray(dashboard.recentSessions) && dashboard.recentSessions.length === 0;
+  return getFirstUseActionStates(dashboard).some((action) => !action.completed);
 }
 
 // Stored study target, verbatim: a valid stored level renders as-is, any
@@ -209,6 +238,7 @@ function renderFirstUseDashboard(container, deps = {}) {
   ]);
 
   const cardNodes = FIRST_USE_ACTIONS.map((action) => {
+    const done = actionCompleted(action.route, deps.dashboard);
     const link = el('a', {
       className: 'button-secondary mt-4 w-full',
       text: action.cta,
@@ -219,7 +249,10 @@ function renderFirstUseDashboard(container, deps = {}) {
       go(action.route);
     });
     return el('article', { className: 'first-use-card surface min-w-0 p-5' }, [
-      el('h3', { className: 'break-words font-semibold text-ink', text: action.title }),
+      el('div', { className: 'flex items-start justify-between gap-3' }, [
+        el('h3', { className: 'break-words font-semibold text-ink', text: action.title }),
+        done ? el('span', { className: 'status-pill shrink-0', text: 'Done', attrs: { 'aria-label': `${action.title}: done` } }) : null
+      ]),
       el('p', { className: 'mt-1 break-words text-sm leading-6 text-muted', text: action.description }),
       link
     ]);
@@ -248,6 +281,8 @@ function renderFirstUseDashboard(container, deps = {}) {
 export {
   FIRST_USE_COPY,
   FIRST_USE_ACTIONS,
+  actionCompleted,
+  getFirstUseActionStates,
   shouldShowFirstUseDashboard,
   formatFirstUseTarget,
   firstUseEstimateLabel,

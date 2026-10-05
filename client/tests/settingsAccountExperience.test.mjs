@@ -39,11 +39,16 @@ test('Learning reuses target and first-experience semantics; Appearance keeps th
   assert.doesNotMatch(source, /accent picker|font selector|density|animation toggle/i);
 });
 
-test('No avatar/upload or social profile surface was introduced', () => {
+test('No avatar/upload surface was introduced; username/bio live only in the public-profile block', () => {
   const settings = readSource('src/pages/settings.js');
   const account = readSource('src/accountProfile.js');
   for (const source of [settings, account]) {
-    assert.doesNotMatch(source, /avatar|upload|supabase storage|remote avatar|username|public profile|bio/i);
+    assert.doesNotMatch(source, /avatar|upload|supabase storage|remote avatar/i);
     assert.doesNotMatch(source, /innerHTML/);
   }
+  // The user-approved public identity (username/bio/visibility for Community)
+  // lives in exactly one fenced block — nowhere else in settings.
+  const blocks = settings.split('Public profile').length - 1;
+  assert.ok(blocks >= 1, 'public profile block present');
+  assert.doesNotMatch(settings.replace(/publicProfileBlock\(\) \{[\s\S]*?\n\}/, ''), /username|public profile|bio/i);
 });

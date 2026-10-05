@@ -17,6 +17,7 @@ const { extractUniqueKanji, syncVocabularyKanjiLinks } = require('../services/ka
 const { buildFullVocabularyReadingContext } = require('../services/vocabularyReading');
 const { ENCOUNTER_SOURCE_TYPES, recordKanjiEncounters } = require('../services/kanjiEncounters');
 const { analyzeGrammarExamples } = require('../services/grammarExampleContext');
+const { getClozeSentences, getVocabTags, replaceVocabTags } = require('../services/contextualVocab');
 
 async function listVocabulary(req, res) {
   try {
@@ -97,7 +98,7 @@ async function listVocabularyOptions(req, res) {
     const candidates = buildSearchCandidates(search || '');
     const normalizedWord = normalizedJapaneseSql('word');
     const normalizedReading = normalizedJapaneseSql('reading');
-    let query = 'SELECT id_vocabulary, word, reading, meaning FROM vocabulary WHERE user_id = ?';
+    let query = 'SELECT id_vocabulary, word, reading, meaning, jlpt_level FROM vocabulary WHERE user_id = ?';
     let params = [req.user.id, limit];
 
     if (search) {
@@ -127,6 +128,14 @@ async function listVocabularyOptions(req, res) {
       ];
     } else {
       query += ' ORDER BY id_vocabulary DESC LIMIT ?';
+    }
+
+    const jlpt = normalizeText(req.query.jlpt, 2, 'jlpt');
+    if (jlpt) {
+      const level = jlpt.toUpperCase();
+      if (!JLPT_LEVELS.includes(level)) return res.status(400).json({ error: 'Invalid JLPT level' });
+      query = query.replace(' ORDER BY', ' AND jlpt_level = ? ORDER BY');
+      params.splice(params.length - 1, 0, level);
     }
 
     const [rows] = await pool.execute(query, params);
@@ -169,8 +178,17 @@ async function getVocabulary(req, res) {
       'SELECT id_usage_example, sentence, translation, notes FROM usage_examples WHERE id_vocabulary = ? ORDER BY id_usage_example DESC',
       [id]
     );
-    const [[legacyKanji], [userKanjiRows], [referenceRows], [examples]] = await Promise.all([
-      legacyKanjiPromise, userKanjiPromise, referencePromise, examplesPromise
+    // SRS state (same shape as kanji detail): owned review row if the entry
+    // was ever graded, else null. Read-only, no lazy enrollment here.
+    const reviewPromise = pool.execute(
+      `SELECT ri.id_review_item, ri.due_on, ri.interval_days, ri.last_reviewed_at, ri.last_result
+       FROM review_items ri
+       JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary
+       WHERE ri.id_vocabulary = ? AND v.user_id = ?`,
+      [id, req.user.id]
+    );
+    const [[legacyKanji], [userKanjiRows], [referenceRows], [examples], [reviewRows]] = await Promise.all([
+      legacyKanjiPromise, userKanjiPromise, referencePromise, examplesPromise, reviewPromise
     ]);
     // Legacy `kanji` projection kept byte-identical for API compatibility.
     const kanji = legacyKanji.map((row) => ({
@@ -181,7 +199,14 @@ async function getVocabulary(req, res) {
       status: row.status
     }));
     const readingContext = buildFullVocabularyReadingContext(entry, wordChars, userKanjiRows, referenceRows);
-    return res.json({ ...entry, kanji, readingContext, examples });
+    const review = reviewRows[0] ? {
+      idReviewItem: reviewRows[0].id_review_item,
+      dueOn: reviewRows[0].due_on,
+      intervalDays: Number(reviewRows[0].interval_days || 0),
+      lastReviewedAt: reviewRows[0].last_reviewed_at || null,
+      lastResult: reviewRows[0].last_result || null
+    } : null;
+    return res.json({ ...entry, kanji, readingContext, examples, review });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load vocabulary entry.' });
   }
@@ -339,11 +364,41 @@ async function deleteVocabularyExample(req, res) {
   } catch (error) { return sendRouteError(res, error, { defaultMessage: 'Unable to delete usage example.' }); }
 }
 
+async function getVocabularyCloze(req, res) {
+  try {
+    const id = parseIdParam(req, 'vocabulary entry');
+    const sentences = await getClozeSentences(pool, id, req.user.id);
+    if (!sentences) return res.status(404).json({ error: 'vocabulary entry not found' });
+    return res.json(sentences);
+  } catch (error) { return sendRouteError(res, error, { defaultMessage: 'Unable to load cloze sentences.' }); }
+}
+
+async function getVocabularyTags(req, res) {
+  try {
+    const id = parseIdParam(req, 'vocabulary entry');
+    const result = await getVocabTags(pool, id, req.user.id);
+    if (!result) return res.status(404).json({ error: 'vocabulary entry not found' });
+    return res.json(result);
+  } catch (error) { return sendRouteError(res, error, { defaultMessage: 'Unable to load vocabulary tags.' }); }
+}
+
+async function putVocabularyTags(req, res) {
+  try {
+    const id = parseIdParam(req, 'vocabulary entry');
+    const tags = await replaceVocabTags(pool, id, req.user.id, req.body?.tags);
+    if (!tags) return res.status(404).json({ error: 'vocabulary entry not found' });
+    return res.json({ tags });
+  } catch (error) { return sendRouteError(res, error, { defaultMessage: 'Unable to save vocabulary tags.' }); }
+}
+
 module.exports = {
   createVocabulary,
   deleteVocabulary,
   getVocabulary,
+  getVocabularyCloze,
   getVocabularyGrammarContext,
+  getVocabularyTags,
+  putVocabularyTags,
   createVocabularyExample,
   updateVocabularyExample,
   deleteVocabularyExample,

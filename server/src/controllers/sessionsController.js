@@ -106,6 +106,10 @@ async function getSession(req, res) {
       'SELECT id_session_writing, title, content, notes FROM session_writings WHERE id_session = ?',
       [id]
     );
+    const [stories] = await pool.execute(
+      'SELECT c.id_content_entry, c.title, c.content_type FROM content_entry_sessions l JOIN content_entries c ON c.id_content_entry = l.id_content_entry WHERE l.id_session = ? AND c.user_id = ? ORDER BY c.content_date DESC, c.id_content_entry DESC',
+      [id, req.user.id]
+    );
 
     // Phase 6 (kanji discovery): deterministic Han detection over the
     // authoritative session-writing content (the same source Phase 3
@@ -125,7 +129,7 @@ async function getSession(req, res) {
     const [[userKanjiRows], [referenceRows]] = await Promise.all([userKanjiPromise, referencePromise]);
     const kanjiDiscovery = buildSessionKanjiDiscovery(discoveryChars, userKanjiRows, referenceRows);
 
-    return res.json({ ...session, vocabulary, kanji, grammar, writing: writingRows[0] || null, kanjiDiscovery });
+    return res.json({ ...session, vocabulary, kanji, grammar, stories, writing: writingRows[0] || null, kanjiDiscovery });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load study session.' });
   }

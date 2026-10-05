@@ -90,6 +90,10 @@
   .icon-button:active { box-shadow:var(--shadow-inset-sm); }
   .icon-button:focus-visible { outline:2px solid var(--nt-focus-ring); outline-offset:2px; }
   .icon-button:disabled { box-shadow:none; }
+  /* Danger icon action (e.g. per-card delete): muted-red tint on the same
+     icon-button footprint so destructive affordances read instantly. */
+  .icon-button--danger { color:var(--jlt-danger); }
+  .icon-button--danger:hover { color:var(--jlt-danger); border-color:color-mix(in srgb,var(--jlt-danger) 40%,transparent); background:var(--jlt-danger-soft); }
   /* Cards/panels: 16px default, subtle token border + minimal shadow.
      Prominent surfaces (charts, dialogs, heroes) use 20px via their own
      classes below. No new wrappers — existing .surface markup only. */
@@ -118,7 +122,7 @@
   .field { @apply grid gap-1.5 text-sm font-medium text-ink; }
   /* Forms: warm token surfaces, subtle borders, 12px radius, Indigo focus,
      ~44px touch targets. Validation behavior untouched (visual only). */
-  .field-control { @apply min-h-11 w-full rounded-[12px] px-4 py-2 text-sm text-ink transition disabled:cursor-not-allowed disabled:opacity-55; background:var(--jlt-surface); border:1px solid var(--jlt-border); box-shadow:none; }
+  .field-control { @apply min-h-11 w-full rounded-[12px] px-4 py-2 text-sm text-ink transition disabled:cursor-not-allowed disabled:opacity-55; background:var(--jlt-surface); border:1px solid var(--jlt-border); box-shadow:none; min-width:0; }
   .field-control::placeholder { color:var(--jlt-muted); opacity:.92; }
   .field-control:hover { border-color:color-mix(in srgb,var(--jlt-border) 55%,var(--jlt-primary)); }
   .field-control:focus { outline:none; border-color:var(--nt-focus-ring); box-shadow:0 0 0 3px color-mix(in srgb,var(--nt-focus-ring) 22%,transparent); }

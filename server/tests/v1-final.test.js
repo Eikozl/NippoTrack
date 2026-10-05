@@ -156,7 +156,7 @@ test('dashboard weekly activity uses today plus the previous six calendar dates'
       const { response } = await requestJson(server, '/api/dashboard');
       assert.equal(response.status, 200);
       const weeklyQuery = queries.find((sql) => sql.includes('session_date AS date'));
-      assert.match(weeklyQuery, /BETWEEN CURRENT_DATE - 6 AND CURRENT_DATE/);
+      assert.match(weeklyQuery, /BETWEEN COALESCE\(\?::date, CURRENT_DATE\) - 6 AND COALESCE\(\?::date, CURRENT_DATE\)/);
       assert.doesNotMatch(weeklyQuery, /CURRENT_DATE - 7/);
     } finally {
       await stopServer(server);

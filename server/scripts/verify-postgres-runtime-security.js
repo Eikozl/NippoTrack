@@ -105,7 +105,7 @@ async function main() {
     const runtimeSequenceExtra = runtimeSequencePrivileges.rows.filter(({ privilege_type }) => !['USAGE', 'SELECT'].includes(privilege_type));
     const failures = [
       !role || !role.rolcanlogin || role.rolsuper || role.rolcreaterole || role.rolcreatedb || role.rolreplication || role.rolbypassrls || role.rolinherit ? 'jlt_runtime attributes are not least-privilege' : null,
-      tables.length !== 37 ? `expected 37 application tables, found ${tables.length}` : null,
+      tables.length !== 56 ? `expected 56 application tables, found ${tables.length}` : null,
       tables.some(({ rls_enabled, rls_forced }) => !rls_enabled || !rls_forced) ? 'RLS is not enabled and forced on every application table' : null,
       actualMatchCount !== expectedPolicySet.length ? 'missing explicit least-privilege jlt_runtime policies' : null,
       unexpectedPolicies.length ? 'unexpected or broad RLS policies exist' : null,

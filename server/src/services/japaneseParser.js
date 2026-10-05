@@ -30,6 +30,12 @@ const ADAPTER_VERSION = 1;
 // budgets: parse-phase-scale waits during initialization.
 const PARSE_TIMEOUT_MS = 3000;
 
+// Cold dictionary load is I/O-bound (10-30s on slow disks / CI contention),
+// not parse-bound: it gets its own budget so a slow disk reads as slow, not
+// broken. Missing dictionaries still fail fast via the builder error below,
+// not via this timer.
+const INIT_TIMEOUT_MS = 60000;
+
 // Maximum input accepted for the lexical path. The Kanji path keeps its own
 // 10,000-character limit; lexical parsing is heavier (synchronous Viterbi +
 // large token payload), so it carries a separate, benchmark-derived cap.
@@ -103,7 +109,7 @@ function buildTokenizer() {
         settled = true;
         reject(new ParserError('PARSER_INIT_FAILED', 'Japanese parser engine initialization timed out.'));
       }
-    }, PARSE_TIMEOUT_MS * 5);
+    }, INIT_TIMEOUT_MS);
     if (typeof timer.unref === 'function') timer.unref();
     try {
       kuromoji.builder({ dicPath }).build((error, tokenizer) => {
@@ -185,6 +191,7 @@ module.exports = {
   ENGINE_DICTIONARY,
   ENGINE_NAME,
   ENGINE_PACKAGE,
+  INIT_TIMEOUT_MS,
   MAX_LEXICAL_TEXT_LENGTH,
   PARSE_TIMEOUT_MS,
   ParserError,

@@ -33,28 +33,31 @@
    return INFLECTION_CONTINUATION_POS.has(nextToken.pos);
  }
 
- // Reconstruct the full observed inflected surface for a candidate by walking
- // forward from the head token through contiguous safe inflection continuations.
- function reconstructObservedSurface(tokens, headIndex) {
-   const head = tokens[headIndex];
-   if (!head) return { surface: head?.surface || '', surfaceReading: head?.surfaceReading || null };
-   let surface = head.surface;
-   let surfaceReading = head.surfaceReading;
-   let allHaveReading = !!head.surfaceReading;
-   let i = headIndex + 1;
-   while (i < tokens.length) {
-     const next = tokens[i];
-     if (!isSafeInflectionContinuation(tokens[i - 1], next)) break;
-     surface += next.surface;
-     if (next.surfaceReading) {
-       surfaceReading = (surfaceReading || '') + next.surfaceReading;
-     } else {
-       allHaveReading = false;
-     }
-     i += 1;
-   }
-   return { surface, surfaceReading: allHaveReading ? surfaceReading : null };
- }
+  // Reconstruct the full observed inflected surface for a candidate by walking
+  // forward from the head token through contiguous safe inflection continuations.
+  // `consumed` counts head + continuations so per-occurrence token layers can
+  // fold continuations into the head without overlapping offsets. Additive:
+  // existing callers use surface/surfaceReading only and ignore the rest.
+  function reconstructObservedSurface(tokens, headIndex) {
+    const head = tokens[headIndex];
+    if (!head) return { surface: head?.surface || '', surfaceReading: head?.surfaceReading || null, consumed: 0, endIndex: headIndex };
+    let surface = head.surface;
+    let surfaceReading = head.surfaceReading;
+    let allHaveReading = !!head.surfaceReading;
+    let i = headIndex + 1;
+    while (i < tokens.length) {
+      const next = tokens[i];
+      if (!isSafeInflectionContinuation(tokens[i - 1], next)) break;
+      surface += next.surface;
+      if (next.surfaceReading) {
+        surfaceReading = (surfaceReading || '') + next.surfaceReading;
+      } else {
+        allHaveReading = false;
+      }
+      i += 1;
+    }
+    return { surface, surfaceReading: allHaveReading ? surfaceReading : null, consumed: i - headIndex, endIndex: i - 1 };
+  }
 
  function candidateIdentity(token) {
    return `${token.pos}::${token.lemma || token.surface}`;
@@ -316,6 +319,9 @@ function summarizeLexical(candidates, unverified, matchingAvailable) {
 
 module.exports = {
   buildLexicalCandidates,
+  candidateIdentity,
+  isSafeInflectionContinuation,
   matchOwnedVocabulary,
+  reconstructObservedSurface,
   summarizeLexical
 };

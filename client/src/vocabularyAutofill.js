@@ -323,7 +323,12 @@ export function evaluateExampleOffer({ sourceText, observedSurface } = {}) {
 // the bounded same-sense composition (never primaryGloss-only). Diet-trim
 // edge: compose from available glosses; "+N more" appears ONLY when the item
 // carries an explicit remainingCount — never invent an unknown N.
-export function analyzerPrefillFromContext(candidate, contextItem) {
+// Pin: the context response diet (server contextResponse.buildItem) never
+// emits per-item pins; provenance lives on the block-level dictionary for the
+// SAME pinned snapshot as the items. Callers pass that snapshot as
+// pinFallback so entry expansion stays anchored to the analyzed snapshot
+// (an item-level pin still wins when present).
+export function analyzerPrefillFromContext(candidate, contextItem, pinFallback = null) {
   if (!candidate || typeof candidate !== 'object') return null;
   const lemma = typeof candidate.lemma === 'string' && candidate.lemma.trim() ? candidate.lemma.trim() : null;
   const canonical = typeof candidate.canonical === 'string' ? candidate.canonical : '';
@@ -353,9 +358,13 @@ export function analyzerPrefillFromContext(candidate, contextItem) {
   let requiresChoice = false;
   let entryRows = [];
   let glossMeta = null;
-  const pin = contextItem && typeof contextItem === 'object' && contextItem.pin && typeof contextItem.pin === 'object'
+  const pinFromItem = contextItem && typeof contextItem === 'object' && contextItem.pin && typeof contextItem.pin === 'object'
     ? contextItem.pin
     : null;
+  const pinFromFallback = pinFallback && typeof pinFallback === 'object' && pinFallback.sourceId != null
+    ? pinFallback
+    : null;
+  const pin = pinFromItem || pinFromFallback;
 
   if (!isProperNoun && match === 'UNIQUE' && interpretation === 'COMPATIBLE' && contextItem?.interpretation?.selectedSense) {
     const sense = contextItem.interpretation.selectedSense;

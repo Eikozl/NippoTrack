@@ -1,5 +1,9 @@
 const pool = require('../config/db');
-const { sendRouteError } = require('../errors/http');
+const { ValidationError, sendRouteError } = require('../errors/http');
+const { ENTITIES, ankiRow, buildXlsx, csvRow, eachEntityPage, metadataRow, obsidianDocument, parseEntities, tsvRow, userHash } = require('../services/exportService');
+
+// Explicit escape (never a literal): editors and diffs stay readable.
+const BOM = '\uFEFF';
 
 function exportQueries(userId) {
   return {
@@ -38,4 +42,68 @@ async function exportBackup(req, res) {
   }
 }
 
-module.exports = { exportBackup };
+module.exports = { exportBackup, exportTabular };
+
+async function exportTabular(req, res) {
+  try {
+    const format = String(req.query.format || 'csv').toLowerCase();
+    if (!['csv', 'xlsx', 'anki', 'obsidian'].includes(format)) throw new ValidationError('format must be csv, xlsx, anki or obsidian');
+    const { error, value: entities } = parseEntities(req.query.entities);
+    if (error) throw new ValidationError(error);
+    const date = new Date().toISOString().slice(0, 10);
+    const exportedAt = new Date().toISOString();
+    const hash = userHash(req.user.id);
+
+    res.setHeader('Cache-Control', 'no-store');
+    if (format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="nippotrack-export-${date}.csv"`);
+      // UTF-8 BOM first: Excel discovers the encoding (and the Japanese text) instead of mojibake.
+      res.write(BOM);
+      for (const name of entities) {
+        const def = ENTITIES[name];
+        res.write(csvRow([`## ${def.label}`]));
+        res.write(csvRow(def.headers));
+        await eachEntityPage(pool, req.user.id, name, async (page) => {
+          for (const values of page) {
+            if (!res.write(csvRow(values))) await new Promise((resolve) => res.once('drain', resolve));
+          }
+        });
+        res.write('\r\n');
+      }
+      return res.end();
+    }
+
+    const sheets = [];
+    for (const name of entities) {
+      const def = ENTITIES[name];
+      const rows = [];
+      await eachEntityPage(pool, req.user.id, name, async (page) => { rows.push(...page); });
+      sheets.push({ name: def.label, headers: def.headers, rows });
+    }
+    if (format === 'anki') {
+      res.setHeader('Content-Type', 'text/tab-separated-values; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="nippotrack-export-${date}.tsv"`);
+      for (const sheet of sheets) {
+        for (const values of sheet.rows) res.write(tsvRow(ankiRow(sheet.name, sheet.headers, values)));
+      }
+      return res.end();
+    }
+    if (format === 'obsidian') {
+      res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="nippotrack-export-${date}.md"`);
+      const documents = sheets.map((sheet) => obsidianDocument(sheet.name, sheet.headers, sheet.rows, { exportedAt, hash }));
+      return res.send(documents.join('\n---\n'));
+    }
+    const buffer = buildXlsx(sheets);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="nippotrack-export-${date}.xlsx"`);
+    res.setHeader('Content-Length', String(buffer.length));
+    return res.send(buffer);
+  } catch (error) {
+    return sendRouteError(res, error, {
+      defaultStatus: 503,
+      defaultMessage: 'Unable to export data.'
+    });
+  }
+}

@@ -2,7 +2,10 @@ const { extractUniqueKanji } = require('./kanjiVocabularyLinks');
 
 const ENCOUNTER_SOURCE_TYPES = Object.freeze({
   VOCABULARY: 'vocabulary',
-  SESSION_WRITING: 'session_writing'
+  SESSION_WRITING: 'session_writing',
+  // V5.3a immersion sessions; allowed by migration 021's widened
+  // chk_kanji_encounters_source_type CHECK.
+  IMMERSION_SESSION: 'immersion_session'
 });
 
 function encounterDedupeKey(source, kanjiId) {
@@ -57,11 +60,12 @@ async function getKanjiEncounterSummary(executor, userId, kanjiId) {
     ),
     recent AS (
       SELECT s.id_kanji_encounter, s.source_type, s.source_id, s.encountered_at,
-             CASE
-               WHEN s.source_type = 'vocabulary' THEN v.word
-               WHEN s.source_type = 'session_writing' THEN COALESCE(sw.title, 'Session writing')
-               ELSE NULL
-             END AS source_title
+              CASE
+                WHEN s.source_type = 'vocabulary' THEN v.word
+                WHEN s.source_type = 'session_writing' THEN COALESCE(sw.title, 'Session writing')
+                WHEN s.source_type = 'immersion_session' THEN 'Immersion session'
+                ELSE NULL
+              END AS source_title
       FROM scoped s
       LEFT JOIN vocabulary v ON s.source_type = 'vocabulary' AND v.id_vocabulary = s.source_id AND v.user_id = ?
       LEFT JOIN study_sessions ss ON s.source_type = 'session_writing' AND ss.id_session = s.source_id AND ss.user_id = ?

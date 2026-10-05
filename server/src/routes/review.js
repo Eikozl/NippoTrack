@@ -3,6 +3,16 @@ const controller = require('../controllers/reviewController');
 
 const router = express.Router();
 router.get('/candidates', controller.listCandidates);
+router.get('/difficult', controller.listDifficultItems);
+router.get('/due', controller.listDueReviewCards);
+router.get('/types', controller.getReviewTypes);
+router.get('/patterns', controller.getReviewPatterns);
+router.put('/preferences', controller.putReviewPreferences);
+router.get('/sessions', controller.listReviewSessions);
+router.delete('/sessions', controller.clearReviewSessions);
+router.get('/sessions/:id', controller.getReviewSession);
+router.delete('/sessions/:id', controller.deleteReviewSession);
+router.get('/sessions/:id/items', controller.getReviewSessionItems);
 router.post('/sessions', controller.createReviewSession);
 router.post('/sessions/:id/complete', controller.completeReviewSession);
 router.post('/grade', controller.gradeEntity);

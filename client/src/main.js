@@ -31,12 +31,15 @@ const pageLoaders = {
   vocabulary: () => import('./pages/entityPage.js').then((module) => (container) => module.renderEntityPage(container, module.ENTITY_CONFIGS.vocabulary)),
   kanji: () => import('./pages/entityPage.js').then((module) => (container) => module.renderEntityPage(container, module.ENTITY_CONFIGS.kanji)),
   analyzer: () => import('./pages/analyzer.js').then((module) => (container) => module.renderAnalyzer(container)),
+  immersion: () => import('./pages/immersion.js').then((module) => (container) => module.renderImmersion(container)),
+  reading: () => import('./pages/reading.js').then((module) => (container) => module.renderReading(container)),
   grammar: () => import('./pages/entityPage.js').then((module) => (container) => module.renderEntityPage(container, module.ENTITY_CONFIGS.grammar)),
   goals: () => import('./pages/v2Pages.js').then((module) => (container) => module.renderV2Page(container, 'goals')),
   content: () => import('./pages/v2Pages.js').then((module) => (container) => module.renderV2Page(container, 'content')),
   notes: () => import('./pages/v2Pages.js').then((module) => (container) => module.renderV2Page(container, 'notes')),
   tags: () => import('./pages/v2Pages.js').then((module) => (container) => module.renderV2Page(container, 'tags')),
   review: () => import('./pages/review.js').then((module) => (container) => module.renderReview(container)),
+  community: () => import('./pages/community.js').then((module) => (container) => module.renderCommunity(container)),
   statistics: () => import('./pages/statistics.js').then((module) => (container) => module.renderStatistics(container)),
   settings: () => import('./pages/settings.js').then((module) => (container) => module.renderSettings(container))
 };
@@ -52,12 +55,15 @@ const pages = {
   vocabulary: (container) => loadPage('vocabulary').then((render) => render(container)),
   kanji: (container) => loadPage('kanji').then((render) => render(container)),
   analyzer: (container) => loadPage('analyzer').then((render) => render(container)),
+  immersion: (container) => loadPage('immersion').then((render) => render(container)),
+  reading: (container) => loadPage('reading').then((render) => render(container)),
   grammar: (container) => loadPage('grammar').then((render) => render(container)),
   goals: (container) => loadPage('goals').then((render) => render(container)),
   content: (container) => loadPage('content').then((render) => render(container)),
   notes: (container) => loadPage('notes').then((render) => render(container)),
   tags: (container) => loadPage('tags').then((render) => render(container)),
   review: (container) => loadPage('review').then((render) => render(container)),
+  community: (container) => loadPage('community').then((render) => render(container)),
   statistics: (container) => loadPage('statistics').then((render) => render(container)),
   settings: (container) => loadPage('settings').then((render) => render(container))
 };
@@ -640,7 +646,11 @@ async function navigate(pageName, { updateHash = true } = {}) {
   // re-show the current setup screen instead of rendering a page.
   if (firstExperienceSession?.active) { firstExperienceSession.reshow(); return; }
   const referenceCharacter = parseKanjiReferenceRoute(pageName);
-  const page = referenceCharacter ? pageName : (pages[pageName] ? pageName : 'dashboard');
+  // Hash routes may carry a query suffix (e.g. `#review?reviewSessionId=…`
+  // from the Immersion hand-off): the route key is the path before '?', the
+  // full string stays in the hash so pages can read their parameters.
+  const baseName = referenceCharacter ? pageName : String(pageName || '').split('?')[0];
+  const page = referenceCharacter ? pageName : (pages[baseName] ? baseName : 'dashboard');
   destroyCharts();
   navigationButtons.forEach((button) => {
     const active = button.dataset.page === page;
@@ -649,7 +659,10 @@ async function navigate(pageName, { updateHash = true } = {}) {
     else button.removeAttribute('aria-current');
   });
   closeNavigation();
-  if (updateHash && window.location.hash !== `#${page}`) history.pushState(null, '', `#${page}`);
+  // Preserve the incoming route (query included) in the hash when it already
+  // resolves to a known page; only fallbacks collapse to the resolved page.
+  const hashTarget = referenceCharacter || pages[baseName] ? pageName : page;
+  if (updateHash && window.location.hash !== `#${pageName}`) history.pushState(null, '', `#${hashTarget}`);
   if (referenceCharacter) await renderKanjiReferencePage(content, referenceCharacter);
   else await pages[page](content);
   loadSidebarStreak();
