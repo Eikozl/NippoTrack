@@ -104,6 +104,9 @@ async function validateLinkedContent(executor, authorId, payload) {
   if ((entityType === null) !== (entityId === null)) {
     throw new ValidationError('entityType and entityId must be provided together.');
   }
+  // Linked ids are normalized here: garbage is a 400 (cleanId), never a
+  // silent miss or a raw value into SQL; valid ids behave as before.
+  const cleanEntityId = entityId === null ? null : cleanId(entityId, 'entityId');
   let snapshot = {};
   if (entityType !== null) {
     if (!ENTITY_TYPES.includes(entityType)) throw new ValidationError('entityType must be vocabulary, kanji, or grammar.');
@@ -114,12 +117,13 @@ async function validateLinkedContent(executor, authorId, payload) {
       : entityType === 'kanji'
         ? 'character_kanji AS display, NULL AS reading, meaning'
         : 'grammar_point AS display, NULL AS reading, meaning';
-    const [rows] = await executor.execute(`SELECT ${columns} FROM ${table} WHERE ${pk} = ? AND user_id = ?`, [entityId, authorId]);
+    const [rows] = await executor.execute(`SELECT ${columns} FROM ${table} WHERE ${pk} = ? AND user_id = ?`, [cleanEntityId, authorId]);
     const entry = Array.isArray(rows) ? rows[0] : null;
     if (!entry) throw new ValidationError('Linked learning item not found.');
     snapshot = { display: entry.display, reading: entry.reading || null, meaning: entry.meaning || null };
   }
-  const deckId = payload.deckId ?? null;
+  const rawDeckId = payload.deckId ?? null;
+  const deckId = rawDeckId === null ? null : cleanId(rawDeckId, 'deckId');
   if (deckId !== null) {
     const [rows] = await executor.execute(
       `SELECT d.title, d.entity_type, (SELECT COUNT(*) FROM deck_publication_items i WHERE i.id_deck_publication = d.id_deck_publication) AS items
@@ -130,7 +134,8 @@ async function validateLinkedContent(executor, authorId, payload) {
     if (!deck) throw new ValidationError('Linked deck not found.');
     snapshot = { ...snapshot, title: deck.title, entityType: deck.entity_type, itemCount: Number(deck.items || 0) };
   }
-  const readingId = payload.readingId ?? null;
+  const rawReadingId = payload.readingId ?? null;
+  const readingId = rawReadingId === null ? null : cleanId(rawReadingId, 'readingId');
   if (readingId !== null) {
     const [rows] = await executor.execute(
       `SELECT title, level, char_length(text) AS chars FROM reading_publications
@@ -141,7 +146,7 @@ async function validateLinkedContent(executor, authorId, payload) {
     if (!text) throw new ValidationError('Linked reading text not found.');
     snapshot = { ...snapshot, title: text.title, level: text.level || null, chars: Number(text.chars || 0) };
   }
-  return { entityType, entityId, deckId, readingId, snapshot };
+  return { entityType, entityId: cleanEntityId, deckId, readingId, snapshot };
 }
 
 function validatePostBody(postType, body) {
@@ -290,6 +295,16 @@ async function toggleLike(executor, userId, postId) {
   if (existing[0]) {
     await executor.execute('DELETE FROM post_likes WHERE id_community_post = ? AND user_id = ?', [id, userId]);
     liked = false;
+    // Orphan-notif hygiene: the like inbox row no longer describes reality.
+    // Best-effort — a cleanup failure must never fail the unlike itself.
+    try {
+      await executor.execute(
+        'DELETE FROM notifications WHERE user_id = ? AND actor_id = ? AND kind = \'like\' AND id_community_post = ?',
+        [visible.authorId, userId, id]
+      );
+    } catch {
+      // Unlike already succeeded; the stale inbox row is harmless.
+    }
   } else {
     await executor.execute(
       'INSERT INTO post_likes (id_community_post, user_id) VALUES (?, ?) ON CONFLICT (id_community_post, user_id) DO NOTHING',
@@ -309,9 +324,15 @@ async function listComments(executor, viewerId, postId, { page = 1, limit = 20 }
   const safePage = Number.isSafeInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
   const safeLimit = Number.isSafeInteger(Number(limit)) && Number(limit) > 0 ? Math.min(MAX_FEED_LIMIT, Number(limit)) : 20;
   const offset = (safePage - 1) * safeLimit;
+  // Blocked-pair comments stay hidden both ways; private-profile authors are
+  // visible to themselves only (mirrors visibilityWhere, three viewer params).
+  const commentVisibility = `(c.author_id = ? OR up.is_public)`
+    + ` AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = c.author_id) OR (b.blocker_id = c.author_id AND b.blocked_id = ?))`;
   const [[totalRow]] = await executor.execute(
-    'SELECT COUNT(*) AS total FROM post_comments WHERE id_community_post = ? AND NOT is_deleted',
-    [id]
+    `SELECT COUNT(*) AS total FROM post_comments c
+     JOIN user_profile up ON up.user_id = c.author_id
+     WHERE c.id_community_post = ? AND NOT c.is_deleted AND ${commentVisibility}`,
+    [id, viewerId, viewerId, viewerId]
   );
   const total = Number(totalRow?.total || 0);
   const [rows] = await executor.execute(
@@ -319,9 +340,9 @@ async function listComments(executor, viewerId, postId, { page = 1, limit = 20 }
        up.username AS author_username, up.display_name AS author_display, up.avatar_url AS author_avatar
      FROM post_comments c
      JOIN user_profile up ON up.user_id = c.author_id
-     WHERE c.id_community_post = ? AND NOT c.is_deleted
+     WHERE c.id_community_post = ? AND NOT c.is_deleted AND ${commentVisibility}
      ORDER BY c.id_post_comment ASC LIMIT ? OFFSET ?`,
-    [id, safeLimit, offset]
+    [id, viewerId, viewerId, viewerId, safeLimit, offset]
   );
   return {
     items: (Array.isArray(rows) ? rows : []).map((row) => ({
@@ -381,6 +402,12 @@ async function createComment(executor, userId, postId, body) {
 async function updateComment(executor, userId, commentId, body) {
   const id = cleanId(commentId, 'comment');
   const text = cleanText(body, 1000, 'body', { required: true });
+  // The parent post gates the edit: deleted/private/blocked posts resolve to
+  // null here (404 upstream), so edits cannot leak through hidden threads.
+  const postId = await postIdForComment(executor, id);
+  if (!postId) return null;
+  const post = await getPost(executor, userId, postId);
+  if (!post) return null;
   const [result] = await executor.execute(
     'UPDATE post_comments SET body = ? WHERE id_post_comment = ? AND author_id = ? AND NOT is_deleted',
     [text, id, userId]
@@ -402,7 +429,18 @@ async function deleteComment(executor, userId, commentId) {
      ))`,
     [id, userId, userId]
   );
-  return Number(result?.affectedRows ?? 0) > 0 ? { deletedId: id } : null;
+  if (Number(result?.affectedRows ?? 0) <= 0) return null;
+  // Orphan-notif hygiene: the comment inbox row no longer describes reality.
+  // Best-effort — a cleanup failure must never fail the delete itself.
+  try {
+    await executor.execute(
+      'DELETE FROM notifications WHERE kind = \'comment\' AND id_post_comment = ?',
+      [id]
+    );
+  } catch {
+    // Delete already succeeded; the stale inbox row is harmless.
+  }
+  return { deletedId: id };
 }
 
 async function followUser(executor, followerId, username) {
@@ -460,18 +498,25 @@ async function listFollows(executor, userId, username, direction, { page = 1, li
   const offset = (safePage - 1) * safeLimit;
   const joinColumn = direction === 'followers' ? 'f.follower_id' : 'f.followed_id';
   const whereColumn = direction === 'followers' ? 'f.followed_id' : 'f.follower_id';
+  // Member rows are filtered like any other identity surface: public profiles
+  // only (the viewer's own row always passes) and no blocked pair either way
+  // versus the viewer.
+  const memberVisibility = `(up.user_id = ? OR up.is_public)`
+    + ` AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = up.user_id) OR (b.blocker_id = up.user_id AND b.blocked_id = ?))`;
   const [[totalRow]] = await executor.execute(
-    `SELECT COUNT(*) AS total FROM user_follows f WHERE ${whereColumn} = ?`,
-    [owner.user_id]
+    `SELECT COUNT(*) AS total FROM user_follows f
+     JOIN user_profile up ON up.user_id = ${joinColumn}
+     WHERE ${whereColumn} = ? AND ${memberVisibility}`,
+    [owner.user_id, userId, userId, userId]
   );
   const total = Number(totalRow?.total || 0);
   const [rows] = await executor.execute(
     `SELECT up.user_id, up.username, up.display_name, up.avatar_url, up.bio
      FROM user_follows f
      JOIN user_profile up ON up.user_id = ${joinColumn}
-     WHERE ${whereColumn} = ?
+     WHERE ${whereColumn} = ? AND ${memberVisibility}
      ORDER BY up.username ASC LIMIT ? OFFSET ?`,
-    [owner.user_id, safeLimit, offset]
+    [owner.user_id, userId, userId, userId, safeLimit, offset]
   );
   return {
     items: (Array.isArray(rows) ? rows : []).map((row) => ({
@@ -502,9 +547,23 @@ async function listNotifications(executor, userId, { page = 1, limit = 20, unrea
   const safePage = Number.isSafeInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
   const safeLimit = Number.isSafeInteger(Number(limit)) && Number(limit) > 0 ? Math.min(MAX_FEED_LIMIT, Number(limit)) : 20;
   const offset = (safePage - 1) * safeLimit;
+  // Inbox rows that point at a post re-check that post at read time: deleted
+  // posts and posts the viewer can no longer see (private/blocked) drop out
+  // of the counts and the page alike. Follow notifications carry no post and
+  // always pass. (pap = post-author profile; up stays the actor profile.)
+  const notifPostJoins = `LEFT JOIN community_posts p ON p.id_community_post = n.id_community_post
+    LEFT JOIN user_profile pap ON pap.user_id = p.author_id`;
+  const notifPostVisible = `(n.id_community_post IS NULL OR (NOT p.is_deleted AND (p.author_id = ? OR (p.is_public AND pap.is_public))`
+    + ` AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = p.author_id) OR (b.blocker_id = p.author_id AND b.blocked_id = ?))))`;
   const where = unreadOnly ? 'n.user_id = ? AND NOT n.is_read' : 'n.user_id = ?';
-  const [[totalRow]] = await executor.execute(`SELECT COUNT(*) AS total FROM notifications n WHERE ${where}`, [userId]);
-  const [[unreadRow]] = await executor.execute('SELECT COUNT(*) AS total FROM notifications WHERE user_id = ? AND NOT is_read', [userId]);
+  const [[totalRow]] = await executor.execute(
+    `SELECT COUNT(*) AS total FROM notifications n ${notifPostJoins} WHERE ${where} AND ${notifPostVisible}`,
+    [userId, ...visibilityParams(userId)]
+  );
+  const [[unreadRow]] = await executor.execute(
+    `SELECT COUNT(*) AS total FROM notifications n ${notifPostJoins} WHERE n.user_id = ? AND NOT n.is_read AND ${notifPostVisible}`,
+    [userId, ...visibilityParams(userId)]
+  );
   const total = Number(totalRow?.total || 0);
   const [rows] = await executor.execute(
     `SELECT n.id_notification AS id, n.actor_id, n.kind, n.id_community_post AS "postId",
@@ -512,9 +571,10 @@ async function listNotifications(executor, userId, { page = 1, limit = 20, unrea
        up.username AS actor_username, up.display_name AS actor_display, up.avatar_url AS actor_avatar
      FROM notifications n
      LEFT JOIN user_profile up ON up.user_id = n.actor_id
-     WHERE ${where}
+     ${notifPostJoins}
+     WHERE ${where} AND ${notifPostVisible}
      ORDER BY n.id_notification DESC LIMIT ? OFFSET ?`,
-    [userId, safeLimit, offset]
+    [userId, ...visibilityParams(userId), safeLimit, offset]
   );
   return {
     items: (Array.isArray(rows) ? rows : []).map((row) => ({
@@ -550,26 +610,41 @@ async function markNotificationRead(executor, userId, notificationId) {
 // plus the most recent post titles/actors behind them. Four bounded
 // queries, user-scoped; empty inbox → zeroed shape (UI hides, never 0s).
 async function getNotificationSummary(executor, userId) {
+  // Like/comment inbox rows re-check their post at read time (deleted or
+  // no-longer-visible posts drop out of both the counts and the previews);
+  // follow rows carry no post and always pass.
+  const summaryPostVisible = `(n.id_community_post IS NULL OR (NOT p.is_deleted AND (p.author_id = ? OR (p.is_public AND pap.is_public))`
+    + ` AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = p.author_id) OR (b.blocker_id = p.author_id AND b.blocked_id = ?))))`;
   const [[countRows], [likeRows], [commentRows], [followRows]] = await Promise.all([
     executor.execute(
-      `SELECT kind, COUNT(*) AS count FROM notifications WHERE user_id = ? AND NOT is_read GROUP BY kind`,
-      [userId]
+      `SELECT n.kind, COUNT(*) AS count FROM notifications n
+       LEFT JOIN community_posts p ON p.id_community_post = n.id_community_post
+       LEFT JOIN user_profile pap ON pap.user_id = p.author_id
+       WHERE n.user_id = ? AND NOT n.is_read AND ${summaryPostVisible}
+       GROUP BY n.kind`,
+      [userId, ...visibilityParams(userId)]
     ),
     executor.execute(
       `SELECT p.id_community_post AS id, p.title, p.japanese_text
        FROM notifications n
        JOIN community_posts p ON p.id_community_post = n.id_community_post
+       JOIN user_profile pap ON pap.user_id = p.author_id
        WHERE n.user_id = ? AND NOT n.is_read AND n.kind = 'like'
+         AND NOT p.is_deleted AND (p.author_id = ? OR (p.is_public AND pap.is_public))
+         AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = p.author_id) OR (b.blocker_id = p.author_id AND b.blocked_id = ?))
        ORDER BY n.id_notification DESC LIMIT 3`,
-      [userId]
+      [userId, ...visibilityParams(userId)]
     ),
     executor.execute(
       `SELECT p.id_community_post AS id, p.title, p.japanese_text
        FROM notifications n
        JOIN community_posts p ON p.id_community_post = n.id_community_post
+       JOIN user_profile pap ON pap.user_id = p.author_id
        WHERE n.user_id = ? AND NOT n.is_read AND n.kind = 'comment'
+         AND NOT p.is_deleted AND (p.author_id = ? OR (p.is_public AND pap.is_public))
+         AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = p.author_id) OR (b.blocker_id = p.author_id AND b.blocked_id = ?))
        ORDER BY n.id_notification DESC LIMIT 3`,
-      [userId]
+      [userId, ...visibilityParams(userId)]
     ),
     executor.execute(
       `SELECT up.username, up.display_name
@@ -627,6 +702,13 @@ async function createReport(executor, reporterId, { targetType, targetId, reason
     // reporter; otherwise strangers could probe hidden content by id.
     const parentId = await postIdForComment(executor, id);
     if (!parentId) return null;
+    const [commentRows] = await executor.execute(
+      'SELECT author_id FROM post_comments WHERE id_post_comment = ? AND NOT is_deleted',
+      [id]
+    );
+    const comment = Array.isArray(commentRows) ? commentRows[0] : null;
+    if (!comment) return null;
+    if (String(comment.author_id) === String(reporterId)) throw new ValidationError('You cannot report your own comment.');
     const parent = await getPost(executor, reporterId, parentId);
     if (!parent) return null;
   }
@@ -638,7 +720,7 @@ async function createReport(executor, reporterId, { targetType, targetId, reason
 }
 
 async function postIdForComment(executor, commentId) {
-  const [rows] = await executor.execute('SELECT id_community_post AS id FROM post_comments WHERE id_post_comment = ?', [commentId]);
+  const [rows] = await executor.execute('SELECT id_community_post AS id FROM post_comments WHERE id_post_comment = ? AND NOT is_deleted', [commentId]);
   const row = Array.isArray(rows) ? rows[0] : null;
   return row ? Number(row.id) : null;
 }

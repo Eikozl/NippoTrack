@@ -52,6 +52,7 @@ test('like toggles idempotently and never on own posts', async () => {
     if (/FROM community_posts p/i.test(sql)) return [[VISIBLE_POST]];
     if (/SELECT 1 FROM post_likes/i.test(sql)) return [[{ '1': 1 }]];
     if (/^DELETE FROM post_likes/i.test(sql.trim())) return [{ affectedRows: 1 }];
+    if (/^DELETE FROM notifications/i.test(sql.trim())) return [{ affectedRows: 1 }];
     if (/INSERT INTO notifications/i.test(sql)) throw new Error('unlike must not notify');
     throw new Error(`Unexpected SQL: ${sql.slice(0, 60)}`);
   }, async () => {
@@ -84,7 +85,17 @@ test('comments validate, scope to visible posts, and respect ownership', async (
     assert.equal(comment.id, 11);
     assert.equal(comment.mine, true);
   });
-  await withPoolExecute(async () => [{ affectedRows: 1 }], async () => {
+  await withPoolExecute(async (sql) => {
+    // updateComment gates on the parent post (postIdForComment + getPost)
+    // before the owned-row UPDATE; deleteComment cleans the comment notif.
+    // NOTE: the delete UPDATE embeds FROM community_posts in EXISTS, so the
+    // write branches sort before the read branches.
+    if (/UPDATE post_comments SET/i.test(sql)) return [{ affectedRows: 1 }];
+    if (/^DELETE FROM notifications/i.test(sql.trim())) return [{ affectedRows: 1 }];
+    if (/SELECT id_community_post AS id FROM post_comments/i.test(sql)) return [[{ id: 7 }]];
+    if (/FROM community_posts p/i.test(sql)) return [[VISIBLE_POST]];
+    throw new Error(`Unexpected SQL: ${sql.slice(0, 60)}`);
+  }, async () => {
     assert.deepEqual(await service.updateComment(pool, USER_ID, 11, 'nicer'), { id: 11, body: 'nicer' });
     assert.deepEqual(await service.deleteComment(pool, USER_ID, 11), { deletedId: 11 });
   });
@@ -133,9 +144,11 @@ test('follows are idempotent and gated on public, unblocked users', async () => 
 });
 
 test('notifications list paginates with unread count; read is own-only', async () => {
-  await withPoolExecute(async (sql) => {
-    if (/SELECT COUNT\(\*\) AS total FROM notifications n/i.test(sql)) return [[{ total: '2' }]];
-    if (/SELECT COUNT\(\*\) AS total FROM notifications WHERE/i.test(sql)) return [[{ total: '1' }]];
+  const seen = [];
+  await withPoolExecute(async (sql, params = []) => {
+    seen.push({ sql, params });
+    if (/COUNT\(\*\)/i.test(sql) && /NOT n\.is_read/i.test(sql)) return [[{ total: '1' }]];
+    if (/COUNT\(\*\)/i.test(sql)) return [[{ total: '2' }]];
     if (/FROM notifications n/i.test(sql)) {
       return [[{ id: 9, actor_id: OTHER_ID, kind: 'like', postId: 7, commentId: null, isRead: false, actor_username: 'yuki', actor_display: null, actor_avatar: null, createdAt: '2026-10-07' }]];
     }
@@ -144,6 +157,7 @@ test('notifications list paginates with unread count; read is own-only', async (
     const inbox = await service.listNotifications(pool, USER_ID, {});
     assert.equal(inbox.unread, 1);
     assert.equal(inbox.items[0].isRead, false);
+    assert.ok(seen.every(({ sql }) => !/community_posts p/i.test(sql) || (/NOT p\.is_deleted/i.test(sql) && /user_blocks/i.test(sql))), 'post-linked inbox rows re-check visibility');
   });
   await withPoolExecute(async () => [{ affectedRows: 1 }], async () => {
     assert.deepEqual(await service.markNotificationRead(pool, USER_ID, 9), { id: 9, isRead: true });
