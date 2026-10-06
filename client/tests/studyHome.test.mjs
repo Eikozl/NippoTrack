@@ -74,6 +74,17 @@ test('reading empty state links to analyzer (cohesion)', () => {
   assert.ok(source.includes("href: '#analyzer'"), 'reuses existing analyzer route');
 });
 
+test('community publish is limited to own reading texts', () => {
+  const source = readSource('src/pages/reading.js');
+  assert.ok(source.includes('importedFromPublication'), 'import provenance read from text metadata');
+  assert.ok(source.includes('Imported copies can’t be republished to Community.'), 'imported copies explain why publish is gone');
+});
+
+test('community re-import opens the existing copy', () => {
+  const source = readSource('src/pages/community.js');
+  assert.ok(source.includes('Already in your library'), 'duplicate import says so instead of silently duplicating');
+});
+
 test('encounter label uses learner wording', () => {
   const source = readSource('src/pages/entityPage.js');
   assert.ok(source.includes('Where you'), 'learner-friendly encounter header');

@@ -82,7 +82,9 @@ async function postImport(req, res) {
     const id = parseIdParam(req, 'publication');
     const result = await importReadingPublication(pool, req.user.id, id);
     if (!result) return res.status(404).json({ error: 'Publication not found.' });
-    return res.status(201).json({ success: true, ...result });
+    // Re-import of an already-imported publication returns the existing
+    // copy (200) instead of creating a duplicate (201).
+    return res.status(result.duplicate === true ? 200 : 201).json({ success: true, ...result });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to import the text.' });
   }

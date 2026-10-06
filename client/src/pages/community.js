@@ -434,6 +434,7 @@ export async function renderCommunity(container) {
             return result;
           }).then((result) => {
             if (result && result.id) {
+              if (result.duplicate === true) showToast('Already in your library — opened your copy.');
               closeDetail();
               window.location.hash = `#reading?id=${result.id}`;
             }

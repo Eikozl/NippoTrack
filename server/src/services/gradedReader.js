@@ -955,16 +955,28 @@ async function getReadingText(executor, userId, id) {
   };
 }
 
-async function createUserReadingText(executor, userId, { text: rawText, title: rawTitle } = {}) {
+async function createUserReadingText(executor, userId, { text: rawText, title: rawTitle, sourceMetadata } = {}) {
   const text = normalizeReadingText(rawText);
   const title = normalizeTitle(rawTitle);
+  // Provenance stamp for the source row (existing metadata jsonb, no
+  // migration). Community imports pass { importedFromPublication: id } so
+  // publishReading can refuse re-publication; anything else stays '{}'.
+  // Plain object only, capped — never trust caller payloads verbatim.
+  let metadataJson = '{}';
+  if (sourceMetadata !== undefined && sourceMetadata !== null) {
+    if (!sourceMetadata || typeof sourceMetadata !== 'object' || Array.isArray(sourceMetadata)) {
+      throw new ValidationError('sourceMetadata must be a plain object.');
+    }
+    metadataJson = JSON.stringify(sourceMetadata).slice(0, 500);
+    if (metadataJson.length >= 500) throw new ValidationError('sourceMetadata is too large.');
+  }
   const analysis = await analyzeReading(executor, userId, text);
   const connection = await executor.getConnection();
   try {
     await connection.beginTransaction();
     const [sourceResult] = await connection.execute(
-      "INSERT INTO reading_sources (type, url, title, metadata, fetched_at) VALUES ('user', NULL, ?, '{}'::jsonb, CURRENT_TIMESTAMP) RETURNING id_reading_source AS insertId",
-      [title]
+      "INSERT INTO reading_sources (type, url, title, metadata, fetched_at) VALUES ('user', NULL, ?, ?::jsonb, CURRENT_TIMESTAMP) RETURNING id_reading_source AS insertId",
+      [title, metadataJson]
     );
     const sourceId = extractInsertId(sourceResult);
     if (!sourceId) throw new Error('Failed to create reading source.');

@@ -1201,10 +1201,17 @@ async function renderReader(container, textId) {
   });
   fontSlider.addEventListener('input', () => { storyBlocks.style.fontSize = `${fontSlider.value}px`; });
 
-  // Community publish (owners only): snapshots text + translations to the
-  // Texts feed. Shared library rows hide it (data.mine false, server 404s).
+  // Community publish (owners only, own-created texts only): snapshots text
+  // + translations to the Texts feed. Shared library rows hide it
+  // (data.mine false, server 404s), and so do copies imported from
+  // Community (server 400s): re-publishing imports would amplify one text
+  // into unbounded new publications.
+  const importedCopy = data?.metadata?.importedFromPublication !== undefined
+    && data?.metadata?.importedFromPublication !== null;
   const publishButton = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Publish', attrs: { type: 'button', 'aria-label': `Publish ${data.title} to Community` } });
-  publishButton.hidden = data.mine !== true;
+  publishButton.hidden = data.mine !== true || importedCopy;
+  const importNote = element('p', { className: 'text-xs text-muted', text: 'Imported copies can’t be republished to Community.' });
+  importNote.hidden = !importedCopy;
   publishButton.addEventListener('click', () => {
     const titleInput = element('input', { className: 'field-control', attrs: { value: data.title || '', maxlength: '200', 'aria-label': 'Publication title' } });
     const descriptionInput = element('textarea', { className: 'field-control min-h-16 w-full', attrs: { rows: '2', maxlength: '500', placeholder: 'Short description', 'aria-label': 'Publication description' } });
@@ -1287,7 +1294,8 @@ async function renderReader(container, textId) {
         element('span', { className: 'text-sm font-semibold', text: 'A', attrs: { 'aria-hidden': 'true' } })
       ]),
       translateButton,
-      publishButton
+      publishButton,
+      importNote
     ])
   ]);
 

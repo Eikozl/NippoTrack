@@ -10,15 +10,43 @@ const MAX_PUBLICATION_TITLE = 200;
 const MAX_PUBLICATION_DESCRIPTION = 500;
 const MAX_LIST_LIMIT = 50;
 
+// Provenance marker written by importReadingPublication into the copy's
+// reading_sources.metadata. Copies carrying it can never be re-published:
+// without this, A publishes → B imports → B publishes the copy → C imports
+// → …, amplifying one text into unbounded new publications (server load).
+// Tolerant of driver shapes (jsonb object vs serialized string) and of
+// legacy rows without metadata (treated as own-created, publishable).
+function readSourceMetadata(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+    } catch { /* fall through to empty */ }
+  }
+  return {};
+}
+
+function isCommunityImport(metadata) {
+  const marker = readSourceMetadata(metadata).importedFromPublication;
+  return (typeof marker === 'number' && Number.isSafeInteger(marker) && marker > 0) || (typeof marker === 'string' && marker.trim() !== '');
+}
+
 async function publishReading(executor, ownerId, { textId, title, description, isPublic = true }) {
   const id = Number(textId);
   if (!Number.isSafeInteger(id) || id <= 0) throw new ValidationError('textId must be a positive integer.');
   const [rows] = await executor.execute(
-    'SELECT id_reading_text, title, level, text, sentence_translations_json FROM reading_texts WHERE id_reading_text = ? AND user_id = ?',
+    `SELECT rt.id_reading_text, rt.title, rt.level, rt.text, rt.sentence_translations_json,
+       rs.type AS source_type, rs.metadata AS source_metadata
+      FROM reading_texts rt LEFT JOIN reading_sources rs ON rs.id_reading_source = rt.source_id
+      WHERE rt.id_reading_text = ? AND rt.user_id = ?`,
     [id, ownerId]
   );
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row) return null;
+  if (isCommunityImport(row.source_metadata)) {
+    throw new ValidationError('Only texts you created in Reading can be published. Copies imported from Community cannot be republished.');
+  }
   const cleanTitle = String(title ?? row.title ?? '').trim().slice(0, MAX_PUBLICATION_TITLE);
   if (!cleanTitle) throw new ValidationError('title must be a non-empty string.');
   const cleanDescription = String(description ?? '').trim().slice(0, MAX_PUBLICATION_DESCRIPTION);
@@ -119,7 +147,26 @@ async function deleteReadingPublication(executor, publicationId, viewerId) {
 async function importReadingPublication(executor, userId, publicationId) {
   const publication = await getReadingPublication(executor, publicationId, userId);
   if (!publication) return null;
-  const created = await createUserReadingText(executor, userId, { text: publication.text, title: publication.title });
+  // Idempotent import: the same publication imported twice must not create
+  // two library copies. The provenance marker makes the previous copy
+  // findable (grandfathered marker-less duplicates cannot be matched and
+  // stay as they are — documented, not silently merged).
+  const [existing] = await executor.execute(
+    `SELECT rt.id_reading_text AS id, rt.title FROM reading_texts rt
+     JOIN reading_sources rs ON rs.id_reading_source = rt.source_id
+     WHERE rt.user_id = ? AND rs.metadata->>'importedFromPublication' = ? LIMIT 1`,
+    [userId, String(Number(publication.id))]
+  );
+  const hit = Array.isArray(existing) ? existing[0] : null;
+  if (hit) return { id: Number(hit.id), title: hit.title, duplicate: true };
+  // Stamp provenance on the copy's source row (same transaction as the
+  // create): publishReading refuses anything carrying this marker, which
+  // breaks the import → publish → import amplification loop.
+  const created = await createUserReadingText(executor, userId, {
+    text: publication.text,
+    title: publication.title,
+    sourceMetadata: { importedFromPublication: Number(publication.id) }
+  });
   const translations = publication.translations && Object.keys(publication.translations).length
     ? publication.translations
     : null;
