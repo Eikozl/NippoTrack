@@ -21,11 +21,27 @@ function rejectUnknownFields(body, allowed) {
 async function createPost(req, res) {
   try {
     const body = postBody(req.body);
-    rejectUnknownFields(body, ['postType', 'title', 'body', 'japaneseText', 'translation', 'entityType', 'entityId', 'deckId', 'readingId']);
+    // Phase 5: includeStats opts a progress post into a server-computed
+    // snapshot. stats/snapshot/snapshot_json are accepted-but-ignored so
+    // forged client numbers can never mint metrics (service never reads
+    // them); anything else unknown still 400s.
+    rejectUnknownFields(body, ['postType', 'title', 'body', 'japaneseText', 'translation', 'entityType', 'entityId', 'deckId', 'readingId', 'includeStats', 'stats', 'snapshot', 'snapshot_json']);
     const post = await community.createPost(pool, req.user.id, body);
     return res.status(201).json(post);
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to create the post.' });
+  }
+}
+
+// V6.1 Phase 5: own verified aggregates for sharing. Identity derives ONLY
+// from req.user.id — no userId/owner query param is read, so ?userId=other
+// still returns the caller's own numbers. ?today= optionally anchors the
+// streak/month windows (dashboard convention); malformed dates 400.
+async function getShareStats(req, res) {
+  try {
+    return res.json(await community.getShareStats(pool, req.user.id, { today: req.query?.today }));
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load share stats.' });
   }
 }
 
@@ -299,6 +315,7 @@ module.exports = {
   getDiscover,
   getPost,
   getProfile,
+  getShareStats,
   listBlockedUsers,
   listComments,
   listFeed,

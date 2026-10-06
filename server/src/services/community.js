@@ -231,11 +231,20 @@ function mapPost(row, viewerId) {
   } catch {
     snapshot = null;
   }
+  // V6.1 Phase 5: verified study-progress snapshot. Progress posts minted
+  // with includeStats:true carry a server-computed stats object as their
+  // whole snapshot_json (flat shape, same keys as getShareStats). The `stats`
+  // key is additive: progress posts expose their snapshot again as `stats`
+  // (null when no verified snapshot); every other post type reports null
+  // here so share-post display snapshots are never mistaken for metrics.
+  // `snapshot` stays for back-compat.
+  const stats = row.post_type === 'progress' && snapshot ? snapshot : null;
   return {
     id: Number(row.id),
     authorId: row.author_id,
     mine: String(row.author_id) === String(viewerId),
     postType: row.post_type,
+    stats,
     title: row.title || null,
     body: row.body || null,
     japaneseText: row.japanese_text || null,
@@ -334,8 +343,150 @@ function validatePostBody(postType, body) {
   return cleanText(body.body, 2000, 'body');
 }
 
+// V6.1 Phase 5 (#7 real study-progress posts): verified share stats.
+//
+// Every number below reuses an EXISTING dashboard/study predicate — no new
+// statistics engine, no client-supplied numbers, never another learner's
+// rows (all predicates bind the caller's userId only):
+// - vocabCount/kanjiCount/grammarCount: same COUNT(*) ownership predicates
+//   as dashboardController.getDashboard (vocabulary/kanji/grammar_points
+//   WHERE user_id = ?).
+// - streakDays: same active-day rule + counting as
+//   dashboardController.getActivity (distinct study_sessions dates plus
+//   reading_study_days with seconds >= 300, counted back from the effective
+//   today). longestStreak intentionally NOT exposed (unneeded for sharing).
+// - studiedMinutesMonth: same source tables/predicates as getDashboard's
+//   minutes_week (study_sessions.duration_minutes + reading_study_days
+//   seconds/60) but over the last 30 days inclusive
+//   (effectiveToday-29 .. effectiveToday) — there is NO existing month
+//   query, the week window is the closest existing one, so the exact window
+//   ships in `studiedMinutesWindow` and `asOf`. Documented deviation, not a
+//   new engine.
+// - reviewsDue: same due predicate as dashboardController.getStudyNow
+//   (review_items due_on <= CURRENT_DATE joined to OWNED vocabulary/kanji/
+//   grammar rows, excluding interval_days = 0 never-reviewed placeholders);
+//   total only, no breakdown.
+// - readingsFinished: same table as getStudyNow's incomplete-reading source
+//   (user_reading_progress), COUNT WHERE completed_at IS NOT NULL. Single
+//   cheap aggregate; fails open to 0 on legacy schemas without the table
+//   (mirrors the dashboard's reading fail-open posture).
+// Bounded: one round of parallel queries (7 at most, each single-row or
+// small), all user-scoped. `?today=` anchors the streak/month windows on
+// the client's local date like the dashboard; absent param keeps the DB
+// CURRENT_DATE fallback.
+const SHARE_STATS_WINDOW_DAYS = 30;
+
+function shareIsoDate(value) {
+  return value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
+}
+
+function shareDayNumber(value) {
+  return Math.floor(Date.parse(`${value}T00:00:00Z`) / 86400000);
+}
+
+function shareShiftDays(iso, days) {
+  return new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+}
+
+function resolveShareToday(raw) {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const value = String(raw);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) {
+    throw new ValidationError('today must be a YYYY-MM-DD date.');
+  }
+  return value;
+}
+
+async function getShareStats(executor, userId, { today = null } = {}) {
+  const requested = resolveShareToday(today);
+  let effectiveToday = requested;
+  if (!effectiveToday) {
+    const [todayRows] = await executor.execute("SELECT to_char(CURRENT_DATE, 'YYYY-MM-DD') AS today");
+    const raw = Array.isArray(todayRows) ? todayRows[0]?.today : null;
+    const iso = shareIsoDate(raw || new Date());
+    effectiveToday = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : new Date().toISOString().slice(0, 10);
+  }
+  const windowStart = shareShiftDays(effectiveToday, -(SHARE_STATS_WINDOW_DAYS - 1));
+  const countsPromise = executor.execute(
+    'SELECT (SELECT COUNT(*) FROM vocabulary WHERE user_id = ?) AS vocab, (SELECT COUNT(*) FROM kanji WHERE user_id = ?) AS kanji, (SELECT COUNT(*) FROM grammar_points WHERE user_id = ?) AS grammar',
+    [userId, userId, userId]
+  );
+  const sessionDatesPromise = executor.execute(
+    "SELECT to_char(session_date, 'YYYY-MM-DD') AS date FROM study_sessions WHERE user_id = ? GROUP BY session_date ORDER BY session_date ASC",
+    [userId]
+  );
+  const readingDaysPromise = executor.execute(
+    "SELECT to_char(day, 'YYYY-MM-DD') AS date FROM reading_study_days WHERE user_id = ? AND seconds >= 300 GROUP BY day ORDER BY day ASC",
+    [userId]
+  ).catch(() => [[]]);
+  const sessionMinutesPromise = executor.execute(
+    'SELECT COALESCE(SUM(duration_minutes), 0) AS minutes FROM study_sessions WHERE user_id = ? AND session_date BETWEEN ?::date AND ?::date',
+    [userId, windowStart, effectiveToday]
+  );
+  const readingMinutesPromise = executor.execute(
+    'SELECT COALESCE(SUM(seconds), 0) / 60 AS minutes FROM reading_study_days WHERE user_id = ? AND day BETWEEN ?::date AND ?::date',
+    [userId, windowStart, effectiveToday]
+  ).catch(() => [[]]);
+  const duePromise = executor.execute(
+    `SELECT
+      (SELECT COUNT(*) FROM review_items ri
+        JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary
+        WHERE ri.due_on <= CURRENT_DATE AND ri.id_vocabulary IS NOT NULL AND ri.id_kanji IS NULL AND ri.id_grammar IS NULL
+          AND v.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)) AS due_vocabulary,
+      (SELECT COUNT(*) FROM review_items ri
+        JOIN kanji k ON k.id_kanji = ri.id_kanji
+        WHERE ri.due_on <= CURRENT_DATE AND ri.id_kanji IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_grammar IS NULL
+          AND k.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)) AS due_kanji,
+      (SELECT COUNT(*) FROM review_items ri
+        JOIN grammar_points g ON g.id_grammar = ri.id_grammar
+        WHERE ri.due_on <= CURRENT_DATE AND ri.id_grammar IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_kanji IS NULL
+          AND g.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)) AS due_grammar`,
+    [userId, userId, userId]
+  );
+  const readingsFinishedPromise = executor.execute(
+    'SELECT COUNT(*) AS total FROM user_reading_progress WHERE user_id = ? AND completed_at IS NOT NULL',
+    [userId]
+  ).catch(() => [[]]);
+  const [[countRows], [sessionDateRows], [readingDayRows], [sessionMinRows], [readingMinRows], [dueRows], [finishedRows]] = await Promise.all([
+    countsPromise, sessionDatesPromise, readingDaysPromise, sessionMinutesPromise, readingMinutesPromise, duePromise, readingsFinishedPromise
+  ]);
+  const counts = Array.isArray(countRows) ? countRows[0] || {} : {};
+  const sessionDates = (Array.isArray(sessionDateRows) ? sessionDateRows : []).map((row) => shareIsoDate(row.date));
+  const readingDates = (Array.isArray(readingDayRows) ? readingDayRows : []).map((row) => shareIsoDate(row.date));
+  const active = new Set([...sessionDates, ...readingDates].filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)));
+  let streakDays = 0;
+  for (let day = shareDayNumber(effectiveToday); active.has(new Date(day * 86400000).toISOString().slice(0, 10)); day -= 1) streakDays += 1;
+  const sessionMinutes = Number((Array.isArray(sessionMinRows) ? sessionMinRows[0] : null)?.minutes || 0);
+  const readingMinutes = Number((Array.isArray(readingMinRows) ? readingMinRows[0] : null)?.minutes || 0);
+  const due = Array.isArray(dueRows) ? dueRows[0] || {} : {};
+  const finished = Array.isArray(finishedRows) ? finishedRows[0] || {} : {};
+  return {
+    streakDays,
+    vocabCount: Number(counts.vocab || 0),
+    kanjiCount: Number(counts.kanji || 0),
+    grammarCount: Number(counts.grammar || 0),
+    studiedMinutesMonth: Math.round(sessionMinutes + readingMinutes),
+    studiedMinutesWindow: `${windowStart}..${effectiveToday} (last ${SHARE_STATS_WINDOW_DAYS} days inclusive, study sessions + reading)`,
+    reviewsDue: Number(due.due_vocabulary || 0) + Number(due.due_kanji || 0) + Number(due.due_grammar || 0),
+    readingsFinished: Number(finished.total || 0),
+    asOf: effectiveToday
+  };
+}
+
 async function createPost(executor, authorId, payload) {
   const postType = assertPostType(payload.postType);
+  // Phase 5: client-supplied numbers are NEVER trusted. Only includeStats:true
+  // triggers a server-computed snapshot via getShareStats; stats/snapshot/
+  // snapshot_json keys in the payload are silently ignored (never read) so a
+  // forged body cannot mint fake metrics. progress posts may still carry a
+  // manual body message alongside the verified snapshot.
+  const includeStats = payload.includeStats ?? null;
+  let wantStats = false;
+  if (includeStats !== undefined && includeStats !== null && includeStats !== false) {
+    if (includeStats !== true) throw new ValidationError('includeStats must be true or omitted.');
+    wantStats = true;
+  }
+  if (wantStats && postType !== 'progress') throw new ValidationError('includeStats is only allowed on progress posts.');
   const title = cleanText(payload.title, 200, 'title');
   const body = validatePostBody(postType, payload);
   const japaneseText = postType === 'example'
@@ -343,10 +494,14 @@ async function createPost(executor, authorId, payload) {
     : cleanText(payload.japaneseText, 2000, 'japaneseText');
   const translation = cleanText(payload.translation, 2000, 'translation');
   const links = await validateLinkedContent(executor, authorId, payload);
+  // Single write: the snapshot is a point-in-time reading, so no transaction
+  // spans the stat reads + INSERT (no multi-write atomicity to preserve).
+  // Reuses posts.snapshot_json from 039 — no migration.
+  const snapshot = wantStats ? await getShareStats(executor, authorId) : (links.snapshot || {});
   const [result] = await executor.execute(
     `INSERT INTO community_posts (author_id, post_type, title, body, japanese_text, translation, entity_type, entity_id, deck_id, reading_id, snapshot_json)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb) RETURNING id_community_post AS insertId`,
-    [authorId, postType, title, body, japaneseText, translation, links.entityType, links.entityId, links.deckId, links.readingId, JSON.stringify(links.snapshot || {})]
+    [authorId, postType, title, body, japaneseText, translation, links.entityType, links.entityId, links.deckId, links.readingId, JSON.stringify(snapshot)]
   );
   const id = Number(result?.insertId ?? (Array.isArray(result) ? result[0]?.insertId : undefined));
   if (!Number.isSafeInteger(id) || id <= 0) throw new Error('Unable to create the post.');
@@ -1493,6 +1648,7 @@ module.exports = {
   popularScore,
   searchCommunity,
   toggleLike,
+  getShareStats,
   unblockUser,
   unfollowUser,
   updateComment,
