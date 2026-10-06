@@ -236,7 +236,7 @@ renderDetail: (item) => {
             element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Session Writing Sources' }), element('dd', { className: 'mt-1 font-medium text-ink', text: String(encounters.bySource.find(s => s.sourceType === 'session_writing')?.count || 0) })])
           ]),
           encounters.recent?.length ? element('div', { className: 'mt-4' }, [
-            element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Recent' }),
+            element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Recent Encounters (max 5)' }),
             element('ul', { className: 'mt-2 grid gap-2' }, encounters.recent.map((enc) => element('li', { className: 'text-sm text-ink/80 flex items-center gap-2' }, [
               element('span', { className: 'status-pill text-xs', text: enc.sourceType === 'vocabulary' ? 'Vocab' : 'Writing' }),
               element('span', { text: enc.sourceTitle || `Source #${enc.sourceId}` }),

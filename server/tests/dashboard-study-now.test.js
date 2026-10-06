@@ -67,7 +67,7 @@ test('Study Now prioritizes due reviews with difficult context', async () => {
     assert.equal(data.primary.auto, 'due');
     assert.match(data.primary.title, /18 reviews? due/);
     assert.match(data.primary.reason, /12 words · 5 kanji · 1 pattern/);
-    assert.match(data.primary.reason, /4.*struggled/);
+    assert.match(data.primary.reason, /4.*marked Again more than once/);
     assert.match(data.primary.reason, /Up first: /);
     assert.match(data.primary.cta, /Start now/);
     assert.equal(data.signals.dueCount, 18);

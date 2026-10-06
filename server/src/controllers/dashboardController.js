@@ -204,7 +204,7 @@ async function getStudyNow(req, res) {
       ].filter(Boolean);
       const reason = [
         `${parts.join(' · ')} ready to recall.`,
-        difficultCount > 0 ? `Includes ${difficultCount} you recently struggled with.` : null,
+        difficultCount > 0 ? `Includes ${difficultCount} you've marked Again more than once.` : null,
         dueSample.length ? `Up first: ${dueSample.slice(0, 3).join(', ')}.` : null,
         'Short recall now saves re-study later.'
       ].filter(Boolean).join(' ');
@@ -243,7 +243,7 @@ async function getStudyNow(req, res) {
         title: 'Log today’s study',
         reason: 'No minutes recorded today yet. A short session keeps your streak alive.',
         estimate: '~5 min',
-        cta: 'Log session',
+        cta: 'Log study session',
         href: '#sessions'
       };
     } else {
