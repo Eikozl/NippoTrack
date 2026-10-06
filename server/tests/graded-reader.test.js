@@ -171,6 +171,12 @@ test('library returns shared and owned rows with filters and bounded pagination'
     assert.ok(calls.every(({ sql, params }) => !/FROM reading_texts/i.test(sql) || (sql.includes('rt.user_id IS NULL') && params.includes(USER_ID))));
     const listCall = calls.find(({ sql }) => /FROM reading_texts rt LEFT JOIN reading_sources rs/i.test(sql) && /ORDER BY rt.created_at/i.test(sql));
     assert.deepEqual(listCall.params.slice(-2), [1, 1]);
+    // Regression: the SELECT-list mine placeholder leads the SQL text, so
+    // its user_id must lead the params. A [...filters, userId] order bound
+    // the source value to rt.user_id and broke every filtered listing on
+    // real Postgres with "invalid input syntax for type uuid" (stubs never
+    // caught it because they ignore param positions).
+    assert.deepEqual(listCall.params.slice(0, 4), [USER_ID, USER_ID, 'N5', 'aozora'], 'mine, ownership, level, then source filter');
 
     const allRows = mockRes();
     await controller.listLibrary({ query: { page: '1', limit: '2' }, user: { id: USER_ID } }, allRows.res);

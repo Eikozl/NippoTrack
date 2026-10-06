@@ -641,7 +641,11 @@ async function listReadingLibrary(executor, userId, {
        (rt.user_id = ?) AS mine
       FROM reading_texts rt LEFT JOIN reading_sources rs ON rs.id_reading_source = rt.source_id
       WHERE ${whereSql} ORDER BY rt.created_at DESC, rt.id_reading_text DESC LIMIT ? OFFSET ?`,
-    [...params, userId, limit, offset]
+    // The SELECT-list mine placeholder comes first in the SQL text, so its
+    // user_id must lead the params (a previous [...params, userId, ...]
+    // order bound the source filter value to rt.user_id and broke every
+    // filtered listing with "invalid input syntax for type uuid").
+    [userId, ...params, limit, offset]
   );
   const itemRows = rows || [];
   const characterSets = itemRows.map((row) => new Set(extractHanOccurrences(row.text || '').map(({ character }) => character)));
