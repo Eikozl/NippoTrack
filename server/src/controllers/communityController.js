@@ -194,6 +194,14 @@ async function markNotificationRead(req, res) {
   }
 }
 
+async function notificationSummary(req, res) {
+  try {
+    return res.json(await community.getNotificationSummary(pool, req.user.id));
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load notification summary.' });
+  }
+}
+
 async function markAllNotificationsRead(req, res) {
   try {
     return res.json({ success: true, ...(await community.markAllNotificationsRead(pool, req.user.id)) });
@@ -289,6 +297,7 @@ module.exports = {
   listNotifications,
   markAllNotificationsRead,
   markNotificationRead,
+  notificationSummary,
   searchCommunity,
   unblockUser,
   unfollowUser,

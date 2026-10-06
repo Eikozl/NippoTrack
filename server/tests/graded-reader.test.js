@@ -218,8 +218,16 @@ test('progress is user-scoped, validates bounds, and uses an upsert', async () =
       assert.ok(params.includes(USER_ID));
       return [[{ id_reading_text: 31, text: '学生' }]];
     }
+    if (/SELECT time_spent_seconds FROM user_reading_progress/i.test(sql)) {
+      assert.ok(params.includes(USER_ID), 'delta read stays user-scoped');
+      return [[{ time_spent_seconds: 5 }]];
+    }
     if (/INSERT INTO user_reading_progress/i.test(sql)) return [[{ id: 4 }]];
     if (/SELECT position FROM user_reading_progress/i.test(sql)) return [[{ position: '2' }]];
+    if (/INSERT INTO reading_study_days/i.test(sql)) {
+      assert.ok(params.includes(USER_ID), 'daily credit stays user-scoped');
+      return [{ affectedRows: 1 }];
+    }
     throw new Error(`Unexpected progress SQL: ${sql}`);
   } }, async () => {
     const invalid = mockRes();
@@ -237,16 +245,27 @@ test('progress is user-scoped, validates bounds, and uses an upsert', async () =
     assert.match(upsert.sql, /ON CONFLICT \(user_id, text_id\) DO UPDATE/i);
     assert.match(upsert.sql, /GREATEST\(user_reading_progress\.position, EXCLUDED\.position\)/i);
     assert.ok(upsert.params.includes(USER_ID));
+    // Delta credit: submitted 15s minus stored 5s credits 10s to today.
+    const daily = calls.find(({ sql }) => /INSERT INTO reading_study_days/i.test(sql));
+    assert.ok(daily, 'reading time accrues to the daily row');
+    assert.deepEqual(daily.params, [USER_ID, 10]);
+    assert.match(daily.sql, /ON CONFLICT \(user_id, day\) DO UPDATE/i);
   });
 
   await withPoolStubs({ execute: async (sql, params = []) => {
     if (/SELECT id_reading_text, text FROM reading_texts/i.test(sql)) {
       return [[{ id_reading_text: 31, text: '学生' }]];
     }
+    if (/SELECT time_spent_seconds FROM user_reading_progress/i.test(sql)) {
+      return [[{ time_spent_seconds: 20 }]];
+    }
     // Stored position 5 wins over the submitted 1: progress never regresses,
     // and the response echoes the stored (post-GREATEST) value.
     if (/INSERT INTO user_reading_progress/i.test(sql)) return [[{ id: 4 }]];
     if (/SELECT position FROM user_reading_progress/i.test(sql)) return [[{ position: '5' }]];
+    if (/INSERT INTO reading_study_days/i.test(sql)) {
+      throw new Error('backwards totals must not credit anything');
+    }
     throw new Error(`Unexpected progress SQL: ${sql}`);
   } }, async () => {
     const response = mockRes();

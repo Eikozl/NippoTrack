@@ -74,6 +74,12 @@ test('discover has search plus honest people suggestions', () => {
   assert.ok(source.includes('Active learners'), 'suggestions labeled by what they are');
 });
 
+test('avatars and names both open profiles', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('Open profile of'), 'profile entry points labeled');
+  assert.ok(source.includes('tabs.appendChild(bell)'), 'bell sits last in the tabs row, aligned with tabs');
+});
+
 test('empty states guide instead of dead-ending', () => {
   const source = readSource('src/pages/communityFeed.js');
   assert.ok(source.includes('Your community is quiet'), 'empty following guides to discover');

@@ -318,7 +318,9 @@ const PICKER_TYPES = [
 export async function renderDecksHub(container) {
   // Decks hub home (legacy V5.x surface, preserved verbatim for V6.0):
   // publishing, sharing, importing, browsing and collections. Mounted as
-  // the Decks tab of the Community shell — no header of its own.
+  // the Decks tab of the Community shell — no header of its own. Clears
+  // the shell loader first (appending under it left it spinning forever).
+  container.replaceChildren();
   const feed = section('Feed', 'Public decks. Filter, listen, open details, follow.');
   const publish = section('Publish', 'Pick items from your collection and publish a deck — or pick a text tab to publish reading texts.');
   const share = section('Share & import', 'Signed codes: share your own items, import codes as new rows.');
@@ -586,7 +588,7 @@ export async function renderDecksHub(container) {
   let selectedTextId = null;
   const renderTextsPicker = () => {
     const query = String(search.value || '').trim().toLowerCase();
-    const own = libraryTexts.filter((item) => item.mine === true);
+    const own = libraryTexts.filter((item) => item.mine === true || item.mine === 1);
     const visible = own.filter((item) => !query || String(item.title || '').toLowerCase().includes(query));
     if (!visible.length) {
       results.replaceChildren(element('p', { className: 'text-sm text-muted', text: libraryLoaded ? 'No own texts match. Create one from the reader.' : 'Loading your texts…' }));
@@ -956,18 +958,16 @@ export async function renderDecksHub(container) {
 // mounts untouched as the Decks tab (zero regression surface).
 export async function renderCommunity(container) {
   const { mountSocialFeed } = await import('./communityFeed.js');
-  const actions = element('div', { className: 'flex items-center gap-2' });
   container.replaceChildren(element('section', {}, [
     pageHeader({
       eyebrow: 'Social',
       title: 'Community',
-      description: 'Learn Japanese with other learners: follow people, share what you study, save what inspires you.',
-      action: actions
+      description: 'Learn Japanese with other learners: follow people, share what you study, save what inspires you.'
     })
   ]));
   const shell = container.firstChild;
-  const tabs = element('div', { className: 'flex flex-wrap gap-2', attrs: { role: 'tablist', 'aria-label': 'Community sections' } });
+  const tabs = element('div', { className: 'flex flex-wrap items-center gap-2', attrs: { role: 'tablist', 'aria-label': 'Community sections' } });
   const body = element('div', { className: 'mt-5' });
   shell.append(tabs, body);
-  await mountSocialFeed({ tabs, body, actions, renderDecksHub });
+  await mountSocialFeed({ tabs, body, renderDecksHub });
 }

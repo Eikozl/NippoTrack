@@ -50,12 +50,24 @@ function initialsFor(display, username) {
   return (letters.slice(0, 2).join('') || '?').toUpperCase();
 }
 
-function avatarNode(post) {
-  return element('span', {
+function avatarNode(post, onProfile) {
+  const face = element('span', {
     className: 'grid size-10 shrink-0 place-items-center rounded-full bg-ink font-display text-sm font-semibold text-paper',
     text: initialsFor(post.authorDisplay, post.authorUsername),
     attrs: { 'aria-hidden': 'true' }
   });
+  // Usernames AND avatars open profiles — discoverability must not depend
+  // on hitting the small handle text.
+  if (post.authorUsername && typeof onProfile === 'function') {
+    const button = element('button', {
+      className: 'shrink-0 rounded-full',
+      attrs: { type: 'button', 'aria-label': `Open profile of ${post.authorUsername}` }
+    });
+    button.addEventListener('click', (event) => { event.stopPropagation(); onProfile(post.authorUsername); });
+    button.appendChild(face);
+    return button;
+  }
+  return face;
 }
 
 function authorLine(post, onProfile) {
@@ -90,7 +102,7 @@ function entityCreateBody(entityType, snapshot) {
   return { grammar_point: snapshot.display, meaning: snapshot.meaning || 'Saved from Community' };
 }
 
-export async function mountSocialFeed({ tabs, body, actions, renderDecksHub }) {
+export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   const state = {
     tab: 'feed',
     pages: { feed: 1, following: 1, discover: 1 },
@@ -117,9 +129,10 @@ export async function mountSocialFeed({ tabs, body, actions, renderDecksHub }) {
     tabs.appendChild(button);
   }
 
-  // Notifications bell lives in the page header.
+  // Notifications bell sits last in the tabs row, aligned with the tab
+  // buttons (never floating in the header).
   const bell = element('button', {
-    className: 'icon-button relative',
+    className: 'icon-button relative ml-auto min-h-9',
     attrs: { type: 'button', 'aria-label': 'Notifications' }
   });
   const bellBadge = element('span', {
@@ -130,7 +143,7 @@ export async function mountSocialFeed({ tabs, body, actions, renderDecksHub }) {
   bellBadge.style.display = 'none';
   bell.append(document.createTextNode('🔔'), bellBadge);
   bell.addEventListener('click', openNotifications);
-  actions.appendChild(bell);
+  tabs.appendChild(bell);
   async function refreshBell() {
     try {
       const inbox = await apiRequest('/api/community/notifications?limit=1');
@@ -446,7 +459,7 @@ export async function mountSocialFeed({ tabs, body, actions, renderDecksHub }) {
       }
     });
     const head = element('div', { className: 'flex items-start justify-between gap-3' }, [
-      element('div', { className: 'flex min-w-0 items-center gap-3' }, [avatarNode(post), authorLine(post, onProfile)]),
+      element('div', { className: 'flex min-w-0 items-center gap-3' }, [avatarNode(post, onProfile), authorLine(post, onProfile)]),
       postMenuButton(post, onRefresh)
     ]);
     card.append(head, element('div', { className: 'mt-2' }, [typePill(post.postType)]));
@@ -854,7 +867,7 @@ export async function mountSocialFeed({ tabs, body, actions, renderDecksHub }) {
         const data = await apiRequest(`/api/community/search?q=${encodeURIComponent(query)}&type=${type}&limit=10`);
         const blocks = [];
         for (const person of data.people || []) {
-          blocks.push(personRow(person, () => runSearch(query, type)));
+          blocks.push(personRow(person, () => runSearch(query, type), openProfile));
         }
         for (const post of data.posts || []) {
           blocks.push(postCard(post, { onProfile: openProfile, onRefresh: () => runSearch(query, type) }));
@@ -894,20 +907,29 @@ export async function mountSocialFeed({ tabs, body, actions, renderDecksHub }) {
         }
         if (seen.size >= 5) break;
       }
-      suggestHost.replaceChildren(...[...seen.values()].map((person) => personRow(person, () => {})));
+      suggestHost.replaceChildren(...[...seen.values()].map((person) => personRow(person, () => {}, openProfile)));
       if (!seen.size) suggestHost.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'No active learners yet.' }));
     }).catch(() => suggestHost.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Suggestions are unavailable.' })));
   }
 
-  function personRow(person, onChange) {
+  function personRow(person, onChange, onProfile) {
+    const nameButton = element('button', { className: 'flex min-w-0 flex-1 items-center gap-3 text-left', attrs: { type: 'button', 'aria-label': `Open profile of ${person.username}` } }, [
+      // Plain face here: the whole row button already navigates (buttons
+      // cannot nest).
+      avatarNode({ authorDisplay: person.displayName, authorUsername: person.username }, null),
+      element('div', { className: 'min-w-0' }, [
+        element('p', { className: 'truncate text-sm font-semibold text-ink', text: person.displayName || person.username }),
+        element('p', { className: 'truncate text-xs text-muted', text: `@${person.username}${person.bio ? ` · ${person.bio}` : ''}` })
+      ])
+    ]);
+    if (typeof onProfile === 'function') {
+      nameButton.addEventListener('click', (event) => {
+        if (event.target && typeof event.target.closest === 'function' && event.target.closest('button') !== nameButton) return;
+        onProfile(person.username);
+      });
+    }
     return element('div', { className: 'surface flex items-center justify-between gap-3 p-3' }, [
-      element('button', { className: 'flex min-w-0 flex-1 items-center gap-3 text-left', attrs: { type: 'button', 'aria-label': `Open profile of ${person.username}` } }, [
-        avatarNode({ authorDisplay: person.displayName, authorUsername: person.username }),
-        element('div', { className: 'min-w-0' }, [
-          element('p', { className: 'truncate text-sm font-semibold text-ink', text: person.displayName || person.username }),
-          element('p', { className: 'truncate text-xs text-muted', text: `@${person.username}${person.bio ? ` · ${person.bio}` : ''}` })
-        ])
-      ]),
+      nameButton,
       followButton(person.username, onChange)
     ]);
   }
@@ -953,7 +975,7 @@ export async function mountSocialFeed({ tabs, body, actions, renderDecksHub }) {
         try {
           const data = await apiRequest(`/api/community/users/${encodeURIComponent(username)}/${direction}?limit=20`);
           const items = Array.isArray(data?.items) ? data.items : [];
-          postsHost.replaceChildren(...(items.length ? items.map((person) => personRow({ username: person.username, displayName: person.displayName, avatarUrl: person.avatarUrl, bio: person.bio }, showList.bind(null, direction))) : [element('p', { className: 'text-sm text-muted', text: 'Nobody here yet.' })]));
+          postsHost.replaceChildren(...(items.length ? items.map((person) => personRow({ username: person.username, displayName: person.displayName, avatarUrl: person.avatarUrl, bio: person.bio }, showList.bind(null, direction), openProfile)) : [element('p', { className: 'text-sm text-muted', text: 'Nobody here yet.' })]));
         } catch {
           postsHost.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Unable to load.' }));
         }

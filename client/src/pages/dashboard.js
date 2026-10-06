@@ -159,6 +159,42 @@ function todayProgressSection(studyNow) {
   ]);
 }
 
+// V6.0 community pulse: unread interactions only (likes, new followers,
+// comments), Study-Now-styled. Zero unread → renders nothing at all, like
+// the goals preview (never an empty "0 notifications" card). Fail-open.
+async function communityPulseSection() {
+  let summary = null;
+  try {
+    summary = await apiRequest('/api/community/notifications/summary');
+  } catch {
+    return null;
+  }
+  if (!summary || Number(summary.unread || 0) <= 0) return null;
+  const lines = [];
+  const likeTitles = (Array.isArray(summary.likes?.posts) ? summary.likes.posts : []).map((post) => post.title).filter(Boolean);
+  if (Number(summary.likes?.count || 0) > 0) {
+    lines.push(`You have ${summary.likes.count} like${summary.likes.count === 1 ? '' : 's'}${likeTitles.length ? ` in the post “${likeTitles[0]}”` : ''}`);
+  }
+  if (Number(summary.follows?.count || 0) > 0) {
+    const actors = (Array.isArray(summary.follows?.actors) ? summary.follows.actors : []).filter(Boolean);
+    lines.push(`${summary.follows.count} new follower${summary.follows.count === 1 ? '' : 's'}${actors.length ? ` (${actors.join(', ')})` : ''}`);
+  }
+  const commentTitles = (Array.isArray(summary.comments?.posts) ? summary.comments.posts : []).map((post) => post.title).filter(Boolean);
+  if (Number(summary.comments?.count || 0) > 0) {
+    lines.push(`${summary.comments.count} new comment${summary.comments.count === 1 ? '' : 's'}${commentTitles.length ? ` in your post “${commentTitles[0]}”` : ''}`);
+  }
+  if (!lines.length) return null;
+  return element('section', { className: 'surface mt-5 p-5 sm:p-6', attrs: { 'aria-label': 'Community activity' } }, [
+    element('div', { className: 'flex items-center justify-between gap-3' }, [
+      element('div', { className: 'flex items-center gap-3' }, [iconTile('community', { className: 'panel-icon' }), element('h2', { className: 'font-semibold text-ink', text: 'Community' })]),
+      element('a', { className: 'text-sm font-semibold text-vermilion hover:underline', text: 'Open community', attrs: { href: '#community' } })
+    ]),
+    element('div', { className: 'mt-2 divide-y divide-stone' }, lines.map((line) => element('div', { className: 'py-2' }, [
+      element('p', { className: 'text-sm leading-6 text-ink', text: line })
+    ])))
+  ]);
+}
+
 function continueSection(studyNow) {
   // V5.6 Completion Pass: "Continue where you left off" — genuinely
   // resumable state only (unfinished reading with position, open review
@@ -354,6 +390,7 @@ export async function renderDashboard(container) {
       // existing Goals ordering: earliest deadline first, then newest.
       const eligibleGoals = goalItems.filter((item) => item.is_active && !item.isComplete);
       const previewGoals = eligibleGoals.slice(0, 3);
+      const pulse = await communityPulseSection();
       content.replaceChildren(
         ...(welcome ? [welcomeHeader(welcome)] : []),
         ...(studyNowSection(studyNow) ? [studyNowSection(studyNow)] : []),
@@ -361,6 +398,7 @@ export async function renderDashboard(container) {
         // snapshot. Progress/continue render nothing when data is absent.
         ...(todayProgressSection(studyNow) ? [todayProgressSection(studyNow)] : []),
         ...(continueSection(studyNow) ? [continueSection(studyNow)] : []),
+        ...(pulse ? [pulse] : []),
         // V5.6 Completion Pass: the metrics grid no longer duplicates what
         // Study Now (due reviews → action) and Today's Progress (today's
         // minutes → done) already answer. It keeps week/streaks/collection.

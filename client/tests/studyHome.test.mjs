@@ -91,6 +91,23 @@ test('reading imports answer honestly, never fire-and-forget', () => {
   assert.ok(source.includes('texts yet'), 'filter-aware empty state names the active source');
 });
 
+test('reading progress measures minutes with the reader back-link style', () => {
+  const source = readSource('src/pages/reading.js');
+  assert.ok(!source.includes("statCard('Characters read'"), 'no character-count cards remain');
+  assert.ok(source.includes("statCard('Time today'"), 'today minutes card exists');
+  assert.ok(source.includes("statCard('Time · last 30 days'"), '30-day minutes card exists');
+  assert.ok(source.includes('data?.daily'), 'daily series feeds accurate attribution');
+  const progressLinks = source.match(/← Back to library/g) || [];
+  assert.ok(progressLinks.length >= 2, 'progress views share the reader arrow link');
+});
+
+test('dashboard shows a community pulse only with unread activity', () => {
+  const source = readSource('src/pages/dashboard.js');
+  assert.ok(source.includes('function communityPulseSection'), 'pulse section exists');
+  assert.ok(source.includes('/api/community/notifications/summary'), 'summary endpoint used');
+  assert.ok(source.includes('Open community'), 'pulse links out, never traps');
+});
+
 test('community publish is limited to own reading texts', () => {
   const source = readSource('src/pages/reading.js');
   assert.ok(source.includes('importedFromPublication'), 'import provenance read from text metadata');

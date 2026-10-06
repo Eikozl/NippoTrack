@@ -546,6 +546,65 @@ async function markNotificationRead(executor, userId, notificationId) {
   return Number(result?.affectedRows ?? 0) > 0 ? { id, isRead: true } : null;
 }
 
+// V6.0 dashboard widget feed: unread interaction counts grouped by kind
+// plus the most recent post titles/actors behind them. Four bounded
+// queries, user-scoped; empty inbox → zeroed shape (UI hides, never 0s).
+async function getNotificationSummary(executor, userId) {
+  const [[countRows], [likeRows], [commentRows], [followRows]] = await Promise.all([
+    executor.execute(
+      `SELECT kind, COUNT(*) AS count FROM notifications WHERE user_id = ? AND NOT is_read GROUP BY kind`,
+      [userId]
+    ),
+    executor.execute(
+      `SELECT p.id_community_post AS id, p.title, p.japanese_text
+       FROM notifications n
+       JOIN community_posts p ON p.id_community_post = n.id_community_post
+       WHERE n.user_id = ? AND NOT n.is_read AND n.kind = 'like'
+       ORDER BY n.id_notification DESC LIMIT 3`,
+      [userId]
+    ),
+    executor.execute(
+      `SELECT p.id_community_post AS id, p.title, p.japanese_text
+       FROM notifications n
+       JOIN community_posts p ON p.id_community_post = n.id_community_post
+       WHERE n.user_id = ? AND NOT n.is_read AND n.kind = 'comment'
+       ORDER BY n.id_notification DESC LIMIT 3`,
+      [userId]
+    ),
+    executor.execute(
+      `SELECT up.username, up.display_name
+       FROM notifications n
+       JOIN user_profile up ON up.user_id = n.actor_id
+       WHERE n.user_id = ? AND NOT n.is_read AND n.kind = 'follow'
+       ORDER BY n.id_notification DESC LIMIT 3`,
+      [userId]
+    )
+  ]);
+  const counts = { like: 0, comment: 0, follow: 0 };
+  for (const row of Array.isArray(countRows) ? countRows : []) {
+    if (counts[row.kind] !== undefined) counts[row.kind] = Number(row.count || 0);
+  }
+  const postTitle = (row) => {
+    const title = String(row.title || row.japanese_text || '').trim();
+    return title ? (title.length > 40 ? `${title.slice(0, 40)}…` : title) : 'your post';
+  };
+  return {
+    unread: counts.like + counts.comment + counts.follow,
+    likes: {
+      count: counts.like,
+      posts: (Array.isArray(likeRows) ? likeRows : []).map((row) => ({ id: Number(row.id), title: postTitle(row) }))
+    },
+    comments: {
+      count: counts.comment,
+      posts: (Array.isArray(commentRows) ? commentRows : []).map((row) => ({ id: Number(row.id), title: postTitle(row) }))
+    },
+    follows: {
+      count: counts.follow,
+      actors: (Array.isArray(followRows) ? followRows : []).map((row) => row.display_name || row.username).filter(Boolean).slice(0, 3)
+    }
+  };
+}
+
 async function markAllNotificationsRead(executor, userId) {
   const [result] = await executor.execute(
     'UPDATE notifications SET is_read = TRUE WHERE user_id = ? AND NOT is_read',
@@ -772,6 +831,7 @@ module.exports = {
   deletePost,
   followUser,
   getCommunityProfile,
+  getNotificationSummary,
   getPost,
   listBlockedUsers,
   listComments,

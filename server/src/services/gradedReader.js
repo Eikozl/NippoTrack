@@ -1062,6 +1062,18 @@ async function upsertReadingProgress(executor, userId, textId, {
   // Position is the one exception: it only ever advances (GREATEST), so a
   // stale or out-of-order save — second tab, re-render before first autosave,
   // retried request — can never move the reader backwards.
+  // Daily study credit: the delta between the submitted accumulated total
+  // and the stored total is credited to today's reading_study_days row, so
+  // reading time counts toward dashboard minutes and streaks. Retries are
+  // delta-safe (same total → delta 0); backwards totals clamp to 0.
+  let previousSeconds = 0;
+  if (timeSpentSeconds !== undefined && timeSpentSeconds > 0) {
+    const [previousRows] = await executor.execute(
+      'SELECT time_spent_seconds FROM user_reading_progress WHERE user_id = ? AND text_id = ?',
+      [userId, textId]
+    );
+    previousSeconds = Number(previousRows?.[0]?.time_spent_seconds || 0);
+  }
   const [result] = await executor.execute(
     `INSERT INTO user_reading_progress (user_id, text_id, position, time_spent_seconds, completed_at)
      SELECT ?, rt.id_reading_text, ?, ?, CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END
@@ -1083,6 +1095,14 @@ async function upsertReadingProgress(executor, userId, textId, {
     [userId, textId]
   );
   const storedPosition = Number(storedRows?.[0]?.position);
+  const credited = Math.max(0, (timeSpentSeconds ?? 0) - previousSeconds);
+  if (credited > 0) {
+    await executor.execute(
+      `INSERT INTO reading_study_days (user_id, day, seconds) VALUES (?, CURRENT_DATE, ?)
+       ON CONFLICT (user_id, day) DO UPDATE SET seconds = reading_study_days.seconds + EXCLUDED.seconds`,
+      [userId, credited]
+    );
+  }
   return {
     position: Number.isSafeInteger(storedPosition) ? storedPosition : position,
     timeSpentSeconds: timeSpentSeconds ?? 0,
@@ -1333,7 +1353,21 @@ async function listReadingProgress(executor, userId, { page, limit, offset } = {
     timeSpentSeconds: Number(row.timeSpentSeconds || 0),
     updatedAt: row.updatedAt || null
   }));
-  return { items, total, page, limit, totalPages: total ? Math.ceil(total / limit) : 0 };
+  // Daily reading seconds (last 56 days) for time-based stats: accurate
+  // per-day attribution that cumulative progress totals cannot provide.
+  // Best-effort on legacy schemas (fail open to []).
+  let daily = [];
+  try {
+    const [dailyRows] = await executor.execute(
+      `SELECT to_char(day, 'YYYY-MM-DD') AS date, seconds FROM reading_study_days
+       WHERE user_id = ? AND day > CURRENT_DATE - 56 ORDER BY day ASC`,
+      [userId]
+    );
+    daily = (dailyRows || []).map((row) => ({ date: String(row.date).slice(0, 10), seconds: Number(row.seconds || 0) }));
+  } catch {
+    daily = [];
+  }
+  return { items, daily, total, page, limit, totalPages: total ? Math.ceil(total / limit) : 0 };
 }
 
 function decodeEntities(value) {

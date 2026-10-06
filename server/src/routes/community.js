@@ -19,6 +19,7 @@ router.post('/unfollow', controller.unfollowUser);
 router.get('/users/:username/:direction', controller.listFollows);
 router.get('/profile/:username', controller.getProfile);
 router.get('/notifications', controller.listNotifications);
+router.get('/notifications/summary', controller.notificationSummary);
 router.post('/notifications/read-all', controller.markAllNotificationsRead);
 router.post('/notifications/:id/read', controller.markNotificationRead);
 router.post('/reports', controller.createReport);

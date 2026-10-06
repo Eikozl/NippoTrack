@@ -1204,7 +1204,7 @@ async function renderReader(container, textId) {
   const importedCopy = data?.metadata?.importedFromPublication !== undefined
     && data?.metadata?.importedFromPublication !== null;
   const publishButton = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Publish', attrs: { type: 'button', 'aria-label': `Publish ${data.title} to Community` } });
-  publishButton.hidden = data.mine !== true || importedCopy;
+  publishButton.hidden = !(data.mine === true || data.mine === 1) || importedCopy;
   const importNote = element('p', { className: 'text-xs text-muted', text: 'Imported copies can’t be republished to Community.' });
   importNote.hidden = !importedCopy;
   publishButton.addEventListener('click', () => {
@@ -1467,7 +1467,7 @@ async function renderProgressView(container) {
     data = await listReadingProgress({ limit: 50 });
   } catch (error) {
     container.replaceChildren(element('section', { className: 'mx-auto w-full max-w-3xl' }, [
-      element('a', { className: 'button-secondary inline-flex min-h-9 items-center px-3 py-1.5 text-xs', text: 'Back to library', attrs: { href: '#reading' } }),
+      element('a', { className: 'text-sm font-medium text-muted underline-offset-4 hover:text-ink hover:underline', text: '← Back to library', attrs: { href: '#reading' } }),
       errorState(error, () => renderProgressView(container))
     ]));
     return;
@@ -1475,20 +1475,48 @@ async function renderProgressView(container) {
 
   const items = Array.isArray(data?.items) ? data.items : [];
   const completedItems = items.filter((item) => item.completedAt);
-  const now = Date.now();
-  const thirtyDaysAgo = now - 30 * 86400000;
-  const charsAllTime = completedItems.reduce((sum, item) => sum + Number(item.characters || 0), 0);
-  const chars30Days = completedItems
-    .filter((item) => new Date(item.completedAt).getTime() >= thirtyDaysAgo)
-    .reduce((sum, item) => sum + Number(item.characters || 0), 0);
+  const dayKey = (value) => {
+    try {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return null;
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    } catch {
+      return null;
+    }
+  };
+  // Time-based stats (V6.0): reading measures minutes, not characters.
+  // Daily attribution comes from the server's per-day series (accurate);
+  // the all-time total falls back to cumulative progress seconds.
+  const daily = Array.isArray(data?.daily) ? data.daily : [];
+  const secondsByDate = new Map(daily.map((entry) => [String(entry.date).slice(0, 10), Number(entry.seconds || 0)]));
+  const todayKey = dayKey(Date.now());
   const minutesTotal = Math.round(items.reduce((sum, item) => sum + Number(item.timeSpentSeconds || 0), 0) / 60);
+  const minutesToday = Math.round((secondsByDate.get(todayKey) || 0) / 60);
+  const thirtyDaysAgoKey = (() => {
+    const date = new Date();
+    date.setDate(date.getDate() - 30);
+    return dayKey(date.getTime());
+  })();
+  const minutes30Days = Math.round([...secondsByDate.entries()]
+    .filter(([date]) => !thirtyDaysAgoKey || date >= thirtyDaysAgoKey)
+    .reduce((sum, [, seconds]) => sum + seconds, 0) / 60);
 
-  const weekly = Array.from({ length: 8 }, (_, index) => ({ weeksAgo: index, chars: 0 }));
-  for (const item of completedItems) {
-    const weeksAgo = Math.floor((now - new Date(item.completedAt).getTime()) / (7 * 86400000));
-    if (weeksAgo >= 0 && weeksAgo < 8) weekly[weeksAgo].chars += Number(item.characters || 0);
+  const weekly = Array.from({ length: 8 }, (_, index) => ({ weeksAgo: index, minutes: 0 }));
+  if (secondsByDate.size) {
+    for (const [date, seconds] of secondsByDate) {
+      const weeksAgo = Math.floor((Date.now() - new Date(`${date}T00:00:00`).getTime()) / (7 * 86400000));
+      if (weeksAgo >= 0 && weeksAgo < 8) weekly[weeksAgo].minutes += seconds / 60;
+    }
+  } else {
+    // Legacy data without a daily series: attribute cumulative minutes to
+    // completion weeks so old progress still paints something honest.
+    for (const item of completedItems) {
+      if (!item.completedAt) continue;
+      const weeksAgo = Math.floor((Date.now() - new Date(item.completedAt).getTime()) / (7 * 86400000));
+      if (weeksAgo >= 0 && weeksAgo < 8) weekly[weeksAgo].minutes += Number(item.timeSpentSeconds || 0) / 60;
+    }
   }
-  const maxChars = Math.max(1, ...weekly.map((week) => week.chars));
+  const maxMinutes = Math.max(1, ...weekly.map((week) => week.minutes));
 
   const statCard = (label, value) => element('div', { className: 'surface p-4' }, [
     element('p', { className: 'text-xs uppercase tracking-wide text-muted', text: label }),
@@ -1496,27 +1524,27 @@ async function renderProgressView(container) {
   ]);
 
   container.replaceChildren(element('section', { className: 'mx-auto w-full max-w-4xl' }, [
-    element('a', { className: 'button-secondary inline-flex min-h-9 items-center px-3 py-1.5 text-xs', text: 'Back to library', attrs: { href: '#reading' } }),
+    element('a', { className: 'text-sm font-medium text-muted underline-offset-4 hover:text-ink hover:underline', text: '← Back to library', attrs: { href: '#reading' } }),
     pageHeader({
       eyebrow: 'Statistics',
       title: 'Reading progress',
-      description: 'Your reading activity. Kanji coverage lives on the Statistics page.'
+      description: 'Your reading activity in minutes. Kanji coverage lives on the Statistics page.'
     }),
     element('div', { className: 'mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4' }, [
       statCard('Texts completed', String(completedItems.length)),
-      statCard('Characters read', charsAllTime.toLocaleString()),
-      statCard('Characters · last 30 days', chars30Days.toLocaleString()),
-      statCard('Time reading', `${minutesTotal} min`)
+      statCard('Time today', `${minutesToday} min`),
+      statCard('Time · last 30 days', `${minutes30Days} min`),
+      statCard('Time reading · total', `${minutesTotal} min`)
     ]),
     element('div', { className: 'surface mt-4 p-5' }, [
       element('h2', { className: 'font-semibold text-ink', text: 'Last 8 weeks' }),
-      element('p', { className: 'mt-1 text-xs text-muted', text: 'Characters completed per week (newest first).' }),
+      element('p', { className: 'mt-1 text-xs text-muted', text: 'Minutes read per week (newest first).' }),
       element('ul', { className: 'mt-4 grid gap-2' }, weekly.map((week) => element('li', { className: 'flex items-center gap-3 text-xs text-muted' }, [
         element('span', { className: 'w-14 shrink-0', text: week.weeksAgo === 0 ? 'This week' : `${week.weeksAgo}w ago` }),
         element('div', { className: 'h-2.5 flex-1 overflow-hidden rounded-full bg-ink/10' }, [
-          element('div', { className: 'h-full rounded-full bg-ink', attrs: { style: `width:${Math.round((week.chars / maxChars) * 100)}%` } })
+          element('div', { className: 'h-full rounded-full bg-ink', attrs: { style: `width:${Math.round((week.minutes / maxMinutes) * 100)}%` } })
         ]),
-        element('span', { className: 'w-16 shrink-0 text-right', text: week.chars.toLocaleString() })
+        element('span', { className: 'w-16 shrink-0 text-right', text: `${Math.round(week.minutes)} min` })
       ])))
     ]),
     element('p', { className: 'mt-4 text-xs text-muted' }, [
