@@ -229,6 +229,8 @@ test('community profile counts are owner-only; shape keeps every key', async () 
     if (/FROM vocabulary/i.test(sql)) {
       return [[{ posts: 2, followers: 3, following: 1, vocabulary: 10, kanji: 4, grammar: 2 }]];
     }
+    // V6.1 Phase 3: single batched EXISTS for both follow directions.
+    if (/SELECT EXISTS.*user_follows/i.test(sql)) return [[{ following: 1, followed_by: 0 }]];
     if (/SELECT 1 AS following FROM user_follows/i.test(sql)) return [[{ following: 1 }]];
     if (/FROM community_posts WHERE author_id/i.test(sql)) return [[{ posts: 2, followers: 3, following: 1 }]];
     throw new Error(`Unexpected SQL: ${sql.slice(0, 60)}`);
@@ -435,12 +437,18 @@ test('every touched phase-2b query binds exactly its placeholders', async () => 
     }
     if (/SELECT id_community_post AS id FROM post_comments/i.test(sql)) return [[{ id: 7 }]];
     if (/SELECT author_id FROM post_comments/i.test(sql)) return [[{ author_id: OTHER_ID }]];
+    if (/SELECT parent_comment_id AS parent/i.test(sql)) return [[]];
+    if (/GROUP BY c\.parent_comment_id/i.test(sql)) return [[]];
     if (/FROM post_comments c/i.test(sql)) {
       if (/COUNT\(\*\)/i.test(sql)) return [[{ total: '0' }]];
+      if (/GROUP BY/i.test(sql)) return [[]];
       return [[]];
     }
     if (/^\s*SELECT 1 FROM user_blocks/i.test(sql)) return [[]];
+    if (/SELECT EXISTS.*user_follows/i.test(sql)) return [[{ following: 0, followed_by: 0 }]];
     if (/SELECT 1 AS following FROM user_follows/i.test(sql)) return [[]];
+    if (/SELECT follower_id, followed_id FROM user_follows/i.test(sql)) return [[]];
+    if (/SELECT followed_id FROM user_follows WHERE follower_id/i.test(sql)) return [[]];
     if (/FROM user_profile WHERE username/i.test(sql)) {
       return [[{ user_id: OTHER_ID, username: 'yuki', display_name: null, bio: null, avatar_url: null, is_public: true, jlpt_level: null, target_jlpt: null, interests: null }]];
     }

@@ -101,8 +101,8 @@ async function listComments(req, res) {
 async function createComment(req, res) {
   try {
     const body = postBody(req.body);
-    rejectUnknownFields(body, ['body']);
-    const comment = await community.createComment(pool, req.user.id, parseIdParam(req, 'post'), body.body);
+    rejectUnknownFields(body, ['body', 'parentCommentId']);
+    const comment = await community.createComment(pool, req.user.id, parseIdParam(req, 'post'), body.body, body.parentCommentId ?? null);
     if (!comment) return res.status(404).json({ error: 'Post not found.' });
     return res.status(201).json(comment);
   } catch (error) {

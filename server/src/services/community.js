@@ -17,6 +17,11 @@ const FEED_TABS = ['latest', 'following', 'discover'];
 const REPORT_REASONS = ['spam', 'harassment', 'inappropriate', 'misleading', 'other'];
 const MAX_FEED_LIMIT = 30;
 const MAX_SEARCH_LIMIT = 20;
+// V6.1 Phase 3: one-level replies embed at most 20 children per top-level
+// comment (documented cap; deeper paging later if needed). Notification
+// excerpts truncate like the summary (ellipsis style) at 80 chars.
+const MAX_REPLIES_PER_COMMENT = 20;
+const MAX_NOTIFICATION_EXCERPT = 80;
 
 function assertPostType(value) {
   if (!POST_TYPES.includes(value)) throw new ValidationError(`post_type must be one of: ${POST_TYPES.join(', ')}.`);
@@ -65,6 +70,20 @@ function visibilityParams(viewerId) {
 // search ILIKE pairs with ESCAPE '\' and the pattern is pre-escaped here.
 function escapeLikePattern(value) {
   return String(value).replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
+// V6.1 Phase 3: notification excerpts reuse the summary truncation style
+// (slice + ellipsis) at 80 chars, sourced from title → japanese_text →
+// body. Follow notifications (no post) yield null; empty posts yield null.
+function notificationExcerpt(title, japaneseText, body) {
+  const text = String(title || japaneseText || body || '').trim();
+  if (!text) return null;
+  return text.length > MAX_NOTIFICATION_EXCERPT ? `${text.slice(0, MAX_NOTIFICATION_EXCERPT)}…` : text;
+}
+
+function isEditedRow(row) {
+  if (!row || !row.created_at || !row.updated_at) return false;
+  return String(row.created_at) !== String(row.updated_at);
 }
 
 function mapPost(row, viewerId) {
@@ -350,12 +369,15 @@ async function listComments(executor, viewerId, postId, { page = 1, limit = 20 }
   const offset = (safePage - 1) * safeLimit;
   // Blocked-pair comments stay hidden both ways; private-profile authors are
   // visible to themselves only (mirrors visibilityWhere, three viewer params).
+  // V6.1 Phase 3: top-level page is parent_comment_id IS NULL only; replies
+  // embed below (max 20 per parent, block-filtered with the same predicate).
   const commentVisibility = `(c.author_id = ? OR up.is_public)`
     + ` AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = c.author_id) OR (b.blocker_id = c.author_id AND b.blocked_id = ?))`;
+  const topLevelFilter = 'c.parent_comment_id IS NULL';
   const [[totalRow]] = await executor.execute(
     `SELECT COUNT(*) AS total FROM post_comments c
      JOIN user_profile up ON up.user_id = c.author_id
-     WHERE c.id_community_post = ? AND NOT c.is_deleted AND ${commentVisibility}`,
+     WHERE c.id_community_post = ? AND ${topLevelFilter} AND NOT c.is_deleted AND ${commentVisibility}`,
     [id, viewerId, viewerId, viewerId]
   );
   const total = Number(totalRow?.total || 0);
@@ -364,22 +386,77 @@ async function listComments(executor, viewerId, postId, { page = 1, limit = 20 }
        up.username AS author_username, up.display_name AS author_display, up.avatar_url AS author_avatar
      FROM post_comments c
      JOIN user_profile up ON up.user_id = c.author_id
-     WHERE c.id_community_post = ? AND NOT c.is_deleted AND ${commentVisibility}
+     WHERE c.id_community_post = ? AND ${topLevelFilter} AND NOT c.is_deleted AND ${commentVisibility}
      ORDER BY c.id_post_comment ASC LIMIT ? OFFSET ?`,
     [id, viewerId, viewerId, viewerId, safeLimit, offset]
   );
+  const topRows = Array.isArray(rows) ? rows : [];
+  // Batched reply enrichment (no per-row queries): one COUNT per parent for
+  // replyCount plus one ordered fetch capped at 20 per parent in JS.
+  let countsByParent = new Map();
+  let repliesByParent = new Map();
+  const parentIds = topRows.map((row) => Number(row.id)).filter((n) => Number.isSafeInteger(n));
+  if (parentIds.length) {
+    const inList = parentIds.map(() => '?').join(', ');
+    const [countRows] = await executor.execute(
+      `SELECT c.parent_comment_id AS parent, COUNT(*) AS total FROM post_comments c
+       JOIN user_profile up ON up.user_id = c.author_id
+       WHERE c.id_community_post = ? AND c.parent_comment_id IN (${inList}) AND NOT c.is_deleted AND ${commentVisibility}
+       GROUP BY c.parent_comment_id`,
+      [id, ...parentIds, viewerId, viewerId, viewerId]
+    );
+    for (const row of Array.isArray(countRows) ? countRows : []) {
+      countsByParent.set(Number(row.parent), Number(row.total || 0));
+    }
+    const [replyRows] = await executor.execute(
+      `SELECT c.id_post_comment AS id, c.author_id, c.body, c.created_at, c.updated_at,
+         c.parent_comment_id AS parent,
+         up.username AS author_username, up.display_name AS author_display, up.avatar_url AS author_avatar
+       FROM post_comments c
+       JOIN user_profile up ON up.user_id = c.author_id
+       WHERE c.id_community_post = ? AND c.parent_comment_id IN (${inList}) AND NOT c.is_deleted AND ${commentVisibility}
+       ORDER BY c.id_post_comment ASC`,
+      [id, ...parentIds, viewerId, viewerId, viewerId]
+    );
+    for (const row of Array.isArray(replyRows) ? replyRows : []) {
+      const parent = Number(row.parent);
+      if (!repliesByParent.has(parent)) repliesByParent.set(parent, []);
+      const bucket = repliesByParent.get(parent);
+      // Cap enforced in JS (cheap: at most page-size parents × rows); deeper
+      // paging later if needed. replyCount still reflects the full total.
+      if (bucket.length >= MAX_REPLIES_PER_COMMENT) continue;
+      bucket.push({
+        id: Number(row.id),
+        authorId: row.author_id,
+        mine: String(row.author_id) === String(viewerId),
+        body: row.body,
+        authorUsername: row.author_username || null,
+        authorDisplay: row.author_display || null,
+        authorAvatar: row.author_avatar || null,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at || null,
+        edited: isEditedRow(row),
+        parentCommentId: parent
+      });
+    }
+  }
   return {
-    items: (Array.isArray(rows) ? rows : []).map((row) => ({
-      id: Number(row.id),
-      authorId: row.author_id,
-      mine: String(row.author_id) === String(viewerId),
-      body: row.body,
-      authorUsername: row.author_username || null,
-      authorDisplay: row.author_display || null,
-      authorAvatar: row.author_avatar || null,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at || null
-    })),
+    items: topRows.map((row) => {
+      const topId = Number(row.id);
+      return {
+        id: topId,
+        authorId: row.author_id,
+        mine: String(row.author_id) === String(viewerId),
+        body: row.body,
+        authorUsername: row.author_username || null,
+        authorDisplay: row.author_display || null,
+        authorAvatar: row.author_avatar || null,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at || null,
+        replyCount: countsByParent.get(topId) || 0,
+        replies: repliesByParent.get(topId) || []
+      };
+    }),
     total,
     page: safePage,
     limit: safeLimit,
@@ -387,22 +464,64 @@ async function listComments(executor, viewerId, postId, { page = 1, limit = 20 }
   };
 }
 
-async function createComment(executor, userId, postId, body) {
+async function createComment(executor, userId, postId, body, parentCommentId = null) {
   const text = cleanText(body, 1000, 'body', { required: true });
   const id = cleanId(postId, 'post');
+  // Optional one-level reply parent: validated before the visibility gate so
+  // garbage never issues a query; missing/cross-post/nested/deleted → 400.
+  let parentId = null;
+  let parentAuthorId = null;
+  if (parentCommentId !== undefined && parentCommentId !== null && parentCommentId !== '') {
+    parentId = cleanId(parentCommentId, 'parentCommentId');
+    const [parentRows] = await executor.execute(
+      'SELECT id_post_comment AS pid, id_community_post AS post, author_id, parent_comment_id AS parent, is_deleted AS deleted FROM post_comments WHERE id_post_comment = ?',
+      [parentId]
+    );
+    const parent = Array.isArray(parentRows) ? parentRows[0] : null;
+    if (!parent || parent.deleted === true || parent.deleted === 1) {
+      throw new ValidationError('Parent comment not found.');
+    }
+    if (Number(parent.post) !== Number(id)) {
+      throw new ValidationError('Parent comment must belong to the same post.');
+    }
+    if (parent.parent !== null && parent.parent !== undefined) {
+      throw new ValidationError('Replies are limited to one level.');
+    }
+    parentAuthorId = parent.author_id;
+  }
+  // Reply inherits the post visibility gate (deleted/private/blocked → null).
   const post = await getPost(executor, userId, id);
   if (!post) return null;
-  const [result] = await executor.execute(
-    'INSERT INTO post_comments (id_community_post, author_id, body) VALUES (?, ?, ?) RETURNING id_post_comment AS insertId',
-    [id, userId, text]
-  );
-  const commentId = Number(result?.insertId);
+  let commentId;
+  if (parentId === null) {
+    const [result] = await executor.execute(
+      'INSERT INTO post_comments (id_community_post, author_id, body) VALUES (?, ?, ?) RETURNING id_post_comment AS insertId',
+      [id, userId, text]
+    );
+    commentId = Number(result?.insertId);
+  } else {
+    const [result] = await executor.execute(
+      'INSERT INTO post_comments (id_community_post, author_id, body, parent_comment_id) VALUES (?, ?, ?, ?) RETURNING id_post_comment AS insertId',
+      [id, userId, text, parentId]
+    );
+    commentId = Number(result?.insertId);
+  }
   if (!Number.isSafeInteger(commentId) || commentId <= 0) throw new Error('Unable to create the comment.');
-  if (!post.mine) {
-    await notifyUser(executor, { userId: post.authorId, actorId: userId, kind: 'comment', postId: id, commentId });
+  if (parentId === null) {
+    if (!post.mine) {
+      await notifyUser(executor, { userId: post.authorId, actorId: userId, kind: 'comment', postId: id, commentId });
+    }
+  } else {
+    // Reply rule (avoids double inbox rows): notify the parent comment
+    // author only (kind 'reply', no self-notif). The post author is NOT
+    // re-notified unless they ARE the parent author — then the single
+    // 'reply' row already covers them (never two rows for one reply).
+    if (parentAuthorId && String(parentAuthorId) !== String(userId)) {
+      await notifyUser(executor, { userId: parentAuthorId, actorId: userId, kind: 'reply', postId: id, commentId });
+    }
   }
   const [rows] = await executor.execute(
-    `SELECT c.id_post_comment AS id, c.author_id, c.body, c.created_at, c.updated_at,
+    `SELECT c.id_post_comment AS id, c.author_id, c.body, c.created_at, c.updated_at, c.parent_comment_id AS parent,
        up.username AS author_username, up.display_name AS author_display, up.avatar_url AS author_avatar
      FROM post_comments c
      JOIN user_profile up ON up.user_id = c.author_id
@@ -419,7 +538,8 @@ async function createComment(executor, userId, postId, body) {
     authorDisplay: row.author_display || null,
     authorAvatar: row.author_avatar || null,
     createdAt: row.created_at || null,
-    updatedAt: row.updated_at || null
+    updatedAt: row.updated_at || null,
+    parentCommentId: row.parent !== null && row.parent !== undefined ? Number(row.parent) : (parentId !== null ? parentId : null)
   };
 }
 
@@ -454,11 +574,12 @@ async function deleteComment(executor, userId, commentId) {
     [id, userId, userId]
   );
   if (Number(result?.affectedRows ?? 0) <= 0) return null;
-  // Orphan-notif hygiene: the comment inbox row no longer describes reality.
+  // Orphan-notif hygiene: the comment/reply inbox row no longer describes
+  // reality. Replies share the post_comments table, so both kinds clean here.
   // Best-effort — a cleanup failure must never fail the delete itself.
   try {
     await executor.execute(
-      'DELETE FROM notifications WHERE kind = \'comment\' AND id_post_comment = ?',
+      'DELETE FROM notifications WHERE kind IN (\'comment\', \'reply\') AND id_post_comment = ?',
       [id]
     );
   } catch {
@@ -542,13 +663,29 @@ async function listFollows(executor, userId, username, direction, { page = 1, li
      ORDER BY up.username ASC LIMIT ? OFFSET ?`,
     [owner.user_id, userId, userId, userId, safeLimit, offset]
   );
+  const members = Array.isArray(rows) ? rows : [];
+  // V6.1 Phase 3: single batched IN-query for viewer-relative flags (no
+  // per-row queries). Key: viewerFollowing (viewer follows each member).
+  let followingSet = new Set();
+  const memberIds = members.map((row) => row.user_id).filter(Boolean);
+  if (memberIds.length) {
+    const inList = memberIds.map(() => '?').join(', ');
+    const [followRows] = await executor.execute(
+      `SELECT followed_id FROM user_follows WHERE follower_id = ? AND followed_id IN (${inList})`,
+      [userId, ...memberIds]
+    );
+    for (const row of Array.isArray(followRows) ? followRows : []) {
+      if (row && row.followed_id) followingSet.add(String(row.followed_id));
+    }
+  }
   return {
-    items: (Array.isArray(rows) ? rows : []).map((row) => ({
+    items: members.map((row) => ({
       userId: row.user_id,
       username: row.username,
       displayName: row.display_name || null,
       avatarUrl: row.avatar_url || null,
-      bio: row.bio || null
+      bio: row.bio || null,
+      viewerFollowing: followingSet.has(String(row.user_id))
     })),
     total,
     page: safePage,
@@ -559,7 +696,10 @@ async function listFollows(executor, userId, username, direction, { page = 1, li
 
 async function notifyUser(executor, { userId, actorId, kind, postId = null, commentId = null }) {
   if (!userId || String(userId) === String(actorId)) return null;
-  if (!['like', 'comment', 'follow'].includes(kind)) return null;
+  // V6.1 Phase 3 adds 'reply' (parent-comment-author inbox row). Migration
+  // 042 widens chk_notifications_kind accordingly; older DBs without 042
+  // reject the insert (23514/23503 → caller surfaces 400/503, never silent).
+  if (!['like', 'comment', 'follow', 'reply'].includes(kind)) return null;
   // Phase 2b (F7): never write an inbox row across a blocking relationship
   // either way. The read-time inbox filters would hide it anyway; skipping
   // the write keeps blocked actors from probing delivery and saves the row.
@@ -600,7 +740,8 @@ async function listNotifications(executor, userId, { page = 1, limit = 20, unrea
   const [rows] = await executor.execute(
     `SELECT n.id_notification AS id, n.actor_id, n.kind, n.id_community_post AS "postId",
        n.id_post_comment AS "commentId", n.is_read AS "isRead", n.created_at AS "createdAt",
-       up.username AS actor_username, up.display_name AS actor_display, up.avatar_url AS actor_avatar
+       up.username AS actor_username, up.display_name AS actor_display, up.avatar_url AS actor_avatar,
+       p.title AS post_title, p.japanese_text AS post_japanese, p.body AS post_body
      FROM notifications n
      LEFT JOIN user_profile up ON up.user_id = n.actor_id
      ${notifPostJoins}
@@ -609,6 +750,10 @@ async function listNotifications(executor, userId, { page = 1, limit = 20, unrea
     [userId, ...visibilityParams(userId), safeLimit, offset]
   );
   return {
+    // V6.1 Phase 3 context: excerpt (80-char summary-style truncation from
+    // title → japanese_text → body, null for follows/empty) plus
+    // actorDisplayName (new canonical key; actorDisplay kept for compat) so
+    // clients render "Yuki liked your post: 「…」" without extra fetches.
     items: (Array.isArray(rows) ? rows : []).map((row) => ({
       id: Number(row.id),
       actorId: row.actor_id,
@@ -618,7 +763,9 @@ async function listNotifications(executor, userId, { page = 1, limit = 20, unrea
       isRead: row.isRead === true || row.isRead === 1,
       actorUsername: row.actor_username || null,
       actorDisplay: row.actor_display || null,
+      actorDisplayName: row.actor_display || null,
       actorAvatar: row.actor_avatar || null,
+      excerpt: notificationExcerpt(row.post_title, row.post_japanese, row.post_body),
       createdAt: row.createdAt
     })),
     unread: Number(unreadRow?.total || 0),
@@ -870,10 +1017,19 @@ async function getCommunityProfile(executor, viewerId, username) {
       grammar: null
     };
   }
-  const [[followRow]] = isSelf ? [[null]] : await executor.execute(
-    'SELECT 1 AS following FROM user_follows WHERE follower_id = ? AND followed_id = ?',
-    [viewerId, profile.user_id]
-  );
+  // V6.1 Phase 3 followed-by signals: single batched EXISTS query returns
+  // both directions (no per-row queries). following stays for compat;
+  // viewerFollowing is the canonical alias; followsYou + mutual are new.
+  let viewerFollowing = false;
+  let followsYou = false;
+  if (!isSelf) {
+    const [[followRow]] = await executor.execute(
+      'SELECT EXISTS (SELECT 1 FROM user_follows WHERE follower_id = ? AND followed_id = ?) AS following, EXISTS (SELECT 1 FROM user_follows WHERE follower_id = ? AND followed_id = ?) AS followed_by',
+      [viewerId, profile.user_id, profile.user_id, viewerId]
+    );
+    viewerFollowing = Boolean(followRow && (followRow.following === true || followRow.following === 1));
+    followsYou = Boolean(followRow && (followRow.followed_by === true || followRow.followed_by === 1));
+  }
   return {
     userId: profile.user_id,
     username: profile.username,
@@ -884,7 +1040,10 @@ async function getCommunityProfile(executor, viewerId, username) {
     targetJlpt: profile.target_jlpt || null,
     interests: profile.interests || null,
     isSelf,
-    following: Boolean(followRow && followRow.following),
+    following: viewerFollowing,
+    viewerFollowing,
+    followsYou,
+    mutual: Boolean(viewerFollowing && followsYou),
     counts: privacyCounts
   };
 }
@@ -903,6 +1062,7 @@ async function searchCommunity(executor, viewerId, query, { type = 'all', page =
   const like = `%${escapeLikePattern(text)}%`;
   const out = { people: [], posts: [], decks: [], reading: [] };
   const jobs = [];
+  let rawPeople = [];
   if (type === 'all' || type === 'people') {
     jobs.push(executor.execute(
       `SELECT up.user_id, up.username, up.display_name, up.avatar_url, up.bio
@@ -913,10 +1073,7 @@ async function searchCommunity(executor, viewerId, query, { type = 'all', page =
        ORDER BY up.username ASC LIMIT ? OFFSET ?`,
       [like, like, viewerId, viewerId, safeLimit, offset]
     ).then(([rows]) => {
-      out.people = (Array.isArray(rows) ? rows : []).map((row) => ({
-        userId: row.user_id, username: row.username, displayName: row.display_name || null,
-        avatarUrl: row.avatar_url || null, bio: row.bio || null
-      }));
+      rawPeople = Array.isArray(rows) ? rows : [];
     }));
   }
   if (type === 'all' || type === 'posts') {
@@ -975,11 +1132,38 @@ async function searchCommunity(executor, viewerId, query, { type = 'all', page =
     }));
   }
   await Promise.all(jobs);
+  // V6.1 Phase 3: viewer-relative people flags via a single batched edge
+  // query (no per-row queries). Keys: following (viewer → person),
+  // followsYou (person → viewer).
+  if (rawPeople.length) {
+    const peopleIds = rawPeople.map((row) => row.user_id).filter(Boolean);
+    const inList = peopleIds.map(() => '?').join(', ');
+    const [edges] = await executor.execute(
+      `SELECT follower_id, followed_id FROM user_follows WHERE (follower_id = ? AND followed_id IN (${inList})) OR (follower_id IN (${inList}) AND followed_id = ?)`,
+      [viewerId, ...peopleIds, ...peopleIds, viewerId]
+    );
+    const followingSet = new Set();
+    const followsYouSet = new Set();
+    for (const edge of Array.isArray(edges) ? edges : []) {
+      if (String(edge.follower_id) === String(viewerId)) followingSet.add(String(edge.followed_id));
+      if (String(edge.followed_id) === String(viewerId)) followsYouSet.add(String(edge.follower_id));
+    }
+    out.people = rawPeople.map((row) => ({
+      userId: row.user_id, username: row.username, displayName: row.display_name || null,
+      avatarUrl: row.avatar_url || null, bio: row.bio || null,
+      following: followingSet.has(String(row.user_id)),
+      followsYou: followsYouSet.has(String(row.user_id))
+    }));
+  } else {
+    out.people = [];
+  }
   return { ...out, page: safePage, limit: safeLimit };
 }
 
 module.exports = {
   MAX_FEED_LIMIT,
+  MAX_NOTIFICATION_EXCERPT,
+  MAX_REPLIES_PER_COMMENT,
   POST_TYPES,
   blockUser,
   createComment,

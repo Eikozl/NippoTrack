@@ -93,15 +93,41 @@ test('comment writes stay single-level; nested reply payloads are rejected', asy
   });
   const insert = seen.find(({ sql }) => /INSERT INTO post_comments/i.test(sql));
   assert.ok(insert, 'comment insert issued');
-  assert.ok(!/parent_comment_id/i.test(insert.sql), 'write path carries no parent column (single-level by design)');
-  // The HTTP layer rejects reply nesting explicitly (400, never silent).
-  const { res, status, body } = mockRes();
+  assert.ok(!/parent_comment_id/i.test(insert.sql), 'top-level write carries no parent column');
+  // V6.1 Phase 3: the HTTP layer now ACCEPTS parentCommentId (one-level
+  // replies). Unknown-field rejection still applies to anything else.
+  await withPoolExecute(async (sql) => {
+    if (/SELECT id_post_comment AS pid/i.test(sql)) {
+      return [[{ pid: 11, post: 7, author_id: OTHER_ID, parent: null, deleted: false }]];
+    }
+    if (/FROM community_posts p/i.test(sql)) return [[VISIBLE_POST]];
+    if (/INSERT INTO post_comments/i.test(sql)) {
+      assert.ok(/parent_comment_id/i.test(sql), 'reply insert carries the parent column');
+      return [{ insertId: 12 }];
+    }
+    if (/FROM user_blocks/i.test(sql)) return [[]];
+    if (/INSERT INTO notifications/i.test(sql)) return [{ insertId: 4 }];
+    if (/FROM post_comments c/i.test(sql)) {
+      return [[{ id: 12, author_id: USER_ID, body: 'reply', created_at: '2026-10-07', updated_at: null, parent: 11, author_username: 'me', author_display: null, author_avatar: null }]];
+    }
+    throw new Error(`Unexpected SQL: ${sql.slice(0, 60)}`);
+  }, async () => {
+    const { res, status, body } = mockRes();
+    await controller.createComment(
+      { body: { body: 'reply', parentCommentId: 11 }, params: { id: '7' }, user: { id: USER_ID } },
+      res
+    );
+    assert.equal(status(), 201);
+    assert.equal(body().parentCommentId, 11);
+  });
+  // Anything else is still an unexpected field (400, never silent).
+  const bad = mockRes();
   await controller.createComment(
-    { body: { body: 'nested?', parentCommentId: 11 }, params: { id: '7' }, user: { id: USER_ID } },
-    res
+    { body: { body: 'x', bogus: 1 }, params: { id: '7' }, user: { id: USER_ID } },
+    bad.res
   );
-  assert.equal(status(), 400);
-  assert.match(body().error, /Unexpected field/);
+  assert.equal(bad.status(), 400);
+  assert.match(bad.body().error, /Unexpected field/);
 });
 
 test('listComments hides blocked-pair and private-profile comments both ways', async () => {
@@ -133,6 +159,8 @@ test('listFollows filters members to public, unblocked profiles', async () => {
     if (/FROM user_profile WHERE username/i.test(sql)) return [[{ user_id: OTHER_ID, is_public: true }]];
     // NOTE: member COUNT/SELECT carry an embedded FROM user_blocks inside
     // NOT EXISTS, so they are matched before the standalone block check.
+    // The viewerFollowing IN-query (Phase 3) sorts before the member reads.
+    if (/SELECT followed_id FROM user_follows WHERE follower_id/i.test(sql)) return [[]];
     if (/COUNT\(\*\)/i.test(sql)) return [[{ total: '1' }]];
     if (/FROM user_follows f/i.test(sql)) {
       return [[{ user_id: OTHER_ID, username: 'yuki', display_name: null, avatar_url: null, bio: null }]];
@@ -143,6 +171,7 @@ test('listFollows filters members to public, unblocked profiles', async () => {
     const result = await service.listFollows(pool, USER_ID, 'yuki', 'followers', {});
     assert.equal(result.total, 1);
     assert.equal(result.items[0].username, 'yuki');
+    assert.equal(result.items[0].viewerFollowing, false);
   });
   const memberQueries = seen.filter(({ sql }) => /FROM user_follows f/i.test(sql));
   assert.equal(memberQueries.length, 2, 'count + page both filtered');
@@ -286,7 +315,9 @@ test('unlike and comment delete clean their orphan notifications, best-effort', 
   });
   const commentCleanup = seenDelete.find(({ sql }) => /^DELETE FROM notifications/i.test(sql.trim()));
   assert.ok(commentCleanup, 'comment delete removes the comment notification');
-  assert.match(commentCleanup.sql, /kind = 'comment'/i);
+  // V6.1 Phase 3: cleanup covers both comment + reply inbox rows (same table).
+  assert.match(commentCleanup.sql, /'comment'/i);
+  assert.match(commentCleanup.sql, /'reply'/i);
   assert.deepEqual(commentCleanup.params, [11]);
   await withPoolExecute(deleteStub(true), async () => {
     assert.deepEqual(await service.deleteComment(pool, USER_ID, 11), { deletedId: 11 });
@@ -345,10 +376,14 @@ test('every touched query binds exactly its placeholders like Postgres would', a
     if (/INSERT INTO post_comments/i.test(sql)) return [{ insertId: 11 }];
     if (/UPDATE post_comments SET/i.test(sql)) return [{ affectedRows: 1 }];
     if (/FROM community_posts p/i.test(sql)) return [[VISIBLE_POST]];
+    if (/SELECT id_post_comment AS pid/i.test(sql)) return [[{ pid: 11, post: 7, author_id: OTHER_ID, parent: null, deleted: false }]];
     if (/SELECT id_community_post AS id FROM post_comments/i.test(sql)) return [[{ id: 7 }]];
     if (/SELECT author_id FROM post_comments/i.test(sql)) return [[{ author_id: OTHER_ID }]];
+    if (/SELECT parent_comment_id AS parent/i.test(sql)) return [[]];
+    if (/GROUP BY c\.parent_comment_id/i.test(sql)) return [[]];
     if (/FROM post_comments c/i.test(sql)) {
       if (/COUNT\(\*\)/i.test(sql)) return [[{ total: '1' }]];
+      if (/GROUP BY/i.test(sql)) return [[]];
       return [[COMMENT_ROW]];
     }
     if (/SELECT 1 FROM post_likes/i.test(sql)) return [[]];
@@ -360,12 +395,14 @@ test('every touched query binds exactly its placeholders like Postgres would', a
     if (/FROM notifications n/i.test(sql)) {
       if (/COUNT\(\*\)/i.test(sql)) return [[{ total: '1' }]];
       if (/GROUP BY/i.test(sql)) return [[{ kind: 'like', count: '1' }]];
-      return [[{ id: 9, actor_id: OTHER_ID, kind: 'like', postId: 7, commentId: null, isRead: false, actor_username: 'yuki', actor_display: null, actor_avatar: null, createdAt: '2026-10-07' }]];
+      return [[{ id: 9, actor_id: OTHER_ID, kind: 'like', postId: 7, commentId: null, isRead: false, actor_username: 'yuki', actor_display: null, actor_avatar: null, createdAt: '2026-10-07', post_title: 'hello', post_japanese: null, post_body: null }]];
     }
+    if (/SELECT followed_id FROM user_follows WHERE follower_id/i.test(sql)) return [[]];
     if (/FROM user_follows f/i.test(sql)) {
       if (/COUNT\(\*\)/i.test(sql)) return [[{ total: '1' }]];
       return [[{ user_id: OTHER_ID, username: 'yuki', display_name: null, avatar_url: null, bio: null }]];
     }
+    if (/SELECT EXISTS.*user_follows/i.test(sql)) return [[{ following: 1, followed_by: 0 }]];
     if (/FROM user_profile WHERE username/i.test(sql)) return [[{ user_id: OTHER_ID, is_public: true }]];
     if (/FROM user_blocks/i.test(sql)) return [[]];
     if (/SELECT 1 FROM content_reports/i.test(sql)) return [[]];
