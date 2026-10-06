@@ -2093,6 +2093,17 @@ function nextButton(container) {
   return findFirstButtonByText(container, 'Next') || findFirstButtonByText(container, 'Finish review');
 }
 
+test('V5.7 review: history, difficult and patterns stay hidden during a session', async () => {
+  const item = candidateItem({ entityType: 'vocabulary', entityId: 81, display: '水', reading: 'みず', meaning: 'water', strength: 'strong' });
+  const { container } = await startWithSingleItem({ item, typesPayload: RECOGNITION_ONLY, sessionId: 318 });
+  assert.match(pillText(container), /Recognition/, 'in an active session');
+  for (const label of ['Recent review sessions', 'Frequently difficult', 'Detected patterns']) {
+    const section = container.querySelector(`section[aria-label="${label}"]`);
+    assert.ok(section, `${label} section exists`);
+    assert.equal(section.hidden, true, `${label} hidden while reviewing`);
+  }
+});
+
 test('V5.7 recognition: correct pick auto-grades Good with no second question', async () => {
   const { harness, container } = await startWithRecognitionQueue();
   const options = optionButtons(container);
@@ -2110,14 +2121,15 @@ test('V5.7 recognition: correct pick auto-grades Good with no second question', 
   assert.ok(nextButton(container), 'a Next button paces the flow');
 });
 
-test('V5.7 recognition: deterministic order per session, shuffled across cards', async () => {
-  const first = await startWithRecognitionQueue({ sessionId: 311 });
-  const second = await startWithRecognitionQueue({ sessionId: 311 });
-  const orderOf = (container) => optionButtons(container).map((node) => textOf(node)).join('|');
-  assert.equal(orderOf(first.container), orderOf(second.container), 'same session and queue render the same order');
-  const counts = {};
-  for (const label of optionButtons(first.container).map((node) => textOf(node))) counts[label] = (counts[label] || 0) + 1;
-  assert.deepEqual(Object.values(counts), [1, 1, 1, 1], 'no duplicate options rendered');
+test('V5.7 recognition: option order varies so positions cannot be memorized', async () => {
+  const positions = new Set();
+  for (let mount = 0; mount < 8; mount += 1) {
+    const { container } = await startWithRecognitionQueue({ sessionId: 400 + mount });
+    const options = optionButtons(container);
+    assert.equal(options.length, 4, 'four options every time');
+    positions.add(options.findIndex((node) => /nostalgic/.test(textOf(node))));
+  }
+  assert.ok(positions.size >= 2, 'correct answer does not sit in one fixed slot');
 });
 
 test('V5.7 recognition: two mistakes auto-grade Hard and advance', async () => {
@@ -2149,14 +2161,20 @@ test('V5.7 recognition: three misses leave only the answer, grading Again', asyn
   assert.equal(gradePosts(harness).length, 1, 'single event for the Again path');
 });
 
-test('V5.7 recognition: reveal after misses grades the measured result', async () => {
+test('V5.7 recognition: no Reveal while options are active; picks always resolve', async () => {
   const { harness, container } = await startWithRecognitionQueue({ sessionId: 314 });
+  assert.equal(findFirstButtonByText(container, 'Reveal answer'), null, 'no Reveal offered alongside options');
   const wrongs = optionButtons(container).filter((node) => !/nostalgic/.test(textOf(node)));
   await clickAndSettle(wrongs[0]);
   await clickAndSettle(wrongs[1]);
-  await clickAndSettle(findFirstButtonByText(container, 'Reveal answer'));
+  assert.equal(findFirstButtonByText(container, 'Reveal answer'), null, 'still no Reveal after misses');
+  const remaining = optionButtons(container).filter((node) => !node.disabled);
+  assert.equal(remaining.length, 2, 'two options left');
+  await clickAndSettle(remaining.find((node) => !/nostalgic/.test(textOf(node))));
+  const right = optionButtons(container).find((node) => /nostalgic/.test(textOf(node)));
+  await clickAndSettle(right);
   await sleep(30);
-  assert.match(textOf(container), /Graded: Hard/, 'giving up after two misses records Hard, not a guess');
+  assert.match(textOf(container), /Graded: Again/, 'three misses grade Again through picks alone');
   assert.equal(gradePosts(harness).length, 1, 'exactly one event');
 });
 
@@ -2217,10 +2235,20 @@ test('V5.7 recognition: keyboard 1-4 picks options pre-reveal only', async () =>
   await sleep(10);
   const picked = optionButtons(container).filter((node) => node.disabled).length;
   assert.equal(picked, before + 1, 'keyboard picks the second option');
-  await clickAndSettle(findFirstButtonByText(container, 'Reveal answer'));
-  await sleep(10);
+  // Finish through picks (no Reveal exists here), then keys go quiet.
+  const remaining = () => optionButtons(container).filter((node) => !node.disabled);
+  let guard = 0;
+  while (remaining().length > 1 && guard < 5) {
+    guard += 1;
+    const wrong = remaining().find((node) => !/nostalgic/.test(textOf(node)));
+    await clickAndSettle(wrong || remaining()[0]);
+  }
+  const right = optionButtons(container).find((node) => /nostalgic/.test(textOf(node)));
+  await clickAndSettle(right);
+  await sleep(30);
   const gradesBefore = gradePosts(harness).length;
+  assert.equal(gradesBefore, 1, 'auto-graded on resolution');
   doc.dispatchEvent({ type: 'keydown', key: '4', preventDefault() {} });
   await sleep(10);
-  assert.equal(gradePosts(harness).length, gradesBefore, 'key 4 does nothing after reveal (no fourth grade)');
+  assert.equal(gradePosts(harness).length, gradesBefore, 'keys do nothing after resolution');
 });

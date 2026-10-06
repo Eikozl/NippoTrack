@@ -106,3 +106,9 @@ test('V5.7 fallback: thin pools keep the reveal flow', () => {
   assert.ok(source.includes('source.length < 3'), 'fewer than three distractors bails out');
   assert.ok(source.includes('if (recognitionOptions)'), 'options render only when built');
 });
+
+test('V5.7 review entry sections never leak into active sessions', () => {
+  const source = readSource('src/pages/review.js');
+  assert.ok(source.includes('function revealIntroSection'), 'stage-gated reveal helper present');
+  assert.ok(!source.includes('Block.hidden = false'), 'no unconditional unhide remains');
+});

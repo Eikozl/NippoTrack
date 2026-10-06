@@ -228,36 +228,25 @@ function isWeak(item) {
   return item.evidenceStrength === 'weak';
 }
 
-// V5.7 multiple-choice recognition (deterministic, no AI, zero queries).
-// Distractors come from the in-memory session queue only (same entity type,
-// same JLPT band when both sides carry one): same-user wording, plausible
-// by construction, never cross-user. FNV-1a + mulberry32 shuffle is stable
-// for the same card in the same session and varies across cards.
-function hashSeedString(text) {
-  let hash = 2166136261;
-  const input = String(text || '');
-  for (let i = 0; i < input.length; i += 1) {
-    hash ^= input.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
+// V5.7 multiple-choice recognition (no AI, zero queries). Distractors come
+// from the in-memory session queue only (same entity type, same JLPT band
+// when both sides carry one): same-user wording, plausible by construction,
+// never cross-user. Both the distractor subset and the final order are drawn
+// fresh per card, so faces and positions change every time and memorizing
+// patterns can never reveal the answer.
+function shuffleInPlace(entries) {
+  for (let i = entries.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [entries[i], entries[j]] = [entries[j], entries[i]];
   }
-  return hash >>> 0;
-}
-
-function mulberry32(seed) {
-  let state = seed | 0;
-  return () => {
-    state = (state + 0x6D2B79F5) | 0;
-    let t = Math.imul(state ^ (state >>> 15), 1 | state);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+  return entries;
 }
 
 function normOptionText(value) {
   return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-function buildRecognitionOptions(item, queue, seedText) {
+function buildRecognitionOptions(item, queue) {
   const wantMeaning = String(item?.meaning || '').trim();
   const wantDisplay = String(item?.display || '').trim();
   if (!wantMeaning || !item?.entityType) return null;
@@ -278,12 +267,8 @@ function buildRecognitionOptions(item, queue, seedText) {
   // Fewer than 3 usable distractors → null and the card keeps its reveal flow.
   const source = banded.length >= 3 ? banded : pool;
   if (source.length < 3) return null;
-  const options = [{ meaning: wantMeaning, answer: true }, ...source.slice(0, 3).map((entry) => ({ meaning: entry.meaning, answer: false }))];
-  const rand = mulberry32(hashSeedString(seedText));
-  for (let i = options.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(rand() * (i + 1));
-    [options[i], options[j]] = [options[j], options[i]];
-  }
+  const picked = shuffleInPlace(source.slice()).slice(0, 3);
+  const options = shuffleInPlace([{ meaning: wantMeaning, answer: true }, ...picked.map((entry) => ({ meaning: entry.meaning, answer: false }))]);
   return { options };
 }
 
@@ -703,6 +688,13 @@ export async function renderReview(container) {
   }
 
   let historyHasContent = false;
+  // V5.7: history/difficult/patterns belong to the Review entry (INTRO)
+  // only — never below an active session. Async loaders can resolve after
+  // the learner already entered REVIEWING (instant with auto-handoff), so
+  // every reveal is gated on the live stage instead of trusting call order.
+  function revealIntroSection(block) {
+    block.hidden = stage !== 'INTRO';
+  }
   function clearHistoryButton() {
     const button = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Clear history', attrs: { type: 'button', 'aria-label': 'Clear all review history' } });
     button.addEventListener('click', () => {
@@ -723,7 +715,7 @@ export async function renderReview(container) {
   async function loadHistory() {
     if (!historyHasContent) {
       historyBlock.replaceChildren(loadingState('Loading…'));
-      historyBlock.hidden = false;
+      revealIntroSection(historyBlock);
     }
     try {
       const data = await apiRequest('/api/review/sessions?limit=10');
@@ -741,7 +733,7 @@ export async function renderReview(container) {
           element('p', { className: 'mt-1 text-sm text-muted', text: 'When you studied, how much you reviewed, and how it felt.' }),
           element('p', { className: 'mt-2 text-sm text-muted', text: 'No review sessions yet. Finish a review to see it here.' })
         );
-        historyBlock.hidden = false;
+        revealIntroSection(historyBlock);
         historyHasContent = true;
         return;
       }
@@ -788,7 +780,7 @@ export async function renderReview(container) {
           return row;
         }))
       );
-      historyBlock.hidden = false;
+      revealIntroSection(historyBlock);
       historyHasContent = true;
     } catch (error) {
       if (historyHasContent) {
@@ -796,7 +788,7 @@ export async function renderReview(container) {
         return;
       }
       historyBlock.replaceChildren(errorState(error, loadHistory));
-      historyBlock.hidden = false;
+      revealIntroSection(historyBlock);
     }
   }
 
@@ -836,7 +828,7 @@ export async function renderReview(container) {
   async function loadDifficult() {
     if (!difficultHasContent) {
       difficultBlock.replaceChildren(loadingState('Loading…'));
-      difficultBlock.hidden = false;
+      revealIntroSection(difficultBlock);
     }
     try {
       const data = await apiRequest('/api/review/difficult');
@@ -852,7 +844,7 @@ export async function renderReview(container) {
           description,
           element('p', { className: 'mt-2 text-sm text-muted', text: 'No frequently difficult items yet. Keep reviewing to populate this section.' })
         );
-        difficultBlock.hidden = false;
+        revealIntroSection(difficultBlock);
         difficultHasContent = true;
         return;
       }
@@ -874,7 +866,7 @@ export async function renderReview(container) {
           ]);
         }))
       );
-      difficultBlock.hidden = false;
+      revealIntroSection(difficultBlock);
       difficultHasContent = true;
     } catch (error) {
       if (difficultHasContent) {
@@ -882,7 +874,7 @@ export async function renderReview(container) {
         return;
       }
       difficultBlock.replaceChildren(errorState(error, loadDifficult));
-      difficultBlock.hidden = false;
+      revealIntroSection(difficultBlock);
     }
   }
 
@@ -1323,7 +1315,7 @@ const CARD_TYPE_DESCRIPTIONS = {
           ]);
         }))
       );
-      patternsBlock.hidden = false;
+      revealIntroSection(patternsBlock);
     } catch {
       patternsBlock.hidden = true;
     }
@@ -1962,18 +1954,6 @@ const CARD_TYPE_DESCRIPTIONS = {
       answerWrap.appendChild(element('p', { className: 'mt-3 text-xs text-muted', text: 'Shortcuts: 1 Again · 2 Hard · 3 Good' }));
     }
     revealButton.addEventListener('click', () => {
-      // V5.7: recognition cards with played options auto-grade on reveal
-      // (the performance is already measured); untouched cards keep manual
-      // self-grading. Other card types are unchanged.
-      if (cardType === 'recognition' && recognitionPicks > 0 && !autoGradePosted) {
-        recognitionResolved = true;
-        frontResult.hidden = false;
-        answerResult.hidden = false;
-        frontResult.textContent = `The answer is “${item.meaning}.”`;
-        answerResult.textContent = `The answer is “${item.meaning}.”`;
-        finalizeRecognitionGrade();
-        return;
-      }
       revealed = true;
       buildAnswer();
       frontWrap.hidden = true;
@@ -2096,8 +2076,12 @@ const CARD_TYPE_DESCRIPTIONS = {
       // V5.7 multiple-choice recognition: deterministic options from the
       // in-memory queue (zero queries). Fewer than 3 usable distractors →
       // the card keeps its plain reveal flow, never padded with nonsense.
-      recognitionOptions = buildRecognitionOptions(item, queue, `${sessionId}:${item.entityType}:${item.entityId}:${currentIndex}`);
+      recognitionOptions = buildRecognitionOptions(item, queue);
       if (recognitionOptions) {
+        // V5.7: options ARE the answer path — with four choices the learner
+        // always resolves by picking, so no Reveal button is offered here.
+        // (Audio keeps its locked Reveal; the no-options fallback below
+        // keeps the plain reveal flow.)
         frontWrap.appendChild(element('p', { className: 'mt-4 text-sm font-semibold leading-6 text-ink', text: `Which meaning fits “${item.display}”? Pick one.` }));
         const optionList = element('div', { className: 'mt-2 grid gap-2', attrs: { role: 'group', 'aria-label': 'Meaning options' } });
         recognitionOptions.options.forEach((option, optionIndex) => {
@@ -2112,8 +2096,9 @@ const CARD_TYPE_DESCRIPTIONS = {
         });
         frontWrap.appendChild(optionList);
         frontWrap.appendChild(frontResult);
+      } else {
+        frontWrap.appendChild(revealButton);
       }
-      frontWrap.appendChild(revealButton);
     }
 
     function pickRecognitionOption(optionIndex) {
