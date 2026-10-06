@@ -43,6 +43,17 @@ test('post cards show identity, counts and learning actions', () => {
   assert.ok(!source.includes('innerHTML'), 'no innerHTML anywhere in social rendering');
 });
 
+test('reading posts preview the text inside the detail dialog', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('/api/reading/publications/${encodeURIComponent(post.readingId)}'), 'excerpt fetched from the public endpoint');
+  assert.ok(source.includes('Preview'), 'excerpt labeled as preview');
+});
+
+test('deck viewer lays items out in a wrapping multi-column grid', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('sm:grid-cols-2 xl:grid-cols-3'), 'one column on mobile, more when space allows');
+});
+
 test('likes, comments, follows, reports and blocks all wire to endpoints', () => {
   const source = readSource('src/pages/communityFeed.js');
   assert.ok(source.includes('/like'), 'like toggle endpoint used');

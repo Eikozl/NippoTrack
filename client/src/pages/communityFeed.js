@@ -348,7 +348,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       return;
     }
     const items = Array.isArray(detail?.items) ? detail.items : [];
-    const rows = element('div', { className: 'grid gap-2' });
+    const rows = element('div', { className: 'grid gap-2 sm:grid-cols-2 xl:grid-cols-3' });
     const saveAll = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: `Save all (${items.length}) to my library`, attrs: { type: 'button' } });
     const savedIds = new Set();
     const paintRows = () => {
@@ -388,7 +388,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
           savedIds.add(`${kind}:${entry.display || entry.word || entry.title}`);
         } else skipped += 1;
       }
-      paintRows();
+    paintRows();
       showToast(saved ? `Saved ${saved} item${saved === 1 ? '' : 's'}${skipped ? `, ${skipped} already saved` : ''}.` : 'Everything was already saved.', saved ? 'success' : 'info');
     }).catch((error) => showToast(error?.message || 'Unable to save.', 'error')));
     openDialog({
@@ -577,6 +577,17 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
         }
       }
       const followRow = (post.mine || !post.authorUsername) ? null : followButton(post.authorUsername, () => {});
+      // Linked learning content renders inline (same boxes as the cards),
+      // plus a bounded text excerpt for shared readings so the post itself
+      // previews what the text says before importing.
+      const dialogLinked = linkedBox(post);
+      if (dialogLinked) dialogLinked.addEventListener('click', (event) => event.stopPropagation());
+      const excerptWrap = (post.postType === 'share_reading' && post.readingId)
+        ? element('div', { className: 'rounded-xl border border-stone bg-paper p-3' }, [
+          element('p', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: 'Preview' }),
+          element('p', { className: 'mt-1 text-sm text-muted', text: 'Loading excerpt…' })
+        ])
+        : null;
       openDialog({
         title: `${post.authorDisplay || post.authorUsername || 'Someone'} · ${POST_TYPE_LABEL[post.postType] || post.postType}`,
         description: post.createdAt ? new Date(post.createdAt).toLocaleString() : '',
@@ -585,12 +596,31 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
           ...(post.title ? [element('p', { className: 'break-words font-semibold text-ink', text: post.title })] : []),
           ...(post.body ? [element('p', { className: 'break-words text-sm leading-6 text-ink/90', text: post.body })] : []),
           ...(post.translation ? [element('p', { className: 'break-words text-sm leading-6 text-muted', text: post.translation })] : []),
+          ...(dialogLinked ? [dialogLinked] : []),
+          ...(excerptWrap ? [excerptWrap] : []),
           element('div', { className: 'flex flex-wrap items-center gap-2' }, [like, followRow].filter(Boolean)),
           element('div', { className: 'grid gap-2' }, [commentsWrap, element('div', { className: 'flex gap-2' }, [input, send])])
         ])],
         submitLabel: 'Close',
         onSubmit: async (form, close) => close()
       });
+      if (excerptWrap) {
+        apiRequest(`/api/reading/publications/${encodeURIComponent(post.readingId)}`).then((detail) => {
+          const points = Array.from(String(detail?.text || ''));
+          const excerpt = points.length > 1500 ? `${points.slice(0, 1500).join('')}…` : points.join('');
+          excerptWrap.replaceChildren(
+            element('p', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: 'Preview' }),
+            excerpt
+              ? element('p', { className: 'mt-1 whitespace-pre-wrap break-words font-jp text-sm leading-7 text-ink', text: excerpt, attrs: { lang: 'ja' } })
+              : element('p', { className: 'mt-1 text-sm text-muted', text: 'Excerpt unavailable.' })
+          );
+        }).catch(() => {
+          excerptWrap.replaceChildren(
+            element('p', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: 'Preview' }),
+            element('p', { className: 'mt-1 text-sm text-muted', text: 'Excerpt unavailable.' })
+          );
+        });
+      }
       reloadComments();
       if (focusComments) setTimeout(() => { try { input.focus(); } catch { /* noop */ } }, 60);
     }).catch((error) => showToast(error?.message || 'Unable to open the post.', 'error'));
