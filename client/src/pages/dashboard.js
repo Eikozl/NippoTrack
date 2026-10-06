@@ -304,14 +304,6 @@ export async function renderDashboard(container) {
         // skips the section without failing the dashboard.
         apiRequest(`/api/dashboard/study-now?today=${localDayKey()}`).catch(() => null)
       ]);
-      // V5.6 perf: the Due metric reuses the Study Now COUNT instead of the
-      // unbounded /api/review UNION on the critical path. The full listing
-      // is fetched only as a fallback when Study Now is unavailable.
-      let dueCount = Number(studyNow?.signals?.dueCount);
-      if (!Number.isFinite(dueCount)) {
-        const review = await apiRequest('/api/review').catch(() => null);
-        dueCount = Array.isArray(review?.items) ? review.items.length : 0;
-      }
       // v5.1-E welcome personalization (presentation only): display_name
       // first-name + local-calendar-day visit state. The cached profile
       // store is reused — no new endpoint, no migration. Fail-open: any
@@ -369,7 +361,10 @@ export async function renderDashboard(container) {
         // snapshot. Progress/continue render nothing when data is absent.
         ...(todayProgressSection(studyNow) ? [todayProgressSection(studyNow)] : []),
         ...(continueSection(studyNow) ? [continueSection(studyNow)] : []),
-        element('div', { className: 'dashboard-metrics reveal-group grid gap-4 sm:grid-cols-2 xl:grid-cols-4' }, [metric('today', 'Today', data.minutesToday, 'minutes studied'), metric('week', 'This week', data.minutesThisWeek, 'minutes studied'), metric('streak', 'Current streak', activity.currentStreak, 'consecutive active days'), metric('streak', 'Longest streak', activity.longestStreak, 'best run of active days'), metric('review', 'Due reviews', dueCount, 'items ready to recall', 'review', true), metric('vocabulary', 'Vocabulary', data.vocabularyCount, 'saved words', 'vocabulary'), metric('kanji', 'Kanji', data.kanjiCount, 'tracked characters', 'kanji'), metric('grammar', 'Grammar', data.grammarCount, 'saved patterns', 'grammar')]),
+        // V5.6 Completion Pass: the metrics grid no longer duplicates what
+        // Study Now (due reviews → action) and Today's Progress (today's
+        // minutes → done) already answer. It keeps week/streaks/collection.
+        element('div', { className: 'dashboard-metrics reveal-group grid gap-4 sm:grid-cols-2 xl:grid-cols-4' }, [metric('week', 'This week', data.minutesThisWeek, 'minutes studied'), metric('streak', 'Current streak', activity.currentStreak, 'consecutive active days'), metric('streak', 'Longest streak', activity.longestStreak, 'best run of active days'), metric('vocabulary', 'Vocabulary', data.vocabularyCount, 'saved words', 'vocabulary'), metric('kanji', 'Kanji', data.kanjiCount, 'tracked characters', 'kanji'), metric('grammar', 'Grammar', data.grammarCount, 'saved patterns', 'grammar')]),
         // Zero eligible goals: this section never renders — no empty card,
         // no placeholder, no reserved space.
         ...(previewGoals.length ? [goalsPreview(previewGoals, eligibleGoals.length > 3)] : []),

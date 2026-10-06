@@ -45,7 +45,8 @@ test('dashboard no longer duplicates statistics charts', () => {
   assert.ok(!source.includes('weeklyChart'), 'weekly chart removed from dashboard');
   assert.ok(!source.includes('distributionChart'), 'distribution chart removed from dashboard');
   assert.ok(!source.includes('chartCard'), 'chart card helper removed');
-  assert.ok(source.includes("metric('review', 'Due reviews'"), 'due reviews metric exists');
+  assert.ok(!source.includes("metric('review', 'Due reviews'"), 'due reviews live in Study Now, not duplicated in the grid');
+  assert.ok(!source.includes("metric('today', 'Today'"), 'today minutes live in Today’s Progress, not duplicated in the grid');
   assert.ok(source.includes('metric-link'), 'linked metrics render as deep links');
   assert.ok(source.includes('#statistics'), 'detailed analytics link present');
   assert.ok(source.includes('activityCalendar'), 'activity calendar stays');

@@ -13,8 +13,9 @@ test('dashboard fetches Study Now fail-open alongside existing signals', () => {
   assert.ok(source.includes('/api/dashboard/study-now'), 'new aggregation endpoint used');
   assert.ok(source.includes('.catch(() => null)'), 'fail-open preserved');
   assert.ok(source.includes('/api/dashboard?today='), 'existing dashboard still fetched');
-  assert.ok(source.includes('/api/review'), 'full due listing kept as fallback only');
-  assert.ok(source.includes('studyNow?.signals?.dueCount'), 'Due metric reuses the bounded COUNT, not the unbounded UNION');
+  assert.ok(!source.includes("apiRequest('/api/review')"), 'dashboard never pulls the full due list; dues load on demand');
+  assert.ok(!source.includes("metric('review', 'Due reviews'"), 'no duplicated due tile; Study Now owns dues');
+  assert.ok(!source.includes("metric('today', 'Today'"), 'no duplicated today tile; Today’s Progress owns minutes');
 });
 
 test('Study Now renders explainable next action with CTA', () => {
