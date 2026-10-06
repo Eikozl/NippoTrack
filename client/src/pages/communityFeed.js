@@ -1128,76 +1128,224 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     });
   }
 
-  // ---- discover: search + people
+  // ---- discover: search + sections (Phase 4-frontend)
+  // Search box stays on top; category chips filter the search endpoint.
+  // Sections below come from a single GET /api/community/discover fetch
+  // (one loading state, one error with retry). Empty sections hide —
+  // no dead "see more" ends. Deck/reading rows reuse openDeckViewer /
+  // openReadingPreview so none are dead. Post sections reuse postCard;
+  // person sections reuse personRow (Follow + Follows-you from backend).
   function renderDiscover() {
     body.replaceChildren();
-    const searchInput = element('input', { className: 'field-control', attrs: { type: 'search', placeholder: 'Search people, posts, decks, readings…', 'aria-label': 'Search community' } });
-    const typeSelect = element('select', { className: 'field-control sm:max-w-44', attrs: { 'aria-label': 'Search type' } },
-      [['all', 'All'], ['posts', 'Posts'], ['people', 'People'], ['decks', 'Decks'], ['reading', 'Reading']]
-        .map(([value, label]) => element('option', { text: label, attrs: { value } })));
-    const results = element('div', { className: 'mt-4 grid gap-3' });
-    const people = element('div', { className: 'mt-6' });
+    const searchInput = element('input', { className: 'field-control', attrs: { type: 'search', placeholder: 'Search people, posts, Japanese words…', 'aria-label': 'Search community' } });
+    const SEARCH_CHIPS = [
+      { value: 'all', label: 'All' },
+      { value: 'people', label: 'People' },
+      { value: 'posts', label: 'Posts' },
+      { value: 'vocabulary', label: 'Vocabulary' },
+      { value: 'kanji', label: 'Kanji' },
+      { value: 'grammar', label: 'Grammar' },
+      { value: 'decks', label: 'Decks' },
+      { value: 'reading', label: 'Reading' }
+    ];
+    const chipsWrap = element('div', { className: 'flex flex-wrap gap-2', attrs: { role: 'group', 'aria-label': 'Search category' } });
+    const chipButtons = new Map();
+    const paintChips = () => {
+      for (const [value, button] of chipButtons) {
+        const active = value === state.searchType;
+        button.setAttribute('aria-pressed', String(active));
+        button.classList.toggle('is-active', active);
+      }
+    };
+    for (const chip of SEARCH_CHIPS) {
+      const button = element('button', {
+        className: 'button-secondary min-h-9 px-3 py-1.5 text-xs',
+        text: chip.label,
+        attrs: { type: 'button', 'aria-pressed': 'false' }
+      });
+      button.addEventListener('click', () => {
+        state.searchType = chip.value;
+        paintChips();
+        runSearch(searchInput.value.trim(), state.searchType);
+      });
+      chipButtons.set(chip.value, button);
+      chipsWrap.appendChild(button);
+    }
+    if (!SEARCH_CHIPS.some((chip) => chip.value === state.searchType)) state.searchType = 'all';
+    paintChips();
+    const results = element('div', { className: 'mt-4 grid min-w-0 gap-3', attrs: { 'aria-live': 'polite' } });
+    const discoverHost = element('div', { className: 'mt-6 grid min-w-0 gap-6' });
     body.append(
-      element('div', { className: 'grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]' }, [searchInput, typeSelect]),
+      element('div', { className: 'grid min-w-0 gap-3' }, [searchInput, chipsWrap]),
       results,
-      people
+      discoverHost
     );
+    // Deck rows open the shared deck viewer (same as post linked boxes).
+    function deckRow(deck) {
+      if (!deck || deck.id === undefined || deck.id === null) return null;
+      const title = deck.title || 'Untitled deck';
+      const metaParts = [];
+      if (deck.ownerUsername) metaParts.push(`by @${deck.ownerUsername}`);
+      if (deck.entityType) metaParts.push(deck.entityType);
+      if (deck.itemCount !== undefined && deck.itemCount !== null) metaParts.push(`${Number(deck.itemCount)} items`);
+      const button = element('button', {
+        className: 'surface block w-full min-w-0 p-4 text-left',
+        attrs: { type: 'button', 'aria-label': `Open deck ${title}` }
+      }, [
+        element('p', { className: 'truncate font-semibold text-ink', text: `📚 ${title}` }),
+        ...(metaParts.length ? [element('p', { className: 'mt-1 truncate text-xs text-muted', text: metaParts.join(' · ') })] : [])
+      ]);
+      button.addEventListener('click', () => openDeckViewer(deck.id, title));
+      return button;
+    }
+    // Reading rows open the excerpt preview (which carries Import).
+    function readingRow(text) {
+      if (!text || text.id === undefined || text.id === null) return null;
+      const title = text.title || 'Untitled reading';
+      const button = element('button', {
+        className: 'surface block w-full min-w-0 p-4 text-left',
+        attrs: { type: 'button', 'aria-label': `Preview reading ${title}` }
+      }, [
+        element('p', { className: 'truncate font-semibold text-ink', text: `📖 ${title}` }),
+        element('p', { className: 'mt-1 truncate text-xs text-muted', text: `by @${text.ownerUsername || 'user'}${text.level ? ` · ${text.level}` : ''}` })
+      ]);
+      button.addEventListener('click', () => openReadingPreview(text.id, title));
+      return button;
+    }
+    // Learning-item hits (vocabulary/kanji/grammar): compact rows with
+    // display (ja) + reading + meaning + level tag + source line. Click
+    // opens the source post dialog or the source deck viewer.
+    function learningRow(hit, refresh) {
+      if (!hit || !hit.display) return null;
+      const isPost = hit.source === 'post' && hit.postId !== null && hit.postId !== undefined;
+      const isDeck = hit.source === 'deck' && hit.deckId !== null && hit.deckId !== undefined;
+      if (!isPost && !isDeck) return null;
+      const sourceText = isPost
+        ? `shared by @${hit.authorUsername || 'user'}${hit.title ? ` · ${hit.title}` : ''}`
+        : `from deck "${hit.title || 'Untitled deck'}"${hit.authorUsername ? ` by @${hit.authorUsername}` : ''}`;
+      const row = element('button', {
+        className: 'surface block w-full min-w-0 p-3 text-left',
+        attrs: { type: 'button', 'aria-label': `${hit.display} — ${sourceText}` }
+      }, [
+        element('div', { className: 'flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1' }, [
+          element('span', { className: 'break-words font-jp text-base font-semibold text-ink', text: hit.display, attrs: { lang: 'ja' } }),
+          ...(hit.reading ? [element('span', { className: 'break-words font-jp text-sm text-muted', text: hit.reading, attrs: { lang: 'ja' } })] : []),
+          ...(hit.level ? [element('span', { className: 'status-pill text-xs', text: hit.level })] : [])
+        ]),
+        ...(hit.meaning ? [element('p', { className: 'mt-1 break-words text-sm text-ink/80', text: hit.meaning })] : []),
+        element('p', { className: 'mt-1 truncate text-xs text-muted', text: sourceText })
+      ]);
+      row.addEventListener('click', () => {
+        if (isPost) openPostDialog(hit.postId, { onProfile: openProfile, onRefresh: refresh });
+        else openDeckViewer(hit.deckId, hit.title);
+      });
+      return row;
+    }
+    function discoverSection(title, subtitle) {
+      const list = element('div', { className: 'grid min-w-0 gap-3' });
+      const section = element('section', { className: 'grid min-w-0 gap-3', attrs: { 'aria-label': title } }, [
+        element('div', { className: 'min-w-0' }, [
+          element('h2', { className: 'font-semibold text-ink', text: title }),
+          ...(subtitle ? [element('p', { className: 'mt-1 break-words text-sm text-muted', text: subtitle })] : [])
+        ]),
+        list
+      ]);
+      return { section, list };
+    }
     let timer = null;
     searchInput.addEventListener('input', () => {
       window.clearTimeout(timer);
-      timer = window.setTimeout(() => runSearch(searchInput.value.trim(), typeSelect.value), 300);
+      timer = window.setTimeout(() => runSearch(searchInput.value.trim(), state.searchType), 300);
     });
-    typeSelect.addEventListener('change', () => runSearch(searchInput.value.trim(), typeSelect.value));
     async function runSearch(query, type) {
-      if (!query) { results.replaceChildren(); return; }
+      const safeType = type || state.searchType || 'all';
+      if (!query) { results.replaceChildren(); discoverHost.hidden = false; return; }
+      discoverHost.hidden = true;
       results.replaceChildren(loadingState('Searching…'));
       try {
-        const data = await apiRequest(`/api/community/search?q=${encodeURIComponent(query)}&type=${type}&limit=10`);
+        const data = await apiRequest(`/api/community/search?q=${encodeURIComponent(query)}&type=${safeType}&limit=10`);
+        const refresh = () => runSearch(query, safeType);
         const blocks = [];
-        for (const person of data.people || []) {
-          blocks.push(personRow(person, () => runSearch(query, type), openProfile));
+        const pushRow = (node) => { if (node) blocks.push(node); };
+        if (safeType === 'all' || safeType === 'people') {
+          for (const person of data.people || []) pushRow(personRow(person, refresh, openProfile));
         }
-        for (const post of data.posts || []) {
-          blocks.push(postCard(post, { onProfile: openProfile, onRefresh: () => runSearch(query, type) }));
+        if (safeType === 'all' || safeType === 'posts') {
+          for (const post of data.posts || []) pushRow(postCard(post, { onProfile: openProfile, onRefresh: refresh }));
         }
-        for (const deck of data.decks || []) {
-          blocks.push(element('button', {
-            className: 'surface metric-link block w-full p-4 text-left',
-            text: `📚 ${deck.title} — by @${deck.ownerUsername || 'user'}`,
-            attrs: { type: 'button' }
-          }));
+        for (const key of ['vocabulary', 'kanji', 'grammar']) {
+          if (safeType === 'all' || safeType === key) {
+            for (const hit of data[key] || []) pushRow(learningRow(hit, refresh));
+          }
         }
-        for (const text of data.reading || []) {
-          const row = element('div', { className: 'surface flex items-center justify-between gap-3 p-4' }, [
-            element('div', { className: 'min-w-0' }, [
-              element('p', { className: 'truncate font-semibold text-ink', text: `📖 ${text.title}` }),
-              element('p', { className: 'text-xs text-muted', text: `by @${text.ownerUsername || 'user'}${text.level ? ` · ${text.level}` : ''}` })
-            ])
-          ]);
-          blocks.push(row);
+        if (safeType === 'all' || safeType === 'decks') {
+          for (const deck of data.decks || []) pushRow(deckRow(deck));
+        }
+        if (safeType === 'all' || safeType === 'reading') {
+          for (const text of data.reading || []) pushRow(readingRow(text));
         }
         results.replaceChildren(...(blocks.length ? blocks : [element('p', { className: 'text-sm text-muted', text: 'Nothing found. Try another search.' })]));
       } catch {
         results.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Search is unavailable.' }));
       }
     }
-    // People suggestions from recent community activity (honest label).
-    people.appendChild(element('h2', { className: 'font-semibold text-ink', text: 'Active learners' }));
-    people.appendChild(element('p', { className: 'mt-1 text-sm text-muted', text: 'People posting recently — follow whoever inspires you.' }));
-    const suggestHost = element('div', { className: 'mt-3 grid gap-2' });
-    people.appendChild(suggestHost);
-    apiRequest('/api/community/feed?tab=discover&page=1&limit=20').then((data) => {
-      const seen = new Map();
-      for (const post of data?.items || []) {
-        if (!post.authorUsername || post.mine) continue;
-        if (!seen.has(post.authorUsername)) {
-          seen.set(post.authorUsername, { username: post.authorUsername, displayName: post.authorDisplay, avatarUrl: post.authorAvatar });
+    async function loadDiscover() {
+      discoverHost.hidden = false;
+      discoverHost.replaceChildren(loadingState('Loading Discover…'));
+      try {
+        const data = await apiRequest('/api/community/discover');
+        const learners = Array.isArray(data?.learners) ? data.learners.slice(0, 5) : [];
+        const popular = Array.isArray(data?.popular) ? data.popular.slice(0, 5) : [];
+        const decks = Array.isArray(data?.content?.decks) ? data.content.decks.slice(0, 5) : [];
+        const readings = Array.isArray(data?.content?.readings) ? data.content.readings.slice(0, 5) : [];
+        const questions = Array.isArray(data?.questions) ? data.questions.slice(0, 5) : [];
+        const sections = [];
+        if (learners.length) {
+          const { section, list } = discoverSection('Learners you may like', 'Active posters you do not follow yet — follow whoever inspires you.');
+          for (const person of learners) {
+            const row = personRow(person, () => {}, openProfile);
+            if (row) list.appendChild(row);
+          }
+          sections.push(section);
         }
-        if (seen.size >= 5) break;
+        if (popular.length) {
+          const { section, list } = discoverSection('Popular this week', 'Engaging posts from the last 7 days.');
+          // Post cards carry the subtle like/comment counts; the backend
+          // score stays server-side (never rendered).
+          for (const post of popular) {
+            list.appendChild(postCard(post, { onProfile: openProfile, onRefresh: loadDiscover }));
+          }
+          sections.push(section);
+        }
+        if (decks.length || readings.length) {
+          const { section, list } = discoverSection('Useful learning content', 'Recent decks and readings from the community.');
+          for (const deck of decks) {
+            const row = deckRow(deck);
+            if (row) list.appendChild(row);
+          }
+          for (const text of readings) {
+            const row = readingRow(text);
+            if (row) list.appendChild(row);
+          }
+          sections.push(section);
+        }
+        if (questions.length) {
+          const { section, list } = discoverSection('Questions', 'Open questions from learners — tap to answer.');
+          for (const post of questions) {
+            list.appendChild(postCard(post, { onProfile: openProfile, onRefresh: loadDiscover }));
+          }
+          sections.push(section);
+        }
+        if (!sections.length) {
+          discoverHost.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Nothing to discover yet. Follow learners or share something to get started.' }));
+          return;
+        }
+        discoverHost.replaceChildren(...sections);
+      } catch (error) {
+        discoverHost.replaceChildren(errorState(error, () => loadDiscover()));
       }
-      suggestHost.replaceChildren(...[...seen.values()].map((person) => personRow(person, () => {}, openProfile)));
-      if (!seen.size) suggestHost.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'No active learners yet.' }));
-    }).catch(() => suggestHost.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Suggestions are unavailable.' })));
+    }
+    loadDiscover();
   }
 
   function personRow(person, onChange, onProfile) {

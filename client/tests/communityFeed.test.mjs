@@ -99,10 +99,69 @@ test('notifications bell tracks unread and opens an inbox', () => {
   assert.ok(source.includes('unread'), 'unread badge tracked');
 });
 
-test('discover has search plus honest people suggestions', () => {
+test('discover sections come from a single discover fetch', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('/api/community/discover'), 'single discover fetch');
+  for (const heading of ['Learners you may like', 'Popular this week', 'Useful learning content', 'Questions']) {
+    assert.ok(source.includes(heading), `section "${heading}" exists`);
+  }
+  assert.ok(source.includes('slice(0, 5)'), 'each backend list capped at 5');
+  assert.ok(source.includes('Loading Discover'), 'one loading state for the whole fetch');
+  assert.ok(source.includes('errorState(error'), 'one error state with retry');
+  assert.ok(source.includes('if (learners.length)'), 'learners section hides when empty');
+  assert.ok(source.includes('if (popular.length)'), 'popular section hides when empty');
+  assert.ok(source.includes('if (questions.length)'), 'questions section hides when empty');
+  assert.ok(source.includes('if (!sections.length)'), 'all-empty still guides instead of 4 empty states');
+  assert.ok(!source.includes('.score'), 'raw popular score never rendered');
+  assert.ok(!source.includes('Active learners'), 'old derived label removed');
+  assert.ok(!source.includes('tab=discover&page'), 'old derived discover-feed fetch removed');
+  assert.ok(source.includes('personRow(person'), 'learners reuse personRow with Follow + Follows-you');
+  assert.ok(source.includes('postCard(post'), 'popular/questions reuse post cards opening the post dialog');
+  assert.ok(source.includes("element('section'"), 'sections use landmark sections');
+  assert.ok(source.includes("element('h2'"), 'sections have headings');
+  assert.ok(!source.includes('innerHTML'), 'no innerHTML in discover rendering');
+});
+
+test('discover deck and reading rows open live viewers, never dead ends', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('function deckRow'), 'deck rows extend the shared renderer');
+  assert.ok(source.includes('function readingRow'), 'reading rows extend the shared renderer');
+  assert.ok(source.includes('openDeckViewer(deck.id'), 'deck row opens the deck viewer');
+  assert.ok(source.includes('openReadingPreview(text.id'), 'reading row opens the excerpt preview');
+  assert.ok(source.includes('importReadingButton(readingId)'), 'preview carries Import');
+  assert.ok(source.includes('Open deck'), 'deck viewer affordance labeled');
+  assert.ok(source.includes('Preview reading'), 'reading row labeled for keyboard/screen-reader reach');
+  assert.ok(source.includes('min-w-0'), 'rows bound widths so 360px never overflows');
+});
+
+test('search offers category chips and compact learning rows', () => {
   const source = readSource('src/pages/communityFeed.js');
   assert.ok(source.includes('/api/community/search'), 'search endpoint used');
-  assert.ok(source.includes('Active learners'), 'suggestions labeled by what they are');
+  for (const value of ["value: 'all'", "value: 'people'", "value: 'posts'", "value: 'vocabulary'", "value: 'kanji'", "value: 'grammar'", "value: 'decks'", "value: 'reading'"]) {
+    assert.ok(source.includes(value), `chip ${value} exists`);
+  }
+  assert.ok(source.includes('Search category'), 'chip group labeled');
+  assert.ok(source.includes('aria-pressed'), 'chip selection exposed');
+  assert.ok(source.includes('function learningRow'), 'learning hits render compact rows');
+  assert.ok(source.includes('font-jp'), 'display uses Japanese type');
+  assert.ok(source.includes("lang: 'ja'"), 'display/reading tagged lang=ja');
+  assert.ok(source.includes('hit.display') && source.includes('hit.reading') && source.includes('hit.meaning'), 'display + reading + meaning shown');
+  assert.ok(source.includes('hit.level'), 'level tag shown');
+  assert.ok(source.includes('shared by @'), 'post source credits the sharer');
+  assert.ok(source.includes('from deck'), 'deck source names the deck');
+  assert.ok(source.includes('openPostDialog(hit.postId'), 'post hit opens the source post dialog');
+  assert.ok(source.includes('openDeckViewer(hit.deckId'), 'deck hit opens the source deck viewer');
+  assert.ok(source.includes('clearTimeout') && source.includes('setTimeout'), 'debounce preserved');
+  assert.ok(!source.includes('innerHTML'), 'no innerHTML in search rendering');
+});
+
+test('legacy latest and following tabs stay untouched', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('function feedLoader'), 'paged feed loader preserved');
+  assert.ok(source.includes("state.tab === 'following'"), 'following tab still routes');
+  assert.ok(source.includes("'following' : 'latest'") || source.includes("'latest'"), 'latest tab still routes');
+  assert.ok(source.includes('composerCard'), 'composer untouched');
+  assert.ok(source.includes('Your community is quiet'), 'following empty state untouched');
 });
 
 test('avatars and names both open profiles', () => {
