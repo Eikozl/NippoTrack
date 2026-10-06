@@ -205,19 +205,23 @@ function itemsDialog(deckId, title, entityType, deckRef = null) {
       // Deck preview items: strict chunking of max 4 per column, column-major
       // (first 4 fill column 1 top-to-bottom, next 4 column 2…). ≤4 items stay
       // a single full-width column with no dividers (unchanged look).
-      // Beyond one column, fixed-width (w-36) columns are grouped into bands:
-      // colsPerBand is MEASURED from live layout
-      // (floor((containerWidth + gap) / (colWidth + gap))); each band renders
-      // as one flex row, overflow bands stack below separated by a real <hr>.
-      // Single list semantics via role=list/listitem; column/band divs stay
-      // generic so AT hears one list. ResizeObserver re-bands only when
-      // colsPerBand actually changes (no loops); isConnected guard releases
-      // the observer once the dialog stack removes the container.
+      // Beyond one column, fixed-width (w-36) columns wrap NATURALLY in one
+      // flex-wrap row — the browser alone decides where columns wrap (a column
+      // wraps IF AND ONLY IF it hit the right edge, so columns can never be
+      // cut in half). Dividers come from REALITY: after layout, columns that
+      // share the same top are one visual row; an <hr> (a 100%-basis flex item
+      // on its own line) is inserted immediately before every column that
+      // starts a new row. First row never gets an hr; a single row gets zero
+      // hrs — AN <hr> EXISTS ⟺ A WRAP REALLY HAPPENED AT THE RIGHT MARGIN.
+      // Single list semantics via role=list/listitem; column divs stay generic
+      // so AT hears one list. ResizeObserver re-places dividers from fresh
+      // measurement; signature compare-then-mutate keeps it loop-safe;
+      // isConnected guard releases the observer once the dialog removes it.
       let listObserver = null;
-      let currentColsPerBand = null;
+      let lastDividerKey = null;
       const renderList = () => {
         if (listObserver) { try { listObserver.disconnect(); } catch { /* cleanup is best-effort */ } listObserver = null; }
-        currentColsPerBand = null;
+        lastDividerKey = null;
         const makeItemNode = (entry) => {
           const open = smallButton(displayOf(entry), `Details for ${displayOf(entry)}`);
           open.classList.add('max-w-full', 'wrap-anywhere', 'break-words');
@@ -242,45 +246,68 @@ function itemsDialog(deckId, title, entityType, deckRef = null) {
           );
           return;
         }
-        const GAP_FALLBACK_PX = 12;
-        const COL_FALLBACK_PX = 144;
-        const listEl = element('div', { className: 'grid max-h-56 w-full min-w-0 max-w-full grid-cols-1 content-start gap-0 overflow-x-hidden overflow-y-auto text-sm text-ink', attrs: { role: 'list' } });
-        const colNodes = columnSlices.map((slice) => element('div', { className: 'grid w-36 min-w-0 max-w-full shrink-0 grid-cols-1 content-start gap-1', dataset: { previewCol: 'true' } }, slice.map(makeItemNode)));
-        const measureColsPerBand = () => {
-          if (!listEl.isConnected) return null;
-          const containerWidth = listEl.clientWidth;
-          if (!containerWidth) return null;
-          let colWidth = COL_FALLBACK_PX;
-          let gap = GAP_FALLBACK_PX;
-          try {
-            const probe = listEl.querySelector('[data-preview-col]');
-            if (probe) {
-              const rect = probe.getBoundingClientRect();
-              if (rect && rect.width > 0) colWidth = rect.width;
+        const listEl = element('div', { className: 'flex max-h-56 w-full min-w-0 max-w-full flex-row flex-wrap items-start gap-3 overflow-y-auto text-sm text-ink', attrs: { role: 'list' } });
+        const colNodes = columnSlices.map((slice) => element('div', { className: 'grid w-36 flex-none shrink-0 grid-cols-1 content-start gap-1' }, slice.map(makeItemNode)));
+        listEl.append(...colNodes);
+        view.replaceChildren(listEl);
+        const placeDividers = () => {
+          if (!listEl.isConnected) {
+            try { if (listObserver) listObserver.disconnect(); } catch { /* cleanup is best-effort */ }
+            listObserver = null;
+            return;
+          }
+          // Reveal the natural wrap: detach previous divider hrs so measurement
+          // sees columns only (the browser's real wrap points, not our marks).
+          const previousHrs = Array.from(listEl.querySelectorAll('hr'));
+          previousHrs.forEach((hr) => hr.remove());
+          const connectedCols = colNodes.filter((col) => col.isConnected);
+          if (!connectedCols.length) { lastDividerKey = JSON.stringify([]); return; }
+          let containerTop = 0;
+          try { containerTop = listEl.getBoundingClientRect().top; } catch { /* measurement is best-effort */ }
+          const tops = connectedCols.map((col) => {
+            try { return col.getBoundingClientRect().top - containerTop; }
+            catch { return 0; }
+          });
+          const breaks = [];
+          let rowTop = tops[0];
+          for (let colIndex = 1; colIndex < tops.length; colIndex += 1) {
+            if (Math.abs(tops[colIndex] - rowTop) > 2) {
+              breaks.push(colIndex);
+              rowTop = tops[colIndex];
             }
-            const band = listEl.querySelector('[data-preview-band]');
-            const gapSource = band || listEl;
-            const computed = window.getComputedStyle(gapSource);
-            const rawGap = computed ? (computed.columnGap || computed.gap || '') : '';
-            const parsed = parseFloat(String(rawGap));
-            if (Number.isFinite(parsed) && parsed > 0) gap = parsed;
-          } catch { /* measurement is best-effort; fallbacks keep layout stable */ }
-          if (!(colWidth > 0)) colWidth = COL_FALLBACK_PX;
-          return Math.max(1, Math.floor((containerWidth + gap) / (colWidth + gap)));
+          }
+          const key = JSON.stringify(breaks);
+          const applyDividers = () => {
+            breaks.forEach((colIndex) => {
+              const divider = element('hr', { className: 'my-2 w-full border-t border-white/10' });
+              divider.style.cssText = 'flex:0 0 100%';
+              listEl.insertBefore(divider, connectedCols[colIndex]);
+            });
+          };
+          if (!breaks.length) {
+            // Single visual row: zero hrs (already detached above). This is the
+            // core guarantee — no wrap, no divider.
+            lastDividerKey = key;
+            return;
+          }
+          if (key === lastDividerKey) {
+            // Same wrap as last run (e.g. a height-only callback from our own
+            // insertion): restore identical dividers so the synchronous
+            // remove + re-add nets to no observable change and converges.
+            applyDividers();
+            return;
+          }
+          lastDividerKey = key;
+          applyDividers();
         };
-        const renderBands = (colsPerBand) => {
-          currentColsPerBand = colsPerBand;
-          listEl.replaceChildren();
-          for (let start = 0; start < colNodes.length; start += colsPerBand) {
-            if (start > 0) {
-              listEl.appendChild(element('hr', { className: 'my-2 w-full min-w-0 max-w-full border-t border-white/10' }));
-            }
-            listEl.appendChild(element('div', { className: 'flex w-full min-w-0 max-w-full flex-row flex-nowrap items-start gap-3 overflow-x-hidden', dataset: { previewBand: 'true' } }, colNodes.slice(start, start + colsPerBand)));
+        const schedulePlace = () => {
+          if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+            window.requestAnimationFrame(() => placeDividers());
+          } else {
+            placeDividers();
           }
         };
-        view.replaceChildren(listEl);
-        const initial = measureColsPerBand();
-        renderBands(initial ?? (typeof window !== 'undefined' && window.innerWidth < 480 ? 1 : 2));
+        schedulePlace();
         if (typeof ResizeObserver !== 'undefined') {
           listObserver = new ResizeObserver(() => {
             if (!listEl.isConnected) {
@@ -288,9 +315,7 @@ function itemsDialog(deckId, title, entityType, deckRef = null) {
               listObserver = null;
               return;
             }
-            const next = measureColsPerBand();
-            if (next == null) return;
-            if (next !== currentColsPerBand) renderBands(next);
+            placeDividers();
           });
           try { listObserver.observe(listEl); } catch { /* observer is best-effort */ }
         }
