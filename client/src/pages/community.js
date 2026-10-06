@@ -202,18 +202,28 @@ function itemsDialog(deckId, title, entityType, deckRef = null) {
         viewerFollowing: detail.viewerFollowing ?? deckRef?.viewerFollowing ?? false
       })]);
       const view = element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-2' });
+      // Deck preview items in columns of max 4 rows: chunk into groups of 4
+      // (column-major: first 4 fill column 1 top-to-bottom, next 4 column 2…).
+      // Flex-wrap lets columns drop below when narrow instead of overflowing
+      // or shrinking unreadably. Single list semantics via role=list/listitem;
+      // column divs stay generic so AT hears one list of items.
       const renderList = () => {
+        const makeItemNode = (entry) => {
+          const open = smallButton(displayOf(entry), `Details for ${displayOf(entry)}`);
+          open.classList.add('max-w-full', 'wrap-anywhere', 'break-words');
+          open.addEventListener('click', () => {
+            const back = smallButton('Back to items', 'Back to items');
+            back.addEventListener('click', renderList);
+            view.replaceChildren(back, itemDetailView(entry, effectiveType));
+          });
+          return element('div', { className: 'min-w-0 max-w-full', attrs: { role: 'listitem' } }, [open]);
+        };
+        const columns = [];
+        for (let index = 0; index < items.length; index += 4) {
+          columns.push(element('div', { className: 'grid min-w-[9rem] max-w-full flex-1 basis-36 grid-cols-1 content-start gap-1' }, items.slice(index, index + 4).map(makeItemNode)));
+        }
         view.replaceChildren(
-          element('ul', { className: 'grid max-h-56 w-full min-w-0 max-w-full grid-cols-1 gap-1 overflow-x-hidden overflow-y-auto text-sm text-ink', attrs: { role: 'list' } }, items.map((entry) => {
-            const open = smallButton(displayOf(entry), `Details for ${displayOf(entry)}`);
-            open.classList.add('max-w-full', 'wrap-anywhere', 'break-words');
-            open.addEventListener('click', () => {
-              const back = smallButton('Back to items', 'Back to items');
-              back.addEventListener('click', renderList);
-              view.replaceChildren(back, itemDetailView(entry, effectiveType));
-            });
-            return element('li', { className: 'min-w-0 max-w-full' }, [open]);
-          }))
+          element('div', { className: 'flex max-h-56 w-full min-w-0 max-w-full flex-row flex-wrap items-start gap-3 overflow-x-hidden overflow-y-auto text-sm text-ink', attrs: { role: 'list' } }, columns)
         );
       };
       renderList();
