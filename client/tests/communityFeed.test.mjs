@@ -124,3 +124,32 @@ test('settings edits the full public identity incl. visibility', () => {
     assert.ok(source.includes(marker), `settings edits ${marker}`);
   }
 });
+
+test('reply threads nest single-level with inline composer', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('parentCommentId'), 'reply create sends parentCommentId');
+  assert.ok(source.includes('replyCount') && source.includes('replies'), 'listComments replies + replyCount consumed');
+  assert.ok(source.includes('Reply to'), 'top-level Reply affordance with composer placeholder');
+  assert.ok(source.includes('aria-label'), 'reply buttons labeled');
+  assert.ok(source.includes('See ${remaining} more'), 'overflow count renders as muted text');
+  assert.ok(source.includes('Cancel reply') && source.includes('Send reply'), 'composer has send/cancel');
+  assert.ok(source.includes('Report reply') || source.includes('Report comment'), 'report affordance on threads');
+  assert.ok(!source.includes('/comments/like') && !source.includes('commentLike'), 'no comment likes added');
+  assert.ok(!source.includes('innerHTML'), 'no innerHTML in reply rendering');
+});
+
+test('notification inbox shows excerpt, actor and time with follow deep-link', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('excerpt'), 'excerpt rendered under the kind line');
+  assert.ok(source.includes('actorDisplayName'), 'canonical actor display name consumed');
+  assert.ok(source.includes('timeAgo(note.createdAt)'), 'notification timestamp present');
+  assert.ok(source.includes('openProfile(note.actorUsername)'), 'follow rows link to actor profile');
+});
+
+test('followed-by signals show without noise', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('Follows you'), 'follows-you pill/text present');
+  assert.ok(source.includes('Mutual'), 'mutual button state present');
+  assert.ok(source.includes('viewerFollowing'), 'canonical viewerFollowing consumed');
+  assert.ok(source.includes('followsYou'), 'followsYou consumed');
+});

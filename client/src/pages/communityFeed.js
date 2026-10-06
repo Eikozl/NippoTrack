@@ -572,6 +572,227 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       }).catch((error) => showToast(error?.message || 'Unable to comment.', 'error'));
       send.addEventListener('click', submitComment);
       input.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); submitComment(); } });
+      const isEditedFor = (node) => {
+        try {
+          if (!node?.updatedAt || !node?.createdAt) return node?.edited === true;
+          if (node.edited === true) return true;
+          return Math.abs(new Date(node.updatedAt).getTime() - new Date(node.createdAt).getTime()) > 1000;
+        } catch {
+          return node?.edited === true;
+        }
+      };
+      const attachInlineEditor = ({ bodyText, editedNote, item, label }) => {
+        const area = element('textarea', { className: 'field-control mt-2 min-h-16 w-full', attrs: { rows: '2', maxlength: '1000', 'aria-label': label } });
+        area.value = item.body || '';
+        const save = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Save', attrs: { type: 'button' } });
+        const cancel = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Cancel', attrs: { type: 'button' } });
+        const editor = element('div', { className: 'mt-2 grid min-w-0 gap-2' }, [area, element('div', { className: 'flex flex-wrap gap-2' }, [save, cancel])]);
+        bodyText.replaceWith(editor);
+        area.focus();
+        cancel.addEventListener('click', () => editor.replaceWith(bodyText));
+        save.addEventListener('click', () => withPendingAction(save, async () => {
+          const text = String(area.value || '').trim();
+          if (!text) { showToast('Write something first.', 'error'); return; }
+          const updated = await apiRequest(`/api/community/comments/${item.id}`, { method: 'PUT', body: { body: text } });
+          item.body = updated?.body || text;
+          item.updatedAt = updated?.updatedAt || new Date().toISOString();
+          item.edited = true;
+          bodyText.textContent = item.body;
+          editor.replaceWith(bodyText);
+          editedNote.hidden = false;
+          showToast('Comment updated.');
+        }).catch((error) => showToast(error?.message || 'Unable to update.', 'error')));
+      };
+      const openReplyComposer = (parent, host, replyButton, paintReplies) => {
+        if (host.firstChild) {
+          try { host.querySelector('input')?.focus(); } catch { /* noop */ }
+          return;
+        }
+        host.hidden = false;
+        const targetName = parent.authorDisplay || parent.authorUsername || 'someone';
+        const replyInput = element('input', { className: 'field-control min-w-0 flex-1', attrs: { type: 'text', maxlength: '1000', placeholder: `Reply to ${targetName}…`, 'aria-label': `Reply to ${targetName}` } });
+        const replySend = element('button', { className: 'icon-button shrink-0', text: '➤', attrs: { type: 'button', 'aria-label': 'Send reply' } });
+        const replyCancel = element('button', { className: 'button-secondary min-h-8 shrink-0 px-2.5 py-1 text-xs', text: 'Cancel', attrs: { type: 'button', 'aria-label': 'Cancel reply' } });
+        host.replaceChildren(element('div', { className: 'flex min-w-0 gap-2' }, [replyInput, replySend, replyCancel]));
+        try { replyInput.focus(); } catch { /* noop */ }
+        const closeComposer = (refocus = true) => {
+          host.replaceChildren();
+          host.hidden = true;
+          if (refocus) { try { replyButton.focus(); } catch { /* noop */ } }
+        };
+        replyCancel.addEventListener('click', () => closeComposer(true));
+        const submitReply = () => withPendingAction(replySend, async () => {
+          const text = String(replyInput.value || '').trim();
+          if (!text) { showToast('Write something first.', 'error'); return; }
+          const created = await apiRequest(`/api/community/posts/${post.id}/comments`, { method: 'POST', body: { body: text, parentCommentId: parent.id } });
+          const merged = created && typeof created === 'object' ? created : {};
+          const replyNode = {
+            id: merged.id,
+            authorId: merged.authorId,
+            mine: merged.mine === true,
+            body: merged.body || text,
+            authorUsername: merged.authorUsername || null,
+            authorDisplay: merged.authorDisplay || null,
+            authorAvatar: merged.authorAvatar || null,
+            createdAt: merged.createdAt || new Date().toISOString(),
+            updatedAt: merged.updatedAt || merged.createdAt || new Date().toISOString(),
+            edited: merged.edited === true,
+            parentCommentId: merged.parentCommentId ?? parent.id
+          };
+          if (!Array.isArray(parent.replies)) parent.replies = [];
+          parent.replies.push(replyNode);
+          parent.replyCount = Number(parent.replyCount || 0) + 1;
+          post.commentCount = Number(post.commentCount || 0) + 1;
+          closeComposer(false);
+          paintReplies();
+          if (typeof onRefresh === 'function') onRefresh();
+          try { replyButton.focus(); } catch { /* noop */ }
+        }, { pendingLabel: 'Sending…' }).catch((error) => showToast(error?.message || 'Unable to reply.', 'error'));
+        replySend.addEventListener('click', submitReply);
+        replyInput.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') { event.preventDefault(); submitReply(); }
+          else if (event.key === 'Escape') { event.preventDefault(); closeComposer(true); }
+        });
+      };
+      const buildReply = (reply, parent, paintReplies) => {
+        const replyAuthor = reply.authorDisplay || reply.authorUsername || 'Someone';
+        const replyBody = element('p', { className: 'mt-1 break-words text-sm leading-6 text-ink/90', text: reply.body });
+        const replyEdited = element('p', { className: 'mt-1 text-xs italic text-muted', text: 'edited' });
+        replyEdited.hidden = !isEditedFor(reply);
+        const replyTime = element('span', { className: 'shrink-0 text-xs text-muted', text: timeAgo(reply.createdAt) });
+        // Single level only: replies show NO Reply button of their own.
+        // Own replies reuse the comment edit/delete path; others reuse the
+        // comment report path (targetType comment).
+        const replyHeadRight = reply.mine
+          ? element('div', { className: 'flex shrink-0 items-center gap-1' }, [
+            replyTime,
+            element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Edit', attrs: { type: 'button', 'aria-label': 'Edit reply' } }),
+            element('button', { className: 'icon-button icon-button--danger shrink-0', text: '🗑', attrs: { type: 'button', 'aria-label': 'Delete reply' } })
+          ])
+          : element('div', { className: 'flex shrink-0 items-center gap-1' }, [
+            replyTime,
+            element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Report', attrs: { type: 'button', 'aria-label': 'Report reply' } })
+          ]);
+        const replyRow = element('div', { className: 'min-w-0 rounded-lg border border-stone bg-paper p-2' }, [
+          element('div', { className: 'flex min-w-0 items-center justify-between gap-2' }, [
+            element('p', { className: 'min-w-0 flex-1 truncate text-xs font-semibold text-ink', text: replyAuthor }),
+            replyHeadRight
+          ]),
+          replyBody,
+          replyEdited
+        ]);
+        const headButtons = replyRow.querySelectorAll('button');
+        if (reply.mine) {
+          const [editButton, deleteButton] = headButtons;
+          editButton?.addEventListener('click', () => attachInlineEditor({ bodyText: replyBody, editedNote: replyEdited, item: reply, label: 'Edit reply' }));
+          deleteButton?.addEventListener('click', () => {
+            confirmDialog({
+              title: 'Delete this reply?',
+              description: 'This cannot be undone.',
+              confirmLabel: 'Delete',
+              onConfirm: async () => {
+                try {
+                  await apiRequest(`/api/community/comments/${reply.id}`, { method: 'DELETE' });
+                  parent.replies = (Array.isArray(parent.replies) ? parent.replies : []).filter((entry) => entry.id !== reply.id);
+                  parent.replyCount = Math.max(0, Number(parent.replyCount || 1) - 1);
+                  post.commentCount = Math.max(0, Number(post.commentCount || 1) - 1);
+                  paintReplies();
+                  if (typeof onRefresh === 'function') onRefresh();
+                } catch (error) {
+                  showToast(error?.message || 'Unable to delete.', 'error');
+                }
+              }
+            });
+          });
+        } else {
+          const [reportButton] = headButtons;
+          reportButton?.addEventListener('click', () => openReportDialog('comment', reply.id));
+        }
+        return replyRow;
+      };
+      const buildTopLevel = (comment) => {
+        if (!Array.isArray(comment.replies)) comment.replies = [];
+        if (comment.replyCount === undefined || comment.replyCount === null) comment.replyCount = comment.replies.length;
+        const authorName = comment.authorDisplay || comment.authorUsername || 'Someone';
+        const bodyText = element('p', { className: 'mt-1 break-words text-sm leading-6 text-ink/90', text: comment.body });
+        const editedNote = element('p', { className: 'mt-1 text-xs italic text-muted', text: 'edited' });
+        editedNote.hidden = !isEditedFor(comment);
+        const timeLabel = element('span', { className: 'shrink-0 text-xs text-muted', text: timeAgo(comment.createdAt) });
+        // Timestamps stay visible for own comments too (comment polish).
+        const headRight = comment.mine
+          ? element('div', { className: 'flex shrink-0 items-center gap-1' }, [
+            timeLabel,
+            element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Edit', attrs: { type: 'button', 'aria-label': 'Edit comment' } }),
+            element('button', { className: 'icon-button icon-button--danger shrink-0', text: '🗑', attrs: { type: 'button', 'aria-label': 'Delete comment' } })
+          ])
+          : element('div', { className: 'flex shrink-0 items-center gap-1' }, [timeLabel]);
+        // Reply affordance lives only on top-level comments (one-level
+        // threading). No comment likes per spec. Report reuses the comment
+        // report path for others.
+        const replyButton = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Reply', attrs: { type: 'button', 'aria-label': `Reply to ${authorName}` } });
+        const reportButton = comment.mine
+          ? null
+          : element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Report', attrs: { type: 'button', 'aria-label': 'Report comment' } });
+        if (reportButton) reportButton.addEventListener('click', () => openReportDialog('comment', comment.id));
+        const actions = element('div', { className: 'mt-2 flex flex-wrap items-center gap-2' }, [replyButton, reportButton].filter(Boolean));
+        // Shallow indent via left border + small padding (pl-2) so 360px
+        // layouts never overflow horizontally. Replies are single level.
+        const repliesBox = element('div', { className: 'mt-2 grid min-w-0 gap-2 border-l-2 border-stone pl-2' });
+        // No per-thread paging endpoint exists — render the remaining count
+        // as muted text only (never a dead button).
+        const moreNote = element('p', { className: 'mt-1 text-xs text-muted', text: '' });
+        moreNote.hidden = true;
+        const composerHost = element('div', { className: 'mt-2 grid min-w-0 gap-2' });
+        composerHost.hidden = true;
+        const paintReplies = () => {
+          const replies = Array.isArray(comment.replies) ? comment.replies : [];
+          repliesBox.replaceChildren(...replies.map((reply) => buildReply(reply, comment, paintReplies)));
+          repliesBox.hidden = replies.length === 0;
+          const remaining = Number(comment.replyCount || 0) - replies.length;
+          if (remaining > 0) {
+            moreNote.textContent = `See ${remaining} more ${remaining === 1 ? 'reply' : 'replies'}`;
+            moreNote.hidden = false;
+          } else {
+            moreNote.hidden = true;
+          }
+        };
+        replyButton.addEventListener('click', () => openReplyComposer(comment, composerHost, replyButton, paintReplies));
+        const row = element('div', { className: 'min-w-0 rounded-xl border border-stone bg-paper p-3' }, [
+          element('div', { className: 'flex min-w-0 items-center justify-between gap-2' }, [
+            element('p', { className: 'min-w-0 flex-1 truncate text-xs font-semibold text-ink', text: authorName }),
+            headRight
+          ]),
+          bodyText,
+          editedNote,
+          actions,
+          repliesBox,
+          moreNote,
+          composerHost
+        ]);
+        if (comment.mine) {
+          const [editButton, deleteButton] = headRight.querySelectorAll('button');
+          editButton?.addEventListener('click', () => attachInlineEditor({ bodyText, editedNote, item: comment, label: 'Edit comment' }));
+          deleteButton?.addEventListener('click', () => {
+            confirmDialog({
+              title: 'Delete this comment?',
+              description: 'This cannot be undone.',
+              confirmLabel: 'Delete',
+              onConfirm: async () => {
+                try {
+                  await apiRequest(`/api/community/comments/${comment.id}`, { method: 'DELETE' });
+                  post.commentCount = Math.max(0, Number(post.commentCount || 1) - 1);
+                  await reloadComments();
+                  if (typeof onRefresh === 'function') onRefresh();
+                } catch (error) {
+                  showToast(error?.message || 'Unable to delete.', 'error');
+                }
+              }
+            });
+          });
+        }
+        paintReplies();
+        return row;
+      };
       async function reloadComments() {
         try {
           const data = await apiRequest(`/api/community/posts/${post.id}/comments?limit=30`);
@@ -580,72 +801,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
             commentsWrap.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'No comments yet. Start the conversation.' }));
             return;
           }
-          commentsWrap.replaceChildren(...items.map((comment) => {
-            const isEdited = (() => {
-              try {
-                if (!comment.updatedAt || !comment.createdAt) return false;
-                return Math.abs(new Date(comment.updatedAt).getTime() - new Date(comment.createdAt).getTime()) > 1000;
-              } catch {
-                return false;
-              }
-            })();
-            const bodyText = element('p', { className: 'mt-1 break-words text-sm leading-6 text-ink/90', text: comment.body });
-            const editedNote = element('p', { className: 'mt-1 text-xs italic text-muted', text: 'edited' });
-            editedNote.hidden = !isEdited;
-            const row = element('div', { className: 'rounded-xl border border-stone bg-paper p-3' }, [
-              element('div', { className: 'flex items-center justify-between gap-2' }, [
-                element('p', { className: 'truncate text-xs font-semibold text-ink', text: comment.authorDisplay || comment.authorUsername || 'Someone' }),
-                comment.mine ? element('div', { className: 'flex shrink-0 items-center gap-1' }, [
-                  element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Edit', attrs: { type: 'button', 'aria-label': 'Edit comment' } }),
-                  element('button', { className: 'icon-button icon-button--danger shrink-0', text: '🗑', attrs: { type: 'button', 'aria-label': 'Delete comment' } })
-                ]) : element('span', { className: 'text-xs text-muted', text: timeAgo(comment.createdAt) })
-              ]),
-              bodyText,
-              editedNote
-            ]);
-            if (comment.mine) {
-              const [editButton, deleteButton] = row.querySelectorAll('button');
-              editButton?.addEventListener('click', () => {
-                const area = element('textarea', { className: 'field-control mt-2 min-h-16 w-full', attrs: { rows: '2', maxlength: '1000', 'aria-label': 'Edit comment' } });
-                area.value = comment.body;
-                const save = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Save', attrs: { type: 'button' } });
-                const cancel = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Cancel', attrs: { type: 'button' } });
-                const editor = element('div', { className: 'mt-2 grid gap-2' }, [area, element('div', { className: 'flex gap-2' }, [save, cancel])]);
-                bodyText.replaceWith(editor);
-                area.focus();
-                cancel.addEventListener('click', () => editor.replaceWith(bodyText));
-                save.addEventListener('click', () => withPendingAction(save, async () => {
-                  const text = String(area.value || '').trim();
-                  if (!text) { showToast('Write something first.', 'error'); return; }
-                  const updated = await apiRequest(`/api/community/comments/${comment.id}`, { method: 'PUT', body: { body: text } });
-                  comment.body = updated?.body || text;
-                  comment.updatedAt = new Date().toISOString();
-                  bodyText.textContent = comment.body;
-                  editor.replaceWith(bodyText);
-                  editedNote.hidden = false;
-                  showToast('Comment updated.');
-                }).catch((error) => showToast(error?.message || 'Unable to update.', 'error')));
-              });
-              deleteButton?.addEventListener('click', () => {
-                confirmDialog({
-                  title: 'Delete this comment?',
-                  description: 'This cannot be undone.',
-                  confirmLabel: 'Delete',
-                  onConfirm: async () => {
-                    try {
-                      await apiRequest(`/api/community/comments/${comment.id}`, { method: 'DELETE' });
-                      post.commentCount = Math.max(0, Number(post.commentCount || 1) - 1);
-                      await reloadComments();
-                      if (typeof onRefresh === 'function') onRefresh();
-                    } catch (error) {
-                      showToast(error?.message || 'Unable to delete.', 'error');
-                    }
-                  }
-                });
-              });
-            }
-            return row;
-          }));
+          commentsWrap.replaceChildren(...items.map((comment) => buildTopLevel(comment)));
         } catch {
           commentsWrap.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Comments are unavailable.' }));
         }
@@ -675,12 +831,30 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     }).catch((error) => showToast(error?.message || 'Unable to open the post.', 'error'));
   }
 
-  function followButton(username, onChange) {
+  function followButton(username, onChange, options = {}) {
     const button = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Follow', attrs: { type: 'button' } });
-    let following = null;
+    // Backend is the source of truth: viewerFollowing (canonical, legacy
+    // following kept for compat), followsYou, mutual. The button only
+    // PRESENTS those decisions — Follow back when they follow you, Mutual
+    // when both directions hold. No auth logic is derived here.
+    let following = options.initialFollowing ?? null;
+    let followsYou = options.followsYou ?? false;
+    let mutual = options.mutual ?? false;
     const paint = () => {
-      button.textContent = following ? 'Following ✓' : 'Follow';
+      if (mutual === true && following === true) {
+        button.textContent = 'Mutual ✓';
+      } else if (following) {
+        button.textContent = 'Following ✓';
+      } else if (followsYou) {
+        button.textContent = 'Follow back';
+      } else {
+        button.textContent = 'Follow';
+      }
       button.setAttribute('aria-pressed', String(following === true));
+      const label = mutual === true && following === true
+        ? `Mutual follow with ${username}`
+        : following ? `Following ${username}` : followsYou ? `Follow back ${username}` : `Follow ${username}`;
+      button.setAttribute('aria-label', label);
     };
     button.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -688,18 +862,24 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
         if (following) {
           await apiRequest('/api/community/unfollow', { method: 'POST', body: { username } });
           following = false;
+          if (mutual) mutual = false;
         } else {
           await apiRequest('/api/community/follow', { method: 'POST', body: { username } });
           following = true;
+          if (followsYou) mutual = true;
         }
         paint();
         if (typeof onChange === 'function') onChange(following);
       }).catch((error) => showToast(error?.message || 'Unable to update follow.', 'error'));
     });
-    apiRequest(`/api/community/profile/${encodeURIComponent(username)}`).then((profile) => {
-      following = profile.following === true;
-      paint();
-    }).catch(() => { paint(); });
+    if (following === null || following === undefined) {
+      apiRequest(`/api/community/profile/${encodeURIComponent(username)}`).then((profile) => {
+        following = (profile.viewerFollowing ?? profile.following) === true;
+        followsYou = profile.followsYou === true || followsYou;
+        mutual = profile.mutual === true || (following && followsYou);
+        paint();
+      }).catch(() => { paint(); });
+    }
     paint();
     return button;
   }
@@ -1021,13 +1201,20 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   }
 
   function personRow(person, onChange, onProfile) {
+    // Followed-by signal: subtle "Follows you" text only when the backend
+    // says so (search rows carry following/followsYou, follows member rows
+    // carry viewerFollowing). No noise elsewhere.
+    const followsYou = person?.followsYou === true;
+    const rawFollowing = person?.following ?? person?.viewerFollowing ?? null;
+    const hasInitial = rawFollowing === true || rawFollowing === false;
     const nameButton = element('button', { className: 'flex min-w-0 flex-1 items-center gap-3 text-left', attrs: { type: 'button', 'aria-label': `Open profile of ${person.username}` } }, [
       // Plain face here: the whole row button already navigates (buttons
       // cannot nest).
       avatarNode({ authorDisplay: person.displayName, authorUsername: person.username }, null),
       element('div', { className: 'min-w-0' }, [
         element('p', { className: 'truncate text-sm font-semibold text-ink', text: person.displayName || person.username }),
-        element('p', { className: 'truncate text-xs text-muted', text: `@${person.username}${person.bio ? ` · ${person.bio}` : ''}` })
+        element('p', { className: 'truncate text-xs text-muted', text: `@${person.username}${person.bio ? ` · ${person.bio}` : ''}` }),
+        ...(followsYou ? [element('p', { className: 'truncate text-xs text-muted', text: 'Follows you' })] : [])
       ])
     ]);
     if (typeof onProfile === 'function') {
@@ -1038,7 +1225,11 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     }
     return element('div', { className: 'surface flex items-center justify-between gap-3 p-3' }, [
       nameButton,
-      followButton(person.username, onChange)
+      followButton(person.username, onChange, hasInitial ? {
+        initialFollowing: rawFollowing === true,
+        followsYou,
+        mutual: person?.mutual === true || (rawFollowing === true && followsYou)
+      } : {})
     ]);
   }
 
@@ -1060,11 +1251,20 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
             element('div', { className: 'min-w-0' }, [
               element('h2', { className: 'truncate font-display text-xl font-semibold text-ink', text: profile.displayName || profile.username }),
               element('p', { className: 'truncate text-sm text-muted', text: `@${profile.username}` }),
+              // Followed-by signal: "Follows you" pill only when the backend
+              // says followsYou. Mutual lives on the follow button itself.
+              ...(profile.followsYou === true ? [element('div', { className: 'mt-2 flex flex-wrap gap-2' }, [
+                element('span', { className: 'status-pill text-xs', text: 'Follows you' })
+              ])] : []),
               ...(profile.bio ? [element('p', { className: 'mt-1 break-words text-sm leading-6 text-ink/80', text: profile.bio })] : []),
               ...((profile.jlptLevel || profile.targetJlpt) ? [element('p', { className: 'mt-1 text-xs text-muted', text: `${profile.jlptLevel ? `Studying ${profile.jlptLevel}` : ''}${profile.jlptLevel && profile.targetJlpt ? ' → ' : ''}${profile.targetJlpt || ''}` })] : [])
             ])
           ]),
-          ...(profile.isSelf ? [] : [followButton(profile.username, () => {})])
+          ...(profile.isSelf ? [] : [followButton(profile.username, () => {}, {
+            initialFollowing: (profile.viewerFollowing ?? profile.following) === true,
+            followsYou: profile.followsYou === true,
+            mutual: profile.mutual === true
+          })])
         ]),
         element('div', { className: 'mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm' }, [
           element('p', { className: 'text-muted', text: `${profile.counts.posts} posts · ${profile.counts.followers} followers · ${profile.counts.following} following` }),
@@ -1083,7 +1283,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
         try {
           const data = await apiRequest(`/api/community/users/${encodeURIComponent(username)}/${direction}?limit=20`);
           const items = Array.isArray(data?.items) ? data.items : [];
-          postsHost.replaceChildren(...(items.length ? items.map((person) => personRow({ username: person.username, displayName: person.displayName, avatarUrl: person.avatarUrl, bio: person.bio }, showList.bind(null, direction), openProfile)) : [element('p', { className: 'text-sm text-muted', text: 'Nobody here yet.' })]));
+          postsHost.replaceChildren(...(items.length ? items.map((person) => personRow({ username: person.username, displayName: person.displayName, avatarUrl: person.avatarUrl, bio: person.bio, viewerFollowing: person.viewerFollowing, following: person.following ?? person.viewerFollowing, followsYou: person.followsYou, mutual: person.mutual }, showList.bind(null, direction), openProfile)) : [element('p', { className: 'text-sm text-muted', text: 'Nobody here yet.' })]));
         } catch {
           postsHost.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Unable to load.' }));
         }
@@ -1123,15 +1323,26 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
           list.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'No notifications yet. Likes, comments and follows will appear here.' }));
         }
         for (const note of items) {
+          // Backend context: actorDisplayName (canonical, actorDisplay kept
+          // for compat) + excerpt (<=80 chars or null). Render "Yuki liked
+          // your post" + excerpt 「…」 underneath + relative timestamp.
+          // Follow-kind rows (no post) deep-link to the actor profile.
+          const actorName = note.actorDisplayName || note.actorDisplay || note.actorUsername || 'Someone';
           const label = note.kind === 'like'
-            ? `liked your post`
-            : note.kind === 'comment' ? `commented on your post` : `started following you`;
+            ? 'liked your post'
+            : note.kind === 'comment' ? 'commented on your post' : note.kind === 'reply' ? 'replied to your comment' : 'started following you';
+          const kindLine = element('p', { className: 'break-words text-sm font-medium text-ink', text: `${actorName} ${label}.` });
+          const excerptLine = note.excerpt
+            ? element('p', { className: 'mt-0.5 break-words text-xs text-muted', text: `「${note.excerpt}」` })
+            : null;
+          const stamp = timeAgo(note.createdAt) || (note.createdAt ? new Date(note.createdAt).toLocaleString() : '');
+          const timeLine = stamp ? element('p', { className: 'mt-0.5 text-xs text-muted', text: stamp }) : null;
           const row = element('button', {
-            className: `flex w-full items-center gap-3 rounded-xl border border-stone bg-paper px-3 py-2.5 text-left text-sm ${note.isRead ? '' : 'border-ink/40'}`,
-            attrs: { type: 'button' }
+            className: `flex w-full items-start gap-3 rounded-xl border border-stone bg-paper px-3 py-2.5 text-left ${note.isRead ? '' : 'border-ink/40'}`,
+            attrs: { type: 'button', 'aria-label': `${actorName} ${label}` }
           }, [
-            element('span', { text: note.kind === 'like' ? '❤️' : note.kind === 'comment' ? '💬' : '👤', attrs: { 'aria-hidden': 'true' } }),
-            element('span', { className: 'min-w-0', text: `${note.actorDisplay || note.actorUsername || 'Someone'} ${label}.` })
+            element('span', { className: 'mt-0.5 shrink-0', text: note.kind === 'like' ? '❤️' : note.kind === 'comment' || note.kind === 'reply' ? '💬' : '👤', attrs: { 'aria-hidden': 'true' } }),
+            element('div', { className: 'min-w-0 flex-1' }, [kindLine, excerptLine, timeLine].filter(Boolean))
           ]);
           row.addEventListener('click', async () => {
             try {
@@ -1140,6 +1351,9 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
             if (note.postId) {
               closePanel();
               openPostDialog(note.postId, { onProfile: openProfile, onRefresh: () => {} });
+            } else if (note.actorUsername) {
+              closePanel();
+              openProfile(note.actorUsername);
             }
             refreshBell();
           });
