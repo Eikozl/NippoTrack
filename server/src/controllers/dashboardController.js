@@ -101,4 +101,133 @@ async function getActivity(req, res) {
   }
 }
 
-module.exports = { getDashboard, getActivity };
+// V5.6 Study Now — single deterministic recommendation reusing existing
+// signals only. Read-only, bounded, user-scoped. No new tables, no ML.
+// Rule order (explainable):
+//   dueCount > 0            -> review (reason includes difficultCount)
+//   incomplete reading      -> continue reading
+//   no collection yet       -> analyze first text
+//   minutesToday == 0       -> log a session / keep streak
+//   else                    -> explore / read something new
+async function getStudyNow(req, res) {
+  try {
+    const today = resolveToday(req.query);
+    const userId = req.user.id;
+    const [dueRows] = await pool.query(`
+      SELECT
+        (SELECT COUNT(*) FROM review_items ri
+          JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary
+          WHERE ri.due_on <= CURRENT_DATE AND ri.id_vocabulary IS NOT NULL AND ri.id_kanji IS NULL AND ri.id_grammar IS NULL
+            AND v.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)) +
+        (SELECT COUNT(*) FROM review_items ri
+          JOIN kanji k ON k.id_kanji = ri.id_kanji
+          WHERE ri.due_on <= CURRENT_DATE AND ri.id_kanji IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_grammar IS NULL
+            AND k.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)) +
+        (SELECT COUNT(*) FROM review_items ri
+          JOIN grammar_points g ON g.id_grammar = ri.id_grammar
+          WHERE ri.due_on <= CURRENT_DATE AND ri.id_grammar IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_kanji IS NULL
+            AND g.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL))
+        AS due_count,
+        COALESCE((SELECT SUM(duration_minutes) FROM study_sessions WHERE user_id = ? AND session_date = COALESCE(?::date, CURRENT_DATE)), 0) AS minutes_today,
+        (SELECT COUNT(*) FROM vocabulary WHERE user_id = ?) AS vocabulary_count,
+        (SELECT COUNT(*) FROM kanji WHERE user_id = ?) AS kanji_count,
+        (SELECT COUNT(*) FROM grammar_points WHERE user_id = ?) AS grammar_count
+    `, [userId, userId, userId, userId, today, userId, userId, userId]);
+    const [[difficultRows], [readingRows]] = await Promise.all([
+      pool.query(`
+        SELECT ri.id_review_item FROM review_items ri
+        LEFT JOIN review_events re ON re.id_review_item = ri.id_review_item
+        LEFT JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary AND v.user_id = ?
+        LEFT JOIN kanji k ON k.id_kanji = ri.id_kanji AND k.user_id = ?
+        LEFT JOIN grammar_points g ON g.id_grammar = ri.id_grammar AND g.user_id = ?
+        WHERE (v.user_id = ? OR k.user_id = ? OR g.user_id = ?)
+        GROUP BY ri.id_review_item
+        HAVING COUNT(*) FILTER (WHERE re.result = 'Again') >= 2
+        LIMIT 10
+      `, [userId, userId, userId, userId, userId, userId]),
+      pool.query(`
+        SELECT rt.id_reading_text AS id, rt.title AS title
+        FROM user_reading_progress p
+        JOIN reading_texts rt ON rt.id_reading_text = p.text_id
+        WHERE p.user_id = ? AND p.completed_at IS NULL
+        ORDER BY p.updated_at DESC NULLS LAST, p.text_id DESC
+        LIMIT 1
+      `, [userId]).catch(() => [[], []])
+    ]);
+    // чтения may fail on older/back-compat schemas — fail open to null.
+    let incompleteReading = null;
+    try {
+      const row = Array.isArray(readingRows) ? readingRows[0] : readingRows?.rows?.[0];
+      const list = Array.isArray(readingRows) ? readingRows : [];
+      const first = list[0] || row;
+      if (first && first.id !== undefined) incompleteReading = { id: first.id, title: first.title || 'Untitled text' };
+    } catch { incompleteReading = null; }
+    const snapshot = Array.isArray(dueRows) ? dueRows[0] : {};
+    const dueCount = Number(snapshot?.due_count || snapshot?.dueCount || 0);
+    const minutesToday = Number(snapshot?.minutes_today || 0);
+    const vocabularyCount = Number(snapshot?.vocabulary_count || 0);
+    const kanjiCount = Number(snapshot?.kanji_count || 0);
+    const grammarCount = Number(snapshot?.grammar_count || 0);
+    const difficultCount = Array.isArray(difficultRows) ? difficultRows.length : 0;
+    const collectionCount = vocabularyCount + kanjiCount + grammarCount;
+
+    let primary;
+    if (dueCount > 0) {
+      const estimate = `~${Math.max(2, Math.min(60, Math.round(dueCount * 0.5)))} min`;
+      primary = {
+        kind: 'review',
+        title: `${dueCount} review${dueCount === 1 ? '' : 's'} due`,
+        reason: difficultCount > 0
+          ? `${dueCount} item${dueCount === 1 ? '' : 's'} ready to recall, including ${difficultCount} you recently struggled with.`
+          : `${dueCount} item${dueCount === 1 ? '' : 's'} ready to recall. Short recall now saves re-study later.`,
+        estimate,
+        cta: 'Start review',
+        href: '#review'
+      };
+    } else if (incompleteReading) {
+      primary = {
+        kind: 'reading',
+        title: 'Continue reading',
+        reason: `Pick up where you left off in “${String(incompleteReading.title).slice(0, 80)}”.`,
+        estimate: '~10 min',
+        cta: 'Continue reading',
+        href: `#reading?id=${encodeURIComponent(incompleteReading.id)}`
+      };
+    } else if (collectionCount === 0) {
+      primary = {
+        kind: 'analyze',
+        title: 'Analyze your first text',
+        reason: 'Paste Japanese you are reading. NippoTrack shows what you know and lets you save it.',
+        estimate: '~5 min',
+        cta: 'Open Analyzer',
+        href: '#analyzer'
+      };
+    } else if (minutesToday === 0) {
+      primary = {
+        kind: 'session',
+        title: 'Log today’s study',
+        reason: 'No minutes recorded today yet. A short session keeps your streak alive.',
+        estimate: '~5 min',
+        cta: 'Log session',
+        href: '#sessions'
+      };
+    } else {
+      primary = {
+        kind: 'explore',
+        title: 'Read something new',
+        reason: 'Reviews are clear and today is logged. New input keeps encounters growing.',
+        estimate: '~10 min',
+        cta: 'Browse reading',
+        href: '#reading'
+      };
+    }
+    return res.json({
+      primary,
+      signals: { dueCount, difficultCount, minutesToday, vocabularyCount, kanjiCount, grammarCount, incompleteReading }
+    });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load study recommendation.' });
+  }
+}
+
+module.exports = { getDashboard, getActivity, getStudyNow };

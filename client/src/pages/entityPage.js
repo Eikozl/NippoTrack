@@ -224,9 +224,9 @@ renderDetail: (item) => {
           ]) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No review scheduled' })
         ]),
 
-        // 4. Encounter Intelligence — exposure only, never review evidence.
+        // 4. Where you've seen it — exposure only, never review evidence.
         element('section', { className: 'kanji-detail-section surface p-5' }, [
-          element('h3', { className: 'font-semibold text-ink', text: 'Encounter Intelligence' }),
+          element('h3', { className: 'font-semibold text-ink', text: 'Where you’ve seen it' }),
           element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: 'Seen in your words and writings — exposure only, not review evidence.' }),
           element('dl', { className: 'mt-3 grid gap-4 sm:grid-cols-2' }, [
             element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Total Encounters' }), element('dd', { className: 'mt-1 font-medium text-ink', text: String(encounters.count) })]),
@@ -236,7 +236,7 @@ renderDetail: (item) => {
             element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Session Writing Sources' }), element('dd', { className: 'mt-1 font-medium text-ink', text: String(encounters.bySource.find(s => s.sourceType === 'session_writing')?.count || 0) })])
           ]),
           encounters.recent?.length ? element('div', { className: 'mt-4' }, [
-            element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Recent Encounters (max 5)' }),
+            element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Recent' }),
             element('ul', { className: 'mt-2 grid gap-2' }, encounters.recent.map((enc) => element('li', { className: 'text-sm text-ink/80 flex items-center gap-2' }, [
               element('span', { className: 'status-pill text-xs', text: enc.sourceType === 'vocabulary' ? 'Vocab' : 'Writing' }),
               element('span', { text: enc.sourceTitle || `Source #${enc.sourceId}` }),

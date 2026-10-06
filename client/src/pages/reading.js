@@ -109,7 +109,8 @@ async function renderLibraryView(container) {
     if (!items.length) {
       gridWrap.replaceChildren(emptyState({
         title: 'No reading texts yet',
-        description: 'Import from Aozora, or paste your own text to start reading.'
+        description: 'Import from Aozora, or paste your own text to start reading.',
+        action: element('a', { className: 'button-primary inline-flex min-h-11 items-center justify-center px-5 py-2.5 text-sm font-semibold', text: 'Open Analyzer', attrs: { href: '#analyzer' } })
       }));
       return;
     }

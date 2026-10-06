@@ -60,6 +60,7 @@ app.get('/api', (req, res) => {
     endpoints: [
       'GET /api/health',
       'GET /api/dashboard',
+      'GET /api/dashboard/study-now',
       'GET /api/sessions',
       'POST /api/sessions',
       'GET /api/vocabulary',

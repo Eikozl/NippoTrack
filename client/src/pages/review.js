@@ -314,7 +314,7 @@ export async function renderReview(container) {
   const introBlock = element('div', {}, [
     element('p', { className: 'eyebrow', text: 'Review' }),
     element('h2', { className: 'mt-2 text-2xl font-semibold tracking-tight text-ink sm:text-3xl', text: 'Want to review your JLPT study?', attrs: { tabindex: '-1' } }),
-    element('p', { className: 'mt-3 max-w-2xl text-sm leading-6 text-muted', text: 'Revisit recent study activity with focused recall, one item at a time. Use self-assessment to note how each item felt and decide what to look at again.' })
+    element('p', { className: 'mt-3 max-w-2xl text-sm leading-6 text-muted', text: 'Short recall now saves re-study later. Again, Hard and Good only set timing — pick how each item felt and keep going.' })
   ]);
   // Immersion hand-off banner: when mounted via a create-session redirect,
   // announce the enrollment and let the normal flow take over. This page
@@ -1525,7 +1525,8 @@ const CARD_TYPE_DESCRIPTIONS = {
               reading: item.reading,
               meaning: item.meaning,
               ...(item.evidenceStrength ? { evidenceStrength: item.evidenceStrength } : {}),
-              ...(item.lastResult ? { lastResult: item.lastResult } : {})
+              ...(item.lastResult ? { lastResult: item.lastResult } : {}),
+              ...(Array.isArray(item.sources) ? { sources: item.sources.slice(0, 5) } : {})
             });
           }
         });
@@ -1626,11 +1627,23 @@ const CARD_TYPE_DESCRIPTIONS = {
     speedSelect.addEventListener('change', () => { applySpeechRate(speedSelect); });
     speechRateSelects.push(speedSelect);
     const titleRow = element('div', { className: 'mt-2 flex items-center gap-2' }, [title, speakerButton, speedSelect]);
+    // V5.6 context-rich review: collapsed "why" never disrupts recall speed.
+    // Only true signals are shown — due date is implicit, lastResult and
+    // provenanceLine come from the candidate payload, never fabricated.
+    const whyLines = [];
+    if (item.lastResult === 'Again' || item.lastResult === 'Hard') whyLines.push(`Last marked ${item.lastResult === 'Again' ? 'Again — worth another look' : 'Hard — recalled with difficulty'}.`);
+    const provenance = provenanceLine(item);
+    if (provenance) whyLines.push(`Seen in: ${provenance}.`);
+    const whyDetails = whyLines.length ? element('details', { className: 'mt-3 rounded-xl border border-stone bg-paper/60 px-3 py-2' }, [
+      element('summary', { className: 'cursor-pointer text-xs font-semibold text-muted', text: 'Why am I reviewing this?' }),
+      element('p', { className: 'mt-1.5 text-xs leading-5 text-muted', text: whyLines.join(' ') })
+    ]) : null;
     const card = element('article', { className: 'surface review-card p-5 sm:p-8' }, [
       element('div', { className: 'flex items-start justify-between gap-3' }, [progress, counter]),
       track,
       typePill,
-      titleRow
+      titleRow,
+      ...(whyDetails ? [whyDetails] : [])
     ]);
 
     const body = element('div', { className: 'mt-5 border-t border-stone pt-5' });
@@ -1947,7 +1960,8 @@ const CARD_TYPE_DESCRIPTIONS = {
       element('div', { className: 'mt-6 flex flex-col gap-2 sm:flex-row' }, [
         element('button', { className: 'button-primary', text: 'Back to Review', attrs: { type: 'button' } }),
         ...(failed.length ? [element('button', { className: 'button-secondary', text: `Repeat failed (${failed.length})`, attrs: { type: 'button' } })] : []),
-        element('a', { className: 'button-secondary', text: 'Go to Dashboard', attrs: { href: '#dashboard' } })
+        element('a', { className: 'button-secondary', text: 'Go to Dashboard', attrs: { href: '#dashboard' } }),
+        element('a', { className: 'button-secondary', text: 'Log study session', attrs: { href: '#sessions' } })
       ])
     ]);
     const buttons = card.querySelectorAll('button');

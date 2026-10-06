@@ -28,6 +28,29 @@ function welcomeHeader(model) {
   ]);
 }
 
+function studyNowSection(studyNow) {
+  // V5.6 Study Home: deterministic next action from existing signals.
+  // Fail-open: null payload renders nothing, dashboard stays byte-identical.
+  const primary = studyNow?.primary;
+  if (!primary || typeof primary !== 'object') return null;
+  const cta = element('a', {
+    className: 'button-primary inline-flex min-h-11 items-center justify-center px-5 py-2.5 text-sm font-semibold',
+    text: primary.cta || 'Start',
+    attrs: { href: primary.href || '#review' }
+  });
+  return element('section', { className: 'surface study-now p-5 sm:p-6', attrs: { 'aria-label': 'Study now recommendation' } }, [
+    element('div', { className: 'flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between' }, [
+      element('div', { className: 'min-w-0' }, [
+        element('p', { className: 'eyebrow', text: 'Study now' }),
+        element('h2', { className: 'mt-1 font-display text-lg font-semibold tracking-tight text-ink', text: primary.title || 'Keep studying' }),
+        element('p', { className: 'mt-1 max-w-2xl text-sm leading-6 text-muted', text: primary.reason || '' }),
+        ...(primary.estimate ? [element('p', { className: 'mt-2 text-xs font-semibold uppercase tracking-[0.13em] text-muted', text: primary.estimate })] : [])
+      ]),
+      element('div', { className: 'flex shrink-0 items-center gap-3' }, [cta])
+    ])
+  ]);
+}
+
 function activityCalendar(items) {
   const minutesByDate = new Map(items.map((item) => [String(item.date).slice(0, 10), Number(item.minutes)]));
   const today = new Date();
@@ -96,7 +119,7 @@ function isEmptyDashboardSnapshot(data) {
 export async function renderDashboard(container) {
   destroyCharts();
   const content = element('div', { className: 'dashboard-frame' });
-  container.replaceChildren(element('section', {}, [pageHeader({ eyebrow: 'Overview', title: 'Dashboard', description: 'A calm snapshot of your current Japanese study activity.' }), content]));
+  container.replaceChildren(element('section', {}, [pageHeader({ eyebrow: 'Study home', title: 'Dashboard', description: 'Your learning home — what to do now, and what you’ve done.' }), content]));
   content.replaceChildren(loadingState('Loading your study overview…'));
   async function load() {
     try {
@@ -106,7 +129,7 @@ export async function renderDashboard(container) {
       // Detailed charts live in Statistics (the canonical analytics page);
       // the dashboard stays a calm snapshot: metrics, recent sessions,
       // activity calendar, and quiet links outward.
-      const [data, activity, review, goalsData] = await Promise.all([
+      const [data, activity, review, goalsData, studyNow] = await Promise.all([
         // `today` anchors server windows on the browser's local date: DB
         // CURRENT_DATE is UTC and dropped evening sessions (0 minutes).
         apiRequest(`/api/dashboard?today=${localDayKey()}`),
@@ -114,7 +137,10 @@ export async function renderDashboard(container) {
         apiRequest('/api/review'),
         // One bounded request on the existing Goals endpoint; a failure
         // here skips the preview without failing the dashboard.
-        apiRequest('/api/goals?active=1&limit=10').catch(() => null)
+        apiRequest('/api/goals?active=1&limit=10').catch(() => null),
+        // V5.6 Study Now: deterministic next action. Fail-open — a failure
+        // skips the section without failing the dashboard.
+        apiRequest(`/api/dashboard/study-now?today=${localDayKey()}`).catch(() => null)
       ]);
       // v5.1-E welcome personalization (presentation only): display_name
       // first-name + local-calendar-day visit state. The cached profile
@@ -168,6 +194,7 @@ export async function renderDashboard(container) {
       const previewGoals = eligibleGoals.slice(0, 3);
       content.replaceChildren(
         ...(welcome ? [welcomeHeader(welcome)] : []),
+        ...(studyNowSection(studyNow) ? [studyNowSection(studyNow)] : []),
         element('div', { className: 'dashboard-metrics reveal-group grid gap-4 sm:grid-cols-2 xl:grid-cols-4' }, [metric('today', 'Today', data.minutesToday, 'minutes studied'), metric('week', 'This week', data.minutesThisWeek, 'minutes studied'), metric('streak', 'Current streak', activity.currentStreak, 'consecutive active days'), metric('streak', 'Longest streak', activity.longestStreak, 'best run of active days'), metric('review', 'Due reviews', review.items.length, 'items ready to recall', 'review', true), metric('vocabulary', 'Vocabulary', data.vocabularyCount, 'saved words', 'vocabulary'), metric('kanji', 'Kanji', data.kanjiCount, 'tracked characters', 'kanji'), metric('grammar', 'Grammar', data.grammarCount, 'saved patterns', 'grammar')]),
         // Zero eligible goals: this section never renders — no empty card,
         // no placeholder, no reserved space.
