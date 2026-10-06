@@ -1659,7 +1659,10 @@ const CARD_TYPE_DESCRIPTIONS = {
     // would hand out the answer the listening exercise is asking for.
     const speakerLabel = cardType === 'audio' ? 'Play audio' : `Play ${item.display}`;
     const speakerButton = element('button', { className: 'icon-button shrink-0', attrs: { type: 'button', 'aria-label': speakerLabel } }, [icon('volume', { size: 20 })]);
-    speakerButton.addEventListener('click', () => { speakDisplay(item.display); });
+    // Prefer the recorded kana reading: device TTS guesses kanji readings
+    // (often on'yomi or outright wrong for jukujikun like 大人), while kana
+    // is pronounced exactly as saved. Falls back to the display text.
+    speakerButton.addEventListener('click', () => { speakDisplay(item.reading || item.display); });
     const speedSelect = element('select', {
       className: 'rounded-lg border border-stone bg-paper px-1.5 py-1 text-xs font-semibold text-muted',
       attrs: { 'aria-label': 'Voice speed', 'data-speech-rate': '' }
@@ -1673,20 +1676,28 @@ const CARD_TYPE_DESCRIPTIONS = {
     // V5.6 context-rich review: collapsed "why" never disrupts recall speed.
     // Only true signals are shown — due date is implicit, lastResult and
     // provenanceLine come from the candidate payload, never fabricated.
+    // Why = reason + honest history (with dates when the batch knows them).
+    const context = item.context && typeof item.context === 'object' ? item.context : null;
     const whyLines = [];
-    if (item.lastResult === 'Again' || item.lastResult === 'Hard') whyLines.push(`Last marked ${item.lastResult === 'Again' ? 'Again — worth another look' : 'Hard — recalled with difficulty'}.`);
+    if (item.lastResult === 'Again' || item.lastResult === 'Hard') {
+      const failedAgo = context?.lastFailedAt ? daysAgoText(context.lastFailedAt) : null;
+      whyLines.push(`Last marked ${item.lastResult === 'Again' ? 'Again — worth another look' : 'Hard — recalled with difficulty'}${failedAgo ? ` (${failedAgo})` : ''}.`);
+    } else if (Number(context?.againCount) > 0) {
+      whyLines.push(`Marked Again ${context.againCount} time${context.againCount === 1 ? '' : 's'} before.`);
+    }
     const provenance = provenanceLine(item);
     if (provenance) whyLines.push(`Seen in: ${provenance}.`);
     const whyDetails = whyLines.length ? element('details', { className: 'mt-3 rounded-xl border border-stone bg-paper/60 px-3 py-2' }, [
       element('summary', { className: 'cursor-pointer text-xs font-semibold text-muted', text: 'Why am I reviewing this?' }),
       element('p', { className: 'mt-1.5 text-xs leading-5 text-muted', text: whyLines.join(' ') })
     ]) : null;
-    // V5.6 Completion Pass: real learning context, collapsed by default so
+    // V5.6 Completion Pass: real learning content, collapsed by default so
     // the recall hot path stays fast (and recall/audio fronts never leak the
-    // answer — the learner opens this deliberately). Every line is backed by
-    // batched queue context; absent data hides the whole block.
+    // answer — the learner opens this deliberately). History lives in Why
+    // above; this block renders ONLY when there is actual content (an owned
+    // example sentence or recorded encounters), so it can never merely
+    // repeat Why.
     const contextLines = [];
-    const context = item.context && typeof item.context === 'object' ? item.context : null;
     if (context?.example?.sentence) {
       contextLines.push(`You saw this in: ${context.example.sentence}`);
       if (context.example.translation) contextLines.push(`Translation: ${context.example.translation}`);
@@ -1694,12 +1705,6 @@ const CARD_TYPE_DESCRIPTIONS = {
     if (Number(context?.encounters?.count) > 0) {
       const seenAgo = context.encounters.lastAt ? daysAgoText(context.encounters.lastAt) : null;
       contextLines.push(`Seen ${context.encounters.count} time${context.encounters.count === 1 ? '' : 's'} in your words and writings${seenAgo ? ` — last ${seenAgo}` : ''}.`);
-    }
-    if (context?.lastFailedAt) {
-      const failedAgo = daysAgoText(context.lastFailedAt);
-      if (failedAgo) contextLines.push(`Last time: Again — ${failedAgo}.`);
-    } else if (Number(context?.againCount) > 0) {
-      contextLines.push(`Marked Again ${context.againCount} time${context.againCount === 1 ? '' : 's'} before.`);
     }
     const contextDetails = contextLines.length ? element('details', { className: 'mt-2 rounded-xl border border-stone bg-paper/60 px-3 py-2' }, [
       element('summary', { className: 'cursor-pointer text-xs font-semibold text-muted', text: 'Context' }),
@@ -1723,6 +1728,12 @@ const CARD_TYPE_DESCRIPTIONS = {
 
     // Practice-only typed-answer state (grading stays with Again/Hard/Good).
     let checkState = null;
+    // Concealed (audio) cards lock Reveal until the heard word is typed —
+    // but this is memory practice, not an exam. After MAX_CONCEALED_TRIES
+    // failed tries the lock opens so nobody gets stuck without a voice
+    // reading the words correctly (device TTS misreads happen).
+    const MAX_CONCEALED_TRIES = 4;
+    let concealedTries = 0;
     let clozeBlank = null;
     let clozeFilled = null;
     let filledLine = null;
@@ -1784,11 +1795,20 @@ const CARD_TYPE_DESCRIPTIONS = {
           confirmMatch();
         } else if (concealMismatch) {
           // Listening exercise: never disclose the word here; the locked
-          // Reveal stays shut until the heard word is typed.
+          // Reveal stays shut until the heard word is typed — or until the
+          // tries run out, so a misheard word can never trap the learner.
+          concealedTries += 1;
+          const triesLeft = MAX_CONCEALED_TRIES - concealedTries;
           frontResult.hidden = false;
-          frontResult.textContent = 'Not quite — listen again.';
           answerResult.hidden = false;
-          answerResult.textContent = 'Not quite — listen again.';
+          if (triesLeft <= 0) {
+            revealButton.removeAttribute('disabled');
+            frontResult.textContent = 'Not quite — after 4 tries, reveal the answer and grade yourself honestly.';
+            answerResult.textContent = 'Not quite — after 4 tries, reveal the answer and grade yourself honestly.';
+          } else {
+            frontResult.textContent = `Not quite — listen again (${triesLeft} ${triesLeft === 1 ? 'try' : 'tries'} left before reveal).`;
+            answerResult.textContent = `Not quite — listen again (${triesLeft} ${triesLeft === 1 ? 'try' : 'tries'} left before reveal).`;
+          }
         } else {
           showCheck({ matched: false, typed: String(typed).trim() });
         }

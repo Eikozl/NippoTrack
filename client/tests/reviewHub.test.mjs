@@ -1604,7 +1604,7 @@ test('Review 3.0 audio: speaker icon in front and after reveal, gated input unlo
   await clickAndSettle(beforeRef);
   await sleep(120);
   assert.equal(harness.speechCalls.length, 1, 'front speaker click speaks');
-  assert.match(String(harness.speechCalls[0]?.text || harness.speechCalls[0] || ''), /水/, 'speaks display text');
+  assert.match(String(harness.speechCalls[0]?.text || harness.speechCalls[0] || ''), /みず/, 'speaker prefers the recorded kana reading over TTS-guessed kanji');
   await clickAndSettle(findFirstButtonByText(container, 'Reveal answer'));
   await sleep(10);
   speakers = speakerButtons(container).filter(isVisible);
@@ -1667,11 +1667,36 @@ test('Review 3.0 audio: mismatch keeps reveal locked and never discloses the wor
   const notices = [...container.querySelectorAll('p')].map((n) => n.textContent || '').filter((t) => t.startsWith('Not quite'));
   assert.ok(notices.length >= 1, 'mismatch notice rendered');
   for (const notice of notices) {
-    assert.equal(notice, 'Not quite — listen again.', 'mismatch never discloses the word up front');
+    assert.equal(notice, 'Not quite — listen again (3 tries left before reveal).', 'mismatch never discloses the word up front');
   }
   const reveal = findFirstButtonByText(container, 'Reveal answer');
   assert.ok(reveal.hasAttribute('disabled'), 'reveal stays locked after mismatch');
   assert.equal(harness.apiCalls.filter((c) => c.url === '/api/review/grade').length, gradesBefore, 'Check never grades');
+});
+
+test('Review audio: four failed tries unlock reveal instead of trapping the learner', async () => {
+  const item = candidateItem({ entityType: 'vocabulary', entityId: 78, display: '水', reading: 'みず', meaning: 'water', strength: 'strong' });
+  const { harness, container } = await startWithSingleItem({
+    item,
+    typesPayload: { availableTypes: ['recognition', 'recall', 'cloze', 'audio'], userPreferences: { cardTypes: ['audio'], weights: {}, engineMode: 'fixed', autoPick: true } }
+  });
+  const input = answerInputOf(container);
+  const check = findFirstButtonByText(container, 'Check');
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    input.value = `zzz-nope-${attempt}`;
+    await clickAndSettle(check);
+  }
+  let reveal = findFirstButtonByText(container, 'Reveal answer');
+  assert.ok(reveal.hasAttribute('disabled'), 'reveal still locked after three tries');
+  input.value = 'zzz-nope-final';
+  await clickAndSettle(check);
+  reveal = findFirstButtonByText(container, 'Reveal answer');
+  assert.ok(!reveal.hasAttribute('disabled'), 'fourth failed try unlocks reveal');
+  assert.match(textOf(container), /grade yourself honestly/, 'unlock copy keeps self-grading honest');
+  await clickAndSettle(reveal);
+  await sleep(10);
+  assert.ok(findFirstButtonByText(container, 'Again'), 'grades reachable after unlock');
+  void harness;
 });
 
 test('Review 3.0 audio: device without Japanese voice renders the card as recognition', async () => {
@@ -1879,7 +1904,7 @@ test('Review audio hardening: rapid double-play keeps single live utterance (no 
   speaker.click();
   await sleep(150);
   assert.equal(harness.speechCalls.length, 1, 'rapid double-play coalesces to single speak (not dropped, not doubled)');
-  assert.match(String(harness.speechCalls[0]?.text || ''), /水/, 'live utterance carries display text');
+  assert.match(String(harness.speechCalls[0]?.text || ''), /みず/, 'live utterance carries the recorded kana reading');
   assert.equal(typeof harness.speechCalls[0]?.onend, 'function', 'retained utterance has onend');
   assert.equal(typeof harness.speechCalls[0]?.onerror, 'function', 'retained utterance has onerror');
   assert.ok(harness.speechCancelCalls.length >= cancelsBefore + 2, 'each play cancels before defer');

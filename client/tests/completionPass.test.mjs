@@ -49,8 +49,17 @@ test('review context is real, collapsed and never fabricated', () => {
   assert.ok(source.includes('item.context'), 'reads batched queue context');
   assert.ok(source.includes('You saw this in:'), 'source sentence when present');
   assert.ok(source.includes('Seen ${'), 'encounter counts when present');
-  assert.ok(source.includes('Last time: Again'), 'last-failed wording without the word failed');
+  assert.ok(source.includes('Last marked'), 'history with dates lives in Why, not Context');
+  assert.ok(!source.includes('Last time: Again'), 'Context never repeats Why history');
   assert.ok(source.includes('function daysAgoText'), 'relative dates computed, invalid hidden');
+});
+
+test('audio cards cannot trap the learner', () => {
+  const source = readSource('src/pages/review.js');
+  assert.ok(source.includes('item.reading || item.display'), 'speaker prefers the recorded kana reading over TTS-guessed kanji');
+  assert.ok(source.includes('MAX_CONCEALED_TRIES = 4'), 'bounded tries before reveal unlocks');
+  assert.ok(source.includes('reveal the answer and grade yourself honestly'), 'unlock copy keeps self-grading honest');
+  assert.ok(source.includes('left before reveal'), 'remaining tries shown');
 });
 
 test('review resumes unfinished sessions from continue links', () => {
