@@ -3,6 +3,7 @@
 // untouched (mounted as the Decks tab). All bodies render via textContent;
 // all identity comes from the server payloads (req.user.id server-side).
 import { apiRequest } from '../api';
+import { speakJapanese } from '../speech.js';
 import {
   element, emptyState, errorState, loadingState, openDialog, confirmDialog,
   showToast, withPendingAction
@@ -88,6 +89,63 @@ function typePill(postType) {
   return element('span', { className: 'status-pill text-xs', text: POST_TYPE_LABEL[postType] || postType });
 }
 
+// Phase 5-frontend honesty gates (same tight rule as review.js
+// isUsableMeaning): fragments, links, or symbol-only strings are never
+// quizzable, so they must never be saved from shared posts either.
+function isUsableMeaning(value) {
+  const text = String(value || '').trim();
+  if (!text) return false;
+  if (/[-–—―]$/.test(text) || /^[-–—―]/.test(text)) return false;
+  if (/https?:\/\/|www\./i.test(text)) return false;
+  if (/[\r\n]/.test(text)) return false;
+  if (!/[\p{L}\p{N}]/u.test(text)) return false;
+  return true;
+}
+
+// Same single-Han check as the Decks hub (community.js:91): kanji saves
+// require exactly one Han character, never a word or multi-char string.
+const SINGLE_HAN = /^\p{Script=Han}$/u;
+
+function speechPieces() {
+  const hasWindow = typeof window !== 'undefined';
+  return {
+    synthesis: hasWindow ? window.speechSynthesis : null,
+    Utterance: hasWindow ? window.SpeechSynthesisUtterance : null
+  };
+}
+
+// Single-utterance TTS reusing the shared speakJapanese infrastructure
+// (same pattern as the Decks hub playQueue single-item path). No furigana
+// or analysis is fabricated — the given text plays as-is.
+function playJapaneseText(text) {
+  const say = String(text || '').trim();
+  if (!say) { showToast('Nothing to play.', 'error'); return; }
+  const verdict = speakJapanese(say, { ...speechPieces() });
+  if (!verdict.ok) showToast(verdict.message || 'Audio playback is unavailable.', 'error');
+}
+
+// Verified progress snapshot block (additive `stats`, null when absent).
+// Presents backend numbers only — never claims live data.
+function statsBlock(stats) {
+  if (!stats || typeof stats !== 'object') return null;
+  const rows = [
+    (stats.streakDays !== undefined && stats.streakDays !== null) ? `🔥 ${Number(stats.streakDays)}-day streak` : null,
+    (stats.vocabCount !== undefined && stats.vocabCount !== null) ? `📚 ${Number(stats.vocabCount)} vocab` : null,
+    (stats.kanjiCount !== undefined && stats.kanjiCount !== null) ? `字 ${Number(stats.kanjiCount)} kanji` : null,
+    (stats.grammarCount !== undefined && stats.grammarCount !== null) ? `📝 ${Number(stats.grammarCount)} grammar` : null,
+    (stats.studiedMinutesMonth !== undefined && stats.studiedMinutesMonth !== null) ? `⏱ ${Number(stats.studiedMinutesMonth)} min (last 30 days)` : null,
+    (stats.reviewsDue !== undefined && stats.reviewsDue !== null) ? `📥 ${Number(stats.reviewsDue)} reviews due` : null,
+    (stats.readingsFinished !== undefined && stats.readingsFinished !== null) ? `📖 ${Number(stats.readingsFinished)} readings finished` : null
+  ].filter(Boolean);
+  if (!rows.length) return null;
+  const asOf = stats.asOf ? `verified snapshot · ${stats.asOf}` : 'verified snapshot';
+  return element('div', { className: 'mt-3 rounded-xl border border-stone bg-paper p-3', attrs: { 'aria-label': 'Verified study snapshot' } }, [
+    element('p', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: 'Study snapshot' }),
+    element('ul', { className: 'mt-2 grid gap-1 text-sm text-ink/90', attrs: { role: 'list' } }, rows.map((line) => element('li', { className: 'tabular-nums', text: line }))),
+    element('p', { className: 'mt-2 text-xs text-muted', text: asOf })
+  ]);
+}
+
 function entityCreateEndpoint(entityType) {
   return entityType === 'vocabulary' ? '/api/vocabulary' : entityType === 'kanji' ? '/api/kanji' : '/api/grammar';
 }
@@ -103,13 +161,19 @@ function deckItemDisplay(kind, entry) {
 }
 
 function entityCreateBody(entityType, snapshot) {
+  // Honesty gate: no usable dictionary meaning → null (callers render a
+  // disabled Save with "No dictionary meaning available"). Never invents a
+  // gloss — fake meanings must not enter the library/review queue.
+  const meaning = String(snapshot?.meaning || '').trim();
+  if (!isUsableMeaning(meaning)) return null;
+  if (!snapshot?.display) return null;
   if (entityType === 'vocabulary') {
-    return { word: snapshot.display, ...(snapshot.reading ? { reading: snapshot.reading } : {}), meaning: snapshot.meaning || 'Saved from Community' };
+    return { word: snapshot.display, ...(snapshot.reading ? { reading: snapshot.reading } : {}), meaning };
   }
   if (entityType === 'kanji') {
-    return { character_kanji: snapshot.display, meaning: snapshot.meaning || 'Saved from Community' };
+    return { character_kanji: snapshot.display, meaning };
   }
-  return { grammar_point: snapshot.display, meaning: snapshot.meaning || 'Saved from Community' };
+  return { grammar_point: snapshot.display, meaning };
 }
 
 export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
@@ -360,7 +424,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     const excerpt = points.length > 1500 ? `${points.slice(0, 1500).join('')}…` : points.join('');
     openDialog({
       title: detail?.title || fallbackTitle || 'Reading preview',
-      description: `${detail?.level || 'No level'}${detail?.text ? ` · ${points.length.toLocaleString()} characters` : ''}`,
+      description: `${detail?.level ? `Level ${detail.level} (reference)` : 'No level'}${detail?.text ? ` · ${points.length.toLocaleString()} characters` : ''}`,
       content: [element('div', { className: 'grid gap-3' }, [
         excerpt
           ? element('p', { className: 'whitespace-pre-wrap break-words font-jp text-sm leading-7 text-ink', text: excerpt, attrs: { lang: 'ja' } })
@@ -370,6 +434,69 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       submitLabel: 'Close',
       onSubmit: async (form, close) => close()
     });
+  }
+
+  function practiceLink() {
+    // Existing #review hub only: no per-entity deep link exists (review has
+    // no entity query param), so link the hub without claiming this item is
+    // queued. Honest title says to save first.
+    const link = element('a', { className: 'button-secondary inline-flex min-h-9 items-center px-3 py-1.5 text-xs', text: 'Practice in Review', attrs: { href: '#review', title: 'Opens Review — save first to include this item', 'aria-label': 'Open Review to practice your due items' } });
+    link.addEventListener('click', (event) => event.stopPropagation());
+    return link;
+  }
+
+  function detailsLink(post) {
+    // Only kanji has an existing detail route for arbitrary text
+    // (#kanji-reference/<char>). Vocab/grammar details require an owned
+    // library id (foreign snapshots carry none) — those buttons are omitted.
+    const kind = post.entityType || (post.postType === 'share_kanji' ? 'kanji' : null);
+    if (kind !== 'kanji') return null;
+    const display = String(post.snapshot?.display || '');
+    if (!SINGLE_HAN.test(display)) return null;
+    const link = element('a', { className: 'button-secondary inline-flex min-h-9 items-center px-3 py-1.5 text-xs', text: 'Details', attrs: { href: `#kanji-reference/${encodeURIComponent(display)}`, 'aria-label': `Open reference details for ${display}` } });
+    link.addEventListener('click', (event) => event.stopPropagation());
+    return link;
+  }
+
+  // Deck items reuse the same honesty gates as single saves (no invented
+  // gloss, single-Han kanji). Used to disable per-item Save honestly.
+  function deckItemSaveable(kind, entry) {
+    const display = deckItemDisplay(kind, entry);
+    if (!display) return false;
+    if (!isUsableMeaning(entry?.meaning)) return false;
+    if (kind === 'kanji' && !SINGLE_HAN.test(String(display))) return false;
+    return true;
+  }
+
+  function exampleActions(post) {
+    // Japanese Example posts (#6): Save-as-vocab (gated on a real usable
+    // translation) + TTS via shared speakJapanese. Analyze is OMITTED:
+    // #analyzer has no text-prefill/query support and #immersion only reads
+    // returnUrl — linking would drop the text. Never fabricate furigana.
+    if (post.postType !== 'example' || !String(post.japaneseText || '').trim()) return null;
+    const text = String(post.japaneseText || '').trim();
+    const meaning = String(post.translation || '').trim();
+    const saveable = isUsableMeaning(meaning);
+    const rowChildren = [];
+    if (saveable) {
+      const save = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Save as vocab', attrs: { type: 'button', 'aria-label': 'Save example as vocabulary' } });
+      save.addEventListener('click', (event) => {
+        event.stopPropagation();
+        withPendingAction(save, async () => {
+          await apiRequest('/api/vocabulary', { method: 'POST', body: { word: text, meaning } });
+          showToast('Saved to your library.');
+        }, { pendingLabel: 'Saving…' }).catch((error) => showToast(error?.message || 'Unable to save (it may already be saved).', 'error'));
+      });
+      rowChildren.push(save);
+    } else {
+      const disabled = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs opacity-60', text: 'Save as vocab', attrs: { type: 'button', disabled: '', title: 'No dictionary meaning available', 'aria-label': 'Save unavailable — no dictionary meaning available' } });
+      disabled.addEventListener('click', (event) => event.stopPropagation());
+      rowChildren.push(disabled);
+    }
+    const play = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: '🔊 Play', attrs: { type: 'button', 'aria-label': 'Play example aloud' } });
+    play.addEventListener('click', (event) => { event.stopPropagation(); playJapaneseText(text); });
+    rowChildren.push(play);
+    return element('div', { className: 'mt-2 flex flex-wrap gap-2' }, rowChildren);
   }
 
   function linkedBox(post) {
@@ -385,20 +512,25 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     }
     if (post.postType === 'share_reading' && post.readingId) {
       const title = snapshot?.title || 'Shared reading';
+      // Analyze OMITTED: POST /api/immersion/analyze exists but the
+      // immersion page takes no text-prefill param (only returnUrl) and the
+      // analyzer page has no query prefill — a link would drop the text.
+      // Import + preview-as-Read reuse existing flows read-only.
+      const levelText = snapshot?.level ? `Level ${snapshot.level} (reference)` : 'No level';
       return element('div', { className: 'mt-3 rounded-xl border border-stone bg-paper p-3' }, [
         element('p', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: '📖 Reading — tap the title for a preview' }),
         readingPreviewButton(post.readingId, title),
-        ...(snapshot ? [element('p', { className: 'mt-1 text-xs text-muted', text: `${snapshot.level || 'No level'}${snapshot.chars ? ` · ${Number(snapshot.chars).toLocaleString()} characters` : ''}` })] : []),
+        ...(snapshot ? [element('p', { className: 'mt-1 text-xs text-muted', text: `${levelText}${snapshot.chars ? ` · ${Number(snapshot.chars).toLocaleString()} characters` : ''}`, attrs: { title: 'Reference level — not official JLPT data' } })] : []),
         element('div', { className: 'mt-2 flex flex-wrap gap-2' }, [importReadingButton(post.readingId)])
       ]);
     }
     if ((post.postType === 'share_vocab' || post.postType === 'share_kanji' || post.postType === 'share_grammar') && snapshot?.display) {
       return element('div', { className: 'mt-3 rounded-xl border border-stone bg-paper p-3' }, [
         element('p', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: 'Shared learning item' }),
-        element('p', { className: 'mt-1 break-words font-jp text-lg font-semibold text-ink', text: snapshot.display }),
-        ...(snapshot.reading ? [element('p', { className: 'break-words font-jp text-sm text-muted', text: snapshot.reading })] : []),
+        element('p', { className: 'mt-1 break-words font-jp text-lg font-semibold text-ink', text: snapshot.display, attrs: { lang: 'ja' } }),
+        ...(snapshot.reading ? [element('p', { className: 'break-words font-jp text-sm text-muted', text: snapshot.reading, attrs: { lang: 'ja' } })] : []),
         ...(snapshot.meaning ? [element('p', { className: 'mt-1 break-words text-sm text-ink/80', text: snapshot.meaning })] : []),
-        element('div', { className: 'mt-2 flex flex-wrap gap-2' }, [saveEntityButton(post)])
+        element('div', { className: 'mt-2 flex flex-wrap gap-2' }, [saveEntityButton(post), practiceLink(), detailsLink(post)].filter(Boolean))
       ]);
     }
     return null;
@@ -424,18 +556,26 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     const items = Array.isArray(detail?.items) ? detail.items : [];
     const rows = element('div', { className: 'grid grid-cols-2 gap-2 xl:grid-cols-3' });
     const saveAll = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: `Save all (${items.length}) to my library`, attrs: { type: 'button' } });
+    // Existing #review hub only — no per-deck review route exists. Read-only
+    // link beside Save-all; the deck itself is unchanged.
+    const startReview = element('a', { className: 'button-secondary inline-flex min-h-9 items-center px-3 py-1.5 text-xs', text: 'Start Review', attrs: { href: '#review', 'aria-label': 'Start Review in the review hub' } });
+    const topRow = element('div', { className: 'flex flex-wrap gap-2' }, [saveAll, startReview]);
     const savedIds = new Set();
     const paintRows = () => {
       rows.replaceChildren(...items.map((entry, index) => {
         const kind = entry.entityType || detail.entityType || 'vocabulary';
         const label = deckItemDisplay(kind, entry) || `Item ${index + 1}`;
         const saved = savedIds.has(`${kind}:${label}`);
+        const saveable = deckItemSaveable(kind, entry);
+        const saveDisabledReason = !isUsableMeaning(entry?.meaning)
+          ? 'No dictionary meaning available'
+          : (kind === 'kanji' ? 'Single kanji character required' : 'Cannot save this item');
         const save = element('button', {
-          className: 'button-secondary min-h-8 shrink-0 px-2.5 py-1 text-xs',
+          className: `button-secondary min-h-8 shrink-0 px-2.5 py-1 text-xs${saveable && !saved ? '' : ' opacity-60'}`,
           text: saved ? 'Saved ✓' : 'Save',
-          attrs: { type: 'button', ...(saved ? { disabled: '' } : {}) }
+          attrs: { type: 'button', ...((saved || !saveable) ? { disabled: '', title: saved ? 'Already saved' : saveDisabledReason, 'aria-label': saved ? `Saved ${label}` : `Save unavailable for ${label} — ${saveDisabledReason.toLowerCase()}` } : { 'aria-label': `Save ${label} to library` }) }
         });
-        if (!saved) {
+        if (!saved && saveable) {
           save.addEventListener('click', async () => {
             const ok = await saveDeckItem(kind, entry);
             if (ok) { savedIds.add(`${kind}:${label}`); paintRows(); }
@@ -443,7 +583,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
         }
         return element('div', { className: 'flex items-center justify-between gap-3 rounded-xl border border-stone bg-paper px-3 py-2' }, [
           element('div', { className: 'min-w-0' }, [
-            element('p', { className: 'truncate font-jp text-sm font-semibold text-ink', text: label }),
+            element('p', { className: 'truncate font-jp text-sm font-semibold text-ink', text: label, attrs: { lang: 'ja' } }),
             ...(entry.meaning ? [element('p', { className: 'truncate text-xs text-muted', text: entry.meaning })] : [])
           ]),
           save
@@ -463,12 +603,12 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
         } else skipped += 1;
       }
     paintRows();
-      showToast(saved ? `Saved ${saved} item${saved === 1 ? '' : 's'}${skipped ? `, ${skipped} already saved` : ''}.` : 'Everything was already saved.', saved ? 'success' : 'info');
+      showToast(saved ? `Saved ${saved} item${saved === 1 ? '' : 's'}${skipped ? `, ${skipped} skipped (already saved or unavailable)` : ''}.` : 'Nothing new to save (already saved or no dictionary meaning).', saved ? 'success' : 'info');
     }).catch((error) => showToast(error?.message || 'Unable to save.', 'error')));
     openDialog({
       title: title || 'Shared deck',
       description: `${items.length} items`,
-      content: [element('div', { className: 'grid gap-3' }, [saveAll, rows])],
+      content: [element('div', { className: 'grid gap-3' }, [topRow, rows])],
       submitLabel: 'Close',
       onSubmit: async (form, close) => close()
     });
@@ -478,8 +618,12 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
 
   async function saveDeckItem(kind, entry) {
     const display = deckItemDisplay(kind, entry);
-    const meaning = entry.meaning || 'Saved from Community';
+    const meaning = String(entry?.meaning || '').trim();
     if (!display) return false;
+    // Honesty gates: no invented gloss, single-Han kanji. No request fires
+    // when the gate fails — the caller counts it as skipped.
+    if (!isUsableMeaning(meaning)) return false;
+    if (kind === 'kanji' && !SINGLE_HAN.test(String(display))) return false;
     try {
       if (kind === 'kanji') {
         await apiRequest('/api/kanji', { method: 'POST', body: { character_kanji: display, meaning } });
@@ -510,11 +654,21 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
 
   function saveEntityButton(post) {
     const snapshot = post.snapshot || {};
-    const button = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Save to library', attrs: { type: 'button' } });
+    const body = entityCreateBody(post.entityType, snapshot);
+    if (!body) {
+      const disabled = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs opacity-60', text: 'Save to library', attrs: { type: 'button', disabled: '', title: 'No dictionary meaning available', 'aria-label': 'Save unavailable — no dictionary meaning available' } });
+      disabled.addEventListener('click', (event) => event.stopPropagation());
+      return disabled;
+    }
+    const button = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Save to library', attrs: { type: 'button', 'aria-label': `Save ${snapshot.display} to library` } });
     button.addEventListener('click', (event) => {
       event.stopPropagation();
+      if (post.entityType === 'kanji' && !SINGLE_HAN.test(String(snapshot.display || ''))) {
+        showToast('This kanji cannot be saved — a single kanji character is required.', 'error');
+        return;
+      }
       withPendingAction(button, async () => {
-        await apiRequest(entityCreateEndpoint(post.entityType), { method: 'POST', body: entityCreateBody(post.entityType, snapshot) });
+        await apiRequest(entityCreateEndpoint(post.entityType), { method: 'POST', body });
         showToast('Saved to your library.');
       }, { pendingLabel: 'Saving…' }).catch((error) => showToast(error?.message || 'Unable to save (it may already be saved).', 'error'));
     });
@@ -541,6 +695,21 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     if (post.japaneseText) card.appendChild(element('p', { className: 'mt-2 break-words font-jp text-lg leading-8 text-ink', text: post.japaneseText, attrs: { lang: 'ja' } }));
     if (post.body) card.appendChild(element('p', { className: 'mt-2 break-words text-sm leading-6 text-ink/90', text: post.body }));
     if (post.translation) card.appendChild(element('p', { className: 'mt-2 break-words text-sm leading-6 text-muted', text: post.translation }));
+    // Progress cards present the backend-verified snapshot when present
+    // (additive `stats`, null for manual-only progress → body only).
+    if (post.postType === 'progress' && post.stats) {
+      const stats = statsBlock(post.stats);
+      if (stats) card.appendChild(stats);
+    }
+    // Japanese Example posts carry per-example study actions (Save gated on
+    // a real translation + TTS; Analyze omitted — no prefill support).
+    if (post.postType === 'example') {
+      const examples = exampleActions(post);
+      if (examples) {
+        examples.addEventListener('click', (event) => event.stopPropagation());
+        card.appendChild(examples);
+      }
+    }
     const box = linkedBox(post);
     if (box) {
       box.addEventListener('click', (event) => event.stopPropagation());
@@ -811,6 +980,9 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       // reading titles open the excerpt dialog, decks open the viewer).
       const dialogLinked = linkedBox(post);
       if (dialogLinked) dialogLinked.addEventListener('click', (event) => event.stopPropagation());
+      const dialogStats = post.postType === 'progress' ? statsBlock(post.stats) : null;
+      const dialogExamples = post.postType === 'example' ? exampleActions(post) : null;
+      if (dialogExamples) dialogExamples.addEventListener('click', (event) => event.stopPropagation());
       openDialog({
         title: `${post.authorDisplay || post.authorUsername || 'Someone'} · ${POST_TYPE_LABEL[post.postType] || post.postType}`,
         description: post.createdAt ? new Date(post.createdAt).toLocaleString() : '',
@@ -819,6 +991,8 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
           ...(post.title ? [element('p', { className: 'break-words font-semibold text-ink', text: post.title })] : []),
           ...(post.body ? [element('p', { className: 'break-words text-sm leading-6 text-ink/90', text: post.body })] : []),
           ...(post.translation ? [element('p', { className: 'break-words text-sm leading-6 text-muted', text: post.translation })] : []),
+          ...(dialogStats ? [dialogStats] : []),
+          ...(dialogExamples ? [dialogExamples] : []),
           ...(dialogLinked ? [dialogLinked] : []),
           element('div', { className: 'flex flex-wrap items-center gap-2' }, [like, followRow].filter(Boolean)),
           element('div', { className: 'grid gap-2' }, [commentsWrap, element('div', { className: 'flex gap-2' }, [input, send])])
@@ -921,6 +1095,48 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     const linkBox = element('div', { className: 'grid gap-2' });
     const fields = element('div', { className: 'mt-3 grid gap-3' });
     const publish = element('button', { className: 'button-primary mt-3 min-h-11 px-5 py-2.5 text-sm font-semibold', text: 'Publish', attrs: { type: 'button' } });
+    // Progress (#7): "Attach my stats" toggle fetches the caller's OWN
+    // verified snapshot for an honest preview. Client numbers are NEVER
+    // sent — publish sends only includeStats:true + the personal message.
+    const attachBox = element('input', { attrs: { type: 'checkbox', 'aria-label': 'Attach my stats' } });
+    const statsPreview = element('div', { className: 'grid gap-1 text-sm text-ink/90', attrs: { 'aria-live': 'polite' } }, [
+      element('p', { className: 'text-xs text-muted', text: 'Post without stats — body only.' })
+    ]);
+    const statsWrap = element('div', { className: 'grid gap-2 rounded-xl border border-stone bg-paper p-3' }, [
+      element('label', { className: 'flex min-h-9 cursor-pointer items-center gap-2 text-sm text-ink' }, [
+        attachBox,
+        element('span', { text: 'Attach my stats (verified snapshot)' })
+      ]),
+      statsPreview
+    ]);
+    statsWrap.hidden = true;
+    let statsCache = null;
+    const paintStatsPreview = (data) => {
+      const line = `🔥 ${Number(data.streakDays || 0)}-day streak · 📚 ${Number(data.vocabCount || 0)} vocab · 字 ${Number(data.kanjiCount || 0)} kanji · ⏱ ${Number(data.studiedMinutesMonth || 0)} min`;
+      statsPreview.replaceChildren(
+        element('p', { className: 'break-words text-sm tabular-nums text-ink/90', text: line }),
+        element('p', { className: 'text-xs text-muted', text: 'last 30 days · verified snapshot at post time' })
+      );
+    };
+    const refreshStatsPreview = async () => {
+      if (!attachBox.checked) {
+        statsPreview.replaceChildren(element('p', { className: 'text-xs text-muted', text: 'Post without stats — body only.' }));
+        return;
+      }
+      if (statsCache) { paintStatsPreview(statsCache); return; }
+      statsPreview.replaceChildren(element('p', { className: 'text-xs text-muted', text: 'Loading your stats…' }));
+      attachBox.disabled = true;
+      try {
+        const data = await apiRequest('/api/community/share-stats');
+        statsCache = data;
+        paintStatsPreview(data);
+      } catch (error) {
+        statsPreview.replaceChildren(element('p', { className: 'text-xs text-red-700', text: error?.message || 'Stats are unavailable — you can still post without them.' }));
+      } finally {
+        attachBox.disabled = false;
+      }
+    };
+    attachBox.addEventListener('change', refreshStatsPreview);
     let link = {};
     async function paintLink() {
       link = {};
@@ -929,6 +1145,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       const showLink = type.startsWith('share_');
       japaneseInput.hidden = !showJapanese;
       translationInput.hidden = !(showJapanese || type === 'text' || type === 'question');
+      statsWrap.hidden = type !== 'progress';
       linkBox.replaceChildren();
       if (!showLink) return;
       linkBox.appendChild(element('p', { className: 'text-xs text-muted', text: 'Loading your library…' }));
@@ -1003,17 +1220,23 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       if (type === 'example') payload.japaneseText = japaneseInput.value.trim();
       else if (japaneseInput.value.trim() && !japaneseInput.hidden) payload.japaneseText = japaneseInput.value.trim();
       if (translationInput.value.trim() && !translationInput.hidden) payload.translation = translationInput.value.trim();
+      // Verified progress: flag only — server mints the snapshot, client
+      // numbers are never sent (and would be ignored).
+      if (type === 'progress' && attachBox.checked) payload.includeStats = true;
       Object.assign(payload, link);
       const post = await apiRequest('/api/community/posts', { method: 'POST', body: payload });
       titleInput.value = '';
       bodyInput.value = '';
       japaneseInput.value = '';
       translationInput.value = '';
+      attachBox.checked = false;
+      statsCache = null;
+      statsPreview.replaceChildren(element('p', { className: 'text-xs text-muted', text: 'Post without stats — body only.' }));
       showToast('Published to Community.');
       setCollapsed(true);
       if (typeof onPublished === 'function') onPublished(post);
     }, { pendingLabel: 'Publishing…' }).catch((error) => showToast(error?.message || 'Unable to publish.', 'error')));
-    fields.append(typeSelect, titleInput, bodyInput, japaneseInput, translationInput, linkBox, publish);
+    fields.append(typeSelect, titleInput, bodyInput, japaneseInput, translationInput, linkBox, statsWrap, publish);
     // Collapsed by default: a summary toggle owns the viewport emphasis,
     // posts below stay the focus. Expands on demand, collapses after publish.
     const toggleGlyph = element('span', { className: 'shrink-0 text-lg text-muted', text: '+', attrs: { 'aria-hidden': 'true' } });
@@ -1202,12 +1425,13 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     function readingRow(text) {
       if (!text || text.id === undefined || text.id === null) return null;
       const title = text.title || 'Untitled reading';
+      const levelSuffix = text.level ? ` · Level ${text.level} (reference)` : '';
       const button = element('button', {
         className: 'surface block w-full min-w-0 p-4 text-left',
         attrs: { type: 'button', 'aria-label': `Preview reading ${title}` }
       }, [
         element('p', { className: 'truncate font-semibold text-ink', text: `📖 ${title}` }),
-        element('p', { className: 'mt-1 truncate text-xs text-muted', text: `by @${text.ownerUsername || 'user'}${text.level ? ` · ${text.level}` : ''}` })
+        element('p', { className: 'mt-1 truncate text-xs text-muted', text: `by @${text.ownerUsername || 'user'}${levelSuffix}`, attrs: { title: text.level ? 'Reference level — not official JLPT data' : undefined } })
       ]);
       button.addEventListener('click', () => openReadingPreview(text.id, title));
       return button;
@@ -1230,7 +1454,9 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
         element('div', { className: 'flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1' }, [
           element('span', { className: 'break-words font-jp text-base font-semibold text-ink', text: hit.display, attrs: { lang: 'ja' } }),
           ...(hit.reading ? [element('span', { className: 'break-words font-jp text-sm text-muted', text: hit.reading, attrs: { lang: 'ja' } })] : []),
-          ...(hit.level ? [element('span', { className: 'status-pill text-xs', text: hit.level })] : [])
+          // Bare N5..N1 is the sharer's own tag (entityPage convention:
+          // "Your label for filtering — not official reference data").
+          ...(hit.level ? [element('span', { className: 'status-pill text-xs', text: hit.level, attrs: { title: 'Your tag — not official JLPT data', 'aria-label': `Your JLPT tag ${hit.level}` } })] : [])
         ]),
         ...(hit.meaning ? [element('p', { className: 'mt-1 break-words text-sm text-ink/80', text: hit.meaning })] : []),
         element('p', { className: 'mt-1 truncate text-xs text-muted', text: sourceText })
@@ -1405,7 +1631,10 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
                 element('span', { className: 'status-pill text-xs', text: 'Follows you' })
               ])] : []),
               ...(profile.bio ? [element('p', { className: 'mt-1 break-words text-sm leading-6 text-ink/80', text: profile.bio })] : []),
-              ...((profile.jlptLevel || profile.targetJlpt) ? [element('p', { className: 'mt-1 text-xs text-muted', text: `${profile.jlptLevel ? `Studying ${profile.jlptLevel}` : ''}${profile.jlptLevel && profile.targetJlpt ? ' → ' : ''}${profile.targetJlpt || ''}` })] : [])
+              // Settings distinguishes Current level vs Studying toward —
+              // render both labels (never bare "Studying N3" for the current
+              // level). Your tags, not official JLPT data.
+              ...((profile.jlptLevel || profile.targetJlpt) ? [element('p', { className: 'mt-1 text-xs text-muted', text: `${profile.jlptLevel ? `Current level ${profile.jlptLevel}` : ''}${profile.jlptLevel && profile.targetJlpt ? ' · ' : ''}${profile.targetJlpt ? `Studying toward ${profile.targetJlpt}` : ''}`, attrs: { title: 'Your JLPT tags — not official data' } })] : [])
             ])
           ]),
           ...(profile.isSelf ? [] : [followButton(profile.username, () => {}, {

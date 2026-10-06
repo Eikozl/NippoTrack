@@ -212,3 +212,90 @@ test('followed-by signals show without noise', () => {
   assert.ok(source.includes('viewerFollowing'), 'canonical viewerFollowing consumed');
   assert.ok(source.includes('followsYou'), 'followsYou consumed');
 });
+
+test('progress composer attaches verified stats without sending numbers', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('/api/community/share-stats'), 'share-stats fetched for preview');
+  assert.ok(source.includes('Attach my stats'), 'attach toggle labeled');
+  assert.ok(source.includes('includeStats'), 'publish sends the flag only');
+  assert.ok(!source.includes('streakDays:'), 'no client-computed numbers sent (server mints the snapshot)');
+  assert.ok(source.includes('last 30 days'), 'window note shown (last 30 days)');
+  assert.ok(source.includes('Loading your stats'), 'loading state for the preview fetch');
+  assert.ok(source.includes('Stats are unavailable'), 'error state keeps manual posting possible');
+});
+
+test('progress cards present the verified snapshot, manual-only stays body-only', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('function statsBlock'), 'shared snapshot renderer exists');
+  assert.ok(source.includes('verified snapshot'), 'honesty note present, never claims live data');
+  assert.ok(source.includes('stats.asOf') || source.includes('stats?.asOf') || source.includes('asOf'), 'asOf date shown');
+  assert.ok(source.includes("post.postType === 'progress'"), 'progress-gated rendering');
+  assert.ok(source.includes('post.stats'), 'additive stats key consumed (null when absent)');
+});
+
+test('honesty gates block invented glosses from the library and review', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(!source.includes('Saved from Community'), 'invented gloss string gone from save paths');
+  assert.ok(source.includes('function isUsableMeaning'), 'usable-meaning gate reused from review.js');
+  assert.ok(source.includes('No dictionary meaning available'), 'honest disabled reason shown');
+  assert.ok(source.includes('disabled'), 'ungated Save renders disabled');
+  assert.ok(source.includes('entityCreateBody(post.entityType'), 'single saves gate through the body builder');
+});
+
+test('kanji saves require a single Han character before any request', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('Script=Han'), 'single-Han validation present (same as Decks hub)');
+  assert.ok(source.includes('single kanji character is required'), 'honest error toast, no request fired');
+  assert.ok(source.includes('deckItemSaveable'), 'deck per-item gating reuses the same rule');
+});
+
+test('shared vocab/kanji/grammar boxes gain Practice and Details via existing routes only', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('Practice in Review'), 'practice action present');
+  assert.ok(source.includes("href: '#review'"), 'practice links the existing review hub');
+  assert.ok(source.includes('save first to include'), 'practice never claims the item is queued');
+  assert.ok(source.includes('kanji-reference/'), 'kanji details reuse the existing reference route');
+  assert.ok(source.includes('function detailsLink') || source.includes('Details'), 'details helper present with omission for vocab/grammar');
+});
+
+test('shared deck viewer adds Start Review beside Save-all with gated per-item saves', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('Start Review'), 'deck viewer review entry present');
+  assert.ok(source.includes("href: '#review'"), 'deck review links the existing hub, no new study logic');
+  assert.ok(source.includes('topRow') || source.includes('Save all'), 'save-all stays beside the new link');
+  assert.ok(source.includes("lang: 'ja'"), 'deck han labels tagged lang=ja');
+});
+
+test('shared readings keep Import and preview-as-Read with Analyze honestly omitted', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('importReadingButton(readingId)'), 'import reuses the idempotent endpoint');
+  assert.ok(source.includes('openReadingPreview'), 'preview stays the Read entry (no bogus publication-id reader link)');
+  assert.ok(source.includes('Analyze') && source.includes('OMITTED'), 'omission documented in code (no prefill support)');
+  assert.ok(!source.includes('#analyzer?text=') && !source.includes('#immersion?text='), 'no fabricated prefill routes invented');
+});
+
+test('japanese examples save gated plus TTS, never fabricated analysis', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('function exampleActions'), 'per-example actions exist');
+  assert.ok(source.includes('Save as vocab'), 'example save present');
+  assert.ok(source.includes('speakJapanese'), 'TTS reuses the shared speech infrastructure');
+  assert.ok(source.includes('playJapaneseText'), 'single-utterance wrapper, no queue invention');
+  assert.ok(!source.includes('<ruby') && !source.includes('furigana:'), 'no fabricated ruby/furigana markup');
+});
+
+test('jlpt labels qualify bare levels and profile renders both settings fields', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('Current level') && source.includes('Studying toward'), 'profile shows both settings labels, never bare Studying N3');
+  assert.ok(source.includes('Your tag') || source.includes('Your JLPT tag'), 'level pills qualified per entityPage convention');
+  assert.ok(source.includes('not official'), 'reference disclaimer present');
+  assert.ok(!source.includes('Studying ${profile.jlptLevel}'), 'old misleading profile string removed');
+});
+
+test('kana/kanji reading nodes carry lang=ja and characters wording stays unified', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  const langCount = source.split("lang: 'ja'").length - 1;
+  assert.ok(langCount >= 8, `at least 8 lang=ja nodes after the fix, got ${langCount}`);
+  assert.ok(source.includes('snapshot.display, attrs: { lang'), 'shared display tagged');
+  assert.ok(source.includes('snapshot.reading'), 'shared reading tagged');
+  assert.ok(source.includes('characters'), 'unified characters wording kept');
+});
