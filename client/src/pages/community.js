@@ -204,7 +204,7 @@ function itemsDialog(deckId, title, entityType, deckRef = null) {
       const view = element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-2' });
       const renderList = () => {
         view.replaceChildren(
-          element('ul', { className: 'grid max-h-56 w-full min-w-0 max-w-full grid-cols-2 gap-1 overflow-x-hidden overflow-y-auto text-sm text-ink xl:grid-cols-3', attrs: { role: 'list' } }, items.map((entry) => {
+          element('ul', { className: 'grid max-h-56 w-full min-w-0 max-w-full grid-cols-1 gap-1 overflow-x-hidden overflow-y-auto text-sm text-ink', attrs: { role: 'list' } }, items.map((entry) => {
             const open = smallButton(displayOf(entry), `Details for ${displayOf(entry)}`);
             open.classList.add('max-w-full', 'wrap-anywhere', 'break-words');
             open.addEventListener('click', () => {
@@ -336,7 +336,7 @@ export async function renderDecksHub(container) {
   ]);
   const textFilter = element('input', { className: 'field-control', attrs: { type: 'search', 'aria-label': 'Filter decks by text', placeholder: 'Filter by title…' } });
   filterRow.append(typeFilter, textFilter);
-  const feedList = element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-2 gap-4 xl:grid-cols-3' });
+  const feedList = element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-4' });
   feed.body.append(filterRow, feedList);
   let feedDecks = [];
   const FEED_VISIBLE = 3;
@@ -352,7 +352,7 @@ export async function renderDecksHub(container) {
       return;
     }
     const shown = visible.slice(0, FEED_VISIBLE);
-    feedList.replaceChildren(element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-2 gap-2 overflow-x-hidden xl:grid-cols-3' }, shown.map((deck) => buildFeedRow(deck))));
+    feedList.replaceChildren(element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-2 overflow-x-hidden' }, shown.map((deck) => buildFeedRow(deck))));
     if (visible.length > FEED_VISIBLE) {
       const more = smallButton(`See more (${visible.length - FEED_VISIBLE} more)`, 'View all matching decks');
       more.addEventListener('click', () => openAllDecksDialog(typeFilter.value, query));
@@ -366,7 +366,7 @@ export async function renderDecksHub(container) {
     ]);
     dialogType.value = initialType || '';
     const dialogSearch = element('input', { className: 'field-control', attrs: { type: 'search', 'aria-label': 'Filter decks by text', placeholder: 'Filter by title…', value: initialQuery || '' } });
-    const dialogList = element('div', { className: 'grid max-h-[50vh] w-full min-w-0 max-w-full grid-cols-2 gap-2 overflow-x-hidden overflow-y-auto' });
+    const dialogList = element('div', { className: 'grid max-h-[50vh] w-full min-w-0 max-w-full grid-cols-1 gap-2 overflow-x-hidden overflow-y-auto' });
     const renderDialogList = () => {
       const query = String(dialogSearch.value || '').trim().toLowerCase();
       const visible = filterFeedDecks(dialogType.value, query);
@@ -403,7 +403,7 @@ export async function renderDecksHub(container) {
   const texts = section('Texts', 'Community reading texts. Open a preview, import copies into your reader library.');
   container.insertBefore(texts.wrap, publish.wrap);
   const textsSearch = element('input', { className: 'field-control', attrs: { type: 'search', 'aria-label': 'Filter texts by title', placeholder: 'Filter by title…' } });
-  const textsList = element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-2 gap-2 overflow-x-hidden xl:grid-cols-3' });
+  const textsList = element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-2 overflow-x-hidden' });
   texts.body.append(textsSearch, textsList);
   let feedTexts = [];
   const renderTexts = () => {
