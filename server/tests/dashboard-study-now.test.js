@@ -32,16 +32,22 @@ async function withPoolQuery(stub, callback) {
   }
 }
 
-function stubPool({ due = null, difficult = 0, minutes = 0, vocab = 0, kanji = 0, grammar = 0, reading = null, sample = [] } = {}) {
+function stubPool({ due = null, difficult = 0, minutes = 0, vocab = 0, kanji = 0, grammar = 0, reading = null, sample = [], gradedToday = 0, newToday = 0, openSessions = [] } = {}) {
   const dueParts = due || { vocabulary: vocab, kanji, grammar };
   return async (sql) => {
-    if (/review_events/.test(sql)) {
+    if (/FROM review_sessions rs/i.test(sql)) {
+      return [openSessions];
+    }
+    if (/review_events/i.test(sql) && /GROUP BY ri\.id_review_item/i.test(sql)) {
       return [Array.from({ length: difficult }, (_, i) => ({ id_review_item: i + 1 }))];
     }
-    if (/user_reading_progress/.test(sql)) {
+    if (/FROM review_events re/i.test(sql)) {
+      return [[{ graded_today: gradedToday }]];
+    }
+    if (/user_reading_progress/i.test(sql)) {
       return [reading ? [reading] : []];
     }
-    if (/due_sample/.test(sql)) {
+    if (/due_sample/i.test(sql)) {
       return [sample.map((title) => ({ title }))];
     }
     return [[{
@@ -51,7 +57,8 @@ function stubPool({ due = null, difficult = 0, minutes = 0, vocab = 0, kanji = 0
       minutes_today: minutes,
       vocabulary_count: vocab,
       kanji_count: kanji,
-      grammar_count: grammar
+      grammar_count: grammar,
+      new_items_today: newToday
     }]];
   };
 }
@@ -129,6 +136,42 @@ test('Study Now stays user-scoped (no cross-user params)', async () => {
       }
     }
     assert.ok(seen.length >= 2, 'due + parallel signals queried');
+  });
+});
+
+test('Study Now reports real today progress and resumable work', async () => {
+  await withPoolQuery(stubPool({
+    due: { vocabulary: 2, kanji: 0, grammar: 0 },
+    minutes: 10,
+    vocab: 4,
+    gradedToday: 23,
+    newToday: 6,
+    reading: { id: 7, title: 'Aozora story', position: 120, timeSpentSeconds: 300 },
+    openSessions: [{ id: 9, sourceFrom: '2026-10-01', sourceTo: '2026-10-04', startedAt: '2026-10-04', total: 30, graded: 7 }]
+  }), async () => {
+    const { res, status, body } = mockRes();
+    await controller.getStudyNow({ user: { id: USER_ID }, query: { today: TODAY } }, res);
+    assert.equal(status(), 200);
+    const data = body();
+    assert.deepEqual(data.todayProgress, { reviewsDone: 23, reviewsDue: 2, readingMinutes: 10, newItems: 6 });
+    assert.deepEqual(data.continueStudying.reading, { id: 7, title: 'Aozora story', position: 120, timeSpentSeconds: 300 });
+    assert.deepEqual(data.continueStudying.reviewSession, { id: 9, remaining: 23, total: 30, sourceFrom: '2026-10-01', sourceTo: '2026-10-04' });
+  });
+});
+
+test('Continue Studying hides finished sessions and empty reading', async () => {
+  await withPoolQuery(stubPool({
+    due: { vocabulary: 0, kanji: 0, grammar: 0 },
+    vocab: 4,
+    minutes: 5,
+    gradedToday: 30,
+    openSessions: [{ id: 9, sourceFrom: '2026-10-01', sourceTo: '2026-10-04', startedAt: '2026-10-04', total: 30, graded: 30 }]
+  }), async () => {
+    const { res, body } = mockRes();
+    await controller.getStudyNow({ user: { id: USER_ID }, query: { today: TODAY } }, res);
+    assert.equal(body().continueStudying.reading, null);
+    assert.equal(body().continueStudying.reviewSession, null, 'fully graded sessions are not resumable');
+    assert.deepEqual(body().todayProgress, { reviewsDone: 30, reviewsDue: 0, readingMinutes: 5, newItems: 0 });
   });
 });
 

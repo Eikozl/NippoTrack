@@ -130,9 +130,13 @@ async function getStudyNow(req, res) {
         COALESCE((SELECT SUM(duration_minutes) FROM study_sessions WHERE user_id = ? AND session_date = COALESCE(?::date, CURRENT_DATE)), 0) AS minutes_today,
         (SELECT COUNT(*) FROM vocabulary WHERE user_id = ?) AS vocabulary_count,
         (SELECT COUNT(*) FROM kanji WHERE user_id = ?) AS kanji_count,
-        (SELECT COUNT(*) FROM grammar_points WHERE user_id = ?) AS grammar_count
-    `, [userId, userId, userId, userId, today, userId, userId, userId]);
-    const [[difficultRows], [readingRows], [sampleRows]] = await Promise.all([
+        (SELECT COUNT(*) FROM grammar_points WHERE user_id = ?) AS grammar_count,
+        (SELECT COUNT(*) FROM vocabulary WHERE user_id = ? AND created_at::date = COALESCE(?::date, CURRENT_DATE)) +
+        (SELECT COUNT(*) FROM kanji WHERE user_id = ? AND created_at::date = COALESCE(?::date, CURRENT_DATE)) +
+        (SELECT COUNT(*) FROM grammar_points WHERE user_id = ? AND created_at::date = COALESCE(?::date, CURRENT_DATE))
+        AS new_items_today
+    `, [userId, userId, userId, userId, today, userId, userId, userId, userId, today, userId, today, userId, today]);
+    const [[difficultRows], [readingRows], [sampleRows], [gradedRows], [openRows]] = await Promise.all([
       pool.query(`
         SELECT ri.id_review_item FROM review_items ri
         LEFT JOIN review_events re ON re.id_review_item = ri.id_review_item
@@ -145,7 +149,8 @@ async function getStudyNow(req, res) {
         LIMIT 10
       `, [userId, userId, userId, userId, userId, userId]),
       pool.query(`
-        SELECT rt.id_reading_text AS id, rt.title AS title
+        SELECT rt.id_reading_text AS id, rt.title AS title,
+          p.position AS position, p.time_spent_seconds AS "timeSpentSeconds"
         FROM user_reading_progress p
         JOIN reading_texts rt ON rt.id_reading_text = p.text_id
         WHERE p.user_id = ? AND p.completed_at IS NULL
@@ -171,16 +176,73 @@ async function getStudyNow(req, res) {
           WHERE ri.due_on <= CURRENT_DATE AND ri.id_grammar IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_kanji IS NULL
             AND g.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)
         ) due_sample ORDER BY due_on ASC LIMIT 5
-      `, [userId, userId, userId]).catch(() => [[], []])
+      `, [userId, userId, userId]).catch(() => [[], []]),
+      // Reviews graded today (any session or none): events joined to owned
+      // entities only, so other users' reviews can never inflate the count.
+      pool.query(`
+        SELECT COUNT(*) AS graded_today
+        FROM review_events re
+        JOIN review_items ri ON ri.id_review_item = re.id_review_item
+        LEFT JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary AND v.user_id = ?
+        LEFT JOIN kanji k ON k.id_kanji = ri.id_kanji AND k.user_id = ?
+        LEFT JOIN grammar_points g ON g.id_grammar = ri.id_grammar AND g.user_id = ?
+        WHERE re.reviewed_at::date = COALESCE(?::date, CURRENT_DATE)
+          AND (v.user_id = ? OR k.user_id = ? OR g.user_id = ?)
+      `, [userId, userId, userId, today, userId, userId, userId]).catch(() => [[], []]),
+      // Open (uncompleted) review sessions with persisted queues, newest
+      // first. Remaining = queued − graded-in-session (floored at 0 below);
+      // sessions with nothing left are not resumable and get filtered out.
+      pool.query(`
+        SELECT rs.id_review_session AS id, rs.source_from AS "sourceFrom", rs.source_to AS "sourceTo",
+          rs.started_at AS "startedAt",
+          (SELECT COUNT(*) FROM review_session_items si WHERE si.id_review_session = rs.id_review_session) AS total,
+          (SELECT COUNT(*) FROM review_events re WHERE re.id_review_session = rs.id_review_session) AS graded
+        FROM review_sessions rs
+        WHERE rs.user_id = ? AND rs.completed_at IS NULL
+        ORDER BY rs.started_at DESC, rs.id_review_session DESC LIMIT 3
+      `, [userId]).catch(() => [[], []])
     ]);
-    // чтения may fail on older/back-compat schemas — fail open to null.
+    // Reading progress may fail on older/back-compat schemas — fail open to null.
     let incompleteReading = null;
     try {
       const row = Array.isArray(readingRows) ? readingRows[0] : readingRows?.rows?.[0];
       const list = Array.isArray(readingRows) ? readingRows : [];
       const first = list[0] || row;
-      if (first && first.id !== undefined) incompleteReading = { id: first.id, title: first.title || 'Untitled text' };
+      if (first && first.id !== undefined) incompleteReading = {
+        id: first.id,
+        title: first.title || 'Untitled text',
+        position: Number(first.position || 0) || null,
+        timeSpentSeconds: Number(first.timeSpentSeconds || 0) || null
+      };
     } catch { incompleteReading = null; }
+    // Genuinely resumable review work only: open sessions whose persisted
+    // queue still has ungraded items. Fully-graded-but-uncompleted sessions
+    // are not offered (finishing happens inside Review, not from Home).
+    let openReviewSession = null;
+    try {
+      const sessions = Array.isArray(openRows) ? openRows : [];
+      for (const session of sessions) {
+        const total = Number(session?.total || 0);
+        const graded = Number(session?.graded || 0);
+        const remaining = Math.max(0, total - graded);
+        if (total > 0 && remaining > 0) {
+          openReviewSession = {
+            id: Number(session.id),
+            remaining,
+            total,
+            sourceFrom: session.sourceFrom ? String(session.sourceFrom).slice(0, 10) : null,
+            sourceTo: session.sourceTo ? String(session.sourceTo).slice(0, 10) : null
+          };
+          break;
+        }
+      }
+    } catch { openReviewSession = null; }
+    const gradedToday = (() => {
+      try {
+        const rows = Array.isArray(gradedRows) ? gradedRows : [];
+        return Number(rows[0]?.graded_today || rows[0]?.gradedToday || 0);
+      } catch { return 0; }
+    })();
     const snapshot = Array.isArray(dueRows) ? dueRows[0] : {};
     const dueVocabulary = Number(snapshot?.due_vocabulary || 0);
     const dueKanji = Number(snapshot?.due_kanji || 0);
@@ -258,7 +320,17 @@ async function getStudyNow(req, res) {
     }
     return res.json({
       primary,
-      signals: { dueCount, dueBreakdown: { vocabulary: dueVocabulary, kanji: dueKanji, grammar: dueGrammar }, dueSample, difficultCount, minutesToday, vocabularyCount, kanjiCount, grammarCount, incompleteReading }
+      signals: { dueCount, dueBreakdown: { vocabulary: dueVocabulary, kanji: dueKanji, grammar: dueGrammar }, dueSample, difficultCount, minutesToday, vocabularyCount, kanjiCount, grammarCount, incompleteReading },
+      todayProgress: {
+        reviewsDone: gradedToday,
+        reviewsDue: dueCount,
+        readingMinutes: minutesToday,
+        newItems: Number(snapshot?.new_items_today || 0)
+      },
+      continueStudying: {
+        reading: incompleteReading,
+        reviewSession: openReviewSession
+      }
     });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load study recommendation.' });

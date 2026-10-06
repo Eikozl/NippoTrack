@@ -120,7 +120,7 @@ async function startDueSession(button) {
         items: picked.map(({ entityType, entityId }) => ({ entityType, entityId }))
       }
     });
-    const queueItems = picked.map(({ dueOn, ...rest }) => rest);
+    const queueItems = applySessionContext(picked.map(({ dueOn, ...rest }) => rest), session);
     try {
       if (window.sessionStorage) {
         window.sessionStorage.setItem(STUDY_NOW_QUEUE_KEY, JSON.stringify({
@@ -133,6 +133,85 @@ async function startDueSession(button) {
   }, { pendingLabel: 'Starting…' }).catch((error) => {
     showToast(error?.message || 'Unable to start the session.', 'error');
   });
+}
+
+function todayProgressSection(studyNow) {
+  // V5.6 Completion Pass: "What have I actually done today?" — real daily
+  // numbers only (graded reviews, logged minutes, new items). Fail-open:
+  // without the payload the section renders nothing, never placeholder 0s.
+  const progress = studyNow?.todayProgress;
+  if (!progress || typeof progress !== 'object') return null;
+  const done = Number(progress.reviewsDone || 0);
+  const due = Number(progress.reviewsDue || 0);
+  const minutes = Number(progress.readingMinutes || 0);
+  const fresh = Number(progress.newItems || 0);
+  const row = (label, value) => element('div', { className: 'flex items-baseline justify-between gap-3 py-2' }, [
+    element('p', { className: 'text-sm text-muted', text: label }),
+    element('p', { className: 'text-sm font-semibold tabular-nums text-ink', text: value })
+  ]);
+  return element('section', { className: 'surface mt-5 p-5 sm:p-6', attrs: { 'aria-label': "Today's progress" } }, [
+    element('div', { className: 'flex items-center gap-3' }, [iconTile('today', { className: 'panel-icon' }), element('h2', { className: 'font-semibold text-ink', text: 'Today’s progress' })]),
+    element('div', { className: 'mt-2 divide-y divide-stone' }, [
+      row('Reviews', done > 0 || due > 0 ? `${done} of ${done + due} reviews done` : 'No reviews due'),
+      row('Study time', minutes > 0 ? `${minutes} min today` : 'Nothing logged yet'),
+      row('New items', fresh > 0 ? `${fresh} new item${fresh === 1 ? '' : 's'} today` : 'Nothing added yet')
+    ])
+  ]);
+}
+
+function continueSection(studyNow) {
+  // V5.6 Completion Pass: "Continue where you left off" — genuinely
+  // resumable state only (unfinished reading with position, open review
+  // session with remaining cards). Nothing resumable → no section at all;
+  // Study Now above already offers the next action, so no dead CTA here.
+  const cont = studyNow?.continueStudying;
+  if (!cont || typeof cont !== 'object') return null;
+  const cards = [];
+  if (cont.reading && cont.reading.id !== undefined && cont.reading.id !== null) {
+    cards.push(element('a', {
+      className: 'surface metric-link flex items-center justify-between gap-4 p-4',
+      attrs: { href: `#reading?id=${encodeURIComponent(cont.reading.id)}`, 'aria-label': `Continue reading ${cont.reading.title || 'your text'}` }
+    }, [
+      element('div', { className: 'min-w-0' }, [
+        element('p', { className: 'eyebrow', text: 'Reading' }),
+        element('p', { className: 'mt-1 break-words font-semibold text-ink', text: cont.reading.title || 'Untitled text' }),
+        element('p', { className: 'mt-1 text-xs text-muted', text: 'Pick up where you left off' })
+      ]),
+      element('span', { className: 'button-secondary shrink-0 px-3 py-1.5 text-xs', text: 'Continue', attrs: { 'aria-hidden': 'true' } })
+    ]));
+  }
+  if (cont.reviewSession && Number(cont.reviewSession.id) > 0 && Number(cont.reviewSession.remaining) > 0) {
+    const remaining = Number(cont.reviewSession.remaining);
+    const total = Number(cont.reviewSession.total || remaining);
+    cards.push(element('a', {
+      className: 'surface metric-link flex items-center justify-between gap-4 p-4',
+      attrs: { href: `#review?retake=${encodeURIComponent(cont.reviewSession.id)}`, 'aria-label': `Resume review session with ${remaining} cards left` }
+    }, [
+      element('div', { className: 'min-w-0' }, [
+        element('p', { className: 'eyebrow', text: 'Review' }),
+        element('p', { className: 'mt-1 break-words font-semibold text-ink', text: `Unfinished review — ${remaining} of ${total} left` }),
+        element('p', { className: 'mt-1 text-xs text-muted', text: 'Resume where you left off' })
+      ]),
+      element('span', { className: 'button-secondary shrink-0 px-3 py-1.5 text-xs', text: 'Resume', attrs: { 'aria-hidden': 'true' } })
+    ]));
+  }
+  if (!cards.length) return null;
+  return element('section', { className: 'mt-5', attrs: { 'aria-label': 'Continue studying' } }, [
+    element('h2', { className: 'font-semibold text-ink', text: 'Continue where you left off' }),
+    element('div', { className: 'mt-3 grid gap-4 sm:grid-cols-2' }, cards)
+  ]);
+}
+
+// Session-creation responses carry batched per-item context (V5.6 Completion
+// Pass); merge it into the client queue so cards render Context blocks with
+// zero extra requests. Entries without context keep reviewing normally.
+function applySessionContext(queueItems, session) {
+  const byKey = new Map((Array.isArray(session?.items) ? session.items : []).map((entry) => [`${entry.entityType}:${entry.entityId}`, entry.context]));
+  for (const item of queueItems) {
+    const context = byKey.get(`${item.entityType}:${item.entityId}`);
+    if (context) item.context = context;
+  }
+  return queueItems;
 }
 
 function activityCalendar(items) {
@@ -286,6 +365,10 @@ export async function renderDashboard(container) {
       content.replaceChildren(
         ...(welcome ? [welcomeHeader(welcome)] : []),
         ...(studyNowSection(studyNow) ? [studyNowSection(studyNow)] : []),
+        // V5.6 Completion Pass hierarchy: action → today → continue →
+        // snapshot. Progress/continue render nothing when data is absent.
+        ...(todayProgressSection(studyNow) ? [todayProgressSection(studyNow)] : []),
+        ...(continueSection(studyNow) ? [continueSection(studyNow)] : []),
         element('div', { className: 'dashboard-metrics reveal-group grid gap-4 sm:grid-cols-2 xl:grid-cols-4' }, [metric('today', 'Today', data.minutesToday, 'minutes studied'), metric('week', 'This week', data.minutesThisWeek, 'minutes studied'), metric('streak', 'Current streak', activity.currentStreak, 'consecutive active days'), metric('streak', 'Longest streak', activity.longestStreak, 'best run of active days'), metric('review', 'Due reviews', dueCount, 'items ready to recall', 'review', true), metric('vocabulary', 'Vocabulary', data.vocabularyCount, 'saved words', 'vocabulary'), metric('kanji', 'Kanji', data.kanjiCount, 'tracked characters', 'kanji'), metric('grammar', 'Grammar', data.grammarCount, 'saved patterns', 'grammar')]),
         // Zero eligible goals: this section never renders — no empty card,
         // no placeholder, no reserved space.

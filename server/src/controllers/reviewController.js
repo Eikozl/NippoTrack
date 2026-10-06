@@ -3,6 +3,7 @@ const { ValidationError, sendRouteError } = require('../errors/http');
 const { parseIdParam, isValidDateString, validateAllowedValues } = require('../validation');
 const { parsePagination, paginationPayload } = require('../pagination');
 const { getReviewCandidates, toIsoDate } = require('../services/reviewCandidates');
+const { getReviewItemContext } = require('../services/reviewItemContext');
 const {
   CARD_TYPES,
   ENTITY_CARD_TYPES,
@@ -173,8 +174,9 @@ const DUE_REVIEWS_SQL = `SELECT ri.id_review_item, ri.due_on, ri.interval_days, 
   'Grammar' AS item_type, g.id_grammar AS entity_id, g.grammar_point AS title, g.meaning AS meaning, NULL AS reading
   FROM review_items ri
   JOIN grammar_points g ON g.id_grammar = ri.id_grammar
-  WHERE ri.due_on <= CURRENT_DATE AND ri.id_grammar IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_kanji IS NULL AND g.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)
-  ORDER BY due_on ASC, id_review_item ASC`;
+  WHERE ri.due_on <= CURRENT_DATE AND ri.id_grammar IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_kanji IS NULL   AND g.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)
+  ORDER BY due_on ASC, id_review_item ASC
+  LIMIT 1001`;
 
 async function listDueReviews(req, res) {
   try {
@@ -214,7 +216,10 @@ async function listDueReviewCards(req, res) {
         return { ...row, entityType, entityId: Number.isInteger(entityId) && entityId > 0 ? entityId : null, cardTypes: [...(ENTITY_CARD_TYPES[entityType] || ['recognition'])] };
       })
       .filter((row) => !requestedTypes || row.cardTypes.some((type) => requestedTypes.includes(type)));
-    return res.json({ items });
+    // V5.6 Completion Pass: bounded due listing (oldest-first preserved).
+    // The exact backlog size stays available via study-now signals.dueCount.
+    const truncated = items.length > 1000;
+    return res.json({ items: truncated ? items.slice(0, 1000) : items, truncated });
   } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load review cards.' }); }
 }
 
@@ -359,7 +364,20 @@ async function createReviewSession(req, res) {
       await connection.commit();
       connection.release();
       connection = null;
-      return res.status(201).json({ id, sourceFrom, sourceTo, completedAt: null, itemCount: queueItems.length });
+      // V5.6 Completion Pass: embed batched per-item context (last failed,
+      // example sentence, encounter counts) so review cards never fetch
+      // context one-by-one. Fail-open: enrichment trouble never blocks the
+      // session — the queue without context still reviews fine.
+      let contextItems = null;
+      try {
+        const context = await getReviewItemContext(pool, req.user.id, queueItems);
+        contextItems = queueItems.map((entry) => ({
+          entityType: entry.entityType,
+          entityId: entry.entityId,
+          context: context.get(`${entry.entityType}:${entry.entityId}`) || null
+        }));
+      } catch { contextItems = null; }
+      return res.status(201).json({ id, sourceFrom, sourceTo, completedAt: null, itemCount: queueItems.length, ...(contextItems ? { items: contextItems } : {}) });
     } catch (error) {
       if (connection) { await connection.rollback().catch(() => {}); connection.release(); connection = null; }
       throw error;
@@ -738,6 +756,14 @@ async function getReviewSessionItems(req, res) {
       lastResult: row.lastResult || null
     }));
     if (persisted.length) {
+      // Same batched context as session creation (fail-open): resume/retake
+      // queues carry identical Context blocks without per-card requests.
+      try {
+        const context = await getReviewItemContext(pool, req.user.id, persisted);
+        for (const item of persisted) {
+          item.context = context.get(`${item.entityType}:${item.entityId}`) || null;
+        }
+      } catch { /* context stays absent; queue still resumes */ }
       return res.json({ id, reconstructed: false, items: persisted });
     }
     // Empty persisted queue on an OPEN session: legacy (pre-026), no-items,

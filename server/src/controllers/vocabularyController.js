@@ -18,6 +18,7 @@ const { buildFullVocabularyReadingContext } = require('../services/vocabularyRea
 const { ENCOUNTER_SOURCE_TYPES, recordKanjiEncounters } = require('../services/kanjiEncounters');
 const { analyzeGrammarExamples } = require('../services/grammarExampleContext');
 const { getClozeSentences, getVocabTags, replaceVocabTags } = require('../services/contextualVocab');
+const { getWhereSeen } = require('../services/whereSeen');
 
 async function listVocabulary(req, res) {
   try {
@@ -302,6 +303,20 @@ async function getVocabularyGrammarContext(req, res) {
   } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to analyze grammar in vocabulary examples.' }); }
 }
 
+// V5.6 Completion Pass: learner-facing encounter history from existing
+// relations only (owned examples, linked study sessions, immersion items).
+// Ownership is verified first (404 for foreign ids); every query below is
+// additionally user-scoped in-statement. Empty → empty arrays (UI hides).
+async function getVocabularyEncounters(req, res) {
+  try {
+    const id = parseIdParam(req, 'vocabulary entry');
+    if (!await fetchEntityById('vocabulary', id, req.user.id)) {
+      return res.status(404).json({ error: 'vocabulary entry not found' });
+    }
+    return res.json(await getWhereSeen(pool, req.user.id, 'vocabulary', id));
+  } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load encounters.' }); }
+}
+
 async function deleteVocabulary(req, res) {
   try {
     const id = parseIdParam(req, 'vocabulary entry');
@@ -396,6 +411,7 @@ module.exports = {
   deleteVocabulary,
   getVocabulary,
   getVocabularyCloze,
+  getVocabularyEncounters,
   getVocabularyGrammarContext,
   getVocabularyTags,
   putVocabularyTags,

@@ -176,6 +176,9 @@ export function mountKanjiWriting(container, { character = '', onDone = null } =
         }
       });
     });
+    // Single reset control: Retry and Clear produced the same visible result
+    // (empty canvas + focus), so only Clear remains — it clears and says so
+    // through the shared aria-live verdict.
     const clear = element('button', { className: buttonClass, text: 'Clear', attrs: { type: 'button' } });
     clear.addEventListener('click', () => {
       drawnStrokes.length = 0;
@@ -185,22 +188,13 @@ export function mountKanjiWriting(container, { character = '', onDone = null } =
       verdict.textContent = 'Canvas cleared.';
       canvas.focus?.();
     });
-    const retry = element('button', { className: buttonClass, text: 'Retry', attrs: { type: 'button' } });
-    retry.addEventListener('click', () => {
-      drawnStrokes.length = 0;
-      current = null;
-      redraw();
-      verdict.hidden = true;
-      verdict.textContent = '';
-      canvas.focus?.();
-    });
     const next = element('button', { className: 'button-primary min-h-8 px-2.5 py-1 text-xs', text: 'Done', attrs: { type: 'button' } });
     next.addEventListener('click', () => { if (typeof onDone === 'function') onDone(); });
     wrap.append(
       element('p', { className: 'text-sm leading-6 text-muted', text: `Watch the order first, then trace ${character} (${paths.length} strokes). Only the order is checked — shape is yours.` }),
       stage,
       verdict,
-      element('div', { className: 'grid grid-cols-2 gap-2', attrs: { role: 'group', 'aria-label': 'Writing actions' } }, [watch, clear, retry, next])
+      element('div', { className: 'grid grid-cols-3 gap-2', attrs: { role: 'group', 'aria-label': 'Writing actions' } }, [watch, clear, next])
     );
     container.appendChild(wrap);
   }).catch((error) => {

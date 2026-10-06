@@ -5,6 +5,7 @@ const router = express.Router();
 router.get('/options', controller.listGrammarOptions);
 router.get('/reference', controller.listGrammarReferences);
 router.get('/:id/vocabulary-context', controller.getGrammarVocabularyContext);
+router.get('/:id/encounters', controller.getGrammarEncounters);
 router.route('/').get(controller.listGrammar).post(controller.createGrammar);
 router.post('/:id/examples', controller.createGrammarExample);
 router.put('/:id/examples/:exampleId', controller.updateGrammarExample);

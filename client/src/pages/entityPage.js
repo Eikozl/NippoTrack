@@ -44,6 +44,36 @@ function formatSrsDateTime(iso) {
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+// V5.6 Completion Pass: shared Where-seen filler for vocabulary + grammar
+// (kanji keeps its embedded encounter summary). Sessions and immersion that
+// captured the item — existing relations only, learner labels only.
+// Empty or failed → the slot is removed so pages never show hollow sections.
+function fillWhereSeen(slot, url) {
+  apiRequest(url).then((data) => {
+    const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
+    const immersion = Array.isArray(data?.immersion) ? data.immersion : [];
+    if (!sessions.length && !immersion.length) { slot.remove(); return; }
+    const rows = [
+      ...sessions.map((entry) => ({
+        pill: 'Session',
+        text: `Study session — ${entry.category || 'Study'}${entry.date ? ` · ${formatSrsDate(entry.date)}` : ''}${Number(entry.minutes) > 0 ? ` · ${entry.minutes} min` : ''}`
+      })),
+      ...immersion.map((entry) => ({
+        pill: 'Immersion',
+        text: `Immersion session${entry.createdAt ? ` · ${formatSrsDate(entry.createdAt)}` : ''}${entry.level ? ` · ${entry.level}` : ''}`
+      }))
+    ];
+    slot.replaceChildren(
+      element('h3', { className: 'font-semibold text-ink', text: 'Where you’ve seen it' }),
+      element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: 'Study sessions and immersion that captured this item — exposure only, not review evidence.' }),
+      element('ul', { className: 'mt-3 grid gap-2' }, rows.map((row) => element('li', { className: 'flex items-center gap-2 text-sm text-ink/80' }, [
+        element('span', { className: 'status-pill text-xs', text: row.pill }),
+        element('span', { className: 'min-w-0 break-words', text: row.text })
+      ])))
+    );
+  }).catch(() => slot.remove());
+}
+
 export const ENTITY_CONFIGS = {
   vocabulary: {
     endpoint: '/api/vocabulary',
@@ -66,10 +96,10 @@ export const ENTITY_CONFIGS = {
       const contextKanji = getContextKanji(item).map(formatKanjiContextEntry).filter(Boolean);
       const wordReading = readingContext?.wordReading?.value ?? item.reading;
       const kanjiNotice = readingContext?.notice || VOCAB_READING_NOTICE;
-      // SRS state (same shape as kanji detail, presentation only).
+      // Review schedule (same shape as kanji detail, presentation only).
       const review = item.review || null;
-      const srsSection = element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'aria-label': 'SRS review state' } }, [
-        element('h3', { className: 'font-semibold text-ink', text: 'SRS Review' }),
+      const srsSection = element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'aria-label': 'Review schedule' } }, [
+        element('h3', { className: 'font-semibold text-ink', text: 'Review schedule' }),
         review ? element('dl', { className: 'mt-3 grid gap-3 text-sm sm:grid-cols-2' }, [
           element('div', {}, [element('dt', { className: 'text-muted', text: 'Next Review' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatSrsDate(review.dueOn) })]),
           element('div', {}, [element('dt', { className: 'text-muted', text: 'Interval' }), element('dd', { className: 'mt-1 font-medium text-ink', text: `${review.intervalDays || 0} days` })]),
@@ -143,6 +173,10 @@ export const ENTITY_CONFIGS = {
       element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'data-grammar-example-context': 'true' } }, [
         element('h3', { className: 'font-semibold text-ink', text: 'Grammar in your examples' }),
         element('p', { className: 'mt-2 text-sm text-muted', text: 'Loading grammar detected in saved examples…' })
+      ]),
+      element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'data-where-seen': 'true' } }, [
+        element('h3', { className: 'font-semibold text-ink', text: 'Where you’ve seen it' }),
+        element('p', { className: 'mt-2 text-sm text-muted', text: 'Loading study sessions and immersion…' })
       ])
     ])},
     fields: [
@@ -324,8 +358,8 @@ renderDetail: (item) => {
         element('div', {}, [element('dt', { className: 'text-muted', text: 'JLPT tag' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.jlpt_level || 'Not set' })]),
         element('div', {}, [element('dt', { className: 'text-muted', text: 'Status (self-reported)' }), element('dd', { className: 'mt-1 font-medium text-ink', text: item.status || 'New' })])
       ]),
-      element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'aria-label': 'SRS review state' } }, [
-        element('h3', { className: 'font-semibold text-ink', text: 'SRS Review' }),
+      element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'aria-label': 'Review schedule' } }, [
+        element('h3', { className: 'font-semibold text-ink', text: 'Review schedule' }),
         grammarReview ? element('dl', { className: 'mt-3 grid gap-3 text-sm sm:grid-cols-2' }, [
           element('div', {}, [element('dt', { className: 'text-muted', text: 'Next Review' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatSrsDate(grammarReview.dueOn) })]),
           element('div', {}, [element('dt', { className: 'text-muted', text: 'Interval' }), element('dd', { className: 'mt-1 font-medium text-ink', text: `${grammarReview.intervalDays || 0} days` })]),
@@ -351,6 +385,10 @@ renderDetail: (item) => {
       element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'data-vocabulary-example-context': 'true' } }, [
         element('h3', { className: 'font-semibold text-ink', text: 'Vocabulary in this example' }),
         element('p', { className: 'mt-2 text-sm text-muted', text: 'Loading vocabulary found in this saved example…' })
+      ]),
+      element('section', { className: 'mt-5 rounded-lg border border-stone p-4', attrs: { 'data-where-seen': 'true' } }, [
+        element('h3', { className: 'font-semibold text-ink', text: 'Where you’ve seen it' }),
+        element('p', { className: 'mt-2 text-sm text-muted', text: 'Loading study sessions and immersion…' })
       ])
       ]);
     },
@@ -1025,6 +1063,16 @@ export function renderEntityPage(container, config) {
           const items = data.items || [];
           vocabularySlot.append(items.length ? element('div', { className: 'mt-2 grid gap-2' }, items.map((item) => element('p', { className: 'text-sm text-ink', text: `${item.canonical} · ${item.inVocabulary ? 'In Vocabulary' : 'Not in Vocabulary'}` }))) : element('p', { className: 'mt-2 text-sm text-muted', text: 'No vocabulary candidates found in this saved example.' }));
         }).catch(() => vocabularySlot.replaceChildren(element('h3', { className: 'font-semibold text-ink', text: 'Vocabulary in this example' }), element('p', { className: 'mt-2 text-sm text-muted', text: 'Vocabulary context is unavailable.' })));
+      }
+      // V5.6 Completion Pass: where-seen fills from the encounters endpoints
+      // (existing relations only). Empty/failed → slot removed, never hollow.
+      const whereSeenSlot = content.querySelector('[data-where-seen]');
+      if (whereSeenSlot && config === ENTITY_CONFIGS.vocabulary && record.id_vocabulary) {
+        fillWhereSeen(whereSeenSlot, `/api/vocabulary/${record.id_vocabulary}/encounters`);
+      } else if (whereSeenSlot && config === ENTITY_CONFIGS.grammar && record.id_grammar) {
+        fillWhereSeen(whereSeenSlot, `/api/grammar/${record.id_grammar}/encounters`);
+      } else if (whereSeenSlot) {
+        whereSeenSlot.remove();
       }
       if (config === ENTITY_CONFIGS.kanji) {
         // B.2 stroke-order overlay: lazy + fail-open — the owned detail

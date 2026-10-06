@@ -228,6 +228,33 @@ function isWeak(item) {
   return item.evidenceStrength === 'weak';
 }
 
+// V5.6 Completion Pass: session-creation responses carry batched per-item
+// context (same helper shape as the dashboard auto-session). Merge it into
+// the client queue so cards render Context blocks with zero extra requests.
+function applySessionContext(queueItems, session) {
+  const byKey = new Map((Array.isArray(session?.items) ? session.items : []).map((entry) => [`${entry.entityType}:${entry.entityId}`, entry.context]));
+  for (const item of queueItems) {
+    const context = byKey.get(`${item.entityType}:${item.entityId}`);
+    if (context) item.context = context;
+  }
+  return queueItems;
+}
+
+// Relative day label for honest history ("Last failed 4 days ago").
+// Unparseable input yields null and the line is hidden — never "NaN days".
+function daysAgoText(iso) {
+  try {
+    const then = Date.parse(String(iso).slice(0, 10) + 'T00:00:00Z');
+    if (Number.isNaN(then)) return null;
+    const now = new Date();
+    const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const days = Math.round((Date.parse(todayKey + 'T00:00:00Z') - then) / 86400000);
+    if (days <= 0) return 'today';
+    if (days === 1) return 'yesterday';
+    return `${days} days ago`;
+  } catch { return null; }
+}
+
 // Immersion hand-off: create-session redirects to `#review?reviewSessionId=…`.
 function reviewSessionIdFromHash() {
   try {
@@ -1558,7 +1585,7 @@ const CARD_TYPE_DESCRIPTIONS = {
           }
         });
         sessionId = session.id;
-        queue = picked;
+        queue = applySessionContext(picked, session);
         currentIndex = 0;
         revealed = false;
         graded = [];
@@ -1654,12 +1681,37 @@ const CARD_TYPE_DESCRIPTIONS = {
       element('summary', { className: 'cursor-pointer text-xs font-semibold text-muted', text: 'Why am I reviewing this?' }),
       element('p', { className: 'mt-1.5 text-xs leading-5 text-muted', text: whyLines.join(' ') })
     ]) : null;
+    // V5.6 Completion Pass: real learning context, collapsed by default so
+    // the recall hot path stays fast (and recall/audio fronts never leak the
+    // answer — the learner opens this deliberately). Every line is backed by
+    // batched queue context; absent data hides the whole block.
+    const contextLines = [];
+    const context = item.context && typeof item.context === 'object' ? item.context : null;
+    if (context?.example?.sentence) {
+      contextLines.push(`You saw this in: ${context.example.sentence}`);
+      if (context.example.translation) contextLines.push(`Translation: ${context.example.translation}`);
+    }
+    if (Number(context?.encounters?.count) > 0) {
+      const seenAgo = context.encounters.lastAt ? daysAgoText(context.encounters.lastAt) : null;
+      contextLines.push(`Seen ${context.encounters.count} time${context.encounters.count === 1 ? '' : 's'} in your words and writings${seenAgo ? ` — last ${seenAgo}` : ''}.`);
+    }
+    if (context?.lastFailedAt) {
+      const failedAgo = daysAgoText(context.lastFailedAt);
+      if (failedAgo) contextLines.push(`Last time: Again — ${failedAgo}.`);
+    } else if (Number(context?.againCount) > 0) {
+      contextLines.push(`Marked Again ${context.againCount} time${context.againCount === 1 ? '' : 's'} before.`);
+    }
+    const contextDetails = contextLines.length ? element('details', { className: 'mt-2 rounded-xl border border-stone bg-paper/60 px-3 py-2' }, [
+      element('summary', { className: 'cursor-pointer text-xs font-semibold text-muted', text: 'Context' }),
+      ...contextLines.map((line) => element('p', { className: 'mt-1.5 break-words text-xs leading-5 text-muted', text: line }))
+    ]) : null;
     const card = element('article', { className: 'surface review-card p-5 sm:p-8' }, [
       element('div', { className: 'flex items-start justify-between gap-3' }, [progress, counter]),
       track,
       typePill,
       titleRow,
-      ...(whyDetails ? [whyDetails] : [])
+      ...(whyDetails ? [whyDetails] : []),
+      ...(contextDetails ? [contextDetails] : [])
     ]);
 
     const body = element('div', { className: 'mt-5 border-t border-stone pt-5' });
@@ -2046,5 +2098,46 @@ const CARD_TYPE_DESCRIPTIONS = {
   loadDifficult();
   loadCardTypePreferences();
   loadPatterns();
-  tryResumeImmersionQueue();
+  if (!tryResumeImmersionQueue()) tryResumeRetake();
+
+  // V5.6 Completion Pass: deep-link resume for genuinely unfinished
+  // sessions (Continue Studying → #review?retake=<id>). Same semantics as
+  // the history Retake button — persisted queue minus graded items on the
+  // SAME open session — without needing the history modal first.
+  async function tryResumeRetake() {
+    let retakeId = null;
+    try {
+      const hash = typeof window !== 'undefined' && window.location ? window.location.hash || '' : '';
+      const queryIndex = hash.indexOf('?');
+      if (queryIndex === -1) return;
+      retakeId = new URLSearchParams(hash.slice(queryIndex + 1)).get('retake');
+      if (!retakeId || !/^[1-9]\d*$/.test(retakeId)) return;
+    } catch { return; }
+    const id = Number(retakeId);
+    let data = null;
+    try {
+      data = await apiRequest(`/api/review/sessions/${id}/items`);
+    } catch (error) {
+      showToast(error?.message || 'Could not resume the session.', 'error');
+      return;
+    }
+    const stored = Array.isArray(data?.items) ? data.items : [];
+    const remaining = stored.filter((entry) => !entry.lastResult);
+    if (!remaining.length) {
+      showToast('Nothing left to resume in this session.', 'info');
+      return;
+    }
+    sessionId = id;
+    queue = remaining.map(({ lastResult, position, ...rest }) => rest);
+    currentIndex = 0;
+    revealed = false;
+    graded = stored
+      .filter((entry) => entry.lastResult === 'Again' || entry.lastResult === 'Hard')
+      .map(({ lastResult, position, ...rest }) => ({ ...rest, result: lastResult }));
+    lastPickedByKey.clear();
+    activeReview = { sessionId, selected: queue };
+    setStage('REVIEWING');
+    renderCard();
+    showToast(`Resumed with ${remaining.length} remaining item${remaining.length === 1 ? '' : 's'}.`);
+  }
 }

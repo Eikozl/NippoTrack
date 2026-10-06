@@ -12,6 +12,7 @@ const {
   validateWriteFields
 } = require('../validation');
 const { fetchEntityById } = require('./helpers');
+const { getWhereSeen } = require('../services/whereSeen');
 const { executePaginatedList } = require('./listHelpers');
 const { findGrammarReferenceId, getGrammarReferenceById, searchGrammarReferences } = require('../services/grammarReferenceStore');
 const { analyzeVocabularyInGrammarExample } = require('../services/grammarExampleContext');
@@ -278,6 +279,20 @@ async function getGrammarVocabularyContext(req, res) {
   } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to analyze vocabulary in grammar example.' }); }
 }
 
+// V5.6 Completion Pass: learner-facing encounter history from existing
+// relations only (managed examples, linked study sessions, immersion items).
+// Same ownership contract as the vocabulary twin: 404 for foreign ids,
+// every query user-scoped in-statement, empty arrays when nothing exists.
+async function getGrammarEncounters(req, res) {
+  try {
+    const id = parseIdParam(req, 'grammar point');
+    if (!await fetchEntityById('grammar', id, req.user.id)) {
+      return res.status(404).json({ error: 'grammar point not found' });
+    }
+    return res.json(await getWhereSeen(pool, req.user.id, 'grammar', id));
+  } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load encounters.' }); }
+}
+
 function grammarExampleValues(body, { partial = false } = {}) {
   const allowed = ['sentence', 'translation', 'notes'];
   validateWriteFields(body, allowed);
@@ -338,4 +353,4 @@ async function deleteGrammar(req, res) {
   }
 }
 
-module.exports = { createGrammar, createGrammarExample, deleteGrammar, deleteGrammarExample, getGrammar, getGrammarVocabularyContext, listGrammar, listGrammarOptions, listGrammarReferences, updateGrammar, updateGrammarExample };
+module.exports = { createGrammar, createGrammarExample, deleteGrammar, deleteGrammarExample, getGrammar, getGrammarEncounters, getGrammarVocabularyContext, listGrammar, listGrammarOptions, listGrammarReferences, updateGrammar, updateGrammarExample };
