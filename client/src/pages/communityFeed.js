@@ -335,6 +335,43 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     return wrap;
   }
 
+  function readingPreviewButton(readingId, title) {
+    const button = element('button', {
+      className: 'mt-1 break-words text-left font-semibold text-ink hover:underline',
+      text: title,
+      attrs: { type: 'button', 'aria-label': `Preview ${title}` }
+    });
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      openReadingPreview(readingId, title);
+    });
+    return button;
+  }
+
+  async function openReadingPreview(readingId, fallbackTitle) {
+    let detail = null;
+    try {
+      detail = await apiRequest(`/api/reading/publications/${encodeURIComponent(readingId)}`);
+    } catch (error) {
+      showToast(error?.message || 'Unable to load the preview.', 'error');
+      return;
+    }
+    const points = Array.from(String(detail?.text || ''));
+    const excerpt = points.length > 1500 ? `${points.slice(0, 1500).join('')}…` : points.join('');
+    openDialog({
+      title: detail?.title || fallbackTitle || 'Reading preview',
+      description: `${detail?.level || 'No level'}${detail?.text ? ` · ${points.length.toLocaleString()} characters` : ''}`,
+      content: [element('div', { className: 'grid gap-3' }, [
+        excerpt
+          ? element('p', { className: 'whitespace-pre-wrap break-words font-jp text-sm leading-7 text-ink', text: excerpt, attrs: { lang: 'ja' } })
+          : element('p', { className: 'text-sm text-muted', text: 'Excerpt unavailable.' }),
+        importReadingButton(readingId)
+      ])],
+      submitLabel: 'Close',
+      onSubmit: async (form, close) => close()
+    });
+  }
+
   function linkedBox(post) {
     const snapshot = post.snapshot && typeof post.snapshot === 'object' ? post.snapshot : null;
     if (post.postType === 'share_deck' && post.deckId) {
@@ -349,8 +386,8 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     if (post.postType === 'share_reading' && post.readingId) {
       const title = snapshot?.title || 'Shared reading';
       return element('div', { className: 'mt-3 rounded-xl border border-stone bg-paper p-3' }, [
-        element('p', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: '📖 Reading' }),
-        element('p', { className: 'mt-1 break-words font-semibold text-ink', text: title }),
+        element('p', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: '📖 Reading — tap the title for a preview' }),
+        readingPreviewButton(post.readingId, title),
         ...(snapshot ? [element('p', { className: 'mt-1 text-xs text-muted', text: `${snapshot.level || 'No level'}${snapshot.chars ? ` · ${Number(snapshot.chars).toLocaleString()} characters` : ''}` })] : []),
         element('div', { className: 'mt-2 flex flex-wrap gap-2' }, [importReadingButton(post.readingId)])
       ]);
@@ -385,7 +422,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       return;
     }
     const items = Array.isArray(detail?.items) ? detail.items : [];
-    const rows = element('div', { className: 'grid gap-2 sm:grid-cols-2 xl:grid-cols-3' });
+    const rows = element('div', { className: 'grid grid-cols-2 gap-2 xl:grid-cols-3' });
     const saveAll = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: `Save all (${items.length}) to my library`, attrs: { type: 'button' } });
     const savedIds = new Set();
     const paintRows = () => {
@@ -614,17 +651,10 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
         }
       }
       const followRow = (post.mine || !post.authorUsername) ? null : followButton(post.authorUsername, () => {});
-      // Linked learning content renders inline (same boxes as the cards),
-      // plus a bounded text excerpt for shared readings so the post itself
-      // previews what the text says before importing.
+      // Linked learning content renders inline (same boxes as the cards —
+      // reading titles open the excerpt dialog, decks open the viewer).
       const dialogLinked = linkedBox(post);
       if (dialogLinked) dialogLinked.addEventListener('click', (event) => event.stopPropagation());
-      const excerptWrap = (post.postType === 'share_reading' && post.readingId)
-        ? element('div', { className: 'rounded-xl border border-stone bg-paper p-3' }, [
-          element('p', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: 'Preview' }),
-          element('p', { className: 'mt-1 text-sm text-muted', text: 'Loading excerpt…' })
-        ])
-        : null;
       openDialog({
         title: `${post.authorDisplay || post.authorUsername || 'Someone'} · ${POST_TYPE_LABEL[post.postType] || post.postType}`,
         description: post.createdAt ? new Date(post.createdAt).toLocaleString() : '',
@@ -634,30 +664,12 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
           ...(post.body ? [element('p', { className: 'break-words text-sm leading-6 text-ink/90', text: post.body })] : []),
           ...(post.translation ? [element('p', { className: 'break-words text-sm leading-6 text-muted', text: post.translation })] : []),
           ...(dialogLinked ? [dialogLinked] : []),
-          ...(excerptWrap ? [excerptWrap] : []),
           element('div', { className: 'flex flex-wrap items-center gap-2' }, [like, followRow].filter(Boolean)),
           element('div', { className: 'grid gap-2' }, [commentsWrap, element('div', { className: 'flex gap-2' }, [input, send])])
         ])],
         submitLabel: 'Close',
         onSubmit: async (form, close) => close()
       });
-      if (excerptWrap) {
-        apiRequest(`/api/reading/publications/${encodeURIComponent(post.readingId)}`).then((detail) => {
-          const points = Array.from(String(detail?.text || ''));
-          const excerpt = points.length > 1500 ? `${points.slice(0, 1500).join('')}…` : points.join('');
-          excerptWrap.replaceChildren(
-            element('p', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: 'Preview' }),
-            excerpt
-              ? element('p', { className: 'mt-1 whitespace-pre-wrap break-words font-jp text-sm leading-7 text-ink', text: excerpt, attrs: { lang: 'ja' } })
-              : element('p', { className: 'mt-1 text-sm text-muted', text: 'Excerpt unavailable.' })
-          );
-        }).catch(() => {
-          excerptWrap.replaceChildren(
-            element('p', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: 'Preview' }),
-            element('p', { className: 'mt-1 text-sm text-muted', text: 'Excerpt unavailable.' })
-          );
-        });
-      }
       reloadComments();
       if (focusComments) setTimeout(() => { try { input.focus(); } catch { /* noop */ } }, 60);
     }).catch((error) => showToast(error?.message || 'Unable to open the post.', 'error'));
@@ -717,9 +729,9 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     });
   }
 
-  // ---- composer
+  // ---- composer (collapsed by default so posts own the viewport)
   function composerCard(onPublished) {
-    const wrap = element('div', { className: 'surface p-4 sm:p-5' });
+    const wrap = element('div', { className: 'surface p-4 sm:p-5', attrs: { 'data-composer': 'true' } });
     const typeSelect = element('select', { className: 'field-control', attrs: { 'aria-label': 'Post type' } },
       COMPOSER_TYPES.map((type) => element('option', { text: type.label, attrs: { value: type.value } })));
     const titleInput = element('input', { className: 'field-control', attrs: { type: 'text', maxlength: '200', placeholder: 'Title (optional)', 'aria-label': 'Post title' } });
@@ -818,14 +830,32 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       japaneseInput.value = '';
       translationInput.value = '';
       showToast('Published to Community.');
+      setCollapsed(true);
       if (typeof onPublished === 'function') onPublished(post);
     }, { pendingLabel: 'Publishing…' }).catch((error) => showToast(error?.message || 'Unable to publish.', 'error')));
     fields.append(typeSelect, titleInput, bodyInput, japaneseInput, translationInput, linkBox, publish);
-    wrap.append(
-      element('div', { className: 'flex items-center gap-3' }, [element('h2', { className: 'font-semibold text-ink', text: 'Share something' })]),
-      element('p', { className: 'mt-1 text-sm text-muted', text: 'Post an example, a question, a milestone — or share learning content.' }),
-      fields
-    );
+    // Collapsed by default: a summary toggle owns the viewport emphasis,
+    // posts below stay the focus. Expands on demand, collapses after publish.
+    const toggleGlyph = element('span', { className: 'shrink-0 text-lg text-muted', text: '+', attrs: { 'aria-hidden': 'true' } });
+    const toggle = element('button', {
+      className: 'flex w-full items-center justify-between gap-3 text-left',
+      attrs: { type: 'button', 'aria-expanded': 'false' }
+    }, [
+      element('div', { className: 'min-w-0' }, [
+        element('h2', { className: 'font-semibold text-ink', text: 'Share something' }),
+        element('p', { className: 'mt-1 text-sm text-muted', text: 'Post an example, a question, a milestone — or share learning content.' })
+      ]),
+      toggleGlyph
+    ]);
+    const collapsible = element('div', { className: 'mt-3 grid gap-3' }, [fields]);
+    collapsible.hidden = true;
+    const setCollapsed = (collapsed) => {
+      collapsible.hidden = collapsed;
+      toggle.setAttribute('aria-expanded', String(!collapsed));
+      toggleGlyph.textContent = collapsed ? '+' : '−';
+    };
+    toggle.addEventListener('click', () => setCollapsed(!collapsible.hidden));
+    wrap.append(toggle, collapsible);
     paintLink();
     return wrap;
   }
@@ -910,8 +940,9 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       }
       if (button.textContent === 'Create a post') {
         button.addEventListener('click', () => {
-          body.querySelector('select')?.focus();
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          const composerToggle = body.querySelector('[data-composer] > button');
+          if (composerToggle && composerToggle.getAttribute('aria-expanded') === 'false') composerToggle.click();
+          else window.scrollTo({ top: 0, behavior: 'smooth' });
         });
       }
     });

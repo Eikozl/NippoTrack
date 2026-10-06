@@ -45,13 +45,20 @@ test('post cards show identity, counts and learning actions', () => {
 
 test('reading posts preview the text inside the detail dialog', () => {
   const source = readSource('src/pages/communityFeed.js');
-  assert.ok(source.includes('/api/reading/publications/${encodeURIComponent(post.readingId)}'), 'excerpt fetched from the public endpoint');
-  assert.ok(source.includes('Preview'), 'excerpt labeled as preview');
+  assert.ok(source.includes('openReadingPreview'), 'reading titles open a dedicated excerpt dialog');
+  assert.ok(source.includes('/api/reading/publications/${encodeURIComponent(post.readingId)}') || source.includes('/api/reading/publications/${encodeURIComponent(readingId)}'), 'excerpt fetched from the public endpoint');
 });
 
 test('deck viewer lays items out in a wrapping multi-column grid', () => {
   const source = readSource('src/pages/communityFeed.js');
-  assert.ok(source.includes('sm:grid-cols-2 xl:grid-cols-3'), 'one column on mobile, more when space allows');
+  assert.ok(source.includes('grid-cols-2') && source.includes('xl:grid-cols-3'), 'columns from mobile up, more when space allows');
+});
+
+test('composer stays collapsed behind a summary toggle', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('data-composer'), 'composer identifiable');
+  assert.ok(source.includes('aria-expanded'), 'toggle exposes state');
+  assert.ok(source.includes('setCollapsed(true)'), 'collapses after publish');
 });
 
 test('shared deck items show han characters, never generic placeholders', () => {
