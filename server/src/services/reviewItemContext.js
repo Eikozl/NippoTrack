@@ -166,4 +166,13 @@ async function getReviewItemContext(executor, userId, items) {
   return context;
 }
 
-module.exports = { MAX_CONTEXT_ITEMS, getReviewItemContext };
+// API attachments carry context only when it says something real (an
+// example, encounters, or review history). Empty shells stay off the wire
+// so queue shapes remain stable and payloads stay lean; the UI treats a
+// missing context exactly like an empty one (block hidden).
+function hasMeaningfulContext(entry) {
+  if (!entry || typeof entry !== 'object') return false;
+  return Boolean(entry.example || entry.encounters || entry.lastReviewedAt || entry.lastFailedAt || Number(entry.againCount) > 0);
+}
+
+module.exports = { MAX_CONTEXT_ITEMS, getReviewItemContext, hasMeaningfulContext };

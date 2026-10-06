@@ -11,7 +11,7 @@ const OTHER_ID = '00000000-0000-4000-8000-000000000002';
 
 const pool = require('../src/config/db');
 const { getWhereSeen } = require('../src/services/whereSeen');
-const { getReviewItemContext } = require('../src/services/reviewItemContext');
+const { getReviewItemContext, hasMeaningfulContext } = require('../src/services/reviewItemContext');
 const vocabularyController = require('../src/controllers/vocabularyController');
 const grammarController = require('../src/controllers/grammarController');
 
@@ -144,4 +144,14 @@ test('review context ignores malformed items and stays empty without data', asyn
     assert.equal(context.size, 0, 'nothing valid, nothing returned');
   });
   assert.ok(queried <= 1, 'degenerate input issues no fan-out');
+});
+
+test('hasMeaningfulContext keeps empty shells off the wire', () => {
+  assert.equal(hasMeaningfulContext(null), false);
+  assert.equal(hasMeaningfulContext({}), false);
+  assert.equal(hasMeaningfulContext({ lastReviewedAt: null, lastFailedAt: null, againCount: 0, example: null, encounters: null }), false);
+  assert.equal(hasMeaningfulContext({ againCount: 1 }), true);
+  assert.equal(hasMeaningfulContext({ lastFailedAt: '2026-09-20' }), true);
+  assert.equal(hasMeaningfulContext({ example: { sentence: 'x' } }), true);
+  assert.equal(hasMeaningfulContext({ encounters: { count: 2 } }), true);
 });

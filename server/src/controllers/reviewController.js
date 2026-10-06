@@ -3,7 +3,7 @@ const { ValidationError, sendRouteError } = require('../errors/http');
 const { parseIdParam, isValidDateString, validateAllowedValues } = require('../validation');
 const { parsePagination, paginationPayload } = require('../pagination');
 const { getReviewCandidates, toIsoDate } = require('../services/reviewCandidates');
-const { getReviewItemContext } = require('../services/reviewItemContext');
+const { getReviewItemContext, hasMeaningfulContext } = require('../services/reviewItemContext');
 const {
   CARD_TYPES,
   ENTITY_CARD_TYPES,
@@ -371,11 +371,12 @@ async function createReviewSession(req, res) {
       let contextItems = null;
       try {
         const context = await getReviewItemContext(pool, req.user.id, queueItems);
-        contextItems = queueItems.map((entry) => ({
-          entityType: entry.entityType,
-          entityId: entry.entityId,
-          context: context.get(`${entry.entityType}:${entry.entityId}`) || null
-        }));
+        contextItems = queueItems.map((entry) => {
+          const itemContext = context.get(`${entry.entityType}:${entry.entityId}`);
+          return hasMeaningfulContext(itemContext)
+            ? { entityType: entry.entityType, entityId: entry.entityId, context: itemContext }
+            : { entityType: entry.entityType, entityId: entry.entityId };
+        });
       } catch { contextItems = null; }
       return res.status(201).json({ id, sourceFrom, sourceTo, completedAt: null, itemCount: queueItems.length, ...(contextItems ? { items: contextItems } : {}) });
     } catch (error) {
@@ -695,7 +696,7 @@ async function buildReconstructedSessionItems(executor, sessionId, userId, sourc
     }
     if (ordered.length >= RECONSTRUCTED_QUEUE_LIMIT) break;
   }
-  return ordered.map((entry, position) => ({
+  const queue = ordered.map((entry, position) => ({
     position,
     entityType: entry.entityType,
     entityId: entry.entityId,
@@ -704,6 +705,16 @@ async function buildReconstructedSessionItems(executor, sessionId, userId, sourc
     meaning: entry.meaning || null,
     lastResult: null
   }));
+  // Same batched context as persisted queues (fail-open): reconstructed
+  // resume carries identical Context blocks.
+  try {
+    const context = await getReviewItemContext(executor, userId, queue);
+    for (const item of queue) {
+      const itemContext = context.get(`${item.entityType}:${item.entityId}`);
+      if (hasMeaningfulContext(itemContext)) item.context = itemContext;
+    }
+  } catch { /* context stays absent; queue still resumes */ }
+  return queue;
 }
 
 async function getReviewSessionItems(req, res) {
@@ -761,7 +772,8 @@ async function getReviewSessionItems(req, res) {
       try {
         const context = await getReviewItemContext(pool, req.user.id, persisted);
         for (const item of persisted) {
-          item.context = context.get(`${item.entityType}:${item.entityId}`) || null;
+          const itemContext = context.get(`${item.entityType}:${item.entityId}`);
+          if (hasMeaningfulContext(itemContext)) item.context = itemContext;
         }
       } catch { /* context stays absent; queue still resumes */ }
       return res.json({ id, reconstructed: false, items: persisted });
