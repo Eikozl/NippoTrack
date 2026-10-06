@@ -309,7 +309,7 @@ test('Select all / Clear act per group', async () => {
   selectAll.click();
   let boxes = vocabSection.querySelectorAll('input[type="checkbox"]');
   assert.ok(boxes.length === 2 && boxes.every((b) => b.checked), 'select all checks the group');
-  const create = findButtonsByText(container, 'Create study session')[0];
+  const create = findButtonsByText(container, 'Create review session')[0];
   assert.equal(create.disabled, false, 'create enabled after selection');
   findButtonsByText(vocabSection, 'Clear')[0].click();
   boxes = vocabSection.querySelectorAll('input[type="checkbox"]');
@@ -323,7 +323,7 @@ test('create is disabled until a selection, then navigates to reviewSessionUrl',
     createPayload: { sessionId: 5, reviewSessionId: 77, createdCounts: { vocabulary: 1, kanji: 0, grammar: 0, reviewItems: 1 }, reviewSessionUrl: '/review?reviewSessionId=77' }
   });
   const container = await mountAndAnalyze(harness);
-  const create = findButtonsByText(container, 'Create study session')[0];
+  const create = findButtonsByText(container, 'Create review session')[0];
   assert.equal(create.disabled, true, 'disabled with nothing selected');
   const firstBox = container.querySelector('section[aria-label="Vocabulary"]').querySelector('input[type="checkbox"]');
   firstBox.checked = true;

@@ -354,7 +354,7 @@ export async function renderCommunity(container) {
     const shown = visible.slice(0, FEED_VISIBLE);
     feedList.replaceChildren(element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-2 overflow-x-hidden' }, shown.map((deck) => buildFeedRow(deck))));
     if (visible.length > FEED_VISIBLE) {
-      const more = smallButton(`Ver más (${visible.length - FEED_VISIBLE} more)`, 'View all matching decks');
+      const more = smallButton(`See more (${visible.length - FEED_VISIBLE} more)`, 'View all matching decks');
       more.addEventListener('click', () => openAllDecksDialog(typeFilter.value, query));
       feedList.append(element('div', { className: 'mt-1 flex justify-center' }, [more]));
     }

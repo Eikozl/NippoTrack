@@ -293,7 +293,7 @@ export function renderSessions(container) {
         return;
       }
       if (!items.length) {
-        results.replaceChildren(emptyState({ title: 'No sessions found', description: 'Record a study session or adjust the current filters.' }));
+        results.replaceChildren(emptyState({ title: 'No sessions found', description: 'Log a study session or adjust the current filters.' }));
         return;
       }
       const pager = paginationControls(pagination, (pageNumber) => {

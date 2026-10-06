@@ -13,7 +13,8 @@ test('dashboard fetches Study Now fail-open alongside existing signals', () => {
   assert.ok(source.includes('/api/dashboard/study-now'), 'new aggregation endpoint used');
   assert.ok(source.includes('.catch(() => null)'), 'fail-open preserved');
   assert.ok(source.includes('/api/dashboard?today='), 'existing dashboard still fetched');
-  assert.ok(source.includes('/api/review'), 'existing review still fetched');
+  assert.ok(source.includes('/api/review'), 'full due listing kept as fallback only');
+  assert.ok(source.includes('studyNow?.signals?.dueCount'), 'Due metric reuses the bounded COUNT, not the unbounded UNION');
 });
 
 test('Study Now renders explainable next action with CTA', () => {
@@ -77,4 +78,15 @@ test('encounter label uses learner wording', () => {
   const source = readSource('src/pages/entityPage.js');
   assert.ok(source.includes('Where you'), 'learner-friendly encounter header');
   assert.ok(!source.includes("text: 'Encounter Intelligence'"), 'jargon header removed');
+  assert.ok(source.includes("text: 'Review schedule'"), 'schedule header without SRS jargon');
+});
+
+test('session and review verbs are consistent', () => {
+  const sessions = readSource('src/pages/sessions.js');
+  assert.ok(sessions.includes('Log a study session or adjust the current filters.'), 'sessions empty state uses Log');
+  const immersion = readSource('src/pages/immersion.js');
+  assert.ok(immersion.includes('Create review session'), 'immersion builds a review queue, not study time');
+  assert.ok(!immersion.includes('Create study session'), 'old ambiguous label gone');
+  const community = readSource('src/pages/community.js');
+  assert.ok(!community.includes('`Ver más'), 'no mixed-language feed button');
 });

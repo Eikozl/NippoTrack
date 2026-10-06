@@ -213,12 +213,11 @@ export async function renderDashboard(container) {
       // Detailed charts live in Statistics (the canonical analytics page);
       // the dashboard stays a calm snapshot: metrics, recent sessions,
       // activity calendar, and quiet links outward.
-      const [data, activity, review, goalsData, studyNow] = await Promise.all([
+      const [data, activity, goalsData, studyNow] = await Promise.all([
         // `today` anchors server windows on the browser's local date: DB
         // CURRENT_DATE is UTC and dropped evening sessions (0 minutes).
         apiRequest(`/api/dashboard?today=${localDayKey()}`),
         apiRequest(`/api/dashboard/activity?today=${localDayKey()}`),
-        apiRequest('/api/review'),
         // One bounded request on the existing Goals endpoint; a failure
         // here skips the preview without failing the dashboard.
         apiRequest('/api/goals?active=1&limit=10').catch(() => null),
@@ -226,6 +225,14 @@ export async function renderDashboard(container) {
         // skips the section without failing the dashboard.
         apiRequest(`/api/dashboard/study-now?today=${localDayKey()}`).catch(() => null)
       ]);
+      // V5.6 perf: the Due metric reuses the Study Now COUNT instead of the
+      // unbounded /api/review UNION on the critical path. The full listing
+      // is fetched only as a fallback when Study Now is unavailable.
+      let dueCount = Number(studyNow?.signals?.dueCount);
+      if (!Number.isFinite(dueCount)) {
+        const review = await apiRequest('/api/review').catch(() => null);
+        dueCount = Array.isArray(review?.items) ? review.items.length : 0;
+      }
       // v5.1-E welcome personalization (presentation only): display_name
       // first-name + local-calendar-day visit state. The cached profile
       // store is reused — no new endpoint, no migration. Fail-open: any
@@ -279,7 +286,7 @@ export async function renderDashboard(container) {
       content.replaceChildren(
         ...(welcome ? [welcomeHeader(welcome)] : []),
         ...(studyNowSection(studyNow) ? [studyNowSection(studyNow)] : []),
-        element('div', { className: 'dashboard-metrics reveal-group grid gap-4 sm:grid-cols-2 xl:grid-cols-4' }, [metric('today', 'Today', data.minutesToday, 'minutes studied'), metric('week', 'This week', data.minutesThisWeek, 'minutes studied'), metric('streak', 'Current streak', activity.currentStreak, 'consecutive active days'), metric('streak', 'Longest streak', activity.longestStreak, 'best run of active days'), metric('review', 'Due reviews', review.items.length, 'items ready to recall', 'review', true), metric('vocabulary', 'Vocabulary', data.vocabularyCount, 'saved words', 'vocabulary'), metric('kanji', 'Kanji', data.kanjiCount, 'tracked characters', 'kanji'), metric('grammar', 'Grammar', data.grammarCount, 'saved patterns', 'grammar')]),
+        element('div', { className: 'dashboard-metrics reveal-group grid gap-4 sm:grid-cols-2 xl:grid-cols-4' }, [metric('today', 'Today', data.minutesToday, 'minutes studied'), metric('week', 'This week', data.minutesThisWeek, 'minutes studied'), metric('streak', 'Current streak', activity.currentStreak, 'consecutive active days'), metric('streak', 'Longest streak', activity.longestStreak, 'best run of active days'), metric('review', 'Due reviews', dueCount, 'items ready to recall', 'review', true), metric('vocabulary', 'Vocabulary', data.vocabularyCount, 'saved words', 'vocabulary'), metric('kanji', 'Kanji', data.kanjiCount, 'tracked characters', 'kanji'), metric('grammar', 'Grammar', data.grammarCount, 'saved patterns', 'grammar')]),
         // Zero eligible goals: this section never renders — no empty card,
         // no placeholder, no reserved space.
         ...(previewGoals.length ? [goalsPreview(previewGoals, eligibleGoals.length > 3)] : []),

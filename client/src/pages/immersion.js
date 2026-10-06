@@ -116,7 +116,7 @@ export async function renderImmersion(container) {
 
     const footer = element('div', { className: 'surface review-sticky-footer flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between' });
     const countNote = element('p', { className: 'text-sm text-muted', text: '0 selected', attrs: { 'aria-live': 'polite' } });
-    const createButton = element('button', { className: 'button-primary', text: 'Create study session', attrs: { type: 'button', disabled: '' } });
+    const createButton = element('button', { className: 'button-primary', text: 'Create review session', attrs: { type: 'button', disabled: '' } });
     footer.append(countNote, createButton);
 
     function selectedTotal() {

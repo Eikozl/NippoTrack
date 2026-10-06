@@ -215,7 +215,7 @@ renderDetail: (item) => {
         // dialogs; stacked otherwise. Exposure stays exposure-only.
         element('div', { className: 'grid gap-4 lg:grid-cols-2' }, [
         element('section', { className: 'kanji-detail-section surface p-5' }, [
-          element('h3', { className: 'font-semibold text-ink', text: 'SRS Review' }),
+          element('h3', { className: 'font-semibold text-ink', text: 'Review schedule' }),
           review ? element('dl', { className: 'mt-3 grid gap-3 text-sm sm:grid-cols-2' }, [
             element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Next Review' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatDate(review.dueOn) })]),
             element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Interval' }), element('dd', { className: 'mt-1 font-medium text-ink', text: `${review.intervalDays || 0} days` })]),
