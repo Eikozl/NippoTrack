@@ -240,7 +240,9 @@ export async function mountSocialFeed({ tabs, body, actions, renderDecksHub }) {
         className: 'flex w-full items-center rounded-md px-3 py-2 text-left text-sm font-medium text-ink transition hover:bg-paper',
         text: label, attrs: { type: 'button', role: 'menuitem' }
       });
-      itemButton.addEventListener('click', () => { close(); handler(); });
+      // Stop bubbling: without this the click reaches the post card
+      // underneath and opens the detail dialog on top of the confirm.
+      itemButton.addEventListener('click', (event) => { event.stopPropagation(); close(); handler(); });
       menu.appendChild(itemButton);
     };
     if (post.mine) {
@@ -471,7 +473,7 @@ export async function mountSocialFeed({ tabs, body, actions, renderDecksHub }) {
       const like = likeButton(post, onRefresh);
       const commentsWrap = element('div', { className: 'grid gap-2' }, [element('p', { className: 'text-sm text-muted', text: 'Loading comments…' })]);
       const input = element('input', { className: 'field-control', attrs: { type: 'text', maxlength: '1000', placeholder: 'Write a comment…', 'aria-label': 'Write a comment' } });
-      const send = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Comment', attrs: { type: 'button' } });
+      const send = element('button', { className: 'icon-button shrink-0', text: '➤', attrs: { type: 'button', 'aria-label': 'Send comment' } });
       const submitComment = () => withPendingAction(send, async () => {
         const text = String(input.value || '').trim();
         if (!text) { showToast('Write something first.', 'error'); return; }
@@ -492,17 +494,52 @@ export async function mountSocialFeed({ tabs, body, actions, renderDecksHub }) {
             return;
           }
           commentsWrap.replaceChildren(...items.map((comment) => {
+            const isEdited = (() => {
+              try {
+                if (!comment.updatedAt || !comment.createdAt) return false;
+                return Math.abs(new Date(comment.updatedAt).getTime() - new Date(comment.createdAt).getTime()) > 1000;
+              } catch {
+                return false;
+              }
+            })();
+            const bodyText = element('p', { className: 'mt-1 break-words text-sm leading-6 text-ink/90', text: comment.body });
+            const editedNote = element('p', { className: 'mt-1 text-xs italic text-muted', text: 'edited' });
+            editedNote.hidden = !isEdited;
             const row = element('div', { className: 'rounded-xl border border-stone bg-paper p-3' }, [
               element('div', { className: 'flex items-center justify-between gap-2' }, [
                 element('p', { className: 'truncate text-xs font-semibold text-ink', text: comment.authorDisplay || comment.authorUsername || 'Someone' }),
-                comment.mine ? element('button', {
-                  className: 'text-xs font-semibold text-red-700 hover:underline', text: 'Delete', attrs: { type: 'button' }
-                }) : element('span', { className: 'text-xs text-muted', text: timeAgo(comment.createdAt) })
+                comment.mine ? element('div', { className: 'flex shrink-0 items-center gap-1' }, [
+                  element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Edit', attrs: { type: 'button', 'aria-label': 'Edit comment' } }),
+                  element('button', { className: 'icon-button icon-button--danger shrink-0', text: '🗑', attrs: { type: 'button', 'aria-label': 'Delete comment' } })
+                ]) : element('span', { className: 'text-xs text-muted', text: timeAgo(comment.createdAt) })
               ]),
-              element('p', { className: 'mt-1 break-words text-sm leading-6 text-ink/90', text: comment.body })
+              bodyText,
+              editedNote
             ]);
             if (comment.mine) {
-              row.querySelectorAll('button')[0]?.addEventListener('click', () => {
+              const [editButton, deleteButton] = row.querySelectorAll('button');
+              editButton?.addEventListener('click', () => {
+                const area = element('textarea', { className: 'field-control mt-2 min-h-16 w-full', attrs: { rows: '2', maxlength: '1000', 'aria-label': 'Edit comment' } });
+                area.value = comment.body;
+                const save = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Save', attrs: { type: 'button' } });
+                const cancel = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Cancel', attrs: { type: 'button' } });
+                const editor = element('div', { className: 'mt-2 grid gap-2' }, [area, element('div', { className: 'flex gap-2' }, [save, cancel])]);
+                bodyText.replaceWith(editor);
+                area.focus();
+                cancel.addEventListener('click', () => editor.replaceWith(bodyText));
+                save.addEventListener('click', () => withPendingAction(save, async () => {
+                  const text = String(area.value || '').trim();
+                  if (!text) { showToast('Write something first.', 'error'); return; }
+                  const updated = await apiRequest(`/api/community/comments/${comment.id}`, { method: 'PUT', body: { body: text } });
+                  comment.body = updated?.body || text;
+                  comment.updatedAt = new Date().toISOString();
+                  bodyText.textContent = comment.body;
+                  editor.replaceWith(bodyText);
+                  editedNote.hidden = false;
+                  showToast('Comment updated.');
+                }).catch((error) => showToast(error?.message || 'Unable to update.', 'error')));
+              });
+              deleteButton?.addEventListener('click', () => {
                 confirmDialog({
                   title: 'Delete this comment?',
                   description: 'This cannot be undone.',
@@ -762,15 +799,17 @@ export async function mountSocialFeed({ tabs, body, actions, renderDecksHub }) {
   function renderFeedRoot() {
     if (state.tab === 'discover') return renderDiscover();
     body.replaceChildren();
-    if (state.tab === 'feed') {
-      const composer = composerCard(() => feedLoader(listHost, 'feed'));
-      body.appendChild(composer);
-    }
+    // UI tab "feed" is the backend "latest" tab everywhere, composer
+    // refresh included (the backend only knows latest/following/discover;
+    // sending "feed" 400s with a scary error right after publishing).
+    const apiTab = state.tab === 'following' ? 'following' : 'latest';
     const listHost = element('div', { className: 'mt-5' });
+    const refreshFeed = () => feedLoader(listHost, apiTab);
+    if (state.tab === 'feed') {
+      body.appendChild(composerCard(() => refreshFeed()));
+    }
     body.appendChild(listHost);
-    // UI tab "feed" is the backend "latest" tab (the backend only knows
-    // latest/following/discover; sending "feed" 400s with a scary error).
-    feedLoader(listHost, state.tab === 'following' ? 'following' : 'latest');
+    refreshFeed();
     wireEmptyActions();
   }
 
