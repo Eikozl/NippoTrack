@@ -140,8 +140,10 @@ async function postDecide(req, res) {
 
 async function getPublicUser(req, res) {
   try {
-    const profile = await getPublicProfile(pool, req.params.username);
-    if (!profile) return res.status(404).json({ error: 'user not found' });
+    // Phase 2b: thread the viewer so private/blocked owners resolve to the
+    // same 404-shape null as a missing user (no oracle). Shape unchanged.
+    const profile = await getPublicProfile(pool, req.params.username, req.user.id);
+    if (!profile || profile.gated) return res.status(404).json({ error: 'user not found' });
     return res.json(profile);
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load the public profile.' });
@@ -243,18 +245,31 @@ async function putOwnProfile(req, res) {
 
 async function listPublicUserDecks(req, res) {
   try {
-    const profile = await getPublicProfile(pool, req.params.username);
-    if (!profile) return res.status(404).json({ error: 'user not found' });
+    // Phase 2b: thread the viewer (profile gate already 404s private/blocked
+    // owners). Owners browsing their own username path additionally see their
+    // private rows; strangers keep the public-only, unblocked filter. The
+    // { profile, items } shape is unchanged.
+    const profile = await getPublicProfile(pool, req.params.username, req.user.id);
+    if (!profile || profile.gated) return res.status(404).json({ error: 'user not found' });
+    const lname = String(req.params.username || '').toLowerCase();
+    const [ownerRows] = await pool.execute('SELECT user_id FROM user_profile WHERE username = ?', [lname]);
+    const ownerId = Array.isArray(ownerRows) ? ownerRows[0]?.user_id : null;
+    const isSelf = ownerId !== null && ownerId !== undefined && String(ownerId) === String(req.user.id);
+    const gate = isSelf
+      ? ''
+      : 'AND d.is_public = TRUE AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = d.owner_id) OR (b.blocker_id = d.owner_id AND b.blocked_id = ?))';
+    const gateParams = isSelf ? [] : [req.user.id, req.user.id];
     const [rows] = await pool.execute(
       `SELECT d.id_deck_publication AS id, d.title, d.description, d.entity_type, d.created_at,
          (SELECT COUNT(*) FROM deck_follows f WHERE f.id_deck_publication = d.id_deck_publication) AS followers,
          (SELECT COUNT(*) FROM deck_publication_items i WHERE i.id_deck_publication = d.id_deck_publication) AS items
        FROM deck_publications d
        WHERE d.owner_id = (SELECT user_id FROM user_profile WHERE username = ?)
-         AND d.is_public = TRUE
+         ${gate}
        ORDER BY d.id_deck_publication DESC LIMIT ? OFFSET ?`,
       [
-        String(req.params.username || '').toLowerCase(),
+        lname,
+        ...gateParams,
         Math.max(1, Math.min(50, Number(req.query?.limit) || 20)),
         Math.max(0, Number(req.query?.offset) || 0)
       ]

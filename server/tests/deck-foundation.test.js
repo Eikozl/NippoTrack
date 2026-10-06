@@ -76,7 +76,7 @@ test('private decks stay invisible to strangers but visible to the owner', async
 });
 
 test('follow and unfollow move the counter', async () => {
-  const deck = { id: 7, owner_id: 'owner-1', title: 'Open', description: '', entity_type: 'vocabulary', is_public: 1, created_at: '2026-01-01', followers: 0 };
+  const deck = { id: 7, owner_id: 'owner-1', title: 'Open', description: '', entity_type: 'vocabulary', is_public: 1, created_at: '2026-01-01', followers: 0, owner_is_public: 1, viewer_blocked: 0 };
   const store = fakeStore({ deck, followers: 2 });
   const followed = await setDeckFollow(store, 7, 'fan-1', true);
   assert.deepEqual(followed, { following: true, followers: 3 });
@@ -86,7 +86,7 @@ test('follow and unfollow move the counter', async () => {
 });
 
 test('public profiles gate on username, visibility and format', async () => {
-  const profile = { user_id: 'owner-1', display_name: 'Taro', bio: 'learner', avatar_url: null };
+  const profile = { user_id: 'owner-1', display_name: 'Taro', bio: 'learner', avatar_url: null, is_public: true };
   const store = fakeStore({ profile, publicDecks: [{ id: 1 }] });
   const found = await getPublicProfile(store, 'taro-123');
   assert.equal(found.username, 'taro-123');
@@ -147,7 +147,7 @@ test('viewer following flag maps from the database', async () => {
   const executor = {
     async execute(sql) {
       if (/LEFT JOIN user_profile/.test(sql)) {
-        return [[{ id: 7, owner_id: 'owner-1', title: 'Open', description: '', entity_type: 'vocabulary', is_public: 1, created_at: '2026-01-01', owner_username: null, owner_display: null, viewer_following: 1, followers: 5 }]];
+        return [[{ id: 7, owner_id: 'owner-1', title: 'Open', description: '', entity_type: 'vocabulary', is_public: 1, created_at: '2026-01-01', owner_username: null, owner_display: null, owner_is_public: 1, viewer_blocked: 0, viewer_following: 1, followers: 5 }]];
       }
       if (/FROM deck_publication_items/.test(sql)) return [[{ position: 0, item_json: { word: '水' } }]];
       throw new Error(`unexpected SQL in following test: ${sql.slice(0, 60)}`);

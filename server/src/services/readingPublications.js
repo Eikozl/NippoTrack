@@ -80,11 +80,23 @@ async function listReadingPublications(executor, { limit = 20, offset = 0, owner
   const safeOffset = Math.max(0, Number(offset) || 0);
   const where = [];
   const params = [];
+  // Phase 2b (F4/F5): mirrors listPublicDecks — non-self scopes require a
+  // public text from a public, unblocked owner; the self scope keeps the
+  // owner's own private rows. (The controller only ever sets ownerId to the
+  // caller's own id, so the owner branch below is the self branch in practice.)
+  const isSelfScope = ownerId !== null && ownerId !== undefined && String(ownerId) === String(viewerId);
   if (ownerId) {
     where.push('r.owner_id = ?');
     params.push(ownerId);
+    if (!isSelfScope) where.push('r.is_public = TRUE');
   } else {
     where.push('r.is_public = TRUE');
+  }
+  if (!isSelfScope) {
+    where.push('(r.owner_id = ? OR p.is_public)');
+    params.push(viewerId || null);
+    where.push('NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = r.owner_id) OR (b.blocker_id = r.owner_id AND b.blocked_id = ?))');
+    params.push(viewerId || null, viewerId || null);
   }
   const [rows] = await executor.execute(
     `SELECT r.id_reading_publication AS id, r.owner_id, r.title, r.description, r.level, r.is_public, r.created_at,
@@ -103,18 +115,29 @@ async function listReadingPublications(executor, { limit = 20, offset = 0, owner
 async function getReadingPublication(executor, publicationId, viewerId) {
   const id = Number(publicationId);
   if (!Number.isSafeInteger(id) || id <= 0) throw new ValidationError('publication id must be a positive integer.');
+  // Phase 2b (F4/F5): same gates as deck reads — public text from a public,
+  // unblocked owner unless the viewer is the owner. WHERE enforces it on live
+  // data; the JS re-checks below re-assert it for other executors.
   const [rows] = await executor.execute(
     `SELECT r.id_reading_publication AS id, r.owner_id, r.title, r.description, r.level, r.text,
        r.translations_json, r.is_public, r.created_at,
-       p.username AS owner_username, p.display_name AS owner_display
+       p.username AS owner_username, p.display_name AS owner_display, p.is_public AS owner_is_public,
+       CASE WHEN ? IS NULL THEN NULL ELSE EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = r.owner_id) OR (b.blocker_id = r.owner_id AND b.blocked_id = ?)) END AS viewer_blocked
       FROM reading_publications r
       LEFT JOIN user_profile p ON p.user_id = r.owner_id
-      WHERE r.id_reading_publication = ?`,
-    [id]
+      WHERE r.id_reading_publication = ?
+        AND (r.owner_id = ? OR (r.is_public AND p.is_public
+          AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = r.owner_id) OR (b.blocker_id = r.owner_id AND b.blocked_id = ?))))`,
+    [viewerId || null, viewerId || null, viewerId || null, id, viewerId || null, viewerId || null, viewerId || null]
   );
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row) return null;
-  if (row.is_public !== true && row.is_public !== 1 && String(row.owner_id) !== String(viewerId)) return null;
+  // Blocked/private resolve to the same 404-shape null as missing (no oracle).
+  if (String(row.owner_id) !== String(viewerId)) {
+    if (row.is_public !== true && row.is_public !== 1) return null;
+    if (row.owner_is_public !== true && row.owner_is_public !== 1) return null;
+    if (row.viewer_blocked === true || row.viewer_blocked === 1) return null;
+  }
   return {
     id: Number(row.id),
     ownerId: row.owner_id,

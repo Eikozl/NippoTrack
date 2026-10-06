@@ -12,6 +12,17 @@ class PlacementAlreadyCompletedError extends Error {
   }
 }
 
+// Phase 2b: application-level conflict (duplicate report). A dedicated class
+// so controllers map it to 409 without parsing messages; the code travels in
+// the JSON body so clients can branch on it.
+class ConflictError extends Error {
+  constructor(message = 'Record already exists.', code = 'ALREADY_EXISTS') {
+    super(message);
+    this.name = 'ConflictError';
+    this.code = code;
+  }
+}
+
 function sendRouteError(res, error, {
   defaultStatus = 500,
   defaultMessage = 'Unable to complete the request.',
@@ -25,6 +36,13 @@ function sendRouteError(res, error, {
     return res.status(409).json({
       error: error.message || 'Quick placement has already been completed.',
       code: 'PLACEMENT_ALREADY_COMPLETED'
+    });
+  }
+
+  if (error instanceof ConflictError) {
+    return res.status(409).json({
+      error: error.message || 'Record already exists.',
+      code: error.code || 'ALREADY_EXISTS'
     });
   }
 
@@ -60,6 +78,7 @@ function errorHandler(error, req, res, next) {
 }
 
 module.exports = {
+  ConflictError,
   PlacementAlreadyCompletedError,
   ValidationError,
   sendRouteError,

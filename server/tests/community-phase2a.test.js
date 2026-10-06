@@ -85,6 +85,7 @@ test('comment writes stay single-level; nested reply payloads are rejected', asy
     if (/FROM community_posts p/i.test(sql)) return [[VISIBLE_POST]];
     if (/INSERT INTO post_comments/i.test(sql)) return [{ insertId: 11 }];
     if (/FROM post_comments c/i.test(sql)) return [[COMMENT_ROW]];
+    if (/FROM user_blocks/i.test(sql)) return [[]];
     if (/INSERT INTO notifications/i.test(sql)) return [{ insertId: 4 }];
     throw new Error(`Unexpected SQL: ${sql.slice(0, 60)}`);
   }, async () => {
@@ -230,6 +231,7 @@ test('comment self-reports are rejected; deleted comments resolve to 404-shape n
     if (/SELECT id_community_post AS id FROM post_comments/i.test(sql)) return [[{ id: 7 }]];
     if (/SELECT author_id FROM post_comments/i.test(sql)) return [[{ author_id: OTHER_ID }]];
     if (/FROM community_posts p/i.test(sql)) return [[VISIBLE_POST]];
+    if (/SELECT 1 FROM content_reports/i.test(sql)) return [[]];
     if (/INSERT INTO content_reports/i.test(sql)) return [{ insertId: 21 }];
     throw new Error(`Unexpected SQL: ${sql.slice(0, 60)}`);
   }, async () => {
@@ -366,6 +368,7 @@ test('every touched query binds exactly its placeholders like Postgres would', a
     }
     if (/FROM user_profile WHERE username/i.test(sql)) return [[{ user_id: OTHER_ID, is_public: true }]];
     if (/FROM user_blocks/i.test(sql)) return [[]];
+    if (/SELECT 1 FROM content_reports/i.test(sql)) return [[]];
     if (/INSERT INTO content_reports/i.test(sql)) return [{ insertId: 21 }];
     throw new Error(`Unexpected SQL: ${sql.slice(0, 80)}`);
   };

@@ -140,7 +140,7 @@ test('feed lists public rows with author and size, owner filter stays scoped', a
 test('detail hides private rows from strangers and flags ownership', async () => {
   const pubRow = (isPublic, owner) => [[{
     id: 11, owner_id: owner, title: 'T1', description: '', level: null, text: '犬。',
-    translations_json: {}, is_public: isPublic, created_at: '2026-01-01', owner_username: null, owner_display: 'Yef'
+    translations_json: {}, is_public: isPublic, created_at: '2026-01-01', owner_username: null, owner_display: 'Yef', owner_is_public: true, viewer_blocked: false
   }]];
   const getAs = async (isPublic, owner, viewer) => withPoolStubs({ execute: async (sql) => {
     if (/FROM reading_publications r/i.test(sql)) return pubRow(isPublic, owner);
@@ -179,7 +179,7 @@ test('import copies text plus translations into the importer library', async () 
   const pubRow = [[{
     id: 11, owner_id: OTHER_ID, title: 'Shared tale', description: '', level: 'N4', text: '犬がいる。',
     translations_json: { 0: 'There is a dog.' }, is_public: true, created_at: '2026-01-01',
-    owner_username: null, owner_display: null
+    owner_username: null, owner_display: null, owner_is_public: true, viewer_blocked: false
   }]];
   const analysisStub = async (sql) => {
     if (/FROM kanji_reference/i.test(sql)) return [[]];
@@ -236,7 +236,7 @@ test('import is idempotent: re-importing returns the existing copy', async () =>
   const pubRow = [[{
     id: 11, owner_id: OTHER_ID, title: 'Shared tale', description: '', level: 'N4', text: '犬がいる。',
     translations_json: null, is_public: true, created_at: '2026-01-01',
-    owner_username: null, owner_display: null
+    owner_username: null, owner_display: null, owner_is_public: true, viewer_blocked: false
   }]];
   await withPoolStubs({ execute: async (sql, params = []) => {
     calls.push({ sql, params });

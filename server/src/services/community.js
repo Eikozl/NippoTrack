@@ -9,7 +9,7 @@
 // - Private-profile authors are visible to themselves only.
 // - Feeds never return emails or private study data — only the public
 //   profile columns (username, display_name, avatar_url, bio).
-const { ValidationError } = require('../errors/http');
+const { ConflictError, ValidationError } = require('../errors/http');
 
 const POST_TYPES = ['text', 'example', 'question', 'progress', 'share_deck', 'share_reading', 'share_vocab', 'share_kanji', 'share_grammar'];
 const ENTITY_TYPES = ['vocabulary', 'kanji', 'grammar'];
@@ -58,6 +58,13 @@ function visibilityWhere(alias, profileAlias) {
 
 function visibilityParams(viewerId) {
   return [viewerId, viewerId, viewerId];
+}
+
+// Phase 2b: LIKE metacharacters (%, _, \) in the raw query must not act as
+// wildcards — q="%" would otherwise enumerate the whole directory. Every
+// search ILIKE pairs with ESCAPE '\' and the pattern is pre-escaped here.
+function escapeLikePattern(value) {
+  return String(value).replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
 
 function mapPost(row, viewerId) {
@@ -126,24 +133,41 @@ async function validateLinkedContent(executor, authorId, payload) {
   const deckId = rawDeckId === null ? null : cleanId(rawDeckId, 'deckId');
   if (deckId !== null) {
     const [rows] = await executor.execute(
-      `SELECT d.title, d.entity_type, (SELECT COUNT(*) FROM deck_publication_items i WHERE i.id_deck_publication = d.id_deck_publication) AS items
+      `SELECT d.title, d.entity_type, d.owner_id, (SELECT COUNT(*) FROM deck_publication_items i WHERE i.id_deck_publication = d.id_deck_publication) AS items
        FROM deck_publications d WHERE d.id_deck_publication = ? AND (d.owner_id = ? OR d.is_public = TRUE)`,
       [deckId, authorId]
     );
     const deck = Array.isArray(rows) ? rows[0] : null;
     if (!deck) throw new ValidationError('Linked deck not found.');
+    // Phase 2b (F7): linking a blocker's/blocked user's deck is rejected with
+    // the same 404-style message, so link checks cannot oracle block state.
+    if (String(deck.owner_id) !== String(authorId)) {
+      const [blocked] = await executor.execute(
+        'SELECT 1 FROM user_blocks WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)',
+        [authorId, deck.owner_id, deck.owner_id, authorId]
+      );
+      if (Array.isArray(blocked) && blocked[0]) throw new ValidationError('Linked deck not found.');
+    }
     snapshot = { ...snapshot, title: deck.title, entityType: deck.entity_type, itemCount: Number(deck.items || 0) };
   }
   const rawReadingId = payload.readingId ?? null;
   const readingId = rawReadingId === null ? null : cleanId(rawReadingId, 'readingId');
   if (readingId !== null) {
     const [rows] = await executor.execute(
-      `SELECT title, level, char_length(text) AS chars FROM reading_publications
+      `SELECT title, level, owner_id, char_length(text) AS chars FROM reading_publications
        WHERE id_reading_publication = ? AND (owner_id = ? OR is_public = TRUE)`,
       [readingId, authorId]
     );
     const text = Array.isArray(rows) ? rows[0] : null;
     if (!text) throw new ValidationError('Linked reading text not found.');
+    // Phase 2b (F7): same block gate as linked decks, same 404-style message.
+    if (String(text.owner_id) !== String(authorId)) {
+      const [blocked] = await executor.execute(
+        'SELECT 1 FROM user_blocks WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)',
+        [authorId, text.owner_id, text.owner_id, authorId]
+      );
+      if (Array.isArray(blocked) && blocked[0]) throw new ValidationError('Linked reading text not found.');
+    }
     snapshot = { ...snapshot, title: text.title, level: text.level || null, chars: Number(text.chars || 0) };
   }
   return { entityType, entityId: cleanEntityId, deckId, readingId, snapshot };
@@ -536,6 +560,14 @@ async function listFollows(executor, userId, username, direction, { page = 1, li
 async function notifyUser(executor, { userId, actorId, kind, postId = null, commentId = null }) {
   if (!userId || String(userId) === String(actorId)) return null;
   if (!['like', 'comment', 'follow'].includes(kind)) return null;
+  // Phase 2b (F7): never write an inbox row across a blocking relationship
+  // either way. The read-time inbox filters would hide it anyway; skipping
+  // the write keeps blocked actors from probing delivery and saves the row.
+  const [blocked] = await executor.execute(
+    'SELECT 1 FROM user_blocks WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)',
+    [actorId, userId, userId, actorId]
+  );
+  if (Array.isArray(blocked) && blocked[0]) return null;
   const [result] = await executor.execute(
     'INSERT INTO notifications (user_id, actor_id, kind, id_community_post, id_post_comment) VALUES (?, ?, ?, ?, ?) RETURNING id_notification AS insertId',
     [userId, actorId, kind, postId, commentId]
@@ -712,6 +744,16 @@ async function createReport(executor, reporterId, { targetType, targetId, reason
     const parent = await getPost(executor, reporterId, parentId);
     if (!parent) return null;
   }
+  // Phase 2b: one report per reporter per target (application-level dedupe —
+  // no unique index, so no migration: the worst case under a race is a
+  // second moderation-queue row, harmless). Repeats are a 409, never silent.
+  const [existing] = await executor.execute(
+    'SELECT 1 FROM content_reports WHERE reporter_id = ? AND target_type = ? AND target_id = ? LIMIT 1',
+    [reporterId, targetType, id]
+  );
+  if (Array.isArray(existing) && existing[0]) {
+    throw new ConflictError('You have already reported this content.', 'REPORT_ALREADY_EXISTS');
+  }
   const [result] = await executor.execute(
     'INSERT INTO content_reports (reporter_id, target_type, target_id, reason, details) VALUES (?, ?, ?, ?, ?) RETURNING id_content_report AS insertId',
     [reporterId, targetType, id, reason, note]
@@ -787,16 +829,47 @@ async function getCommunityProfile(executor, viewerId, username) {
     [viewerId, profile.user_id, profile.user_id, viewerId]
   );
   if (!isSelf && blocked[0]) return { gated: true };
-  const [[counts]] = await executor.execute(
-    `SELECT
-       (SELECT COUNT(*) FROM community_posts WHERE author_id = ? AND NOT is_deleted) AS posts,
-       (SELECT COUNT(*) FROM user_follows WHERE followed_id = ?) AS followers,
-       (SELECT COUNT(*) FROM user_follows WHERE follower_id = ?) AS following,
-       (SELECT COUNT(*) FROM vocabulary WHERE user_id = ?) AS vocabulary,
-       (SELECT COUNT(*) FROM kanji WHERE user_id = ?) AS kanji,
-       (SELECT COUNT(*) FROM grammar_points WHERE user_id = ?) AS grammar`,
-    [profile.user_id, profile.user_id, profile.user_id, profile.user_id, profile.user_id, profile.user_id]
-  );
+  // Phase 2b (F8): study-library sizes (vocabulary/kanji/grammar) are
+  // owner-only. The counts object keeps its shape for everyone (same keys),
+  // but non-self viewers receive null for the private sizes — null means
+  // "undisclosed", never "zero". posts/followers/following stay public.
+  let privacyCounts;
+  if (isSelf) {
+    const [[counts]] = await executor.execute(
+      `SELECT
+         (SELECT COUNT(*) FROM community_posts WHERE author_id = ? AND NOT is_deleted) AS posts,
+         (SELECT COUNT(*) FROM user_follows WHERE followed_id = ?) AS followers,
+         (SELECT COUNT(*) FROM user_follows WHERE follower_id = ?) AS following,
+         (SELECT COUNT(*) FROM vocabulary WHERE user_id = ?) AS vocabulary,
+         (SELECT COUNT(*) FROM kanji WHERE user_id = ?) AS kanji,
+         (SELECT COUNT(*) FROM grammar_points WHERE user_id = ?) AS grammar`,
+      [profile.user_id, profile.user_id, profile.user_id, profile.user_id, profile.user_id, profile.user_id]
+    );
+    privacyCounts = {
+      posts: Number(counts?.posts || 0),
+      followers: Number(counts?.followers || 0),
+      following: Number(counts?.following || 0),
+      vocabulary: Number(counts?.vocabulary || 0),
+      kanji: Number(counts?.kanji || 0),
+      grammar: Number(counts?.grammar || 0)
+    };
+  } else {
+    const [[counts]] = await executor.execute(
+      `SELECT
+         (SELECT COUNT(*) FROM community_posts WHERE author_id = ? AND NOT is_deleted) AS posts,
+         (SELECT COUNT(*) FROM user_follows WHERE followed_id = ?) AS followers,
+         (SELECT COUNT(*) FROM user_follows WHERE follower_id = ?) AS following`,
+      [profile.user_id, profile.user_id, profile.user_id]
+    );
+    privacyCounts = {
+      posts: Number(counts?.posts || 0),
+      followers: Number(counts?.followers || 0),
+      following: Number(counts?.following || 0),
+      vocabulary: null,
+      kanji: null,
+      grammar: null
+    };
+  }
   const [[followRow]] = isSelf ? [[null]] : await executor.execute(
     'SELECT 1 AS following FROM user_follows WHERE follower_id = ? AND followed_id = ?',
     [viewerId, profile.user_id]
@@ -812,14 +885,7 @@ async function getCommunityProfile(executor, viewerId, username) {
     interests: profile.interests || null,
     isSelf,
     following: Boolean(followRow && followRow.following),
-    counts: {
-      posts: Number(counts?.posts || 0),
-      followers: Number(counts?.followers || 0),
-      following: Number(counts?.following || 0),
-      vocabulary: Number(counts?.vocabulary || 0),
-      kanji: Number(counts?.kanji || 0),
-      grammar: Number(counts?.grammar || 0)
-    }
+    counts: privacyCounts
   };
 }
 
@@ -831,7 +897,10 @@ async function searchCommunity(executor, viewerId, query, { type = 'all', page =
   if (text.length > 100) throw new ValidationError('q must not exceed 100 characters.');
   const safePage = Number.isSafeInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
   const safeLimit = Number.isSafeInteger(Number(limit)) && Number(limit) > 0 ? Math.min(MAX_SEARCH_LIMIT, Number(limit)) : 20;
-  const like = `%${text}%`;
+  // Phase 2b: page was accepted but ignored — every class now pages with a
+  // real OFFSET (caps unchanged). The LIKE pattern is wildcard-escaped above.
+  const offset = (safePage - 1) * safeLimit;
+  const like = `%${escapeLikePattern(text)}%`;
   const out = { people: [], posts: [], decks: [], reading: [] };
   const jobs = [];
   if (type === 'all' || type === 'people') {
@@ -839,10 +908,10 @@ async function searchCommunity(executor, viewerId, query, { type = 'all', page =
       `SELECT up.user_id, up.username, up.display_name, up.avatar_url, up.bio
        FROM user_profile up
        WHERE up.username IS NOT NULL AND up.is_public
-         AND (up.username ILIKE ? OR COALESCE(up.display_name, '') ILIKE ?)
+         AND (up.username ILIKE ? ESCAPE '\\' OR COALESCE(up.display_name, '') ILIKE ? ESCAPE '\\')
          AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = up.user_id) OR (b.blocker_id = up.user_id AND b.blocked_id = ?))
-       ORDER BY up.username ASC LIMIT ?`,
-      [like, like, viewerId, viewerId, safeLimit]
+       ORDER BY up.username ASC LIMIT ? OFFSET ?`,
+      [like, like, viewerId, viewerId, safeLimit, offset]
     ).then(([rows]) => {
       out.people = (Array.isArray(rows) ? rows : []).map((row) => ({
         userId: row.user_id, username: row.username, displayName: row.display_name || null,
@@ -857,9 +926,9 @@ async function searchCommunity(executor, viewerId, query, { type = 'all', page =
         FROM community_posts p
         JOIN user_profile up ON up.user_id = p.author_id
         WHERE NOT p.is_deleted AND ${visibilityWhere('p', 'up')}
-          AND (COALESCE(p.title, '') ILIKE ? OR COALESCE(p.body, '') ILIKE ? OR COALESCE(p.japanese_text, '') ILIKE ?)
-        ORDER BY p.id_community_post DESC LIMIT ?`,
-      [...visibilityParams(viewerId), like, like, like, safeLimit]
+          AND (COALESCE(p.title, '') ILIKE ? ESCAPE '\\' OR COALESCE(p.body, '') ILIKE ? ESCAPE '\\' OR COALESCE(p.japanese_text, '') ILIKE ? ESCAPE '\\')
+        ORDER BY p.id_community_post DESC LIMIT ? OFFSET ?`,
+      [...visibilityParams(viewerId), like, like, like, safeLimit, offset]
     ).then(([rows]) => {
       out.posts = (Array.isArray(rows) ? rows : []).map((row) => ({
         id: Number(row.id), postType: row.post_type, title: row.title || null, body: row.body || null,
@@ -869,14 +938,18 @@ async function searchCommunity(executor, viewerId, query, { type = 'all', page =
     }));
   }
   if (type === 'all' || type === 'decks') {
+    // Phase 2b (F9): deck hits require a public deck from a public owner
+    // (the viewer's own rows always pass), plus the both-ways block gate.
     jobs.push(executor.execute(
       `SELECT d.id_deck_publication AS id, d.title, d.entity_type, up.username AS owner_username
        FROM deck_publications d
        LEFT JOIN user_profile up ON up.user_id = d.owner_id
-       WHERE d.is_public AND d.title ILIKE ? AND NOT EXISTS (
+       WHERE d.is_public AND d.title ILIKE ? ESCAPE '\\'
+        AND (d.owner_id = ? OR up.is_public)
+        AND NOT EXISTS (
          SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = d.owner_id) OR (b.blocker_id = d.owner_id AND b.blocked_id = ?))
-       ORDER BY d.id_deck_publication DESC LIMIT ?`,
-      [like, viewerId, viewerId, safeLimit]
+       ORDER BY d.id_deck_publication DESC LIMIT ? OFFSET ?`,
+      [like, viewerId, viewerId, viewerId, safeLimit, offset]
     ).then(([rows]) => {
       out.decks = (Array.isArray(rows) ? rows : []).map((row) => ({
         id: Number(row.id), title: row.title, entityType: row.entity_type, ownerUsername: row.owner_username || null
@@ -884,14 +957,17 @@ async function searchCommunity(executor, viewerId, query, { type = 'all', page =
     }));
   }
   if (type === 'all' || type === 'reading') {
+    // Phase 2b (F9): same owner-publicity gate as deck hits.
     jobs.push(executor.execute(
       `SELECT r.id_reading_publication AS id, r.title, r.level, p.username AS owner_username
        FROM reading_publications r
        LEFT JOIN user_profile p ON p.user_id = r.owner_id
-       WHERE r.is_public AND r.title ILIKE ? AND NOT EXISTS (
+       WHERE r.is_public AND r.title ILIKE ? ESCAPE '\\'
+        AND (r.owner_id = ? OR p.is_public)
+        AND NOT EXISTS (
          SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = r.owner_id) OR (b.blocker_id = r.owner_id AND b.blocked_id = ?))
-       ORDER BY r.id_reading_publication DESC LIMIT ?`,
-      [like, viewerId, viewerId, safeLimit]
+       ORDER BY r.id_reading_publication DESC LIMIT ? OFFSET ?`,
+      [like, viewerId, viewerId, viewerId, safeLimit, offset]
     ).then(([rows]) => {
       out.reading = (Array.isArray(rows) ? rows : []).map((row) => ({
         id: Number(row.id), title: row.title, level: row.level || null, ownerUsername: row.owner_username || null

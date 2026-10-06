@@ -37,6 +37,7 @@ test('like toggles idempotently and never on own posts', async () => {
     calls.push({ sql, params });
     if (/FROM community_posts p/i.test(sql)) return [[VISIBLE_POST]];
     if (/SELECT 1 FROM post_likes/i.test(sql)) return [[]];
+    if (/FROM user_blocks/i.test(sql)) return [[]];
     if (/INSERT INTO post_likes/i.test(sql)) {
       assert.ok(/ON CONFLICT/i.test(sql), 'insert is conflict-safe');
       return [{ affectedRows: 1 }];
@@ -78,6 +79,7 @@ test('comments validate, scope to visible posts, and respect ownership', async (
     if (/FROM community_posts p/i.test(sql)) return [[VISIBLE_POST]];
     if (/INSERT INTO post_comments/i.test(sql)) return [{ insertId: 11 }];
     if (/FROM post_comments c/i.test(sql)) return [[{ id: 11, author_id: USER_ID, body: 'nice', created_at: '2026-10-07', updated_at: null, author_username: 'me', author_display: null, author_avatar: null }]];
+    if (/FROM user_blocks/i.test(sql)) return [[]];
     if (/INSERT INTO notifications/i.test(sql)) return [{ insertId: 4 }];
     throw new Error(`Unexpected SQL: ${sql.slice(0, 60)}`);
   }, async () => {
@@ -171,6 +173,7 @@ test('reports validate and scope to visible content', async () => {
   await assert.rejects(service.createReport(pool, USER_ID, { targetType: 'post', targetId: 1, reason: 'nope' }), /reason must be/);
   await withPoolExecute(async (sql) => {
     if (/FROM community_posts p/i.test(sql)) return [[VISIBLE_POST]];
+    if (/SELECT 1 FROM content_reports/i.test(sql)) return [[]];
     if (/INSERT INTO content_reports/i.test(sql)) return [{ insertId: 21 }];
     throw new Error(`Unexpected SQL: ${sql.slice(0, 60)}`);
   }, async () => {
