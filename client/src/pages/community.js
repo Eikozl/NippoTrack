@@ -202,12 +202,22 @@ function itemsDialog(deckId, title, entityType, deckRef = null) {
         viewerFollowing: detail.viewerFollowing ?? deckRef?.viewerFollowing ?? false
       })]);
       const view = element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-2' });
-      // Deck preview items in columns of max 4 rows: chunk into groups of 4
-      // (column-major: first 4 fill column 1 top-to-bottom, next 4 column 2…).
-      // Flex-wrap lets columns drop below when narrow instead of overflowing
-      // or shrinking unreadably. Single list semantics via role=list/listitem;
-      // column divs stay generic so AT hears one list of items.
+      // Deck preview items: strict chunking of max 4 per column, column-major
+      // (first 4 fill column 1 top-to-bottom, next 4 column 2…). ≤4 items stay
+      // a single full-width column with no dividers (unchanged look).
+      // Beyond one column, fixed-width (w-36) columns are grouped into bands:
+      // colsPerBand is MEASURED from live layout
+      // (floor((containerWidth + gap) / (colWidth + gap))); each band renders
+      // as one flex row, overflow bands stack below separated by a real <hr>.
+      // Single list semantics via role=list/listitem; column/band divs stay
+      // generic so AT hears one list. ResizeObserver re-bands only when
+      // colsPerBand actually changes (no loops); isConnected guard releases
+      // the observer once the dialog stack removes the container.
+      let listObserver = null;
+      let currentColsPerBand = null;
       const renderList = () => {
+        if (listObserver) { try { listObserver.disconnect(); } catch { /* cleanup is best-effort */ } listObserver = null; }
+        currentColsPerBand = null;
         const makeItemNode = (entry) => {
           const open = smallButton(displayOf(entry), `Details for ${displayOf(entry)}`);
           open.classList.add('max-w-full', 'wrap-anywhere', 'break-words');
@@ -218,13 +228,72 @@ function itemsDialog(deckId, title, entityType, deckRef = null) {
           });
           return element('div', { className: 'min-w-0 max-w-full', attrs: { role: 'listitem' } }, [open]);
         };
-        const columns = [];
+        const columnSlices = [];
         for (let index = 0; index < items.length; index += 4) {
-          columns.push(element('div', { className: 'grid min-w-[9rem] max-w-full flex-1 basis-36 grid-cols-1 content-start gap-1' }, items.slice(index, index + 4).map(makeItemNode)));
+          columnSlices.push(items.slice(index, index + 4));
         }
-        view.replaceChildren(
-          element('div', { className: 'flex max-h-56 w-full min-w-0 max-w-full flex-row flex-wrap items-start gap-3 overflow-x-hidden overflow-y-auto text-sm text-ink', attrs: { role: 'list' } }, columns)
-        );
+        if (columnSlices.length <= 1) {
+          const columns = [];
+          for (let index = 0; index < items.length; index += 4) {
+            columns.push(element('div', { className: 'grid min-w-[9rem] max-w-full flex-1 basis-36 grid-cols-1 content-start gap-1' }, items.slice(index, index + 4).map(makeItemNode)));
+          }
+          view.replaceChildren(
+            element('div', { className: 'flex max-h-56 w-full min-w-0 max-w-full flex-row flex-wrap items-start gap-3 overflow-x-hidden overflow-y-auto text-sm text-ink', attrs: { role: 'list' } }, columns)
+          );
+          return;
+        }
+        const GAP_FALLBACK_PX = 12;
+        const COL_FALLBACK_PX = 144;
+        const listEl = element('div', { className: 'grid max-h-56 w-full min-w-0 max-w-full grid-cols-1 content-start gap-0 overflow-x-hidden overflow-y-auto text-sm text-ink', attrs: { role: 'list' } });
+        const colNodes = columnSlices.map((slice) => element('div', { className: 'grid w-36 min-w-0 max-w-full shrink-0 grid-cols-1 content-start gap-1', dataset: { previewCol: 'true' } }, slice.map(makeItemNode)));
+        const measureColsPerBand = () => {
+          if (!listEl.isConnected) return null;
+          const containerWidth = listEl.clientWidth;
+          if (!containerWidth) return null;
+          let colWidth = COL_FALLBACK_PX;
+          let gap = GAP_FALLBACK_PX;
+          try {
+            const probe = listEl.querySelector('[data-preview-col]');
+            if (probe) {
+              const rect = probe.getBoundingClientRect();
+              if (rect && rect.width > 0) colWidth = rect.width;
+            }
+            const band = listEl.querySelector('[data-preview-band]');
+            const gapSource = band || listEl;
+            const computed = window.getComputedStyle(gapSource);
+            const rawGap = computed ? (computed.columnGap || computed.gap || '') : '';
+            const parsed = parseFloat(String(rawGap));
+            if (Number.isFinite(parsed) && parsed > 0) gap = parsed;
+          } catch { /* measurement is best-effort; fallbacks keep layout stable */ }
+          if (!(colWidth > 0)) colWidth = COL_FALLBACK_PX;
+          return Math.max(1, Math.floor((containerWidth + gap) / (colWidth + gap)));
+        };
+        const renderBands = (colsPerBand) => {
+          currentColsPerBand = colsPerBand;
+          listEl.replaceChildren();
+          for (let start = 0; start < colNodes.length; start += colsPerBand) {
+            if (start > 0) {
+              listEl.appendChild(element('hr', { className: 'my-2 w-full min-w-0 max-w-full border-t border-white/10' }));
+            }
+            listEl.appendChild(element('div', { className: 'flex w-full min-w-0 max-w-full flex-row flex-nowrap items-start gap-3 overflow-x-hidden', dataset: { previewBand: 'true' } }, colNodes.slice(start, start + colsPerBand)));
+          }
+        };
+        view.replaceChildren(listEl);
+        const initial = measureColsPerBand();
+        renderBands(initial ?? (typeof window !== 'undefined' && window.innerWidth < 480 ? 1 : 2));
+        if (typeof ResizeObserver !== 'undefined') {
+          listObserver = new ResizeObserver(() => {
+            if (!listEl.isConnected) {
+              try { listObserver.disconnect(); } catch { /* cleanup is best-effort */ }
+              listObserver = null;
+              return;
+            }
+            const next = measureColsPerBand();
+            if (next == null) return;
+            if (next !== currentColsPerBand) renderBands(next);
+          });
+          try { listObserver.observe(listEl); } catch { /* observer is best-effort */ }
+        }
       };
       renderList();
       const header = element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-2' }, [
