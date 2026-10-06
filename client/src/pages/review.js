@@ -271,18 +271,24 @@ export async function renderReview(container) {
   // the freshly created OPEN review session (freshly enrolled items carry no
   // review_events, so date-range discovery cannot surface them yet). Consumed
   // exactly once; any mismatch falls back to the informational banner below.
+  // V5.6: the Study Now dashboard uses the same mechanism with its own key
+  // ('jlt-study-now-queue', due items oldest-first). Either key resumes
+  // straight into REVIEWING — no setup step.
   function tryResumeImmersionQueue() {
     const handoffSessionId = reviewSessionIdFromHash();
     if (!handoffSessionId) return false;
     try {
-      const raw = typeof window !== 'undefined' && window.sessionStorage
-        ? window.sessionStorage.getItem('jlt-immersion-review-queue')
-        : null;
+      const store = typeof window !== 'undefined' && window.sessionStorage ? window.sessionStorage : null;
+      if (!store) return false;
+      const raw = store.getItem('jlt-study-now-queue') || store.getItem('jlt-immersion-review-queue');
       if (!raw) return false;
       const parsed = JSON.parse(raw);
       const items = Array.isArray(parsed?.items) ? parsed.items : [];
       if (Number(parsed?.reviewSessionId) !== Number(handoffSessionId) || !items.length) return false;
-      window.sessionStorage.removeItem('jlt-immersion-review-queue');
+      try {
+        store.removeItem('jlt-study-now-queue');
+        store.removeItem('jlt-immersion-review-queue');
+      } catch { /* removal is best-effort */ }
       sessionId = Number(handoffSessionId);
       queue = items;
       currentIndex = 0;
@@ -323,9 +329,19 @@ export async function renderReview(container) {
   // the freshly enrolled items, so nothing extra is routed anywhere.
   const fromImmersionId = reviewSessionIdFromHash();
   if (fromImmersionId) {
+    // V5.6: Study Now hand-offs carry &from=study-now — same auto-resume,
+    // different origin copy. Unknown values keep the immersion wording.
+    let fromParam = null;
+    try {
+      const hash = typeof window !== 'undefined' && window.location ? window.location.hash || '' : '';
+      const queryIndex = hash.indexOf('?');
+      if (queryIndex !== -1) fromParam = new URLSearchParams(hash.slice(queryIndex + 1)).get('from');
+    } catch { fromParam = null; }
     introBlock.appendChild(element('p', {
       className: 'mt-4 rounded-xl border border-stone bg-paper px-3 py-2 text-sm leading-6 text-ink',
-      text: 'Session created from your text — its items are enrolled for today. Start a review for Today to study them.',
+      text: fromParam === 'study-now'
+        ? 'Your due items are queued — starting your session now.'
+        : 'Session created from your text — its items are enrolled for today. Start a review for Today to study them.',
       attrs: { role: 'status' }
     }));
   }

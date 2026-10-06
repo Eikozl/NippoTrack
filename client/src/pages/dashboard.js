@@ -1,7 +1,7 @@
 import { apiRequest } from '../api';
 import { destroyCharts } from '../chartRegistry';
 import { iconTile } from '../icons';
-import { element, errorState, formatDate, loadingState, pageHeader } from '../ui';
+import { element, errorState, formatDate, loadingState, pageHeader, showToast, withPendingAction } from '../ui';
 import { profileStore } from '../accountProfile.js';
 import { dashboardWelcomeModel, localDayKey, readVisitRecord, recordDashboardVisit } from '../dashboardWelcome.js';
 import { smartGoalsWidget } from '../smartGoals.js';
@@ -31,13 +31,25 @@ function welcomeHeader(model) {
 function studyNowSection(studyNow) {
   // V5.6 Study Home: deterministic next action from existing signals.
   // Fail-open: null payload renders nothing, dashboard stays byte-identical.
+  // Review actions AUTO-START: one click builds the due queue (oldest first)
+  // via the existing /due + /sessions endpoints and hands it to #review —
+  // the learner never touches setup. Other kinds link straight to the
+  // activity itself.
   const primary = studyNow?.primary;
   if (!primary || typeof primary !== 'object') return null;
-  const cta = element('a', {
-    className: 'button-primary inline-flex min-h-11 items-center justify-center px-5 py-2.5 text-sm font-semibold',
-    text: primary.cta || 'Start',
-    attrs: { href: primary.href || '#review' }
-  });
+  const autoDue = primary.auto === 'due';
+  const cta = autoDue
+    ? element('button', {
+      className: 'button-primary inline-flex min-h-11 items-center justify-center px-5 py-2.5 text-sm font-semibold',
+      text: primary.cta || 'Start now',
+      attrs: { type: 'button' }
+    })
+    : element('a', {
+      className: 'button-primary inline-flex min-h-11 items-center justify-center px-5 py-2.5 text-sm font-semibold',
+      text: primary.cta || 'Start',
+      attrs: { href: primary.href || '#review' }
+    });
+  if (autoDue) cta.addEventListener('click', () => startDueSession(cta));
   return element('section', { className: 'surface study-now p-5 sm:p-6', attrs: { 'aria-label': 'Study now recommendation' } }, [
     element('div', { className: 'flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between' }, [
       element('div', { className: 'min-w-0' }, [
@@ -49,6 +61,78 @@ function studyNowSection(studyNow) {
       element('div', { className: 'flex shrink-0 items-center gap-3' }, [cta])
     ])
   ]);
+}
+
+// One-click due session: oldest-first queue from the existing due listing,
+// persisted through the existing review-sessions endpoint, handed to #review
+// via sessionStorage exactly like the Immersion hand-off (per-tab, once).
+// Falls back to plain navigation when anything is missing.
+const STUDY_NOW_QUEUE_KEY = 'jlt-study-now-queue';
+const STUDY_NOW_SESSION_MAX = 100;
+
+function shiftDaysISO(iso, days) {
+  const next = new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86400000);
+  return Number.isNaN(next.getTime()) ? iso : next.toISOString().slice(0, 10);
+}
+
+function dueEntityType(row) {
+  const raw = String(row?.item_type || row?.entityType || '').toLowerCase();
+  if (raw === 'vocabulary') return 'vocabulary';
+  if (raw === 'kanji') return 'kanji';
+  return 'grammar';
+}
+
+async function startDueSession(button) {
+  await withPendingAction(button, async () => {
+    const today = localDayKey();
+    const data = await apiRequest('/api/review/due');
+    const seen = new Set();
+    const picked = [];
+    for (const row of Array.isArray(data?.items) ? data.items : []) {
+      const entityType = dueEntityType(row);
+      const entityId = Number(row?.entityId);
+      if (!Number.isInteger(entityId) || entityId <= 0) continue;
+      const key = `${entityType}:${entityId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      picked.push({
+        entityType,
+        entityId,
+        display: row.title ?? row.display ?? '',
+        reading: row.reading ?? null,
+        meaning: row.meaning ?? null,
+        ...(row.last_result ? { lastResult: row.last_result } : {}),
+        dueOn: String(row.due_on || '').slice(0, 10) || null
+      });
+      if (picked.length >= STUDY_NOW_SESSION_MAX) break;
+    }
+    if (!picked.length) {
+      window.location.hash = '#review';
+      return;
+    }
+    const oldest = picked.map((item) => item.dueOn).filter(Boolean).sort()[0] || today;
+    const earliest = oldest < shiftDaysISO(today, -366) ? shiftDaysISO(today, -366) : oldest;
+    const session = await apiRequest('/api/review/sessions', {
+      method: 'POST',
+      body: {
+        sourceFrom: earliest <= today ? earliest : today,
+        sourceTo: today,
+        items: picked.map(({ entityType, entityId }) => ({ entityType, entityId }))
+      }
+    });
+    const queueItems = picked.map(({ dueOn, ...rest }) => rest);
+    try {
+      if (window.sessionStorage) {
+        window.sessionStorage.setItem(STUDY_NOW_QUEUE_KEY, JSON.stringify({
+          reviewSessionId: Number(session?.id),
+          items: queueItems
+        }));
+      }
+    } catch { /* storage blocked: review falls back to its banner */ }
+    window.location.hash = `#review?reviewSessionId=${encodeURIComponent(session?.id)}&from=study-now`;
+  }, { pendingLabel: 'Starting…' }).catch((error) => {
+    showToast(error?.message || 'Unable to start the session.', 'error');
+  });
 }
 
 function activityCalendar(items) {

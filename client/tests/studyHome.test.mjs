@@ -25,6 +25,17 @@ test('Study Now renders explainable next action with CTA', () => {
   assert.ok(source.includes('min-h-11'), 'touch target meets mobile minimum');
 });
 
+test('Study Now auto-starts due sessions instead of linking to setup', () => {
+  const source = readSource('src/pages/dashboard.js');
+  assert.ok(source.includes("primary.auto === 'due'"), 'review kind builds the queue itself');
+  assert.ok(source.includes('Start now'), 'CTA names the action, not the module');
+  assert.ok(source.includes('/api/review/due'), 'oldest-first due listing reused');
+  assert.ok(source.includes('/api/review/sessions'), 'existing session endpoint reused — no new writes path');
+  assert.ok(source.includes('jlt-study-now-queue'), 'same sessionStorage hand-off as Immersion');
+  assert.ok(source.includes('from=study-now'), 'review knows the origin');
+  assert.ok(source.includes('STUDY_NOW_SESSION_MAX'), 'bounded auto queue');
+});
+
 test('Study Now never blocks dashboard when payload is missing', () => {
   const source = readSource('src/pages/dashboard.js');
   assert.ok(source.includes('studyNowSection(studyNow) ? [studyNowSection(studyNow)] : []'), 'null renders nothing');
@@ -47,6 +58,13 @@ test('review completion closes the loop to sessions', () => {
   const source = readSource('src/pages/review.js');
   assert.ok(source.includes('Log study session'), 'RETURN loop CTA');
   assert.ok(source.includes("href: '#sessions'"), 'reuses existing sessions route');
+});
+
+test('review resumes Study Now hand-offs straight into cards', () => {
+  const source = readSource('src/pages/review.js');
+  assert.ok(source.includes('jlt-study-now-queue'), 'study-now queue key consumed');
+  assert.ok(source.includes('jlt-immersion-review-queue'), 'immersion hand-off still works');
+  assert.ok(source.includes('Your due items are queued'), 'origin-aware banner copy');
 });
 
 test('reading empty state links to analyzer (cohesion)', () => {

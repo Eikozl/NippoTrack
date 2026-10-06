@@ -158,19 +158,19 @@ async function getSessionSummary(executor, sessionId, userId) {
 // (user_id, id) index instead of scanning every due row three times.
 // Inert = auto-enrolled but never actually reviewed; new items enroll lazily on first grade.
 const DUE_REVIEWS_SQL = `SELECT ri.id_review_item, ri.due_on, ri.interval_days, ri.last_reviewed_at, ri.last_result,
-  'Vocabulary' AS item_type, v.word AS title, v.meaning AS meaning, v.reading
+  'Vocabulary' AS item_type, v.id_vocabulary AS entity_id, v.word AS title, v.meaning AS meaning, v.reading
   FROM review_items ri
   JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary
   WHERE ri.due_on <= CURRENT_DATE AND ri.id_vocabulary IS NOT NULL AND ri.id_kanji IS NULL AND ri.id_grammar IS NULL AND v.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)
   UNION ALL
   SELECT ri.id_review_item, ri.due_on, ri.interval_days, ri.last_reviewed_at, ri.last_result,
-  'Kanji' AS item_type, k.character_kanji AS title, k.meaning AS meaning, NULL AS reading
+  'Kanji' AS item_type, k.id_kanji AS entity_id, k.character_kanji AS title, k.meaning AS meaning, NULL AS reading
   FROM review_items ri
   JOIN kanji k ON k.id_kanji = ri.id_kanji
   WHERE ri.due_on <= CURRENT_DATE AND ri.id_kanji IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_grammar IS NULL AND k.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)
   UNION ALL
   SELECT ri.id_review_item, ri.due_on, ri.interval_days, ri.last_reviewed_at, ri.last_result,
-  'Grammar' AS item_type, g.grammar_point AS title, g.meaning AS meaning, NULL AS reading
+  'Grammar' AS item_type, g.id_grammar AS entity_id, g.grammar_point AS title, g.meaning AS meaning, NULL AS reading
   FROM review_items ri
   JOIN grammar_points g ON g.id_grammar = ri.id_grammar
   WHERE ri.due_on <= CURRENT_DATE AND ri.id_grammar IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_kanji IS NULL AND g.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)
@@ -208,7 +208,10 @@ async function listDueReviewCards(req, res) {
         const entityType = String(row.item_type || '').toLowerCase() === 'vocabulary'
           ? 'vocabulary'
           : String(row.item_type || '').toLowerCase() === 'kanji' ? 'kanji' : 'grammar';
-        return { ...row, entityType, cardTypes: [...(ENTITY_CARD_TYPES[entityType] || ['recognition'])] };
+        // entity_id is additive (V5.6 Study Now auto-session needs it to
+        // build the queue client-side); absent/legacy rows stay null-safe.
+        const entityId = Number(row.entity_id);
+        return { ...row, entityType, entityId: Number.isInteger(entityId) && entityId > 0 ? entityId : null, cardTypes: [...(ENTITY_CARD_TYPES[entityType] || ['recognition'])] };
       })
       .filter((row) => !requestedTypes || row.cardTypes.some((type) => requestedTypes.includes(type)));
     return res.json({ items });

@@ -118,22 +118,21 @@ async function getStudyNow(req, res) {
         (SELECT COUNT(*) FROM review_items ri
           JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary
           WHERE ri.due_on <= CURRENT_DATE AND ri.id_vocabulary IS NOT NULL AND ri.id_kanji IS NULL AND ri.id_grammar IS NULL
-            AND v.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)) +
+            AND v.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)) AS due_vocabulary,
         (SELECT COUNT(*) FROM review_items ri
           JOIN kanji k ON k.id_kanji = ri.id_kanji
           WHERE ri.due_on <= CURRENT_DATE AND ri.id_kanji IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_grammar IS NULL
-            AND k.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)) +
+            AND k.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)) AS due_kanji,
         (SELECT COUNT(*) FROM review_items ri
           JOIN grammar_points g ON g.id_grammar = ri.id_grammar
           WHERE ri.due_on <= CURRENT_DATE AND ri.id_grammar IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_kanji IS NULL
-            AND g.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL))
-        AS due_count,
+            AND g.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)) AS due_grammar,
         COALESCE((SELECT SUM(duration_minutes) FROM study_sessions WHERE user_id = ? AND session_date = COALESCE(?::date, CURRENT_DATE)), 0) AS minutes_today,
         (SELECT COUNT(*) FROM vocabulary WHERE user_id = ?) AS vocabulary_count,
         (SELECT COUNT(*) FROM kanji WHERE user_id = ?) AS kanji_count,
         (SELECT COUNT(*) FROM grammar_points WHERE user_id = ?) AS grammar_count
     `, [userId, userId, userId, userId, today, userId, userId, userId]);
-    const [[difficultRows], [readingRows]] = await Promise.all([
+    const [[difficultRows], [readingRows], [sampleRows]] = await Promise.all([
       pool.query(`
         SELECT ri.id_review_item FROM review_items ri
         LEFT JOIN review_events re ON re.id_review_item = ri.id_review_item
@@ -152,7 +151,27 @@ async function getStudyNow(req, res) {
         WHERE p.user_id = ? AND p.completed_at IS NULL
         ORDER BY p.updated_at DESC NULLS LAST, p.text_id DESC
         LIMIT 1
-      `, [userId]).catch(() => [[], []])
+      `, [userId]).catch(() => [[], []]),
+      // Due sample: oldest-first titles so Study Now can say WHAT is due.
+      // Bounded (5) and user-scoped per branch, same predicate as the counts.
+      pool.query(`
+        SELECT title FROM (
+          SELECT ri.due_on AS due_on, v.word AS title FROM review_items ri
+          JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary
+          WHERE ri.due_on <= CURRENT_DATE AND ri.id_vocabulary IS NOT NULL AND ri.id_kanji IS NULL AND ri.id_grammar IS NULL
+            AND v.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)
+          UNION ALL
+          SELECT ri.due_on AS due_on, k.character_kanji AS title FROM review_items ri
+          JOIN kanji k ON k.id_kanji = ri.id_kanji
+          WHERE ri.due_on <= CURRENT_DATE AND ri.id_kanji IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_grammar IS NULL
+            AND k.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)
+          UNION ALL
+          SELECT ri.due_on AS due_on, g.grammar_point AS title FROM review_items ri
+          JOIN grammar_points g ON g.id_grammar = ri.id_grammar
+          WHERE ri.due_on <= CURRENT_DATE AND ri.id_grammar IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_kanji IS NULL
+            AND g.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)
+        ) due_sample ORDER BY due_on ASC LIMIT 5
+      `, [userId, userId, userId]).catch(() => [[], []])
     ]);
     // чтения may fail on older/back-compat schemas — fail open to null.
     let incompleteReading = null;
@@ -163,7 +182,11 @@ async function getStudyNow(req, res) {
       if (first && first.id !== undefined) incompleteReading = { id: first.id, title: first.title || 'Untitled text' };
     } catch { incompleteReading = null; }
     const snapshot = Array.isArray(dueRows) ? dueRows[0] : {};
-    const dueCount = Number(snapshot?.due_count || snapshot?.dueCount || 0);
+    const dueVocabulary = Number(snapshot?.due_vocabulary || 0);
+    const dueKanji = Number(snapshot?.due_kanji || 0);
+    const dueGrammar = Number(snapshot?.due_grammar || 0);
+    const dueCount = dueVocabulary + dueKanji + dueGrammar;
+    const dueSample = (Array.isArray(sampleRows) ? sampleRows : []).map((row) => row?.title).filter(Boolean).slice(0, 5);
     const minutesToday = Number(snapshot?.minutes_today || 0);
     const vocabularyCount = Number(snapshot?.vocabulary_count || 0);
     const kanjiCount = Number(snapshot?.kanji_count || 0);
@@ -174,15 +197,27 @@ async function getStudyNow(req, res) {
     let primary;
     if (dueCount > 0) {
       const estimate = `~${Math.max(2, Math.min(60, Math.round(dueCount * 0.5)))} min`;
+      const parts = [
+        dueVocabulary ? `${dueVocabulary} word${dueVocabulary === 1 ? '' : 's'}` : null,
+        dueKanji ? `${dueKanji} kanji` : null,
+        dueGrammar ? `${dueGrammar} pattern${dueGrammar === 1 ? '' : 's'}` : null
+      ].filter(Boolean);
+      const reason = [
+        `${parts.join(' · ')} ready to recall.`,
+        difficultCount > 0 ? `Includes ${difficultCount} you recently struggled with.` : null,
+        dueSample.length ? `Up first: ${dueSample.slice(0, 3).join(', ')}.` : null,
+        'Short recall now saves re-study later.'
+      ].filter(Boolean).join(' ');
       primary = {
         kind: 'review',
         title: `${dueCount} review${dueCount === 1 ? '' : 's'} due`,
-        reason: difficultCount > 0
-          ? `${dueCount} item${dueCount === 1 ? '' : 's'} ready to recall, including ${difficultCount} you recently struggled with.`
-          : `${dueCount} item${dueCount === 1 ? '' : 's'} ready to recall. Short recall now saves re-study later.`,
+        reason,
         estimate,
-        cta: 'Start review',
-        href: '#review'
+        // Auto-session: the client builds the queue from GET /api/review/due
+        // (oldest first) and hands it to #review — no manual setup needed.
+        cta: dueCount === 1 ? 'Start now — 1 item' : `Start now — ${dueCount} items`,
+        href: '#review',
+        auto: 'due'
       };
     } else if (incompleteReading) {
       primary = {
@@ -223,7 +258,7 @@ async function getStudyNow(req, res) {
     }
     return res.json({
       primary,
-      signals: { dueCount, difficultCount, minutesToday, vocabularyCount, kanjiCount, grammarCount, incompleteReading }
+      signals: { dueCount, dueBreakdown: { vocabulary: dueVocabulary, kanji: dueKanji, grammar: dueGrammar }, dueSample, difficultCount, minutesToday, vocabularyCount, kanjiCount, grammarCount, incompleteReading }
     });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load study recommendation.' });
