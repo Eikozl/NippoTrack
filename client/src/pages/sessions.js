@@ -579,4 +579,15 @@ export function renderSessions(container) {
   });
   updateCustomRangeVisibility();
   load();
+  // V5.6 guided flow: links that mean "log now" (Review completion, Study
+  // Now) arrive as #sessions?new=1. Open the creation dialog immediately and
+  // consume the param so refresh/back lands on the plain list, not a reopen.
+  try {
+    const hash = typeof window !== 'undefined' && window.location ? window.location.hash || '' : '';
+    const queryIndex = hash.indexOf('?');
+    if (queryIndex !== -1 && new URLSearchParams(hash.slice(queryIndex + 1)).get('new') === '1') {
+      window.history.replaceState(null, '', '#sessions');
+      openSessionDialog();
+    }
+  } catch { /* fail open to the plain list */ }
 }

@@ -1977,7 +1977,7 @@ const CARD_TYPE_DESCRIPTIONS = {
         element('button', { className: 'button-primary', text: 'Back to Review', attrs: { type: 'button' } }),
         ...(failed.length ? [element('button', { className: 'button-secondary', text: `Repeat failed (${failed.length})`, attrs: { type: 'button' } })] : []),
         element('a', { className: 'button-secondary', text: 'Go to Dashboard', attrs: { href: '#dashboard' } }),
-        element('a', { className: 'button-secondary', text: 'Log study session', attrs: { href: '#sessions' } })
+        element('a', { className: 'button-secondary', text: 'Log study session', attrs: { href: '#sessions?new=1' } })
       ])
     ]);
     const buttons = card.querySelectorAll('button');

@@ -58,7 +58,14 @@ test('review shows collapsed why without disrupting speed', () => {
 test('review completion closes the loop to sessions', () => {
   const source = readSource('src/pages/review.js');
   assert.ok(source.includes('Log study session'), 'RETURN loop CTA');
-  assert.ok(source.includes("href: '#sessions'"), 'reuses existing sessions route');
+  assert.ok(source.includes("href: '#sessions?new=1'"), 'opens the creation dialog, not just the list');
+});
+
+test('sessions auto-opens creation for log-now links', () => {
+  const source = readSource('src/pages/sessions.js');
+  assert.ok(source.includes("get('new') === '1'"), 'new=1 param detected');
+  assert.ok(source.includes('openSessionDialog()'), 'creation dialog opens on arrival');
+  assert.ok(source.includes("replaceState(null, '', '#sessions')"), 'param consumed so refresh lands on the list');
 });
 
 test('review resumes Study Now hand-offs straight into cards', () => {

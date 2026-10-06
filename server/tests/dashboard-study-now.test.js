@@ -101,7 +101,7 @@ test('Study Now nudges session logging when today is empty', async () => {
     const { res, body } = mockRes();
     await controller.getStudyNow({ user: { id: USER_ID }, query: { today: TODAY } }, res);
     assert.equal(body().primary.kind, 'session');
-    assert.equal(body().primary.href, '#sessions');
+    assert.equal(body().primary.href, '#sessions?new=1');
   });
 });
 

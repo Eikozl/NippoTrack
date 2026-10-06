@@ -244,7 +244,7 @@ async function getStudyNow(req, res) {
         reason: 'No minutes recorded today yet. A short session keeps your streak alive.',
         estimate: '~5 min',
         cta: 'Log study session',
-        href: '#sessions'
+        href: '#sessions?new=1'
       };
     } else {
       primary = {
