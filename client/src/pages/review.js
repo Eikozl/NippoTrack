@@ -246,10 +246,26 @@ function normOptionText(value) {
   return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+// V5.7 gloss sanity: multiple-choice needs complete glosses. User data can
+// hold fragments ("Sino-"), links, or symbol-only strings (e.g. a saved
+// "…" or "～") — quizzing on those (or offering them as options) is
+// meaningless, so they are excluded. Tight rules only: edge dashes (the
+// "Sino-" case), URLs, multiline breaks, and strings with no letter,
+// number, or CJK character at all. Short real words ("I", "of") stay valid.
+function isUsableMeaning(value) {
+  const text = String(value || '').trim();
+  if (!text) return false;
+  if (/[-–—―]$/.test(text) || /^[-–—―]/.test(text)) return false;
+  if (/https?:\/\/|www\./i.test(text)) return false;
+  if (/[\r\n]/.test(text)) return false;
+  if (!/[\p{L}\p{N}]/u.test(text)) return false;
+  return true;
+}
+
 function buildRecognitionOptions(item, queue) {
   const wantMeaning = String(item?.meaning || '').trim();
   const wantDisplay = String(item?.display || '').trim();
-  if (!wantMeaning || !item?.entityType) return null;
+  if (!wantMeaning || !isUsableMeaning(wantMeaning) || !item?.entityType) return null;
   const seen = new Set([normOptionText(wantMeaning)]);
   const pool = [];
   const banded = [];
@@ -257,7 +273,7 @@ function buildRecognitionOptions(item, queue) {
     if (!entry || entry.entityType !== item.entityType) continue;
     if (Number(entry.entityId) === Number(item.entityId)) continue;
     const meaning = String(entry.meaning || '').trim();
-    if (!meaning || seen.has(normOptionText(meaning))) continue;
+    if (!meaning || !isUsableMeaning(meaning) || seen.has(normOptionText(meaning))) continue;
     if (wantDisplay && normOptionText(entry.display) === normOptionText(wantDisplay)) continue;
     seen.add(normOptionText(meaning));
     pool.push({ meaning });

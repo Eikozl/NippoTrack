@@ -107,6 +107,13 @@ test('V5.7 fallback: thin pools keep the reveal flow', () => {
   assert.ok(source.includes('if (recognitionOptions)'), 'options render only when built');
 });
 
+test('V5.7 gloss sanity: fragments never enter multiple choice', () => {
+  const source = readSource('src/pages/review.js');
+  assert.ok(source.includes('function isUsableMeaning'), 'sanity filter present');
+  assert.ok(source.includes('isUsableMeaning(wantMeaning)'), 'fragment targets fall back');
+  assert.ok(source.includes('isUsableMeaning(meaning)'), 'fragment distractors excluded');
+});
+
 test('V5.7 review entry sections never leak into active sessions', () => {
   const source = readSource('src/pages/review.js');
   assert.ok(source.includes('function revealIntroSection'), 'stage-gated reveal helper present');

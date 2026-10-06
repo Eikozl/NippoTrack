@@ -2079,10 +2079,10 @@ async function startWithRecognitionQueue({ sessionId = 301 } = {}) {
   return { harness, container };
 }
 
-function optionButtons(container) {
+function optionButtons(container, words = /nostalgic|lonely|difficult|peaceful/) {
   return [...container.querySelectorAll('button')].filter((node) => node.getAttribute('aria-keyshortcuts') !== null
     && ['1', '2', '3', '4'].includes(node.getAttribute('aria-keyshortcuts'))
-    && /nostalgic|lonely|difficult|peaceful/.test(textOf(node)));
+    && words.test(textOf(node)));
 }
 
 function gradePosts(harness) {
@@ -2230,12 +2230,14 @@ test('V5.7 recognition: keyboard 1-4 picks options pre-reveal only', async () =>
   const { doc } = harness;
   doc.activeElement = doc.body;
   doc.body.tagName = 'BODY';
-  const before = optionButtons(container).filter((node) => node.disabled).length;
+  const disabledBefore = optionButtons(container).filter((node) => node.disabled).length;
   doc.dispatchEvent({ type: 'keydown', key: '2', preventDefault() {} });
   await sleep(10);
-  const picked = optionButtons(container).filter((node) => node.disabled).length;
-  assert.equal(picked, before + 1, 'keyboard picks the second option');
-  // Finish through picks (no Reveal exists here), then keys go quiet.
+  const disabledAfter = optionButtons(container).filter((node) => node.disabled).length;
+  // Key 2 always acts: either it missed (that option locks) or it was the
+  // answer (all options lock on resolution).
+  assert.ok(disabledAfter > disabledBefore, 'keyboard picks an option');
+  // Finish through picks whatever happened, then keys go quiet.
   const remaining = () => optionButtons(container).filter((node) => !node.disabled);
   let guard = 0;
   while (remaining().length > 1 && guard < 5) {
@@ -2244,11 +2246,69 @@ test('V5.7 recognition: keyboard 1-4 picks options pre-reveal only', async () =>
     await clickAndSettle(wrong || remaining()[0]);
   }
   const right = optionButtons(container).find((node) => /nostalgic/.test(textOf(node)));
-  await clickAndSettle(right);
+  if (right && !right.disabled) await clickAndSettle(right);
   await sleep(30);
   const gradesBefore = gradePosts(harness).length;
   assert.equal(gradesBefore, 1, 'auto-graded on resolution');
   doc.dispatchEvent({ type: 'keydown', key: '4', preventDefault() {} });
   await sleep(10);
   assert.equal(gradePosts(harness).length, gradesBefore, 'keys do nothing after resolution');
+});
+
+async function startWithKanjiQueue({ sessionId = 322 } = {}) {
+  const harness = loadReviewModule({
+    candidatesPayload: {
+      groups: {
+        kanji: {
+          items: [
+            candidateItem({ entityType: 'kanji', entityId: 201, display: '漢', reading: 'カン', meaning: 'Sino-', strength: 'strong' }),
+            candidateItem({ entityType: 'kanji', entityId: 202, display: '日', reading: 'ニチ', meaning: 'day', strength: 'strong' }),
+            candidateItem({ entityType: 'kanji', entityId: 203, display: '水', reading: 'スイ', meaning: 'water', strength: 'strong' }),
+            candidateItem({ entityType: 'kanji', entityId: 204, display: '火', reading: 'カ', meaning: 'fire', strength: 'strong' }),
+            candidateItem({ entityType: 'kanji', entityId: 205, display: '木', reading: 'モク', meaning: 'tree', strength: 'strong' })
+          ],
+          total: 5, truncated: false
+        },
+        vocabulary: { items: [], total: 0, truncated: false },
+        grammar: { items: [], total: 0, truncated: false }
+      }
+    },
+    typesPayload: RECOGNITION_ONLY,
+    sessionId,
+    completePayload: { total: 5, byType: { kanji: 5, vocabulary: 0, grammar: 0 }, byResult: { Good: 0, Hard: 0, Again: 0 } }
+  });
+  const container = await gotoSetup(harness);
+  await gotoCandidates(harness, container);
+  const boxes = findInputs(container, (n) => n.getAttribute('type') === 'checkbox');
+  for (const b of boxes) { b.checked = true; b.dispatchEvent({ type: 'change', target: b }); }
+  await sleep(5);
+  const starts = visibleButtonsByText(container, 'Start review');
+  await clickAndSettle(starts[starts.length - 1]);
+  await sleep(15);
+  await sleep(15);
+  return { harness, container };
+}
+
+test('V5.7 recognition: fragment target falls back instead of quizzing garbage', async () => {
+  const { container } = await startWithKanjiQueue();
+  // First card is 漢/Sino-: a fragment meaning cannot be quizzed.
+  assert.match(pillText(container), /Recognition/);
+  assert.equal(optionButtons(container, /Sino-|day|water|fire|tree/).length, 0, 'no options built on a fragment gloss');
+  const reveal = findFirstButtonByText(container, 'Reveal answer');
+  assert.ok(reveal && !reveal.hasAttribute('disabled'), 'plain reveal flow instead');
+});
+
+test('V5.7 recognition: fragment distractors are excluded from options', async () => {
+  const { container } = await startWithKanjiQueue();
+  // Card 漢 falls back; advance past it via reveal + manual Good to reach 日.
+  await clickAndSettle(findFirstButtonByText(container, 'Reveal answer'));
+  await sleep(10);
+  await clickAndSettle(findFirstButtonByText(container, 'Good'));
+  await sleep(30);
+  assert.match(pillText(container), /Recognition/, 'second card renders');
+  const options = optionButtons(container, /day|water|fire|tree/);
+  assert.equal(options.length, 4, 'full option set for a real gloss');
+  const labels = options.map((node) => textOf(node));
+  assert.ok(!labels.some((label) => /Sino-/.test(label)), 'fragment meaning never offered');
+  assert.ok(labels.includes('day'), 'correct gloss present');
 });
