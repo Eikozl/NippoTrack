@@ -107,9 +107,14 @@ async function renderLibraryView(container) {
   function renderGrid(data, currentPage) {
     const items = Array.isArray(data?.items) ? data.items : [];
     if (!items.length) {
+      // Filter-aware empty state: an active source/level filter that matches
+      // nothing is a different situation from an empty library — say which.
+      const sourceLabel = sourceSelectNode.value ? (SOURCES.find((entry) => entry.value === sourceSelectNode.value)?.label || sourceSelectNode.value) : null;
       gridWrap.replaceChildren(emptyState({
-        title: 'No reading texts yet',
-        description: 'Import from Aozora, or paste your own text to start reading.',
+        title: sourceLabel ? `No ${sourceLabel} texts yet` : 'No reading texts yet',
+        description: sourceLabel
+          ? `Nothing from ${sourceLabel} in your library yet. Use Import texts or paste a link above.`
+          : 'Import from Aozora, or paste your own text to start reading.',
         action: element('a', { className: 'button-primary inline-flex min-h-11 items-center justify-center px-5 py-2.5 text-sm font-semibold', text: 'Open Analyzer', attrs: { href: '#analyzer' } })
       }));
       return;
@@ -170,27 +175,9 @@ async function renderLibraryView(container) {
 
   // NHK Easy import was retired: NHK discontinued its public feed, so only
   // Aozora remains as an importable source (plus pasting your own text).
-  // Imports run in the background (a full import classifies every text and
-  // takes minutes), so this polls the library until the new rows land.
-  let importPollTimer = null;
-  async function pollLibraryForImports(sourceType, baseline, attempt = 0) {
-    if (importPollTimer) window.clearTimeout(importPollTimer);
-    importPollTimer = null;
-    if (attempt >= 24) {
-      showToast('Import is taking longer than expected — check back in a bit.');
-      return;
-    }
-    try {
-      const data = await listReadingLibrary({ source: sourceType, page: 1, limit: 1 });
-      if (Number(data?.total || 0) > baseline) {
-        refresh(1);
-        showToast('Import finished — new texts are in your library.');
-        return;
-      }
-    } catch { /* transient failures must not stop the poll */ }
-    importPollTimer = window.setTimeout(() => { pollLibraryForImports(sourceType, baseline, attempt + 1); }, 15000);
-  }
-
+  // Imports run inside the request and answer with honest counts (the old
+  // fire-and-forget background jobs silently never finished on serverless),
+  // so the library refreshes straight from the response — no blind polling.
   const importTexts = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Import texts', attrs: { type: 'button' } });
   importTexts.addEventListener('click', () => withPendingAction(importTexts, async () => {
     let preview = null;
@@ -210,8 +197,9 @@ async function renderLibraryView(container) {
 
   // Pasted-link import: the user brings their own work page (Aozora card or
   // Hukumusume story). The link is shape-checked here for instant feedback
-  // and re-checked server-side; analysis still takes ~a minute, so this
-  // enqueues like bulk import.
+  // and re-checked server-side; the import completes inside the request and
+  // answers with the result, so failures surface honestly instead of
+  // vanishing into a background job.
   const linkInput = element('input', {
     className: 'field-control',
     attrs: { type: 'url', inputmode: 'url', placeholder: 'Paste a work link…', 'aria-label': 'Work page link' }
@@ -225,21 +213,23 @@ async function renderLibraryView(container) {
       showToast('Paste an Aozora card link or a Hukumusume story link.', 'error');
       return;
     }
-    const sourceType = aozoraMatch ? 'aozora' : 'hukumusume';
     try {
-      const before = await listReadingLibrary({ source: sourceType, page: 1, limit: 1 }).catch(() => null);
       const result = await importReadingUrl((aozoraMatch || hukuMatch)[0]);
-      if (result?.status !== 'accepted') {
-        showToast('Import did not start. Please try again.', 'error');
+      if (result?.status !== 'ok' || !Number(result?.textsImported || 0)) {
+        showToast('Import finished with no new text — it may already be in your library.', 'warning');
+        await refresh(1);
         return;
       }
       linkInput.value = '';
-      showToast('Import started — the text will appear below when ready.');
-      pollLibraryForImports(sourceType, Number(before?.total || 0));
+      showToast('Import finished — the text is in your library.');
+      await refresh(1);
     } catch (error) {
-      showToast(error?.message || 'Could not reach the API. Check your connection.', 'error');
+      // A function timeout can still leave a committed partial import
+      // behind: refresh first so landed rows show, then explain the retry.
+      await refresh(1).catch(() => {});
+      showToast(error?.message || 'Import failed. Check the library — retry for anything missing.', 'error');
     }
-  }, { pendingLabel: 'Adding…' }));
+  }, { pendingLabel: 'Importing…' }));
 
   // Picker: choose WHAT to import, from either source. Group selects switch
   // the work index (kana groups for Aozora, months for Hukumusume) so
@@ -357,7 +347,7 @@ async function renderLibraryView(container) {
     clear.addEventListener('click', () => { boxes.forEach(({ checkbox }) => { checkbox.checked = false; }); });
     openDialog({
       title: 'Import texts',
-      description: 'Pick a source and group, then choose the works to import. Each one is classified and added to your library in the background.',
+      description: 'Pick a source and group, then choose the works to import. Each one is classified and added before the request finishes.',
       content: [
         sourceSelect,
         groupSelect,
@@ -367,22 +357,27 @@ async function renderLibraryView(container) {
         countNote
       ],
       submitLabel: 'Import selected',
-      pendingLabel: 'Starting…',
+      pendingLabel: 'Importing…',
       onSubmit: async (form, close) => {
         const selected = [...form.querySelectorAll('input[type="checkbox"]:checked')].map((node) => node.value).filter(Boolean);
         if (!selected.length) {
           showToast('Select at least one work.', 'error');
           return;
         }
-        const before = await listReadingLibrary({ source: currentSource, page: 1, limit: 1 }).catch(() => null);
-        const result = await importReadingSources(currentSource, { urls: selected, index: currentIndex });
-        if (result?.status !== 'accepted') {
-          showToast('Import did not start. Please try again.', 'error');
-          return;
+        try {
+          const result = await importReadingSources(currentSource, { urls: selected, index: currentIndex });
+          close();
+          const added = Number(result?.textsImported || 0);
+          const checked = Number(result?.imported || selected.length);
+          await refresh(1);
+          showToast(added > 0 ? `Import finished — ${added} new text${added === 1 ? '' : 's'} in your library.` : `Checked ${checked} work${checked === 1 ? '' : 's'} — nothing new (already imported or unreadable).`, added > 0 ? 'success' : 'warning');
+        } catch (error) {
+          // Partial imports commit per item server-side: refresh so landed
+          // rows show, then explain that retrying resumes the rest.
+          close();
+          await refresh(1).catch(() => {});
+          showToast(error?.message || 'Import failed partway. Check the library — retry for anything missing.', 'error');
         }
-        close();
-        showToast('Import started — new texts will appear below as they arrive.');
-        pollLibraryForImports(currentSource, Number(before?.total || 0));
       }
     });
     renderGroupOptions();

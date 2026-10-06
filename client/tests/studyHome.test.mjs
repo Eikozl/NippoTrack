@@ -82,6 +82,15 @@ test('reading empty state links to analyzer (cohesion)', () => {
   assert.ok(source.includes("href: '#analyzer'"), 'reuses existing analyzer route');
 });
 
+test('reading imports answer honestly, never fire-and-forget', () => {
+  const source = readSource('src/pages/reading.js');
+  assert.ok(!source.includes('pollLibraryForImports'), 'no blind library polling');
+  assert.ok(!source.includes('setImmediate'), 'no detached client work');
+  assert.ok(source.includes('textsImported'), 'bulk result carries honest counts');
+  assert.ok(source.includes('Import finished'), 'success toast states completion');
+  assert.ok(source.includes('texts yet'), 'filter-aware empty state names the active source');
+});
+
 test('community publish is limited to own reading texts', () => {
   const source = readSource('src/pages/reading.js');
   assert.ok(source.includes('importedFromPublication'), 'import provenance read from text metadata');
