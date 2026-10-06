@@ -1708,6 +1708,46 @@ const CARD_TYPE_DESCRIPTIONS = {
     detachReviewKeys = localDetach;
   }
 
+  // V5.7 kanji readings: the speaker defaults to kun'yomi for single kanji
+  // (device TTS otherwise guesses, usually on'yomi) with an in-session
+  // toggle for on'yomi. Readings come from the existing kanji detail
+  // endpoint, cached per session mount; failures keep legacy behavior.
+  // Session-level preference, default kun.
+  let kanjiReadingChoice = 'kun';
+  const kanjiReadingsCache = new Map();
+
+  async function getKanjiReadings(entityId) {
+    const id = Number(entityId);
+    if (!Number.isInteger(id) || id <= 0) return null;
+    if (kanjiReadingsCache.has(id)) return kanjiReadingsCache.get(id);
+    try {
+      const detail = await apiRequest(`/api/kanji/${id}`);
+      const readings = {
+        onyomi: String(detail?.onyomi || '').trim() || null,
+        kunyomi: String(detail?.kunyomi || '').trim() || null
+      };
+      kanjiReadingsCache.set(id, readings.onyomi || readings.kunyomi ? readings : null);
+    } catch {
+      kanjiReadingsCache.set(id, null);
+    }
+    return kanjiReadingsCache.get(id);
+  }
+
+  // Stored readings list variants ("カン、ケン") or okurigana dots
+  // ("た.べる"): speak the first clean reading only.
+  function cleanKanjiReading(value) {
+    const first = String(value || '').split(/[、,・\s]/)[0] || '';
+    return first.replace(/\./g, '').trim() || null;
+  }
+
+  function pickKanjiReading(item, readings) {
+    const wantKun = kanjiReadingChoice !== 'on';
+    const primary = cleanKanjiReading(wantKun ? readings?.kunyomi : readings?.onyomi);
+    if (primary) return primary;
+    const fallback = cleanKanjiReading(wantKun ? readings?.onyomi : readings?.kunyomi);
+    return fallback || item.reading || item.display;
+  }
+
   function renderCard() {
     detachKeys();
     attachGradeKeys();
@@ -1747,10 +1787,18 @@ const CARD_TYPE_DESCRIPTIONS = {
     // would hand out the answer the listening exercise is asking for.
     const speakerLabel = cardType === 'audio' ? 'Play audio' : `Play ${item.display}`;
     const speakerButton = element('button', { className: 'icon-button shrink-0', attrs: { type: 'button', 'aria-label': speakerLabel } }, [icon('volume', { size: 20 })]);
-    // Prefer the recorded kana reading: device TTS guesses kanji readings
-    // (often on'yomi or outright wrong for jukujikun like 大人), while kana
-    // is pronounced exactly as saved. Falls back to the display text.
-    speakerButton.addEventListener('click', () => { speakDisplay(item.reading || item.display); });
+    // Single kanji are spoken with their recorded reading when known
+    // (preferring the kana reading over TTS-guessed kanji); the toggle
+    // below can switch it per session. Otherwise the recorded kana
+    // reading, else the display text.
+    const isSingleKanjiItem = item.entityType === 'kanji' && typeof item.display === 'string' && /^\p{Script=Han}$/u.test(item.display);
+    speakerButton.addEventListener('click', () => {
+      if (isSingleKanjiItem) {
+        const cached = kanjiReadingsCache.get(Number(item.entityId));
+        if (cached) { speakDisplay(pickKanjiReading(item, cached)); return; }
+      }
+      speakDisplay(item.reading || item.display);
+    });
     const speedSelect = element('select', {
       className: 'rounded-lg border border-stone bg-paper px-1.5 py-1 text-xs font-semibold text-muted',
       attrs: { 'aria-label': 'Voice speed', 'data-speech-rate': '' }
@@ -1760,7 +1808,49 @@ const CARD_TYPE_DESCRIPTIONS = {
     })));
     speedSelect.addEventListener('change', () => { applySpeechRate(speedSelect); });
     speechRateSelects.push(speedSelect);
-    const titleRow = element('div', { className: 'mt-2 flex items-center gap-2' }, [title, speakerButton, speedSelect]);
+    const titleRow = element('div', { className: 'mt-2 flex flex-wrap items-center gap-2' }, [title, speakerButton, speedSelect]);
+    // Kun/on toggle for single kanji: filled once the detail endpoint
+    // answers (cached per session); absent readings keep legacy behavior
+    // with no toggle rendered at all.
+    if (isSingleKanjiItem) {
+      const myIndex = currentIndex;
+      const myItem = item;
+      const readingSlot = element('div', { className: 'flex items-center gap-1', attrs: { role: 'group', 'aria-label': 'Kanji reading' } });
+      titleRow.appendChild(readingSlot);
+      getKanjiReadings(item.entityId).then((readings) => {
+        if (revealed || currentIndex !== myIndex || queue[myIndex] !== myItem) return;
+        if (!readings || (!readings.onyomi && !readings.kunyomi)) return;
+        if (!readings.onyomi || !readings.kunyomi) return;
+        const syncToggle = () => {
+          kunButton.setAttribute('aria-pressed', String(kanjiReadingChoice !== 'on'));
+          onButton.setAttribute('aria-pressed', String(kanjiReadingChoice === 'on'));
+          kunButton.textContent = kanjiReadingChoice !== 'on' ? 'Kun ✓' : 'Kun';
+          onButton.textContent = kanjiReadingChoice === 'on' ? 'On ✓' : 'On';
+        };
+        const kunButton = element('button', {
+          className: 'rounded-lg border border-stone bg-paper px-2 py-1 text-xs font-semibold text-muted',
+          text: 'Kun',
+          attrs: { type: 'button', 'aria-pressed': 'true', 'aria-label': `Kunyomi: ${readings.kunyomi}` }
+        });
+        const onButton = element('button', {
+          className: 'rounded-lg border border-stone bg-paper px-2 py-1 text-xs font-semibold text-muted',
+          text: 'On',
+          attrs: { type: 'button', 'aria-pressed': 'false', 'aria-label': `Onyomi: ${readings.onyomi}` }
+        });
+        kunButton.addEventListener('click', () => {
+          kanjiReadingChoice = 'kun';
+          syncToggle();
+          speakDisplay(pickKanjiReading(myItem, readings));
+        });
+        onButton.addEventListener('click', () => {
+          kanjiReadingChoice = 'on';
+          syncToggle();
+          speakDisplay(pickKanjiReading(myItem, readings));
+        });
+        syncToggle();
+        readingSlot.append(kunButton, onButton);
+      }).catch(() => {});
+    }
     // V5.6 context-rich review: collapsed "why" never disrupts recall speed.
     // Only true signals are shown — due date is implicit, lastResult and
     // provenanceLine come from the candidate payload, never fabricated.

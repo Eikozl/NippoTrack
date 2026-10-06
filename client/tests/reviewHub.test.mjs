@@ -297,7 +297,7 @@ function makeUi(doc, toasts) {
   return { element, pageHeader, loadingState, emptyState, errorState, showToast, withPendingAction };
 }
 
-function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, completePayload, gradeReject, historyPayload, sessionDetailPayload, sessionItemsPayload, typesPayload, preferencesImpl, preferencesPayload, vocabDetail, grammarDetail, clozeSentence, speechVoices } = {}) {
+function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, completePayload, gradeReject, historyPayload, sessionDetailPayload, sessionItemsPayload, typesPayload, preferencesImpl, preferencesPayload, vocabDetail, grammarDetail, kanjiDetail, clozeSentence, speechVoices } = {}) {
   const doc = new FakeDocument();
   const toasts = [];
   const apiCalls = [];
@@ -347,6 +347,12 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
       if (typeof grammarDetail === 'function') return grammarDetail(grammarMatch[1], url);
       if (grammarDetail !== undefined) return grammarDetail;
       if (clozeSentence !== undefined) return { examples: [{ sentence: clozeSentence }] };
+      throw new Error(`unexpected apiRequest ${url}`);
+    }
+    const kanjiMatch = url.match(/^\/api\/kanji\/(\d+)$/);
+    if (kanjiMatch && (opts.method || 'GET') === 'GET') {
+      if (typeof kanjiDetail === 'function') return kanjiDetail(kanjiMatch[1], url);
+      if (kanjiDetail !== undefined) return kanjiDetail;
       throw new Error(`unexpected apiRequest ${url}`);
     }
     if (url.startsWith('/api/review/candidates')) {
@@ -2311,4 +2317,80 @@ test('V5.7 recognition: fragment distractors are excluded from options', async (
   const labels = options.map((node) => textOf(node));
   assert.ok(!labels.some((label) => /Sino-/.test(label)), 'fragment meaning never offered');
   assert.ok(labels.includes('day'), 'correct gloss present');
+});
+
+async function startWithKanjiCard({ kanjiDetail, sessionId = 330 } = {}) {
+  const item = candidateItem({ entityType: 'kanji', entityId: 61, display: '生', reading: null, meaning: 'life', strength: 'strong' });
+  const harness = loadReviewModule({
+    candidatesPayload: {
+      groups: {
+        kanji: { items: [item], total: 1, truncated: false },
+        vocabulary: { items: [], total: 0, truncated: false },
+        grammar: { items: [], total: 0, truncated: false }
+      }
+    },
+    typesPayload: RECOGNITION_ONLY,
+    kanjiDetail: kanjiDetail !== undefined ? kanjiDetail : { onyomi: 'セイ', kunyomi: 'いきる' },
+    sessionId,
+    completePayload: { total: 1, byType: { kanji: 1, vocabulary: 0, grammar: 0 }, byResult: { Good: 0, Hard: 0, Again: 0 } }
+  });
+  const container = await gotoSetup(harness);
+  await gotoCandidates(harness, container);
+  const boxes = findInputs(container, (n) => n.getAttribute('type') === 'checkbox');
+  for (const b of boxes) { b.checked = true; b.dispatchEvent({ type: 'change', target: b }); }
+  await sleep(5);
+  const starts = visibleButtonsByText(container, 'Start review');
+  await clickAndSettle(starts[starts.length - 1]);
+  await sleep(15);
+  await sleep(15);
+  return { harness, container };
+}
+
+function kunOnButtons(container) {
+  const group = container.querySelector('[aria-label="Kanji reading"]');
+  if (!group) return [];
+  return [...group.querySelectorAll('button')];
+}
+
+test('V5.7 kanji voice defaults to kunyomi with an onyomi switch', async () => {
+  const { harness, container } = await startWithKanjiCard();
+  await sleep(20);
+  const buttons = kunOnButtons(container);
+  assert.equal(buttons.length, 2, 'Kun/On toggle rendered');
+  const kun = buttons.find((node) => /^Kun/.test(textOf(node)));
+  const on = buttons.find((node) => /^On/.test(textOf(node)));
+  assert.ok(kun && on, 'both readings offered');
+  assert.equal(kun.getAttribute('aria-pressed'), 'true', 'kun pressed by default');
+  assert.equal(on.getAttribute('aria-pressed'), 'false');
+  const speaker = speakerButtons(container).filter(isVisible)[0];
+  await clickAndSettle(speaker);
+  await sleep(60);
+  assert.equal(harness.speechCalls.length, 1, 'speaker speaks once');
+  assert.match(String(harness.speechCalls[0]?.text || ''), /いきる/, 'default voice is kunyomi, not TTS-guessed onyomi');
+  await clickAndSettle(on);
+  await sleep(60);
+  assert.equal(kun.getAttribute('aria-pressed'), 'false', 'choice flips');
+  assert.equal(on.getAttribute('aria-pressed'), 'true');
+  assert.match(textOf(on), /✓/, 'active choice marked in text, not color-only');
+  assert.equal(harness.speechCalls.length, 2, 'switching replays immediately');
+  assert.match(String(harness.speechCalls[1]?.text || ''), /セイ/, 'on switch speaks onyomi');
+});
+
+test('V5.7 kanji voice hides the toggle without readings and stays legacy', async () => {
+  const { harness, container } = await startWithKanjiCard({ kanjiDetail: { onyomi: null, kunyomi: null } });
+  await sleep(20);
+  assert.equal(kunOnButtons(container).length, 0, 'no toggle without readings');
+  const speaker = speakerButtons(container).filter(isVisible)[0];
+  await clickAndSettle(speaker);
+  await sleep(60);
+  assert.equal(harness.speechCalls.length, 1, 'legacy speaker still works');
+  assert.match(String(harness.speechCalls[0]?.text || ''), /生/, 'falls back to display text');
+  assert.ok(!harness.apiCalls.some((c) => /^\/api\/kanji\/\d+$/.test(c.url) && c.options?.method), 'readings lookup is a plain GET');
+});
+
+test('V5.7 kanji voice issues one lookup per character per session', async () => {
+  const { harness } = await startWithKanjiCard({ sessionId: 331 });
+  await sleep(20);
+  const lookups = harness.apiCalls.filter((c) => /^\/api\/kanji\/61$/.test(c.url));
+  assert.equal(lookups.length, 1, 'single cached lookup, no per-render refetch');
 });

@@ -114,6 +114,14 @@ test('V5.7 gloss sanity: fragments never enter multiple choice', () => {
   assert.ok(source.includes('isUsableMeaning(meaning)'), 'fragment distractors excluded');
 });
 
+test('V5.7 kanji voice defaults to kun with an in-session on switch', () => {
+  const source = readSource('src/pages/review.js');
+  assert.ok(source.includes('kanjiReadingChoice'), 'session-level reading choice exists');
+  assert.ok(source.includes('/api/kanji/${id}'), 'readings come from the existing kanji endpoint');
+  assert.ok(source.includes('kanjiReadingsCache'), 'one lookup per character per session');
+  assert.ok(source.includes("text: 'Kun'") && source.includes("text: 'On'"), 'toggle offers both readings');
+});
+
 test('V5.7 review entry sections never leak into active sessions', () => {
   const source = readSource('src/pages/review.js');
   assert.ok(source.includes('function revealIntroSection'), 'stage-gated reveal helper present');
