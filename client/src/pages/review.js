@@ -1808,13 +1808,15 @@ const CARD_TYPE_DESCRIPTIONS = {
 
     // Practice-only typed-answer state (grading stays with Again/Hard/Good).
     let checkState = null;
-    // V5.7 recognition practice state: option picks feed the suggested
-    // grade only. Grading itself stays self-assessed via the buttons below.
+    // V5.7 recognition practice state: option picks feed the automatic
+    // grade (0-1 mistakes Good, 2 Hard, 3+ Again). No self-grade question
+    // follows — the performance IS the grade, posted exactly once.
     let recognitionPicks = 0;
     let recognitionMistakes = 0;
     let recognitionResolved = false;
-    let recognitionSuggested = null;
     let recognitionOptions = null;
+    let autoGradePosted = false;
+    let nextButton = null;
     // Concealed (audio) cards lock Reveal until the heard word is typed —
     // but this is memory practice, not an exam. After MAX_CONCEALED_TRIES
     // failed tries the lock opens so nobody gets stuck without a voice
@@ -1934,19 +1936,10 @@ const CARD_TYPE_DESCRIPTIONS = {
       if (item.reading) answerWrap.appendChild(element('p', { className: 'text-sm text-muted', text: item.reading }));
       if (item.meaning) answerWrap.appendChild(element('p', { className: 'mt-2 text-base leading-7 text-ink', text: item.meaning }));
       answerWrap.appendChild(answerResult);
-      // V5.7 suggested grade: named pill + labeled button, every grade
-      // still clickable (override wins) and grading posts exactly once.
-      if (recognitionSuggested) {
-        const tryNote = recognitionResolved
-          ? `picked on try ${recognitionPicks}`
-          : `after ${recognitionPicks} ${recognitionPicks === 1 ? 'try' : 'tries'}`;
-        answerWrap.appendChild(element('p', { className: 'mt-5 text-sm leading-6 text-muted', text: `Suggested: ${recognitionSuggested} — ${tryNote}. How did recall feel?` }));
-      } else {
-        answerWrap.appendChild(element('p', { className: 'mt-5 text-sm font-semibold text-ink', text: 'How did recall feel?' }));
-      }
+      answerWrap.appendChild(element('p', { className: 'mt-5 text-sm font-semibold text-ink', text: 'How did recall feel?' }));
       const grades = element('div', { className: 'mt-3 grid gap-2 sm:grid-cols-3' });
       GRADES.forEach(({ result, hint }, gradeIndex) => {
-        const button = element('button', { className: 'button-secondary flex-col gap-1 px-4 py-3 text-center', attrs: { type: 'button', 'aria-keyshortcuts': String(gradeIndex + 1), ...(result === recognitionSuggested ? { 'aria-label': `${result} (suggested)` } : {}) } }, [
+        const button = element('button', { className: 'button-secondary flex-col gap-1 px-4 py-3 text-center', attrs: { type: 'button', 'aria-keyshortcuts': String(gradeIndex + 1) } }, [
           element('span', { className: 'block text-sm font-semibold', text: result }),
           element('span', { className: 'block text-xs font-normal leading-5 text-muted', text: hint })
         ]);
@@ -1957,12 +1950,7 @@ const CARD_TYPE_DESCRIPTIONS = {
               body: { entityType: item.entityType, entityId: item.entityId, result, reviewSessionId: sessionId }
             });
             graded.push({ ...item, result });
-            if (currentIndex + 1 < total) {
-              currentIndex += 1;
-              renderCard();
-            } else {
-              await finishReview();
-            }
+            await proceedToNextCard();
           }, { pendingLabel: 'Saving…' }).catch((error) => {
             showToast(error?.message || 'Unable to save this response.', 'error');
           });
@@ -1974,13 +1962,19 @@ const CARD_TYPE_DESCRIPTIONS = {
       answerWrap.appendChild(element('p', { className: 'mt-3 text-xs text-muted', text: 'Shortcuts: 1 Again · 2 Hard · 3 Good' }));
     }
     revealButton.addEventListener('click', () => {
-      revealed = true;
-      // V5.7: multiple-choice performance becomes a suggested grade —
-      // 0-1 mistakes Good, 2 Hard, 3+ Again — only when the learner actually
-      // played the options. Direct reveals keep plain self-grading.
-      if (cardType === 'recognition' && recognitionPicks > 0) {
-        recognitionSuggested = suggestedGradeForMistakes(recognitionMistakes);
+      // V5.7: recognition cards with played options auto-grade on reveal
+      // (the performance is already measured); untouched cards keep manual
+      // self-grading. Other card types are unchanged.
+      if (cardType === 'recognition' && recognitionPicks > 0 && !autoGradePosted) {
+        recognitionResolved = true;
+        frontResult.hidden = false;
+        answerResult.hidden = false;
+        frontResult.textContent = `The answer is “${item.meaning}.”`;
+        answerResult.textContent = `The answer is “${item.meaning}.”`;
+        finalizeRecognitionGrade();
+        return;
       }
+      revealed = true;
       buildAnswer();
       frontWrap.hidden = true;
       answerWrap.hidden = false;
@@ -2136,12 +2130,73 @@ const CARD_TYPE_DESCRIPTIONS = {
         button.setAttribute('aria-pressed', 'true');
         frontResult.textContent = `That's right — “${item.display}” means “${item.meaning}.”`;
         answerResult.textContent = `That's right — “${item.display}” means “${item.meaning}.”`;
+        finalizeRecognitionGrade();
       } else {
         recognitionMistakes += 1;
         button.disabled = true;
         button.setAttribute('aria-pressed', 'false');
         frontResult.textContent = `Not quite — that means “${option.meaning}.” Try again.`;
         answerResult.textContent = `Not quite — that means “${option.meaning}.” Try again.`;
+      }
+    }
+
+    // V5.7 automatic grading: the classified performance posts through the
+    // SAME grade endpoint and advances like a manual grade — one event,
+    // existing scheduling, no second question. The Next button paces the
+    // flow and guarantees the POST completed before advancing (retrying on
+    // failure), so a flaky network can neither lose nor duplicate a grade.
+    async function postAutoGrade() {
+      if (autoGradePosted) return true;
+      const result = suggestedGradeForMistakes(recognitionMistakes);
+      try {
+        await apiRequest('/api/review/grade', {
+          method: 'POST',
+          body: { entityType: item.entityType, entityId: item.entityId, result, reviewSessionId: sessionId }
+        });
+      } catch (error) {
+        showToast(error?.message || 'Unable to save this response.', 'error');
+        return false;
+      }
+      autoGradePosted = true;
+      graded.push({ ...item, result });
+      frontResult.textContent += ` Graded: ${result}.`;
+      return true;
+    }
+
+    function showNextButton() {
+      if (nextButton) return;
+      revealed = true;
+      recognitionOptionButtons.forEach((entry) => { entry.disabled = true; });
+      nextButton = element('button', {
+        className: 'button-primary mt-3 inline-flex min-h-11 items-center justify-center px-5 py-2.5 text-sm font-semibold',
+        text: currentIndex + 1 < total ? 'Next' : 'Finish review',
+        attrs: { type: 'button' }
+      });
+      nextButton.addEventListener('click', async () => {
+        if (!autoGradePosted) {
+          nextButton.disabled = true;
+          const ok = await postAutoGrade();
+          nextButton.disabled = false;
+          if (!ok) return;
+        }
+        await proceedToNextCard();
+      });
+      if (revealButton.isConnected) revealButton.replaceWith(nextButton);
+      else frontWrap.appendChild(nextButton);
+      nextButton.focus({ preventScroll: true });
+    }
+
+    async function finalizeRecognitionGrade() {
+      showNextButton();
+      await postAutoGrade();
+    }
+
+    async function proceedToNextCard() {
+      if (currentIndex + 1 < total) {
+        currentIndex += 1;
+        renderCard();
+      } else {
+        await finishReview();
       }
     }
 

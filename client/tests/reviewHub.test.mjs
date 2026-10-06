@@ -2089,26 +2089,25 @@ function gradePosts(harness) {
   return harness.apiCalls.filter((c) => c.url === '/api/review/grade');
 }
 
-test('V5.7 recognition: four options, one correct, wrong then right suggests Good', async () => {
+function nextButton(container) {
+  return findFirstButtonByText(container, 'Next') || findFirstButtonByText(container, 'Finish review');
+}
+
+test('V5.7 recognition: correct pick auto-grades Good with no second question', async () => {
   const { harness, container } = await startWithRecognitionQueue();
   const options = optionButtons(container);
   assert.equal(options.length, 4, 'exactly four options');
   assert.deepEqual(options.map((node) => textOf(node)).sort(), ['difficult', 'lonely', 'nostalgic / familiar', 'peaceful'].sort(), 'correct + three distractors, no duplicates');
-  const wrong = options.find((node) => !/nostalgic/.test(textOf(node)));
-  await clickAndSettle(wrong);
-  assert.match(textOf(container), /Not quite/, 'wrong pick asks to try again');
-  assert.equal(wrong.disabled, true, 'picked wrong option locks out');
   const right = options.find((node) => /nostalgic/.test(textOf(node)));
   await clickAndSettle(right);
   assert.match(textOf(container), /That's right/, 'correct pick confirms with the meaning');
-  await clickAndSettle(findFirstButtonByText(container, 'Reveal answer'));
-  await sleep(10);
-  assert.match(textOf(container), /Suggested: Good/, 'one mistake still suggests Good');
-  await clickAndSettle(findFirstButtonByText(container, 'Good'));
-  await sleep(15);
+  await sleep(30);
   const posts = gradePosts(harness);
-  assert.equal(posts.length, 1, 'exactly one review event despite retries');
-  assert.equal(posts[0].options.body.result, 'Good', 'suggested grade reaches the existing handler');
+  assert.equal(posts.length, 1, 'grade posts automatically, exactly once');
+  assert.equal(posts[0].options.body.result, 'Good', 'first-try correct is Good');
+  assert.match(textOf(container), /Graded: Good/, 'recorded grade shown, no self-grade question');
+  assert.equal(visibleButtonsByText(container, 'Good').length, 0, 'no manual grade buttons follow');
+  assert.ok(nextButton(container), 'a Next button paces the flow');
 });
 
 test('V5.7 recognition: deterministic order per session, shuffled across cards', async () => {
@@ -2121,23 +2120,23 @@ test('V5.7 recognition: deterministic order per session, shuffled across cards',
   assert.deepEqual(Object.values(counts), [1, 1, 1, 1], 'no duplicate options rendered');
 });
 
-test('V5.7 recognition: two mistakes suggest Hard, three suggest Again', async () => {
+test('V5.7 recognition: two mistakes auto-grade Hard and advance', async () => {
   const { harness, container } = await startWithRecognitionQueue({ sessionId: 312 });
   const wrongs = optionButtons(container).filter((node) => !/nostalgic/.test(textOf(node)));
   await clickAndSettle(wrongs[0]);
   await clickAndSettle(wrongs[1]);
   const right = optionButtons(container).find((node) => /nostalgic/.test(textOf(node)));
   await clickAndSettle(right);
-  await clickAndSettle(findFirstButtonByText(container, 'Reveal answer'));
-  await sleep(10);
-  assert.match(textOf(container), /Suggested: Hard/, 'two mistakes suggest Hard');
-  await clickAndSettle(findFirstButtonByText(container, 'Hard'));
-  await sleep(15);
+  await sleep(30);
+  assert.match(textOf(container), /Graded: Hard/, 'two mistakes grade Hard automatically');
   assert.equal(gradePosts(harness).length, 1, 'single event for the Hard path');
   assert.equal(gradePosts(harness)[0].options.body.result, 'Hard');
+  await clickAndSettle(nextButton(container));
+  await sleep(15);
+  assert.match(textOf(container), /2 of 4/, 'Next advances the queue');
 });
 
-test('V5.7 recognition: three misses leave only the answer, suggesting Again', async () => {
+test('V5.7 recognition: three misses leave only the answer, grading Again', async () => {
   const { harness, container } = await startWithRecognitionQueue({ sessionId: 313 });
   const wrongs = optionButtons(container).filter((node) => !/nostalgic/.test(textOf(node)));
   assert.equal(wrongs.length, 3, 'three distractors available');
@@ -2145,23 +2144,20 @@ test('V5.7 recognition: three misses leave only the answer, suggesting Again', a
   const right = optionButtons(container).find((node) => /nostalgic/.test(textOf(node)));
   assert.equal(right.disabled, false, 'correct option stays enabled');
   await clickAndSettle(right);
-  await clickAndSettle(findFirstButtonByText(container, 'Reveal answer'));
-  await sleep(10);
-  assert.match(textOf(container), /Suggested: Again/, 'three mistakes suggest Again');
+  await sleep(30);
+  assert.match(textOf(container), /Graded: Again/, 'three mistakes grade Again automatically');
+  assert.equal(gradePosts(harness).length, 1, 'single event for the Again path');
 });
 
-test('V5.7 recognition: learner override wins over the suggestion', async () => {
+test('V5.7 recognition: reveal after misses grades the measured result', async () => {
   const { harness, container } = await startWithRecognitionQueue({ sessionId: 314 });
-  const right = optionButtons(container).find((node) => /nostalgic/.test(textOf(node)));
-  await clickAndSettle(right);
+  const wrongs = optionButtons(container).filter((node) => !/nostalgic/.test(textOf(node)));
+  await clickAndSettle(wrongs[0]);
+  await clickAndSettle(wrongs[1]);
   await clickAndSettle(findFirstButtonByText(container, 'Reveal answer'));
-  await sleep(10);
-  assert.match(textOf(container), /Suggested: Good/, 'suggestion present');
-  await clickAndSettle(findFirstButtonByText(container, 'Again'));
-  await sleep(15);
-  const posts = gradePosts(harness);
-  assert.equal(posts.length, 1, 'override still posts exactly once');
-  assert.equal(posts[0].options.body.result, 'Again', 'override grade wins');
+  await sleep(30);
+  assert.match(textOf(container), /Graded: Hard/, 'giving up after two misses records Hard, not a guess');
+  assert.equal(gradePosts(harness).length, 1, 'exactly one event');
 });
 
 test('V5.7 recognition: too few distractors falls back to plain reveal', async () => {
