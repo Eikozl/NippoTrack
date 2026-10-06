@@ -80,3 +80,10 @@ test('empty states guide instead of dead-ending', () => {
   assert.ok(source.includes('Discover learners'), 'empty following offers an action');
   assert.ok(source.includes('No posts yet'), 'empty latest invites creation');
 });
+
+test('settings edits the full public identity incl. visibility', () => {
+  const source = readSource('src/pages/settings.js');
+  for (const marker of ['profile-level', 'profile-target', 'profile-interests', 'profile-public', 'jlpt_level', 'target_jlpt']) {
+    assert.ok(source.includes(marker), `settings edits ${marker}`);
+  }
+});

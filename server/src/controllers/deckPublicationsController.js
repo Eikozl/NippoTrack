@@ -151,7 +151,7 @@ async function getPublicUser(req, res) {
 async function getOwnProfile(req, res) {
   try {
     const [rows] = await pool.execute(
-      'SELECT username, display_name, bio, avatar_url, is_public FROM user_profile WHERE user_id = ?',
+      'SELECT username, display_name, bio, avatar_url, is_public, jlpt_level, target_jlpt, interests FROM user_profile WHERE user_id = ?',
       [req.user.id]
     );
     const row = Array.isArray(rows) ? rows[0] : {};
@@ -160,14 +160,18 @@ async function getOwnProfile(req, res) {
       displayName: row?.display_name || null,
       bio: row?.bio || null,
       avatarUrl: row?.avatar_url || null,
-      isPublic: Boolean(row?.is_public)
+      isPublic: Boolean(row?.is_public),
+      jlptLevel: row?.jlpt_level || null,
+      targetJlpt: row?.target_jlpt || null,
+      interests: row?.interests || null
     });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load the profile.' });
   }
 }
 
-const OWN_PROFILE_FIELDS = ['username', 'display_name', 'bio', 'avatar_url', 'is_public'];
+const OWN_PROFILE_FIELDS = ['username', 'display_name', 'bio', 'avatar_url', 'is_public', 'jlpt_level', 'target_jlpt', 'interests'];
+const PROFILE_JLPT_LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1'];
 
 async function putOwnProfile(req, res) {
   try {
@@ -192,6 +196,16 @@ async function putOwnProfile(req, res) {
       if (typeof body.is_public !== 'boolean') throw new ValidationError('is_public must be a boolean');
       patch.is_public = body.is_public;
     }
+    for (const levelKey of ['jlpt_level', 'target_jlpt']) {
+      if (body[levelKey] !== undefined) {
+        const level = String(body[levelKey] || '');
+        if (level !== '' && !PROFILE_JLPT_LEVELS.includes(level)) {
+          throw new ValidationError(`${levelKey} must be one of: ${PROFILE_JLPT_LEVELS.join(', ')}.`);
+        }
+        patch[levelKey] = level === '' ? null : level;
+      }
+    }
+    if (body.interests !== undefined) patch.interests = String(body.interests || '').slice(0, 500) || null;
     const columns = Object.keys(patch);
     if (!columns.length) throw new ValidationError('Nothing to update.');
     const excluded = columns.map((column) => `${column} = EXCLUDED.${column}`).join(', ');
@@ -208,7 +222,7 @@ async function putOwnProfile(req, res) {
       throw error;
     }
     const [rows] = await pool.execute(
-      'SELECT username, display_name, bio, avatar_url, is_public FROM user_profile WHERE user_id = ?',
+      'SELECT username, display_name, bio, avatar_url, is_public, jlpt_level, target_jlpt, interests FROM user_profile WHERE user_id = ?',
       [req.user.id]
     );
     const row = Array.isArray(rows) ? rows[0] : {};
@@ -217,7 +231,10 @@ async function putOwnProfile(req, res) {
       displayName: row?.display_name || null,
       bio: row?.bio || null,
       avatarUrl: row?.avatar_url || null,
-      isPublic: Boolean(row?.is_public)
+      isPublic: Boolean(row?.is_public),
+      jlptLevel: row?.jlpt_level || null,
+      targetJlpt: row?.target_jlpt || null,
+      interests: row?.interests || null
     });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to save the public profile.' });

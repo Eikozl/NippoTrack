@@ -11,6 +11,7 @@ const OTHER_ID = '00000000-0000-4000-8000-000000000002';
 
 const pool = require('../src/config/db');
 const service = require('../src/services/community');
+const usersController = require('../src/controllers/deckPublicationsController');
 
 async function withPoolExecute(stub, callback) {
   const original = pool.execute;
@@ -210,5 +211,44 @@ test('search validates and scopes every class', async () => {
     assert.deepEqual(result.people, []);
     assert.deepEqual(result.posts, []);
     assert.ok(calls.every(({ sql, params }) => !/user_blocks|is_public|is_deleted/.test(sql) || params.includes(USER_ID)), 'gates carry the viewer');
+  });
+});
+
+test('own profile accepts level, target and interests with strict validation', async () => {
+  function mockRes() {
+    let statusCode = 200;
+    let body;
+    const res = {
+      status(code) { statusCode = code; return res; },
+      json(value) { body = value; return res; }
+    };
+    return { res, status: () => statusCode, body: () => body };
+  }
+  const saved = {
+    username: 'yuki', display_name: 'Yuki', bio: null, avatar_url: null,
+    is_public: true, jlpt_level: 'N4', target_jlpt: 'N3', interests: 'manga'
+  };
+  await withPoolExecute(async (sql) => {
+    if (/INSERT INTO user_profile/i.test(sql)) return [{ affectedRows: 1 }];
+    if (/FROM user_profile WHERE user_id/i.test(sql)) return [[saved]];
+    throw new Error(`Unexpected SQL: ${sql.slice(0, 60)}`);
+  }, async () => {
+    const { res, status, body } = mockRes();
+    await usersController.putOwnProfile({
+      body: { username: 'yuki', jlpt_level: 'N4', target_jlpt: 'N3', interests: 'manga', is_public: true },
+      user: { id: USER_ID }
+    }, res);
+    assert.equal(status(), 200);
+    assert.equal(body().jlptLevel, 'N4');
+    assert.equal(body().targetJlpt, 'N3');
+    assert.equal(body().interests, 'manga');
+  });
+  await withPoolExecute(async () => { throw new Error('must not query on invalid input'); }, async () => {
+    const bad = mockRes();
+    await usersController.putOwnProfile({ body: { jlpt_level: 'N9' }, user: { id: USER_ID } }, bad.res);
+    assert.equal(bad.status(), 400);
+    const unknown = mockRes();
+    await usersController.putOwnProfile({ body: { email: 'x@y.z' }, user: { id: USER_ID } }, unknown.res);
+    assert.equal(unknown.status(), 400);
   });
 });

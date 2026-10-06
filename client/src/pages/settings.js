@@ -150,23 +150,36 @@ async function renderProfileSection(slot) {
   ]));
 }
 
-// Community handle + visibility for Decks. Separate save from the
-// display-name form; fail-open with toasts.
+// Community handle + visibility. Separate save from the display-name
+// form; fail-open with toasts.
 function publicProfileBlock() {
+  const JLPT_PROFILE_OPTIONS = ['', 'N5', 'N4', 'N3', 'N2', 'N1'];
   const usernameInput = element('input', {
     className: 'field-control', attrs: { id: 'profile-username', name: 'username', type: 'text', maxlength: '30', autocomplete: 'username', placeholder: 'username', 'aria-describedby': 'profile-username-hint' }
   });
   const bioInput = element('textarea', {
     className: 'field-control', attrs: { id: 'profile-bio', name: 'bio', maxlength: '500', placeholder: 'A short bio (optional)' }
   });
+  const levelSelect = element('select', { className: 'field-control', attrs: { id: 'profile-level', name: 'jlpt_level', 'aria-label': 'Current JLPT level' } },
+    JLPT_PROFILE_OPTIONS.map((value) => element('option', { text: value === '' ? 'Current level: not set' : value, attrs: { value } })));
+  const targetSelect = element('select', { className: 'field-control', attrs: { id: 'profile-target', name: 'target_jlpt', 'aria-label': 'Target JLPT level' } },
+    JLPT_PROFILE_OPTIONS.map((value) => element('option', { text: value === '' ? 'Target level: not set' : value, attrs: { value } })));
+  const interestsInput = element('input', {
+    className: 'field-control', attrs: { id: 'profile-interests', name: 'interests', type: 'text', maxlength: '500', placeholder: 'Interests: manga, N3 grammar, travel…' }
+  });
   const publicBox = element('input', { attrs: { id: 'profile-public', name: 'is_public', type: 'checkbox' } });
   const saveButton = element('button', { className: 'button-secondary', text: 'Save public profile', attrs: { type: 'button' } });
   const status = element('p', { className: 'min-h-5 text-sm text-muted', attrs: { 'aria-live': 'polite' } });
   const block = element('div', { className: 'mt-8 grid max-w-2xl gap-4 border-t border-stone pt-6' }, [
     element('h3', { className: 'text-base font-semibold text-ink', text: 'Public profile' }),
-    element('p', { className: 'text-sm text-muted', attrs: { id: 'profile-username-hint' }, text: 'Claim a username to be followable in Decks. Only what you publish is public.' }),
+    element('p', { className: 'text-sm text-muted', attrs: { id: 'profile-username-hint' }, text: 'Claim a username to be followable in Community. Only what you publish is public.' }),
     element('label', { className: 'field', attrs: { for: 'profile-username' } }, [element('span', { text: 'Username (2–30, lowercase, hyphens)' }), usernameInput]),
     element('label', { className: 'field', attrs: { for: 'profile-bio' } }, [element('span', { text: 'Bio' }), bioInput]),
+    element('div', { className: 'grid gap-4 sm:grid-cols-2' }, [
+      element('label', { className: 'field', attrs: { for: 'profile-level' } }, [element('span', { text: 'Current level' }), levelSelect]),
+      element('label', { className: 'field', attrs: { for: 'profile-target' } }, [element('span', { text: 'Studying toward' }), targetSelect])
+    ]),
+    element('label', { className: 'field', attrs: { for: 'profile-interests' } }, [element('span', { text: 'Interests' }), interestsInput]),
     element('label', { className: 'flex items-center gap-2 text-sm text-ink', attrs: { for: 'profile-public' } }, [publicBox, element('span', { text: 'Public profile' })]),
     status,
     element('div', { className: 'flex justify-end' }, [saveButton])
@@ -174,6 +187,9 @@ function publicProfileBlock() {
   apiRequest('/api/users/me').then((saved) => {
     usernameInput.value = saved.username || '';
     bioInput.value = saved.bio || '';
+    levelSelect.value = saved.jlptLevel || '';
+    targetSelect.value = saved.targetJlpt || '';
+    interestsInput.value = saved.interests || '';
     publicBox.checked = Boolean(saved.isPublic);
   }).catch(() => {});
   saveButton.addEventListener('click', () => {
@@ -184,11 +200,17 @@ function publicProfileBlock() {
         body: {
           username: String(usernameInput.value || '').trim(),
           bio: bioInput.value,
+          jlpt_level: levelSelect.value || '',
+          target_jlpt: targetSelect.value || '',
+          interests: interestsInput.value,
           is_public: publicBox.checked
         }
       });
       usernameInput.value = saved.username || '';
       bioInput.value = saved.bio || '';
+      levelSelect.value = saved.jlptLevel || '';
+      targetSelect.value = saved.targetJlpt || '';
+      interestsInput.value = saved.interests || '';
       publicBox.checked = Boolean(saved.isPublic);
       status.textContent = saved.username ? `Public profile: ${saved.username}.` : 'Profile saved (private).';
     }, { pendingLabel: 'Saving…' }).catch((error) => {
