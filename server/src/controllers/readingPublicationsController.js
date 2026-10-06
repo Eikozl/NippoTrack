@@ -43,10 +43,15 @@ async function postPublish(req, res) {
 async function listPublications(req, res) {
   try {
     const query = req.query || {};
+    // Security: an arbitrary ?ownerId= would list another learner's private
+    // texts (the service drops the is_public gate when ownerId is set). Only
+    // the caller's own id unlocks the own scope; anything else is ignored
+    // and falls back to the public feed.
+    const requestedOwner = typeof query.ownerId === 'string' ? query.ownerId : null;
     const result = await listReadingPublications(pool, {
       limit: query.limit !== undefined ? Number(query.limit) : 20,
       offset: query.offset !== undefined ? Number(query.offset) : 0,
-      ownerId: query.ownerId || null,
+      ownerId: requestedOwner && requestedOwner === req.user.id ? req.user.id : null,
       viewerId: req.user.id
     });
     return res.json(result);
