@@ -280,6 +280,14 @@ async function searchCommunity(req, res) {
   }
 }
 
+async function getDiscover(req, res) {
+  try {
+    return res.json(await community.getDiscover(pool, req.user.id));
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load Discover.' });
+  }
+}
+
 module.exports = {
   blockUser,
   createComment,
@@ -288,6 +296,7 @@ module.exports = {
   deleteComment,
   deletePost,
   followUser,
+  getDiscover,
   getPost,
   getProfile,
   listBlockedUsers,

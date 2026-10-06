@@ -5,6 +5,7 @@ const router = express.Router();
 
 router.get('/feed', controller.listFeed);
 router.get('/search', controller.searchCommunity);
+router.get('/discover', controller.getDiscover);
 router.post('/posts', controller.createPost);
 router.get('/posts/:id', controller.getPost);
 router.put('/posts/:id', controller.updatePost);

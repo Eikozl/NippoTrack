@@ -72,6 +72,141 @@ function escapeLikePattern(value) {
   return String(value).replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
 
+// V6.1 Phase 4: learning-item search (vocabulary/kanji/grammar) reads ONLY
+// already-shared rows — never raw private library tables. Two sources:
+//
+// (a) share posts (share_vocab/share_kanji/share_grammar) visible to the
+//     viewer through the same visibilityWhere posture as every other post
+//     surface. The snapshot_json display/reading/meaning keys are written by
+//     validateLinkedContent at publish time from the author's OWN row, so a
+//     hit here re-publishes what the author already chose to share.
+// (b) snapshot items of qualifying public decks: deck_publications rows that
+//     are public AND owned by a public profile (self rows always pass) AND
+//     unblocked both ways — the Phase 2b owner-publicity posture.
+//
+// No query in this section touches vocabulary/kanji/grammar_points directly;
+// a regression test pins that (any FROM on those tables fails the suite).
+const LEARNING_SEARCH = {
+  vocabulary: { sharePostType: 'share_vocab', displayKey: 'word' },
+  kanji: { sharePostType: 'share_kanji', displayKey: 'character_kanji' },
+  grammar: { sharePostType: 'share_grammar', displayKey: 'grammar_point' }
+};
+const SEARCH_TYPES = ['all', 'posts', 'people', 'decks', 'reading', 'vocabulary', 'kanji', 'grammar'];
+
+// Level-tagged recall: a bare level query ("N4", case-insensitive, stray
+// whitespace tolerated) ALSO matches snapshots tagged with that level, not
+// just text containing "N4". Where the column exists:
+// - deck items: item_json->>'jlpt_level' (snapshot columns include jlpt_level
+//   per deckSharing ENTITY, so this recalls reliably);
+// - share posts: snapshot_json->>'jlpt_level' (forward-compatible; snapshots
+//   minted by the current validateLinkedContent carry display/reading/meaning
+//   only, so N4 recall on legacy share posts is limited to text matches).
+// Raw library jlpt_level columns are never queried (privacy posture above).
+function parseLevelQuery(text) {
+  const normalized = String(text || '').trim().toUpperCase().replace(/\s+/g, '');
+  return /^N[1-5]$/.test(normalized) ? normalized : null;
+}
+
+// Tolerant jsonb reader: pg parses jsonb to objects, stubs hand back strings
+// or objects; garbage yields {} (never throws inside a mapper).
+function parseJsonb(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+    } catch {
+      // Fall through to {} — a corrupt snapshot hides one hit, never 500s.
+    }
+  }
+  return {};
+}
+
+function mapSharePostHit(row) {
+  const snap = parseJsonb(row.snapshot_json);
+  return {
+    source: 'post',
+    postId: Number(row.id),
+    deckId: null,
+    position: null,
+    display: snap.display ?? null,
+    reading: snap.reading ?? null,
+    meaning: snap.meaning ?? null,
+    level: snap.jlpt_level ?? snap.jlptLevel ?? null,
+    title: row.title || null,
+    authorUsername: row.author_username || null
+  };
+}
+
+function mapDeckItemHit(row, displayKey) {
+  const item = parseJsonb(row.item_json);
+  return {
+    source: 'deck',
+    postId: null,
+    deckId: Number(row.deck_id),
+    position: row.position !== null && row.position !== undefined ? Number(row.position) : null,
+    display: item[displayKey] ?? item.display ?? null,
+    reading: item.reading ?? null,
+    meaning: item.meaning ?? null,
+    level: item.jlpt_level ?? item.jlptLevel ?? null,
+    title: row.deck_title || null,
+    authorUsername: row.owner_username || null
+  };
+}
+
+// One learning-item type, two bounded gated queries merged deterministically:
+// share-post hits (newest first) then deck-item hits (newest deck, position
+// order), truncated to `limit`. Both sources page with the same OFFSET; deep
+// pages may thin the merged list — acceptable for capped typeahead search.
+// displayKey is an internal constant per type (never user input).
+async function searchLearningType(executor, viewerId, learningType, { like, level, safeLimit, offset }) {
+  const def = LEARNING_SEARCH[learningType];
+  const postLevelFilter = level ? ` OR UPPER(COALESCE(p.snapshot_json->>'jlpt_level', '')) = ?` : '';
+  const postParams = level
+    ? [...visibilityParams(viewerId), def.sharePostType, like, like, like, level, safeLimit, offset]
+    : [...visibilityParams(viewerId), def.sharePostType, like, like, like, safeLimit, offset];
+  const postPromise = executor.execute(
+    `SELECT p.id_community_post AS id, p.post_type, p.title, p.snapshot_json, p.created_at,
+       up.username AS author_username, up.display_name AS author_display, up.avatar_url AS author_avatar
+      FROM community_posts p
+      JOIN user_profile up ON up.user_id = p.author_id
+      WHERE NOT p.is_deleted AND ${visibilityWhere('p', 'up')}
+        AND p.post_type = ?
+        AND (COALESCE(p.snapshot_json->>'display', '') ILIKE ? ESCAPE '\\'
+          OR COALESCE(p.snapshot_json->>'reading', '') ILIKE ? ESCAPE '\\'
+          OR COALESCE(p.snapshot_json->>'meaning', '') ILIKE ? ESCAPE '\\'${postLevelFilter})
+      ORDER BY p.id_community_post DESC LIMIT ? OFFSET ?`,
+    postParams
+  );
+  // FROM deck_publications (not the items table) so the Phase 2b
+  // owner-publicity + block posture reads exactly like the deck search above.
+  const itemLevelFilter = level ? ` OR UPPER(COALESCE(i.item_json->>'jlpt_level', '')) = ?` : '';
+  const deckParams = level
+    ? [learningType, viewerId, viewerId, viewerId, like, like, like, level, safeLimit, offset]
+    : [learningType, viewerId, viewerId, viewerId, like, like, like, safeLimit, offset];
+  const deckPromise = executor.execute(
+    `SELECT d.id_deck_publication AS deck_id, d.title AS deck_title, d.entity_type,
+       up.username AS owner_username, i.position AS position, i.item_json AS item_json
+      FROM deck_publications d
+      JOIN deck_publication_items i ON i.id_deck_publication = d.id_deck_publication
+      LEFT JOIN user_profile up ON up.user_id = d.owner_id
+      WHERE d.is_public AND d.entity_type = ?
+        AND (d.owner_id = ? OR up.is_public)
+        AND NOT EXISTS (
+          SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = d.owner_id) OR (b.blocker_id = d.owner_id AND b.blocked_id = ?))
+        AND (COALESCE(i.item_json->>'${def.displayKey}', '') ILIKE ? ESCAPE '\\'
+          OR COALESCE(i.item_json->>'reading', '') ILIKE ? ESCAPE '\\'
+          OR COALESCE(i.item_json->>'meaning', '') ILIKE ? ESCAPE '\\'${itemLevelFilter})
+      ORDER BY d.id_deck_publication DESC, i.position ASC LIMIT ? OFFSET ?`,
+    deckParams
+  );
+  const [[postRows], [deckRows]] = await Promise.all([postPromise, deckPromise]);
+  const hits = [];
+  for (const row of Array.isArray(postRows) ? postRows : []) hits.push(mapSharePostHit(row));
+  for (const row of Array.isArray(deckRows) ? deckRows : []) hits.push(mapDeckItemHit(row, def.displayKey));
+  return hits.slice(0, safeLimit);
+}
+
 // V6.1 Phase 3: notification excerpts reuse the summary truncation style
 // (slice + ellipsis) at 80 chars, sourced from title → japanese_text →
 // body. Follow notifications (no post) yield null; empty posts yield null.
@@ -1049,8 +1184,7 @@ async function getCommunityProfile(executor, viewerId, username) {
 }
 
 async function searchCommunity(executor, viewerId, query, { type = 'all', page = 1, limit = 20 } = {}) {
-  const allowed = ['all', 'posts', 'people', 'decks', 'reading'];
-  if (!allowed.includes(type)) throw new ValidationError('type must be all, posts, people, decks, or reading.');
+  if (!SEARCH_TYPES.includes(type)) throw new ValidationError('type must be all, posts, people, decks, reading, vocabulary, kanji, or grammar.');
   const text = String(query || '').trim();
   if (!text) throw new ValidationError('q is required.');
   if (text.length > 100) throw new ValidationError('q must not exceed 100 characters.');
@@ -1060,7 +1194,10 @@ async function searchCommunity(executor, viewerId, query, { type = 'all', page =
   // real OFFSET (caps unchanged). The LIKE pattern is wildcard-escaped above.
   const offset = (safePage - 1) * safeLimit;
   const like = `%${escapeLikePattern(text)}%`;
-  const out = { people: [], posts: [], decks: [], reading: [] };
+  // Phase 4: bare level queries ("N4") also match level-tagged snapshots.
+  const level = parseLevelQuery(text);
+  const learningOpts = { like, level, safeLimit, offset };
+  const out = { people: [], posts: [], decks: [], reading: [], vocabulary: [], kanji: [], grammar: [] };
   const jobs = [];
   let rawPeople = [];
   if (type === 'all' || type === 'people') {
@@ -1132,6 +1269,15 @@ async function searchCommunity(executor, viewerId, query, { type = 'all', page =
     }));
   }
   await Promise.all(jobs);
+  // Phase 4: learning-item types run after the legacy classes (share-post +
+  // deck-item hits merged per type, each capped at safeLimit). `all` therefore
+  // issues at most 4 legacy + 6 learning queries, all bounded.
+  if (type === 'all' || type === 'vocabulary' || type === 'kanji' || type === 'grammar') {
+    const wanted = type === 'all' ? ['vocabulary', 'kanji', 'grammar'] : [type];
+    await Promise.all(wanted.map(async (learningType) => {
+      out[learningType] = await searchLearningType(executor, viewerId, learningType, learningOpts);
+    }));
+  }
   // V6.1 Phase 3: viewer-relative people flags via a single batched edge
   // query (no per-row queries). Keys: following (viewer → person),
   // followsYou (person → viewer).
@@ -1160,6 +1306,167 @@ async function searchCommunity(executor, viewerId, query, { type = 'all', page =
   return { ...out, page: safePage, limit: safeLimit };
 }
 
+// V6.1 Phase 4: Discover sections. Every section reuses an established gate
+// posture (never a new one): posts through visibilityWhere, decks/readings
+// through the Phase 2b owner-publicity + both-ways block posture. All
+// sections are deterministically ordered with a total-order tiebreak and
+// capped small (5 each). No pagination: Discover is a widget, not a feed.
+const MAX_DISCOVER_ITEMS = 5;
+const DISCOVER_POPULAR_WINDOW_DAYS = 7;
+const DISCOVER_POPULAR_POOL_LIMIT = 50;
+const DISCOVER_LEARNERS_WINDOW_DAYS = 30;
+
+// Popular-this-week score (EXACT formula — also restated in the Phase 4
+// report; change both if this ever changes):
+//   score = likeCount + commentCount * 3 + freshnessBonus
+//   freshnessBonus = max(0, 24 - floor(ageHours / 12))
+//   ageHours = max(0, (nowMs - createdAtMs) / 3600000)
+// A brand-new post opens with +24, loses 1 point per 12h, floors at 0 after
+// 12 days; inside the 7-day window the bonus ranges 24 → 10, so freshness
+// competes with (but never permanently outruns) accumulated engagement.
+// Comments weigh 3x likes: conversation signals harder than applause.
+// Pure in (likeCount, commentCount, createdAt, nowMs) → pure out, so the
+// ranking is deterministic: same input rows always yield the same order.
+function popularScore(likeCount, commentCount, createdAt, nowMs = Date.now()) {
+  const likes = Math.max(0, Number(likeCount) || 0);
+  const comments = Math.max(0, Number(commentCount) || 0);
+  const createdMs = new Date(createdAt).getTime();
+  const ageHours = Number.isFinite(createdMs) ? Math.max(0, (Number(nowMs) - createdMs) / 3600000) : 0;
+  const freshnessBonus = Math.max(0, 24 - Math.floor(ageHours / 12));
+  return likes + comments * 3 + freshnessBonus;
+}
+
+const DISCOVER_POST_PROJECTION = `p.id_community_post AS id, p.author_id, p.post_type, p.title, p.body, p.japanese_text, p.translation,
+   p.entity_type, p.entity_id, p.deck_id, p.reading_id, p.snapshot_json, p.created_at,
+   p.updated_at,
+   up.username AS author_username, up.display_name AS author_display, up.avatar_url AS author_avatar,
+   (SELECT COUNT(*) FROM post_likes l WHERE l.id_community_post = p.id_community_post) AS like_count,
+   (SELECT COUNT(*) FROM post_comments c WHERE c.id_community_post = p.id_community_post AND NOT c.is_deleted) AS comment_count,
+   EXISTS (SELECT 1 FROM post_likes l WHERE l.id_community_post = p.id_community_post AND l.user_id = ?) AS liked`;
+
+async function getDiscover(executor, viewerId) {
+  // popular candidates: newest 50 visible posts in the 7-day window; ranked
+  // in JS by popularScore (keeps the ranking unit-testable without a live DB
+  // and deterministic across engines). Bound documented: beyond 50 posts in
+  // 7 days, older candidates fall out of the pool before scoring.
+  const popularPromise = executor.execute(
+    `SELECT ${DISCOVER_POST_PROJECTION}
+      FROM community_posts p
+      JOIN user_profile up ON up.user_id = p.author_id
+      WHERE NOT p.is_deleted AND ${visibilityWhere('p', 'up')}
+        AND p.created_at >= NOW() - INTERVAL '7 days'
+      ORDER BY p.id_community_post DESC LIMIT ?`,
+    [viewerId, ...visibilityParams(viewerId), DISCOVER_POPULAR_POOL_LIMIT]
+  );
+  // learners-you-may-like: authors with recent visible posts the viewer does
+  // NOT follow yet. Excludes self, private profiles and blocked pairs (via
+  // visibilityWhere), windowed to 30 days, ordered by recent activity
+  // (max post id is monotonic → total order, deterministic).
+  const learnersPromise = executor.execute(
+    `SELECT up.user_id, up.username, up.display_name, up.avatar_url, up.bio,
+       MAX(p.id_community_post) AS last_post_id, MAX(p.created_at) AS last_active
+      FROM community_posts p
+      JOIN user_profile up ON up.user_id = p.author_id
+      WHERE NOT p.is_deleted AND ${visibilityWhere('p', 'up')}
+        AND p.author_id <> ?
+        AND p.created_at >= NOW() - INTERVAL '30 days'
+        AND NOT EXISTS (SELECT 1 FROM user_follows f WHERE f.follower_id = ? AND f.followed_id = p.author_id)
+      GROUP BY up.user_id, up.username, up.display_name, up.avatar_url, up.bio
+      ORDER BY last_post_id DESC LIMIT ?`,
+    [...visibilityParams(viewerId), viewerId, viewerId, MAX_DISCOVER_ITEMS]
+  );
+  // useful learning content: newest public decks + readings from public
+  // owners (self rows pass), both-ways block gate — Phase 2b posture.
+  const decksPromise = executor.execute(
+    `SELECT d.id_deck_publication AS id, d.title, d.entity_type, up.username AS owner_username, d.created_at,
+       (SELECT COUNT(*) FROM deck_publication_items i WHERE i.id_deck_publication = d.id_deck_publication) AS items
+      FROM deck_publications d
+      LEFT JOIN user_profile up ON up.user_id = d.owner_id
+      WHERE d.is_public
+        AND (d.owner_id = ? OR up.is_public)
+        AND NOT EXISTS (
+          SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = d.owner_id) OR (b.blocker_id = d.owner_id AND b.blocked_id = ?))
+      ORDER BY d.id_deck_publication DESC LIMIT ?`,
+    [viewerId, viewerId, viewerId, MAX_DISCOVER_ITEMS]
+  );
+  const readingsPromise = executor.execute(
+    `SELECT r.id_reading_publication AS id, r.title, r.level, p.username AS owner_username, r.created_at
+      FROM reading_publications r
+      LEFT JOIN user_profile p ON p.user_id = r.owner_id
+      WHERE r.is_public
+        AND (r.owner_id = ? OR p.is_public)
+        AND NOT EXISTS (
+          SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = r.owner_id) OR (b.blocker_id = r.owner_id AND b.blocked_id = ?))
+      ORDER BY r.id_reading_publication DESC LIMIT ?`,
+    [viewerId, viewerId, viewerId, MAX_DISCOVER_ITEMS]
+  );
+  // open questions: newest visible question posts.
+  const questionsPromise = executor.execute(
+    `SELECT ${DISCOVER_POST_PROJECTION}
+      FROM community_posts p
+      JOIN user_profile up ON up.user_id = p.author_id
+      WHERE NOT p.is_deleted AND ${visibilityWhere('p', 'up')}
+        AND p.post_type = 'question'
+      ORDER BY p.id_community_post DESC LIMIT ?`,
+    [viewerId, ...visibilityParams(viewerId), MAX_DISCOVER_ITEMS]
+  );
+  const [[popularRows], [learnerRows], [deckRows], [readingRows], [questionRows]] = await Promise.all([
+    popularPromise, learnersPromise, decksPromise, readingsPromise, questionsPromise
+  ]);
+  // Phase 3 batched pattern reused: one edge query for viewer-relative flags
+  // (no per-row N+1). Learners are unfollowed by construction, so `following`
+  // resolves false — still derived from edges, never hardcoded.
+  let followingSet = new Set();
+  let followsYouSet = new Set();
+  const learnerIds = (Array.isArray(learnerRows) ? learnerRows : []).map((row) => row.user_id).filter(Boolean);
+  if (learnerIds.length) {
+    const inList = learnerIds.map(() => '?').join(', ');
+    const [edges] = await executor.execute(
+      `SELECT follower_id, followed_id FROM user_follows WHERE (follower_id = ? AND followed_id IN (${inList})) OR (follower_id IN (${inList}) AND followed_id = ?)`,
+      [viewerId, ...learnerIds, ...learnerIds, viewerId]
+    );
+    for (const edge of Array.isArray(edges) ? edges : []) {
+      if (String(edge.follower_id) === String(viewerId)) followingSet.add(String(edge.followed_id));
+      if (String(edge.followed_id) === String(viewerId)) followsYouSet.add(String(edge.follower_id));
+    }
+  }
+  const learners = (Array.isArray(learnerRows) ? learnerRows : []).map((row) => ({
+    userId: row.user_id,
+    username: row.username,
+    displayName: row.display_name || null,
+    avatarUrl: row.avatar_url || null,
+    bio: row.bio || null,
+    following: followingSet.has(String(row.user_id)),
+    followsYou: followsYouSet.has(String(row.user_id)),
+    lastActiveAt: row.last_active || null
+  }));
+  const popular = (Array.isArray(popularRows) ? popularRows : [])
+    .map((row) => ({
+      post: mapPost(row, viewerId),
+      score: popularScore(row.like_count, row.comment_count, row.created_at)
+    }))
+    .sort((a, b) => (b.score - a.score) || (b.post.id - a.post.id))
+    .slice(0, MAX_DISCOVER_ITEMS)
+    .map(({ post, score }) => ({ ...post, score }));
+  const decks = (Array.isArray(deckRows) ? deckRows : []).map((row) => ({
+    id: Number(row.id),
+    title: row.title,
+    entityType: row.entity_type,
+    ownerUsername: row.owner_username || null,
+    createdAt: row.created_at,
+    itemCount: Number(row.items || 0)
+  }));
+  const readings = (Array.isArray(readingRows) ? readingRows : []).map((row) => ({
+    id: Number(row.id),
+    title: row.title,
+    level: row.level || null,
+    ownerUsername: row.owner_username || null,
+    createdAt: row.created_at
+  }));
+  const questions = (Array.isArray(questionRows) ? questionRows : []).map((row) => mapPost(row, viewerId));
+  return { learners, popular, content: { decks, readings }, questions };
+}
+
 module.exports = {
   MAX_FEED_LIMIT,
   MAX_NOTIFICATION_EXCERPT,
@@ -1173,6 +1480,7 @@ module.exports = {
   deletePost,
   followUser,
   getCommunityProfile,
+  getDiscover,
   getNotificationSummary,
   getPost,
   listBlockedUsers,
@@ -1182,6 +1490,7 @@ module.exports = {
   listNotifications,
   markAllNotificationsRead,
   markNotificationRead,
+  popularScore,
   searchCommunity,
   toggleLike,
   unblockUser,
