@@ -53,6 +53,15 @@ function visibilityWhere(alias, viewerParam, profileAlias) {
 }
 
 function mapPost(row, viewerId) {
+  let snapshot = null;
+  try {
+    const parsed = row.snapshot_json && typeof row.snapshot_json === 'object' && !Array.isArray(row.snapshot_json)
+      ? row.snapshot_json
+      : JSON.parse(row.snapshot_json || '{}');
+    snapshot = parsed && typeof parsed === 'object' && Object.keys(parsed).length ? parsed : null;
+  } catch {
+    snapshot = null;
+  }
   return {
     id: Number(row.id),
     authorId: row.author_id,
@@ -66,6 +75,7 @@ function mapPost(row, viewerId) {
     entityId: row.entity_id !== null && row.entity_id !== undefined ? Number(row.entity_id) : null,
     deckId: row.deck_id !== null && row.deck_id !== undefined ? Number(row.deck_id) : null,
     readingId: row.reading_id !== null && row.reading_id !== undefined ? Number(row.reading_id) : null,
+    snapshot,
     likeCount: Number(row.like_count || 0),
     commentCount: Number(row.comment_count || 0),
     liked: row.liked === true || row.liked === 1,
@@ -86,30 +96,44 @@ async function validateLinkedContent(executor, authorId, payload) {
   if ((entityType === null) !== (entityId === null)) {
     throw new ValidationError('entityType and entityId must be provided together.');
   }
+  let snapshot = {};
   if (entityType !== null) {
     if (!ENTITY_TYPES.includes(entityType)) throw new ValidationError('entityType must be vocabulary, kanji, or grammar.');
     const table = entityType === 'vocabulary' ? 'vocabulary' : entityType === 'kanji' ? 'kanji' : 'grammar_points';
     const pk = entityType === 'vocabulary' ? 'id_vocabulary' : entityType === 'kanji' ? 'id_kanji' : 'id_grammar';
-    const [rows] = await executor.execute(`SELECT 1 FROM ${table} WHERE ${pk} = ? AND user_id = ?`, [entityId, authorId]);
-    if (!rows[0]) throw new ValidationError('Linked learning item not found.');
+    const columns = entityType === 'vocabulary'
+      ? 'word AS display, reading, meaning'
+      : entityType === 'kanji'
+        ? 'character_kanji AS display, NULL AS reading, meaning'
+        : 'grammar_point AS display, NULL AS reading, meaning';
+    const [rows] = await executor.execute(`SELECT ${columns} FROM ${table} WHERE ${pk} = ? AND user_id = ?`, [entityId, authorId]);
+    const entry = Array.isArray(rows) ? rows[0] : null;
+    if (!entry) throw new ValidationError('Linked learning item not found.');
+    snapshot = { display: entry.display, reading: entry.reading || null, meaning: entry.meaning || null };
   }
   const deckId = payload.deckId ?? null;
   if (deckId !== null) {
     const [rows] = await executor.execute(
-      'SELECT 1 FROM deck_publications WHERE id_deck_publication = ? AND (owner_id = ? OR is_public = TRUE)',
+      `SELECT d.title, d.entity_type, (SELECT COUNT(*) FROM deck_publication_items i WHERE i.id_deck_publication = d.id_deck_publication) AS items
+       FROM deck_publications d WHERE d.id_deck_publication = ? AND (d.owner_id = ? OR d.is_public = TRUE)`,
       [deckId, authorId]
     );
-    if (!rows[0]) throw new ValidationError('Linked deck not found.');
+    const deck = Array.isArray(rows) ? rows[0] : null;
+    if (!deck) throw new ValidationError('Linked deck not found.');
+    snapshot = { ...snapshot, title: deck.title, entityType: deck.entity_type, itemCount: Number(deck.items || 0) };
   }
   const readingId = payload.readingId ?? null;
   if (readingId !== null) {
     const [rows] = await executor.execute(
-      'SELECT 1 FROM reading_publications WHERE id_reading_publication = ? AND (owner_id = ? OR is_public = TRUE)',
+      `SELECT title, level, char_length(text) AS chars FROM reading_publications
+       WHERE id_reading_publication = ? AND (owner_id = ? OR is_public = TRUE)`,
       [readingId, authorId]
     );
-    if (!rows[0]) throw new ValidationError('Linked reading text not found.');
+    const text = Array.isArray(rows) ? rows[0] : null;
+    if (!text) throw new ValidationError('Linked reading text not found.');
+    snapshot = { ...snapshot, title: text.title, level: text.level || null, chars: Number(text.chars || 0) };
   }
-  return { entityType, entityId, deckId, readingId };
+  return { entityType, entityId, deckId, readingId, snapshot };
 }
 
 function validatePostBody(postType, body) {
@@ -129,9 +153,9 @@ async function createPost(executor, authorId, payload) {
   const translation = cleanText(payload.translation, 2000, 'translation');
   const links = await validateLinkedContent(executor, authorId, payload);
   const [result] = await executor.execute(
-    `INSERT INTO community_posts (author_id, post_type, title, body, japanese_text, translation, entity_type, entity_id, deck_id, reading_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id_community_post AS insertId`,
-    [authorId, postType, title, body, japaneseText, translation, links.entityType, links.entityId, links.deckId, links.readingId]
+    `INSERT INTO community_posts (author_id, post_type, title, body, japanese_text, translation, entity_type, entity_id, deck_id, reading_id, snapshot_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb) RETURNING id_community_post AS insertId`,
+    [authorId, postType, title, body, japaneseText, translation, links.entityType, links.entityId, links.deckId, links.readingId, JSON.stringify(links.snapshot || {})]
   );
   const id = Number(result?.insertId ?? (Array.isArray(result) ? result[0]?.insertId : undefined));
   if (!Number.isSafeInteger(id) || id <= 0) throw new Error('Unable to create the post.');
@@ -142,7 +166,8 @@ async function getPost(executor, viewerId, postId) {
   const id = cleanId(postId, 'post');
   const [rows] = await executor.execute(
     `SELECT p.id_community_post AS id, p.author_id, p.post_type, p.title, p.body, p.japanese_text, p.translation,
-       p.entity_type, p.entity_id, p.deck_id, p.reading_id, p.created_at, p.updated_at,
+       p.entity_type, p.entity_id, p.deck_id, p.reading_id, p.snapshot_json, p.created_at,
+       p.updated_at,
        up.username AS author_username, up.display_name AS author_display, up.avatar_url AS author_avatar,
        (SELECT COUNT(*) FROM post_likes l WHERE l.id_community_post = p.id_community_post) AS like_count,
        (SELECT COUNT(*) FROM post_comments c WHERE c.id_community_post = p.id_community_post AND NOT c.is_deleted) AS comment_count,
@@ -180,7 +205,8 @@ async function listFeed(executor, viewerId, { tab = 'latest', page = 1, limit = 
   if (!total) return { items: [], total: 0, page: safePage, limit: safeLimit, totalPages: 0 };
   const [rows] = await executor.execute(
     `SELECT p.id_community_post AS id, p.author_id, p.post_type, p.title, p.body, p.japanese_text, p.translation,
-       p.entity_type, p.entity_id, p.deck_id, p.reading_id, p.created_at, p.updated_at,
+       p.entity_type, p.entity_id, p.deck_id, p.reading_id, p.snapshot_json, p.created_at,
+       p.updated_at,
        up.username AS author_username, up.display_name AS author_display, up.avatar_url AS author_avatar,
        (SELECT COUNT(*) FROM post_likes l WHERE l.id_community_post = p.id_community_post) AS like_count,
        (SELECT COUNT(*) FROM post_comments c WHERE c.id_community_post = p.id_community_post AND NOT c.is_deleted) AS comment_count,

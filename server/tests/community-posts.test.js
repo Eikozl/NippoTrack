@@ -58,7 +58,7 @@ test('createPost links only owned entities and visible decks', async () => {
     );
   });
   await withPoolExecute(async (sql) => {
-    if (/FROM deck_publications WHERE/i.test(sql)) return [[]];
+    if (/FROM deck_publications/i.test(sql)) return [[]];
     throw new Error(`Unexpected SQL: ${sql.slice(0, 60)}`);
   }, async () => {
     await assert.rejects(
@@ -83,8 +83,7 @@ test('createPost persists and returns the gated post', async () => {
   });
 });
 
-test('getPost hides private, deleted, and blocked posts with 404-shape null', async () => {
-  await withPoolExecute(async () => [[{ ...POST_ROW, author_id: OTHER_ID }]], async () => {
+test('getPost hides private, deleted, and blocked posts with 404-shape null', async () => {  await withPoolExecute(async () => [[{ ...POST_ROW, author_id: OTHER_ID }]], async () => {
     const post = await service.getPost(pool, USER_ID, 7);
     assert.equal(post.mine, false);
   });
@@ -119,5 +118,26 @@ test('deletePost soft-deletes own posts only', async () => {
   });
   await withPoolExecute(async () => [{ affectedRows: 0 }], async () => {
     assert.equal(await service.deletePost(pool, USER_ID, 7), null);
+  });
+});
+
+test('share posts snapshot the linked content server-side', async () => {
+  const calls = [];
+  await withPoolExecute(async (sql, params = []) => {
+    calls.push({ sql, params });
+    if (/FROM vocabulary/i.test(sql)) {
+      assert.ok(params.includes(USER_ID), 'entity snapshot reads own rows only');
+      return [[{ display: '懐かしい', reading: 'なつかしい', meaning: 'nostalgic' }]];
+    }
+    if (/INSERT INTO community_posts/i.test(sql)) return [{ insertId: 9 }];
+    if (/FROM community_posts p/i.test(sql)) {
+      return [[{ ...POST_ROW, id: 9, post_type: 'share_vocab', entity_type: 'vocabulary', entity_id: 5, snapshot_json: { display: '懐かしい', reading: 'なつかしい', meaning: 'nostalgic' } }]];
+    }
+    throw new Error(`Unexpected SQL: ${sql.slice(0, 60)}`);
+  }, async () => {
+    const post = await service.createPost(pool, USER_ID, { postType: 'share_vocab', entityType: 'vocabulary', entityId: 5 });
+    assert.deepEqual(post.snapshot, { display: '懐かしい', reading: 'なつかしい', meaning: 'nostalgic' });
+    const insert = calls.find(({ sql }) => /INSERT INTO community_posts/i.test(sql));
+    assert.deepEqual(JSON.parse(insert.params[insert.params.length - 1]), post.snapshot);
   });
 });
