@@ -47,9 +47,17 @@ function cleanId(value, name, { required = false } = {}) {
 
 // Shared visibility predicate fragment for post listings/detail. Viewer sees
 // own rows plus public rows from public profiles, minus any blocked pair.
-function visibilityWhere(alias, viewerParam, profileAlias) {
-  return `(${alias}.author_id = ${viewerParam} OR (${alias}.is_public AND ${profileAlias}.is_public))`
-    + ` AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ${viewerParam} AND b.blocked_id = ${alias}.author_id) OR (b.blocker_id = ${alias}.author_id AND b.blocked_id = ${viewerParam}))`;
+// NOTE: the fragment carries THREE placeholders (author + both block
+// directions) — every caller must spread visibilityParams(viewerId), never a
+// single viewerId, or Postgres rejects the binding on real data (stubs that
+// ignore positions cannot catch this; only counting catches it).
+function visibilityWhere(alias, profileAlias) {
+  return `(${alias}.author_id = ? OR (${alias}.is_public AND ${profileAlias}.is_public))`
+    + ` AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = ${alias}.author_id) OR (b.blocker_id = ${alias}.author_id AND b.blocked_id = ?))`;
+}
+
+function visibilityParams(viewerId) {
+  return [viewerId, viewerId, viewerId];
 }
 
 function mapPost(row, viewerId) {
@@ -172,25 +180,34 @@ async function getPost(executor, viewerId, postId) {
        (SELECT COUNT(*) FROM post_likes l WHERE l.id_community_post = p.id_community_post) AS like_count,
        (SELECT COUNT(*) FROM post_comments c WHERE c.id_community_post = p.id_community_post AND NOT c.is_deleted) AS comment_count,
        EXISTS (SELECT 1 FROM post_likes l WHERE l.id_community_post = p.id_community_post AND l.user_id = ?) AS liked
-     FROM community_posts p
-     JOIN user_profile up ON up.user_id = p.author_id
-     WHERE p.id_community_post = ? AND NOT p.is_deleted AND ${visibilityWhere('p', '?', 'up')}`,
-    [viewerId, id, viewerId]
+      FROM community_posts p
+      JOIN user_profile up ON up.user_id = p.author_id
+      WHERE p.id_community_post = ? AND NOT p.is_deleted AND ${visibilityWhere('p', 'up')}`,
+    [viewerId, id, ...visibilityParams(viewerId)]
   );
   const row = Array.isArray(rows) ? rows[0] : null;
   return row ? mapPost(row, viewerId) : null;
 }
 
-async function listFeed(executor, viewerId, { tab = 'latest', page = 1, limit = 20 } = {}) {
+async function listFeed(executor, viewerId, { tab = 'latest', page = 1, limit = 20, author = null } = {}) {
   if (!FEED_TABS.includes(tab)) throw new ValidationError('tab must be latest, following, or discover.');
   const safePage = Number.isSafeInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
   const safeLimit = Number.isSafeInteger(Number(limit)) && Number(limit) > 0 ? Math.min(MAX_FEED_LIMIT, Number(limit)) : 20;
   const offset = (safePage - 1) * safeLimit;
   let authorFilter = '';
-  const params = [viewerId];
+  const extraParams = [];
+  if (author !== null && author !== undefined && author !== '') {
+    // Profile timelines: posts by one username, still through the same
+    // visibility gates (private/blocked authors resolve to an empty list).
+    const [owners] = await executor.execute('SELECT user_id FROM user_profile WHERE username = ?', [String(author).trim().toLowerCase()]);
+    const owner = Array.isArray(owners) ? owners[0] : null;
+    if (!owner) return { items: [], total: 0, page: safePage, limit: safeLimit, totalPages: 0 };
+    authorFilter = 'AND p.author_id = ? ';
+    extraParams.push(owner.user_id);
+  }
   if (tab === 'following') {
-    authorFilter = 'AND EXISTS (SELECT 1 FROM user_follows f WHERE f.follower_id = ? AND f.followed_id = p.author_id AND p.author_id <> ?) ';
-    params.push(viewerId, viewerId);
+    authorFilter += 'AND EXISTS (SELECT 1 FROM user_follows f WHERE f.follower_id = ? AND f.followed_id = p.author_id AND p.author_id <> ?) ';
+    extraParams.push(viewerId, viewerId);
   }
   const orderBy = tab === 'discover'
     ? 'ORDER BY like_count DESC, p.id_community_post DESC'
@@ -198,8 +215,8 @@ async function listFeed(executor, viewerId, { tab = 'latest', page = 1, limit = 
   const [[totalRow]] = await executor.execute(
     `SELECT COUNT(*) AS total FROM community_posts p
      JOIN user_profile up ON up.user_id = p.author_id
-     WHERE NOT p.is_deleted AND ${visibilityWhere('p', '?', 'up')} ${authorFilter}`,
-    params
+     WHERE NOT p.is_deleted AND ${visibilityWhere('p', 'up')} ${authorFilter}`,
+    [...visibilityParams(viewerId), ...extraParams]
   );
   const total = Number(totalRow?.total || 0);
   if (!total) return { items: [], total: 0, page: safePage, limit: safeLimit, totalPages: 0 };
@@ -211,11 +228,11 @@ async function listFeed(executor, viewerId, { tab = 'latest', page = 1, limit = 
        (SELECT COUNT(*) FROM post_likes l WHERE l.id_community_post = p.id_community_post) AS like_count,
        (SELECT COUNT(*) FROM post_comments c WHERE c.id_community_post = p.id_community_post AND NOT c.is_deleted) AS comment_count,
        EXISTS (SELECT 1 FROM post_likes l WHERE l.id_community_post = p.id_community_post AND l.user_id = ?) AS liked
-     FROM community_posts p
-     JOIN user_profile up ON up.user_id = p.author_id
-     WHERE NOT p.is_deleted AND ${visibilityWhere('p', '?', 'up')} ${authorFilter}
-     ${orderBy} LIMIT ? OFFSET ?`,
-    [viewerId, ...params, safeLimit, offset]
+      FROM community_posts p
+      JOIN user_profile up ON up.user_id = p.author_id
+      WHERE NOT p.is_deleted AND ${visibilityWhere('p', 'up')} ${authorFilter}
+      ${orderBy} LIMIT ? OFFSET ?`,
+    [viewerId, ...visibilityParams(viewerId), ...extraParams, safeLimit, offset]
   );
   const items = (Array.isArray(rows) ? rows : []).map((row) => mapPost(row, viewerId));
   return { items, total, page: safePage, limit: safeLimit, totalPages: Math.ceil(total / safeLimit) };
@@ -698,12 +715,12 @@ async function searchCommunity(executor, viewerId, query, { type = 'all', page =
     jobs.push(executor.execute(
       `SELECT p.id_community_post AS id, p.post_type, p.title, p.body, p.japanese_text, p.created_at,
          up.username AS author_username, up.display_name AS author_display, up.avatar_url AS author_avatar
-       FROM community_posts p
-       JOIN user_profile up ON up.user_id = p.author_id
-       WHERE NOT p.is_deleted AND ${visibilityWhere('p', '?', 'up')}
-         AND (COALESCE(p.title, '') ILIKE ? OR COALESCE(p.body, '') ILIKE ? OR COALESCE(p.japanese_text, '') ILIKE ?)
-       ORDER BY p.id_community_post DESC LIMIT ?`,
-      [viewerId, like, like, like, safeLimit]
+        FROM community_posts p
+        JOIN user_profile up ON up.user_id = p.author_id
+        WHERE NOT p.is_deleted AND ${visibilityWhere('p', 'up')}
+          AND (COALESCE(p.title, '') ILIKE ? OR COALESCE(p.body, '') ILIKE ? OR COALESCE(p.japanese_text, '') ILIKE ?)
+        ORDER BY p.id_community_post DESC LIMIT ?`,
+      [...visibilityParams(viewerId), like, like, like, safeLimit]
     ).then(([rows]) => {
       out.posts = (Array.isArray(rows) ? rows : []).map((row) => ({
         id: Number(row.id), postType: row.post_type, title: row.title || null, body: row.body || null,

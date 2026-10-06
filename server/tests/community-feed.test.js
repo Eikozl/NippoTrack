@@ -95,3 +95,53 @@ test('feed limits are bounded', async () => {
     assert.ok(result.limit <= 30, 'capped at MAX_FEED_LIMIT');
   });
 });
+
+test('every feed query binds exactly its placeholders like Postgres would', async () => {
+  // Regression: stubs ignore param positions, so a misaligned params array
+  // passed silently while real Postgres rejected every filtered listing
+  // with "invalid input syntax for type uuid". This strict stub mimics the
+  // driver's binding check.
+  const strict = async (sql, params = []) => {
+    const placeholders = (sql.match(/\?/g) || []).length;
+    assert.equal(
+      params.length, placeholders,
+      `param count must match placeholders: ${sql.slice(0, 80)}`
+    );
+    if (/SELECT COUNT\(\*\) AS total FROM community_posts/i.test(sql)) return [[{ total: '0' }]];
+    if (/FROM user_profile WHERE username/i.test(sql)) return [[{ user_id: 'other-uuid' }]];
+    if (/FROM community_posts p/i.test(sql)) return [[]];
+    if (/FROM user_profile up/i.test(sql)) return [[]];
+    if (/FROM deck_publications d/i.test(sql)) return [[]];
+    if (/FROM reading_publications r/i.test(sql)) return [[]];
+    throw new Error(`Unexpected SQL: ${sql.slice(0, 60)}`);
+  };
+  await withPoolExecute(strict, async () => {
+    await service.listFeed(pool, USER_ID, { tab: 'latest' });
+    await service.listFeed(pool, USER_ID, { tab: 'following' });
+    await service.listFeed(pool, USER_ID, { tab: 'discover' });
+    await service.listFeed(pool, USER_ID, { tab: 'latest', author: 'yuki' });
+    await service.getPost(pool, USER_ID, 5);
+    await service.searchCommunity(pool, USER_ID, 'nichi');
+  });
+});
+
+test('author timelines reuse feed gates; unknown authors resolve empty', async () => {
+  const { calls, stub } = feedStub([FEED_ROW]);
+  await withPoolExecute(async (sql, params = []) => {
+    calls.push({ sql, params });
+    if (/FROM user_profile WHERE username/i.test(sql)) return [[{ user_id: 'other-uuid' }]];
+    return stub(sql, params);
+  }, async () => {
+    const result = await service.listFeed(pool, USER_ID, { tab: 'latest', author: 'Yuki' });
+    assert.equal(result.items.length, 1);
+    assert.ok(calls.some(({ sql }) => /p\.author_id = \?/i.test(sql)), 'author predicate present');
+  });
+  await withPoolExecute(async (sql) => {
+    if (/FROM user_profile WHERE username/i.test(sql)) return [[]];
+    throw new Error(`Unexpected SQL: ${sql.slice(0, 60)}`);
+  }, async () => {
+    const result = await service.listFeed(pool, USER_ID, { tab: 'latest', author: 'ghost' });
+    assert.deepEqual(result.items, []);
+    assert.equal(result.total, 0);
+  });
+});

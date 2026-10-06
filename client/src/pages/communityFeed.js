@@ -768,7 +768,9 @@ export async function mountSocialFeed({ tabs, body, actions, renderDecksHub }) {
     }
     const listHost = element('div', { className: 'mt-5' });
     body.appendChild(listHost);
-    feedLoader(listHost, state.tab === 'following' ? 'following' : 'feed');
+    // UI tab "feed" is the backend "latest" tab (the backend only knows
+    // latest/following/discover; sending "feed" 400s with a scary error).
+    feedLoader(listHost, state.tab === 'following' ? 'following' : 'latest');
     wireEmptyActions();
   }
 
