@@ -65,6 +65,12 @@ function visibilityParams(viewerId) {
   return [viewerId, viewerId, viewerId];
 }
 
+// V6.1 Phase 7-perf single-query feed counts via LEFT JOIN plus GROUP BY.
+const POST_COUNT_JOINS = 'LEFT JOIN post_likes pl ON pl.id_community_post = p.id_community_post ' + 'LEFT JOIN post_comments pc ON pc.id_community_post = p.id_community_post AND NOT pc.is_deleted ' + 'LEFT JOIN post_likes vl ON vl.id_community_post = p.id_community_post AND vl.user_id = ?';
+const POST_COUNT_SELECT = 'COUNT(DISTINCT pl.user_id) AS like_count, ' + 'COUNT(DISTINCT pc.id_post_comment) AS comment_count, ' + 'MAX(CASE WHEN vl.user_id IS NOT NULL THEN 1 ELSE 0 END) AS liked';
+const POST_GROUP_BY = 'GROUP BY p.id_community_post, p.author_id, p.post_type, p.title, p.body, p.japanese_text, p.translation, ' + 'p.entity_type, p.entity_id, p.deck_id, p.reading_id, p.snapshot_json, p.created_at, p.updated_at, ' + 'up.username, up.display_name, up.avatar_url';
+const MAX_BLOCKED_LIMIT = 50;
+
 // Phase 2b: LIKE metacharacters (%, _, \) in the raw query must not act as
 // wildcards — q="%" would otherwise enumerate the whole directory. Every
 // search ILIKE pairs with ESCAPE '\' and the pattern is pre-escaped here.
@@ -511,16 +517,16 @@ async function createPost(executor, authorId, payload) {
 async function getPost(executor, viewerId, postId) {
   const id = cleanId(postId, 'post');
   const [rows] = await executor.execute(
-    `SELECT p.id_community_post AS id, p.author_id, p.post_type, p.title, p.body, p.japanese_text, p.translation,
-       p.entity_type, p.entity_id, p.deck_id, p.reading_id, p.snapshot_json, p.created_at,
-       p.updated_at,
-       up.username AS author_username, up.display_name AS author_display, up.avatar_url AS author_avatar,
-       (SELECT COUNT(*) FROM post_likes l WHERE l.id_community_post = p.id_community_post) AS like_count,
-       (SELECT COUNT(*) FROM post_comments c WHERE c.id_community_post = p.id_community_post AND NOT c.is_deleted) AS comment_count,
-       EXISTS (SELECT 1 FROM post_likes l WHERE l.id_community_post = p.id_community_post AND l.user_id = ?) AS liked
-      FROM community_posts p
-      JOIN user_profile up ON up.user_id = p.author_id
-      WHERE p.id_community_post = ? AND NOT p.is_deleted AND ${visibilityWhere('p', 'up')}`,
+    'SELECT p.id_community_post AS id, p.author_id, p.post_type, p.title, p.body, p.japanese_text, p.translation, ' +
+    'p.entity_type, p.entity_id, p.deck_id, p.reading_id, p.snapshot_json, p.created_at, ' +
+    'p.updated_at, ' +
+    'up.username AS author_username, up.display_name AS author_display, up.avatar_url AS author_avatar, ' +
+    POST_COUNT_SELECT +
+    ' FROM community_posts p ' +
+    'JOIN user_profile up ON up.user_id = p.author_id ' +
+    POST_COUNT_JOINS +
+    ' WHERE p.id_community_post = ? AND NOT p.is_deleted AND ' + visibilityWhere('p', 'up') +
+    ' ' + POST_GROUP_BY,
     [viewerId, id, ...visibilityParams(viewerId)]
   );
   const row = Array.isArray(rows) ? rows[0] : null;
@@ -535,8 +541,8 @@ async function listFeed(executor, viewerId, { tab = 'latest', page = 1, limit = 
   let authorFilter = '';
   const extraParams = [];
   if (author !== null && author !== undefined && author !== '') {
-    // Profile timelines: posts by one username, still through the same
-    // visibility gates (private/blocked authors resolve to an empty list).
+    // Profile timelines posts by one username through same gates.
+    // Private blocked authors resolve to empty list.
     const [owners] = await executor.execute('SELECT user_id FROM user_profile WHERE username = ?', [String(author).trim().toLowerCase()]);
     const owner = Array.isArray(owners) ? owners[0] : null;
     if (!owner) return { items: [], total: 0, page: safePage, limit: safeLimit, totalPages: 0 };
@@ -551,25 +557,25 @@ async function listFeed(executor, viewerId, { tab = 'latest', page = 1, limit = 
     ? 'ORDER BY like_count DESC, p.id_community_post DESC'
     : 'ORDER BY p.id_community_post DESC';
   const [[totalRow]] = await executor.execute(
-    `SELECT COUNT(*) AS total FROM community_posts p
-     JOIN user_profile up ON up.user_id = p.author_id
-     WHERE NOT p.is_deleted AND ${visibilityWhere('p', 'up')} ${authorFilter}`,
+    'SELECT COUNT(*) AS total FROM community_posts p ' +
+    'JOIN user_profile up ON up.user_id = p.author_id ' +
+    'WHERE NOT p.is_deleted AND ' + visibilityWhere('p', 'up') + ' ' + authorFilter,
     [...visibilityParams(viewerId), ...extraParams]
   );
   const total = Number(totalRow?.total || 0);
   if (!total) return { items: [], total: 0, page: safePage, limit: safeLimit, totalPages: 0 };
   const [rows] = await executor.execute(
-    `SELECT p.id_community_post AS id, p.author_id, p.post_type, p.title, p.body, p.japanese_text, p.translation,
-       p.entity_type, p.entity_id, p.deck_id, p.reading_id, p.snapshot_json, p.created_at,
-       p.updated_at,
-       up.username AS author_username, up.display_name AS author_display, up.avatar_url AS author_avatar,
-       (SELECT COUNT(*) FROM post_likes l WHERE l.id_community_post = p.id_community_post) AS like_count,
-       (SELECT COUNT(*) FROM post_comments c WHERE c.id_community_post = p.id_community_post AND NOT c.is_deleted) AS comment_count,
-       EXISTS (SELECT 1 FROM post_likes l WHERE l.id_community_post = p.id_community_post AND l.user_id = ?) AS liked
-      FROM community_posts p
-      JOIN user_profile up ON up.user_id = p.author_id
-      WHERE NOT p.is_deleted AND ${visibilityWhere('p', 'up')} ${authorFilter}
-      ${orderBy} LIMIT ? OFFSET ?`,
+    'SELECT p.id_community_post AS id, p.author_id, p.post_type, p.title, p.body, p.japanese_text, p.translation, ' +
+    'p.entity_type, p.entity_id, p.deck_id, p.reading_id, p.snapshot_json, p.created_at, ' +
+    'p.updated_at, ' +
+    'up.username AS author_username, up.display_name AS author_display, up.avatar_url AS author_avatar, ' +
+    POST_COUNT_SELECT +
+    ' FROM community_posts p ' +
+    'JOIN user_profile up ON up.user_id = p.author_id ' +
+    POST_COUNT_JOINS +
+    ' WHERE NOT p.is_deleted AND ' + visibilityWhere('p', 'up') + ' ' + authorFilter +
+    ' ' + POST_GROUP_BY +
+    ' ' + orderBy + ' LIMIT ? OFFSET ?',
     [viewerId, ...visibilityParams(viewerId), ...extraParams, safeLimit, offset]
   );
   const items = (Array.isArray(rows) ? rows : []).map((row) => mapPost(row, viewerId));
@@ -1233,21 +1239,44 @@ async function unblockUser(executor, blockerId, username) {
   return { unblocked: String(target.user_id), username: name };
 }
 
-async function listBlockedUsers(executor, blockerId) {
-  const [rows] = await executor.execute(
-    `SELECT up.user_id, up.username, up.display_name, up.avatar_url
-     FROM user_blocks b
-     JOIN user_profile up ON up.user_id = b.blocked_id
-     WHERE b.blocker_id = ?
-     ORDER BY up.username ASC`,
+async function listBlockedUsers(executor, blockerId, { page = 1, limit = 20 } = {}) {
+  const safePage = Number.isSafeInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
+  const safeLimit = Number.isSafeInteger(Number(limit)) && Number(limit) > 0 ? Math.min(MAX_BLOCKED_LIMIT, Number(limit)) : 20;
+  const offset = (safePage - 1) * safeLimit;
+  const [[totalRow]] = await executor.execute(
+    'SELECT COUNT(*) AS total FROM user_blocks b WHERE b.blocker_id = ?',
     [blockerId]
   );
-  return (Array.isArray(rows) ? rows : []).map((row) => ({
-    userId: row.user_id,
-    username: row.username,
-    displayName: row.display_name || null,
-    avatarUrl: row.avatar_url || null
-  }));
+  const total = Number(totalRow?.total || 0);
+  if (!total) return { items: [], total: 0, page: safePage, limit: safeLimit, totalPages: 0 };
+  const [rows] = await executor.execute(
+    'SELECT up.user_id, up.username, up.display_name, up.avatar_url ' +
+    'FROM user_blocks b ' +
+    'JOIN user_profile up ON up.user_id = b.blocked_id ' +
+    'WHERE b.blocker_id = ? ' +
+    'ORDER BY up.username ASC LIMIT ? OFFSET ?',
+    [blockerId, safeLimit, offset]
+  );
+  return {
+    items: (Array.isArray(rows) ? rows : []).map((row) => ({
+      userId: row.user_id,
+      username: row.username,
+      displayName: row.display_name || null,
+      avatarUrl: row.avatar_url || null
+    })),
+    total,
+    page: safePage,
+    limit: safeLimit,
+    totalPages: total ? Math.ceil(total / safeLimit) : 0
+  };
+}
+
+async function getUnreadCount(executor, userId) {
+  const [[row]] = await executor.execute(
+    'SELECT COUNT(*) AS total FROM notifications n WHERE n.user_id = ? AND NOT n.is_read',
+    [userId]
+  );
+  return Number(row?.total || 0);
 }
 
 async function getCommunityProfile(executor, viewerId, username) {
@@ -1491,13 +1520,7 @@ function popularScore(likeCount, commentCount, createdAt, nowMs = Date.now()) {
   return likes + comments * 3 + freshnessBonus;
 }
 
-const DISCOVER_POST_PROJECTION = `p.id_community_post AS id, p.author_id, p.post_type, p.title, p.body, p.japanese_text, p.translation,
-   p.entity_type, p.entity_id, p.deck_id, p.reading_id, p.snapshot_json, p.created_at,
-   p.updated_at,
-   up.username AS author_username, up.display_name AS author_display, up.avatar_url AS author_avatar,
-   (SELECT COUNT(*) FROM post_likes l WHERE l.id_community_post = p.id_community_post) AS like_count,
-   (SELECT COUNT(*) FROM post_comments c WHERE c.id_community_post = p.id_community_post AND NOT c.is_deleted) AS comment_count,
-   EXISTS (SELECT 1 FROM post_likes l WHERE l.id_community_post = p.id_community_post AND l.user_id = ?) AS liked`;
+const DISCOVER_POST_PROJECTION = 'p.id_community_post AS id, p.author_id, p.post_type, p.title, p.body, p.japanese_text, p.translation, ' + 'p.entity_type, p.entity_id, p.deck_id, p.reading_id, p.snapshot_json, p.created_at, ' + 'p.updated_at, ' + 'up.username AS author_username, up.display_name AS author_display, up.avatar_url AS author_avatar, ' + POST_COUNT_SELECT;
 
 async function getDiscover(executor, viewerId) {
   // popular candidates: newest 50 visible posts in the 7-day window; ranked
@@ -1505,12 +1528,14 @@ async function getDiscover(executor, viewerId) {
   // and deterministic across engines). Bound documented: beyond 50 posts in
   // 7 days, older candidates fall out of the pool before scoring.
   const popularPromise = executor.execute(
-    `SELECT ${DISCOVER_POST_PROJECTION}
-      FROM community_posts p
-      JOIN user_profile up ON up.user_id = p.author_id
-      WHERE NOT p.is_deleted AND ${visibilityWhere('p', 'up')}
-        AND p.created_at >= NOW() - INTERVAL '7 days'
-      ORDER BY p.id_community_post DESC LIMIT ?`,
+    'SELECT ' + DISCOVER_POST_PROJECTION +
+    ' FROM community_posts p ' +
+    'JOIN user_profile up ON up.user_id = p.author_id ' +
+    POST_COUNT_JOINS +
+    ' WHERE NOT p.is_deleted AND ' + visibilityWhere('p', 'up') +
+    ' AND p.created_at >= NOW() - INTERVAL \'7 days\'' +
+    ' ' + POST_GROUP_BY +
+    ' ORDER BY p.id_community_post DESC LIMIT ?',
     [viewerId, ...visibilityParams(viewerId), DISCOVER_POPULAR_POOL_LIMIT]
   );
   // learners-you-may-like: authors with recent visible posts the viewer does
@@ -1557,12 +1582,14 @@ async function getDiscover(executor, viewerId) {
   );
   // open questions: newest visible question posts.
   const questionsPromise = executor.execute(
-    `SELECT ${DISCOVER_POST_PROJECTION}
-      FROM community_posts p
-      JOIN user_profile up ON up.user_id = p.author_id
-      WHERE NOT p.is_deleted AND ${visibilityWhere('p', 'up')}
-        AND p.post_type = 'question'
-      ORDER BY p.id_community_post DESC LIMIT ?`,
+    'SELECT ' + DISCOVER_POST_PROJECTION +
+    ' FROM community_posts p ' +
+    'JOIN user_profile up ON up.user_id = p.author_id ' +
+    POST_COUNT_JOINS +
+    ' WHERE NOT p.is_deleted AND ' + visibilityWhere('p', 'up') +
+    ' AND p.post_type = \'question\'' +
+    ' ' + POST_GROUP_BY +
+    ' ORDER BY p.id_community_post DESC LIMIT ?',
     [viewerId, ...visibilityParams(viewerId), MAX_DISCOVER_ITEMS]
   );
   const [[popularRows], [learnerRows], [deckRows], [readingRows], [questionRows]] = await Promise.all([
@@ -1623,6 +1650,7 @@ async function getDiscover(executor, viewerId) {
 }
 
 module.exports = {
+  MAX_BLOCKED_LIMIT,
   MAX_FEED_LIMIT,
   MAX_NOTIFICATION_EXCERPT,
   MAX_REPLIES_PER_COMMENT,
@@ -1638,6 +1666,7 @@ module.exports = {
   getDiscover,
   getNotificationSummary,
   getPost,
+  getUnreadCount,
   listBlockedUsers,
   listComments,
   listFeed,

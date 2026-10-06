@@ -264,9 +264,20 @@ async function unblockUser(req, res) {
 
 async function listBlockedUsers(req, res) {
   try {
-    return res.json({ items: await community.listBlockedUsers(pool, req.user.id) });
+    const query = req.query || {};
+    const result = await community.listBlockedUsers(pool, req.user.id, { page: query.page, limit: query.limit });
+    return res.json({ items: result.items, pagination: { page: result.page, limit: result.limit, total: result.total, totalPages: result.totalPages } });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load blocked users.' });
+  }
+}
+
+async function getUnreadCount(req, res) {
+  try {
+    const unread = await community.getUnreadCount(pool, req.user.id);
+    return res.json({ unread });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load unread count.' });
   }
 }
 
@@ -314,6 +325,7 @@ module.exports = {
   followUser,
   getDiscover,
   getPost,
+  getUnreadCount,
   getProfile,
   getShareStats,
   listBlockedUsers,
