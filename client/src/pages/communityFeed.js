@@ -673,10 +673,20 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       linkBox.replaceChildren();
       if (!showLink) return;
       linkBox.appendChild(element('p', { className: 'text-xs text-muted', text: 'Loading your library…' }));
-      if (type === 'share_deck') {
-        const options = await loadOptions('/api/decks', 'id', (row) => row.title).catch(() => []);
-        linkBox.replaceChildren(buildLinkPicker('Deck', options, (id) => { link.deckId = id; }));
-      } else if (type === 'share_reading') {
+      try {
+        if (type === 'share_deck') {
+          const data = await apiRequest('/api/decks?mine=true&limit=50');
+          const options = (Array.isArray(data?.items) ? data.items : [])
+            .filter((row) => row && row.id !== undefined && row.id !== null)
+            .map((row) => ({ id: row.id, label: `${row.title}${row.entity_type ? ` · ${row.entity_type}` : ''}` }));
+          linkBox.replaceChildren(buildLinkPicker('Deck', options, (id) => { link.deckId = id; }));
+          return;
+        }
+      } catch {
+        linkBox.replaceChildren(buildLinkPicker('Deck', [], () => {}));
+        return;
+      }
+      if (type === 'share_reading') {
         let mine = [];
         try {
           const me = await apiRequest('/api/users/me');

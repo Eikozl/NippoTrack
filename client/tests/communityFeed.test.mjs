@@ -26,7 +26,8 @@ test('composer covers all post types with existing pickers', () => {
     assert.ok(source.includes(`'${type}'`), `composer type ${type} exists`);
   }
   assert.ok(source.includes('/api/vocabulary/options'), 'entity picker reuses options endpoints');
-  assert.ok(source.includes('/api/decks'), 'deck picker reuses the decks endpoint');
+  assert.ok(source.includes('/api/decks?mine=true'), 'deck picker lists own decks inline');
+  assert.ok(!source.includes('loadOptions('), 'no dangling picker helper calls');
   assert.ok(source.includes('/api/reading/publications'), 'reading picker reuses publications');
   assert.ok(source.includes('/api/community/posts'), 'publishes through the posts endpoint');
 });
