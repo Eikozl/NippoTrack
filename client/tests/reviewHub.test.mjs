@@ -1127,8 +1127,10 @@ test('Review Hub A11Y: aria-live progress; Reveal is native keyboard-operable bu
 });
 
 test('Review Hub A11Y: 1/2/3 shortcuts guarded (require revealed, REVIEWING, non-input focus)', async () => {
-  // Static guards present.
-  assert.match(reviewSource, /if\s*\(\s*stage\s*!==\s*'REVIEWING'\s*\|\|\s*!revealed\s*\)\s*return/, 'shortcuts require revealed REVIEWING');
+  // Static guards present: grades require revealed REVIEWING; V5.7 options
+  // require the unrevealed state (mutually exclusive by the revealed flag).
+  assert.match(reviewSource, /if\s*\(\s*stage\s*!==\s*'REVIEWING'\s*\)\s*return/, 'shortcuts require REVIEWING stage');
+  assert.match(reviewSource, /!revealed/, 'revealed flag scopes grades vs options');
   assert.match(reviewSource, /INPUT\|TEXTAREA\|SELECT/, 'shortcuts ignore form focus');
   // Behavioral: no-fire when focus in input; fires when body focused and revealed.
   const harness = loadReviewModule({
@@ -2027,4 +2029,202 @@ test('Review voice speed: changing the selector persists and applies instantly',
   await sleep(150);
   assert.equal(harness.speechCalls.length, 1, 'spoken once');
   assert.equal(harness.speechCalls[0]?.rate, 0.5, 'utterance carries the new rate');
+});
+
+// ---------------------------------------------------------------- V5.7 ADAPTIVE RECOGNITION
+const RECOGNITION_ONLY = {
+  availableTypes: ['recognition', 'recall', 'cloze', 'audio'],
+  userPreferences: { cardTypes: ['recognition'], weights: {}, engineMode: 'fixed', autoPick: true }
+};
+
+function recognitionQueue() {
+  const words = [
+    ['懐かしい', 'なつかしい', 'nostalgic / familiar', 91],
+    ['寂しい', 'さびしい', 'lonely', 92],
+    ['難しい', 'むずかしい', 'difficult', 93],
+    ['平和な', 'へいわな', 'peaceful', 94]
+  ];
+  return {
+    groups: {
+      kanji: { items: [], total: 0, truncated: false },
+      vocabulary: {
+        items: words.map(([display, reading, meaning, entityId]) =>
+          candidateItem({ entityType: 'vocabulary', entityId, display, reading, meaning, strength: 'strong' })),
+        total: 4,
+        truncated: false
+      },
+      grammar: { items: [], total: 0, truncated: false }
+    }
+  };
+}
+
+async function startWithRecognitionQueue({ sessionId = 301 } = {}) {
+  const harness = loadReviewModule({
+    candidatesPayload: recognitionQueue(),
+    typesPayload: RECOGNITION_ONLY,
+    sessionId,
+    completePayload: { total: 4, byType: { kanji: 0, vocabulary: 4, grammar: 0 }, byResult: { Good: 0, Hard: 0, Again: 0 } }
+  });
+  const container = await gotoSetup(harness);
+  await gotoCandidates(harness, container);
+  const boxes = findInputs(container, (n) => n.getAttribute('type') === 'checkbox');
+  assert.ok(boxes.length >= 4, 'candidates selectable (plus type filters)');
+  for (const b of boxes) { b.checked = true; b.dispatchEvent({ type: 'change', target: b }); }
+  await sleep(5);
+  const starts = visibleButtonsByText(container, 'Start review');
+  await clickAndSettle(starts[starts.length - 1]);
+  await sleep(15);
+  await sleep(15);
+  assert.match(pillText(container), /Recognition/, 'fresh queue card renders recognition');
+  return { harness, container };
+}
+
+function optionButtons(container) {
+  return [...container.querySelectorAll('button')].filter((node) => node.getAttribute('aria-keyshortcuts') !== null
+    && ['1', '2', '3', '4'].includes(node.getAttribute('aria-keyshortcuts'))
+    && /nostalgic|lonely|difficult|peaceful/.test(textOf(node)));
+}
+
+function gradePosts(harness) {
+  return harness.apiCalls.filter((c) => c.url === '/api/review/grade');
+}
+
+test('V5.7 recognition: four options, one correct, wrong then right suggests Good', async () => {
+  const { harness, container } = await startWithRecognitionQueue();
+  const options = optionButtons(container);
+  assert.equal(options.length, 4, 'exactly four options');
+  assert.deepEqual(options.map((node) => textOf(node)).sort(), ['difficult', 'lonely', 'nostalgic / familiar', 'peaceful'].sort(), 'correct + three distractors, no duplicates');
+  const wrong = options.find((node) => !/nostalgic/.test(textOf(node)));
+  await clickAndSettle(wrong);
+  assert.match(textOf(container), /Not quite/, 'wrong pick asks to try again');
+  assert.equal(wrong.disabled, true, 'picked wrong option locks out');
+  const right = options.find((node) => /nostalgic/.test(textOf(node)));
+  await clickAndSettle(right);
+  assert.match(textOf(container), /That's right/, 'correct pick confirms with the meaning');
+  await clickAndSettle(findFirstButtonByText(container, 'Reveal answer'));
+  await sleep(10);
+  assert.match(textOf(container), /Suggested: Good/, 'one mistake still suggests Good');
+  await clickAndSettle(findFirstButtonByText(container, 'Good'));
+  await sleep(15);
+  const posts = gradePosts(harness);
+  assert.equal(posts.length, 1, 'exactly one review event despite retries');
+  assert.equal(posts[0].options.body.result, 'Good', 'suggested grade reaches the existing handler');
+});
+
+test('V5.7 recognition: deterministic order per session, shuffled across cards', async () => {
+  const first = await startWithRecognitionQueue({ sessionId: 311 });
+  const second = await startWithRecognitionQueue({ sessionId: 311 });
+  const orderOf = (container) => optionButtons(container).map((node) => textOf(node)).join('|');
+  assert.equal(orderOf(first.container), orderOf(second.container), 'same session and queue render the same order');
+  const counts = {};
+  for (const label of optionButtons(first.container).map((node) => textOf(node))) counts[label] = (counts[label] || 0) + 1;
+  assert.deepEqual(Object.values(counts), [1, 1, 1, 1], 'no duplicate options rendered');
+});
+
+test('V5.7 recognition: two mistakes suggest Hard, three suggest Again', async () => {
+  const { harness, container } = await startWithRecognitionQueue({ sessionId: 312 });
+  const wrongs = optionButtons(container).filter((node) => !/nostalgic/.test(textOf(node)));
+  await clickAndSettle(wrongs[0]);
+  await clickAndSettle(wrongs[1]);
+  const right = optionButtons(container).find((node) => /nostalgic/.test(textOf(node)));
+  await clickAndSettle(right);
+  await clickAndSettle(findFirstButtonByText(container, 'Reveal answer'));
+  await sleep(10);
+  assert.match(textOf(container), /Suggested: Hard/, 'two mistakes suggest Hard');
+  await clickAndSettle(findFirstButtonByText(container, 'Hard'));
+  await sleep(15);
+  assert.equal(gradePosts(harness).length, 1, 'single event for the Hard path');
+  assert.equal(gradePosts(harness)[0].options.body.result, 'Hard');
+});
+
+test('V5.7 recognition: three misses leave only the answer, suggesting Again', async () => {
+  const { harness, container } = await startWithRecognitionQueue({ sessionId: 313 });
+  const wrongs = optionButtons(container).filter((node) => !/nostalgic/.test(textOf(node)));
+  assert.equal(wrongs.length, 3, 'three distractors available');
+  for (const wrong of wrongs) await clickAndSettle(wrong);
+  const right = optionButtons(container).find((node) => /nostalgic/.test(textOf(node)));
+  assert.equal(right.disabled, false, 'correct option stays enabled');
+  await clickAndSettle(right);
+  await clickAndSettle(findFirstButtonByText(container, 'Reveal answer'));
+  await sleep(10);
+  assert.match(textOf(container), /Suggested: Again/, 'three mistakes suggest Again');
+});
+
+test('V5.7 recognition: learner override wins over the suggestion', async () => {
+  const { harness, container } = await startWithRecognitionQueue({ sessionId: 314 });
+  const right = optionButtons(container).find((node) => /nostalgic/.test(textOf(node)));
+  await clickAndSettle(right);
+  await clickAndSettle(findFirstButtonByText(container, 'Reveal answer'));
+  await sleep(10);
+  assert.match(textOf(container), /Suggested: Good/, 'suggestion present');
+  await clickAndSettle(findFirstButtonByText(container, 'Again'));
+  await sleep(15);
+  const posts = gradePosts(harness);
+  assert.equal(posts.length, 1, 'override still posts exactly once');
+  assert.equal(posts[0].options.body.result, 'Again', 'override grade wins');
+});
+
+test('V5.7 recognition: too few distractors falls back to plain reveal', async () => {
+  const item = candidateItem({ entityType: 'vocabulary', entityId: 95, display: '水', reading: 'みず', meaning: 'water', strength: 'strong' });
+  const { container } = await startWithSingleItem({ item, typesPayload: RECOGNITION_ONLY, sessionId: 315 });
+  assert.match(pillText(container), /Recognition/);
+  assert.equal(optionButtons(container).length, 0, 'no options padded from nothing');
+  const reveal = findFirstButtonByText(container, 'Reveal answer');
+  assert.ok(reveal && !reveal.hasAttribute('disabled'), 'plain reveal flow intact');
+  await clickAndSettle(reveal);
+  await sleep(10);
+  assert.ok(!/Suggested:/.test(textOf(container)), 'no suggestion without played options');
+  assert.ok(findFirstButtonByText(container, 'Good'), 'self-grading intact');
+});
+
+test('V5.7 recognition: duplicate meanings never appear as distinct options', async () => {
+  const harness = loadReviewModule({
+    candidatesPayload: {
+      groups: {
+        kanji: { items: [], total: 0, truncated: false },
+        vocabulary: {
+          items: [
+            candidateItem({ entityType: 'vocabulary', entityId: 96, display: '行く', reading: 'いく', meaning: 'to go', strength: 'strong' }),
+            candidateItem({ entityType: 'vocabulary', entityId: 97, display: '去る', reading: 'さる', meaning: 'to go', strength: 'strong' }),
+            candidateItem({ entityType: 'vocabulary', entityId: 98, display: '食べる', reading: 'たべる', meaning: 'to eat', strength: 'strong' }),
+            candidateItem({ entityType: 'vocabulary', entityId: 99, display: '飲む', reading: 'のむ', meaning: 'to drink', strength: 'strong' })
+          ],
+          total: 4, truncated: false
+        },
+        grammar: { items: [], total: 0, truncated: false }
+      }
+    },
+    typesPayload: RECOGNITION_ONLY,
+    sessionId: 316,
+    completePayload: { total: 4, byType: { kanji: 0, vocabulary: 4, grammar: 0 }, byResult: { Good: 0, Hard: 0, Again: 0 } }
+  });
+  const container = await gotoSetup(harness);
+  await gotoCandidates(harness, container);
+  const boxes = findInputs(container, (n) => n.getAttribute('type') === 'checkbox');
+  for (const b of boxes) { b.checked = true; b.dispatchEvent({ type: 'change', target: b }); }
+  await sleep(5);
+  const starts = visibleButtonsByText(container, 'Start review');
+  await clickAndSettle(starts[starts.length - 1]);
+  await sleep(15);
+  await sleep(15);
+  // Target 行く/to go: 去る shares the meaning → only to eat/to drink qualify → fallback.
+  assert.equal(optionButtons(container).length, 0, 'near-duplicate pool falls back instead of padding');
+});
+
+test('V5.7 recognition: keyboard 1-4 picks options pre-reveal only', async () => {
+  const { harness, container } = await startWithRecognitionQueue({ sessionId: 317 });
+  const { doc } = harness;
+  doc.activeElement = doc.body;
+  doc.body.tagName = 'BODY';
+  const before = optionButtons(container).filter((node) => node.disabled).length;
+  doc.dispatchEvent({ type: 'keydown', key: '2', preventDefault() {} });
+  await sleep(10);
+  const picked = optionButtons(container).filter((node) => node.disabled).length;
+  assert.equal(picked, before + 1, 'keyboard picks the second option');
+  await clickAndSettle(findFirstButtonByText(container, 'Reveal answer'));
+  await sleep(10);
+  const gradesBefore = gradePosts(harness).length;
+  doc.dispatchEvent({ type: 'keydown', key: '4', preventDefault() {} });
+  await sleep(10);
+  assert.equal(gradePosts(harness).length, gradesBefore, 'key 4 does nothing after reveal (no fourth grade)');
 });

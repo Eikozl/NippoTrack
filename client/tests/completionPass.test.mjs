@@ -85,3 +85,24 @@ test('handwriting has one reset control, not two', () => {
   assert.ok(!source.includes("text: 'Retry'"), 'duplicate Retry removed');
   assert.ok(source.includes("text: 'Watch order'") && source.includes("text: 'Done'"), 'watch and done intact');
 });
+
+test('V5.7 recognition options come from the queue, never the network', () => {
+  const source = readSource('src/pages/review.js');
+  assert.ok(source.includes('function buildRecognitionOptions'), 'deterministic picker present');
+  assert.ok(source.includes('function suggestedGradeForMistakes'), 'classification helper present');
+  assert.ok(source.includes('MAX_CONCEALED_TRIES'), 'untouched audio escape hatch intact');
+  assert.ok(!source.includes('/api/review/options'), 'no option endpoint exists');
+  assert.ok(!source.includes('/api/review/context'), 'no per-card context endpoint exists');
+});
+
+test('V5.7 keyboard: options pre-reveal, grades post-reveal, never both', () => {
+  const source = readSource('src/pages/review.js');
+  assert.ok(source.includes('recognitionOptionButtons'), 'option buttons tracked for keys');
+  assert.ok(source.includes("!revealed && ['1', '2', '3', '4']"), 'keys 1-4 scoped to unrevealed options');
+});
+
+test('V5.7 fallback: thin pools keep the reveal flow', () => {
+  const source = readSource('src/pages/review.js');
+  assert.ok(source.includes('source.length < 3'), 'fewer than three distractors bails out');
+  assert.ok(source.includes('if (recognitionOptions)'), 'options render only when built');
+});

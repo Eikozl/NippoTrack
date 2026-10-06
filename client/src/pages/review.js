@@ -228,6 +228,73 @@ function isWeak(item) {
   return item.evidenceStrength === 'weak';
 }
 
+// V5.7 multiple-choice recognition (deterministic, no AI, zero queries).
+// Distractors come from the in-memory session queue only (same entity type,
+// same JLPT band when both sides carry one): same-user wording, plausible
+// by construction, never cross-user. FNV-1a + mulberry32 shuffle is stable
+// for the same card in the same session and varies across cards.
+function hashSeedString(text) {
+  let hash = 2166136261;
+  const input = String(text || '');
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function mulberry32(seed) {
+  let state = seed | 0;
+  return () => {
+    state = (state + 0x6D2B79F5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function normOptionText(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function buildRecognitionOptions(item, queue, seedText) {
+  const wantMeaning = String(item?.meaning || '').trim();
+  const wantDisplay = String(item?.display || '').trim();
+  if (!wantMeaning || !item?.entityType) return null;
+  const seen = new Set([normOptionText(wantMeaning)]);
+  const pool = [];
+  const banded = [];
+  for (const entry of Array.isArray(queue) ? queue : []) {
+    if (!entry || entry.entityType !== item.entityType) continue;
+    if (Number(entry.entityId) === Number(item.entityId)) continue;
+    const meaning = String(entry.meaning || '').trim();
+    if (!meaning || seen.has(normOptionText(meaning))) continue;
+    if (wantDisplay && normOptionText(entry.display) === normOptionText(wantDisplay)) continue;
+    seen.add(normOptionText(meaning));
+    pool.push({ meaning });
+    if (item.jlpt && entry.jlpt && entry.jlpt === item.jlpt) banded.push({ meaning });
+  }
+  // Same JLPT band only when it yields a full set; otherwise same-type pool.
+  // Fewer than 3 usable distractors → null and the card keeps its reveal flow.
+  const source = banded.length >= 3 ? banded : pool;
+  if (source.length < 3) return null;
+  const options = [{ meaning: wantMeaning, answer: true }, ...source.slice(0, 3).map((entry) => ({ meaning: entry.meaning, answer: false }))];
+  const rand = mulberry32(hashSeedString(seedText));
+  for (let i = options.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rand() * (i + 1));
+    [options[i], options[j]] = [options[j], options[i]];
+  }
+  return { options };
+}
+
+// V5.7 performance classification: mistakes feed the existing suggested
+// grade only — scheduling stays with Again/Hard/Good via the normal handler.
+function suggestedGradeForMistakes(mistakes) {
+  if (mistakes <= 1) return 'Good';
+  if (mistakes === 2) return 'Hard';
+  return 'Again';
+}
+
 // V5.6 Completion Pass: session-creation responses carry batched per-item
 // context (same helper shape as the dashboard auto-session). Merge it into
 // the client queue so cards render Context blocks with zero extra requests.
@@ -291,6 +358,7 @@ export async function renderReview(container) {
   let revealed = false;
   let sessionId = null;
   let gradeButtons = [];
+  let recognitionOptionButtons = [];
   let graded = [];
   let localDetach = null;
 
@@ -1606,10 +1674,21 @@ const CARD_TYPE_DESCRIPTIONS = {
 
   function attachGradeKeys() {
     const handler = (event) => {
-      if (!['1', '2', '3'].includes(event.key)) return;
       const tag = document.activeElement?.tagName;
       if (tag && /INPUT|TEXTAREA|SELECT/.test(tag)) return;
-      if (stage !== 'REVIEWING' || !revealed) return;
+      if (stage !== 'REVIEWING') return;
+      // V5.7: 1-4 picks a recognition option while the answer is hidden;
+      // 1-3 grades once revealed. Mutually exclusive by the revealed flag.
+      if (!revealed && ['1', '2', '3', '4'].includes(event.key) && recognitionOptionButtons.length) {
+        const target = recognitionOptionButtons[Number(event.key) - 1];
+        if (target && !target.disabled) {
+          event.preventDefault();
+          target.click();
+        }
+        return;
+      }
+      if (!['1', '2', '3'].includes(event.key)) return;
+      if (!revealed) return;
       const target = gradeButtons[Number(event.key) - 1];
       if (target && !target.disabled) {
         event.preventDefault();
@@ -1626,6 +1705,7 @@ const CARD_TYPE_DESCRIPTIONS = {
     attachGradeKeys();
     revealed = false;
     gradeButtons = [];
+    recognitionOptionButtons = [];
     const total = queue.length;
     const item = queue[currentIndex];
     reviewingBlock.replaceChildren();
@@ -1728,6 +1808,13 @@ const CARD_TYPE_DESCRIPTIONS = {
 
     // Practice-only typed-answer state (grading stays with Again/Hard/Good).
     let checkState = null;
+    // V5.7 recognition practice state: option picks feed the suggested
+    // grade only. Grading itself stays self-assessed via the buttons below.
+    let recognitionPicks = 0;
+    let recognitionMistakes = 0;
+    let recognitionResolved = false;
+    let recognitionSuggested = null;
+    let recognitionOptions = null;
     // Concealed (audio) cards lock Reveal until the heard word is typed —
     // but this is memory practice, not an exam. After MAX_CONCEALED_TRIES
     // failed tries the lock opens so nobody gets stuck without a voice
@@ -1847,10 +1934,19 @@ const CARD_TYPE_DESCRIPTIONS = {
       if (item.reading) answerWrap.appendChild(element('p', { className: 'text-sm text-muted', text: item.reading }));
       if (item.meaning) answerWrap.appendChild(element('p', { className: 'mt-2 text-base leading-7 text-ink', text: item.meaning }));
       answerWrap.appendChild(answerResult);
-      answerWrap.appendChild(element('p', { className: 'mt-5 text-sm font-semibold text-ink', text: 'How did recall feel?' }));
+      // V5.7 suggested grade: named pill + labeled button, every grade
+      // still clickable (override wins) and grading posts exactly once.
+      if (recognitionSuggested) {
+        const tryNote = recognitionResolved
+          ? `picked on try ${recognitionPicks}`
+          : `after ${recognitionPicks} ${recognitionPicks === 1 ? 'try' : 'tries'}`;
+        answerWrap.appendChild(element('p', { className: 'mt-5 text-sm leading-6 text-muted', text: `Suggested: ${recognitionSuggested} — ${tryNote}. How did recall feel?` }));
+      } else {
+        answerWrap.appendChild(element('p', { className: 'mt-5 text-sm font-semibold text-ink', text: 'How did recall feel?' }));
+      }
       const grades = element('div', { className: 'mt-3 grid gap-2 sm:grid-cols-3' });
       GRADES.forEach(({ result, hint }, gradeIndex) => {
-        const button = element('button', { className: 'button-secondary flex-col gap-1 px-4 py-3 text-center', attrs: { type: 'button', 'aria-keyshortcuts': String(gradeIndex + 1) } }, [
+        const button = element('button', { className: 'button-secondary flex-col gap-1 px-4 py-3 text-center', attrs: { type: 'button', 'aria-keyshortcuts': String(gradeIndex + 1), ...(result === recognitionSuggested ? { 'aria-label': `${result} (suggested)` } : {}) } }, [
           element('span', { className: 'block text-sm font-semibold', text: result }),
           element('span', { className: 'block text-xs font-normal leading-5 text-muted', text: hint })
         ]);
@@ -1879,6 +1975,12 @@ const CARD_TYPE_DESCRIPTIONS = {
     }
     revealButton.addEventListener('click', () => {
       revealed = true;
+      // V5.7: multiple-choice performance becomes a suggested grade —
+      // 0-1 mistakes Good, 2 Hard, 3+ Again — only when the learner actually
+      // played the options. Direct reveals keep plain self-grading.
+      if (cardType === 'recognition' && recognitionPicks > 0) {
+        recognitionSuggested = suggestedGradeForMistakes(recognitionMistakes);
+      }
       buildAnswer();
       frontWrap.hidden = true;
       answerWrap.hidden = false;
@@ -1997,7 +2099,50 @@ const CARD_TYPE_DESCRIPTIONS = {
       }
     } else {
       appendStrokePractice();
+      // V5.7 multiple-choice recognition: deterministic options from the
+      // in-memory queue (zero queries). Fewer than 3 usable distractors →
+      // the card keeps its plain reveal flow, never padded with nonsense.
+      recognitionOptions = buildRecognitionOptions(item, queue, `${sessionId}:${item.entityType}:${item.entityId}:${currentIndex}`);
+      if (recognitionOptions) {
+        frontWrap.appendChild(element('p', { className: 'mt-4 text-sm font-semibold leading-6 text-ink', text: `Which meaning fits “${item.display}”? Pick one.` }));
+        const optionList = element('div', { className: 'mt-2 grid gap-2', attrs: { role: 'group', 'aria-label': 'Meaning options' } });
+        recognitionOptions.options.forEach((option, optionIndex) => {
+          const optionButton = element('button', {
+            className: 'button-secondary min-h-11 justify-start break-words px-4 py-2.5 text-left text-sm',
+            text: option.meaning,
+            attrs: { type: 'button', 'aria-keyshortcuts': String(optionIndex + 1) }
+          });
+          optionButton.addEventListener('click', () => pickRecognitionOption(optionIndex));
+          recognitionOptionButtons.push(optionButton);
+          optionList.appendChild(optionButton);
+        });
+        frontWrap.appendChild(optionList);
+        frontWrap.appendChild(frontResult);
+      }
       frontWrap.appendChild(revealButton);
+    }
+
+    function pickRecognitionOption(optionIndex) {
+      if (revealed || recognitionResolved || !recognitionOptions) return;
+      const option = recognitionOptions.options[optionIndex];
+      const button = recognitionOptionButtons[optionIndex];
+      if (!option || !button || button.disabled) return;
+      recognitionPicks += 1;
+      frontResult.hidden = false;
+      answerResult.hidden = false;
+      if (option.answer) {
+        recognitionResolved = true;
+        recognitionOptionButtons.forEach((entry) => { entry.disabled = true; });
+        button.setAttribute('aria-pressed', 'true');
+        frontResult.textContent = `That's right — “${item.display}” means “${item.meaning}.”`;
+        answerResult.textContent = `That's right — “${item.display}” means “${item.meaning}.”`;
+      } else {
+        recognitionMistakes += 1;
+        button.disabled = true;
+        button.setAttribute('aria-pressed', 'false');
+        frontResult.textContent = `Not quite — that means “${option.meaning}.” Try again.`;
+        answerResult.textContent = `Not quite — that means “${option.meaning}.” Try again.`;
+      }
     }
 
     reviewingBlock.appendChild(card);
