@@ -92,6 +92,16 @@ function entityCreateEndpoint(entityType) {
   return entityType === 'vocabulary' ? '/api/vocabulary' : entityType === 'kanji' ? '/api/kanji' : '/api/grammar';
 }
 
+// Deck snapshots store raw columns (word / character_kanji /
+// grammar_point), never a generic display field — mirror the server's
+// displayOf() so shared decks show han characters, not "Item N".
+function deckItemDisplay(kind, entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  if (kind === 'kanji') return entry.character_kanji || entry.display || null;
+  if (kind === 'grammar') return entry.grammar_point || entry.display || null;
+  return entry.word || entry.display || entry.title || null;
+}
+
 function entityCreateBody(entityType, snapshot) {
   if (entityType === 'vocabulary') {
     return { word: snapshot.display, ...(snapshot.reading ? { reading: snapshot.reading } : {}), meaning: snapshot.meaning || 'Saved from Community' };
@@ -259,6 +269,33 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       menu.appendChild(itemButton);
     };
     if (post.mine) {
+      addItem('Edit post', () => {
+        const titleInput = element('input', { className: 'field-control', attrs: { type: 'text', maxlength: '200', 'aria-label': 'Post title' } });
+        titleInput.value = post.title || '';
+        const bodyInput = element('textarea', { className: 'field-control min-h-24 w-full', attrs: { rows: '3', maxlength: '2000', 'aria-label': 'Post text' } });
+        bodyInput.value = post.body || '';
+        const translationInput = element('textarea', { className: 'field-control min-h-16 w-full', attrs: { rows: '2', maxlength: '2000', 'aria-label': 'Translation' } });
+        translationInput.value = post.translation || '';
+        openDialog({
+          title: 'Edit post',
+          description: 'Only text fields change — the linked content stays as published.',
+          content: [element('div', { className: 'grid gap-3' }, [titleInput, bodyInput, translationInput])],
+          submitLabel: 'Save changes',
+          onSubmit: async (form, close) => {
+            try {
+              await apiRequest(`/api/community/posts/${post.id}`, {
+                method: 'PUT',
+                body: { title: titleInput.value, body: bodyInput.value, translation: translationInput.value }
+              });
+              showToast('Post updated.');
+              close();
+              if (typeof onDone === 'function') onDone();
+            } catch (error) {
+              showToast(error?.message || 'Unable to update.', 'error');
+            }
+          }
+        });
+      });
       addItem('Delete post', () => {
         confirmDialog({
           title: 'Delete this post?',
@@ -354,7 +391,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     const paintRows = () => {
       rows.replaceChildren(...items.map((entry, index) => {
         const kind = entry.entityType || detail.entityType || 'vocabulary';
-        const label = entry.display || entry.word || entry.title || `Item ${index + 1}`;
+        const label = deckItemDisplay(kind, entry) || `Item ${index + 1}`;
         const saved = savedIds.has(`${kind}:${label}`);
         const save = element('button', {
           className: 'button-secondary min-h-8 shrink-0 px-2.5 py-1 text-xs',
@@ -385,7 +422,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
         // eslint-disable-next-line no-await-in-loop
         if (await saveDeckItem(kind, entry)) {
           saved += 1;
-          savedIds.add(`${kind}:${entry.display || entry.word || entry.title}`);
+          savedIds.add(`${kind}:${deckItemDisplay(kind, entry)}`);
         } else skipped += 1;
       }
     paintRows();
@@ -403,7 +440,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   function openDeckViewerRefresh() {}
 
   async function saveDeckItem(kind, entry) {
-    const display = entry.display || entry.word || entry.title;
+    const display = deckItemDisplay(kind, entry);
     const meaning = entry.meaning || 'Saved from Community';
     if (!display) return false;
     try {

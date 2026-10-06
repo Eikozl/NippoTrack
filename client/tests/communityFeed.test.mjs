@@ -54,6 +54,18 @@ test('deck viewer lays items out in a wrapping multi-column grid', () => {
   assert.ok(source.includes('sm:grid-cols-2 xl:grid-cols-3'), 'one column on mobile, more when space allows');
 });
 
+test('shared deck items show han characters, never generic placeholders', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('function deckItemDisplay'), 'per-type display mapping exists');
+  assert.ok(source.includes('character_kanji') && source.includes('grammar_point'), 'kanji and grammar columns mapped');
+});
+
+test('own posts can be edited through the existing endpoint', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('Edit post'), 'edit menu entry for own posts');
+  assert.ok(source.includes('/api/community/posts/${post.id}'), 'update reuses the posts endpoint');
+});
+
 test('likes, comments, follows, reports and blocks all wire to endpoints', () => {
   const source = readSource('src/pages/communityFeed.js');
   assert.ok(source.includes('/like'), 'like toggle endpoint used');
