@@ -299,3 +299,71 @@ test('kana/kanji reading nodes carry lang=ja and characters wording stays unifie
   assert.ok(source.includes('snapshot.reading'), 'shared reading tagged');
   assert.ok(source.includes('characters'), 'unified characters wording kept');
 });
+
+test('composer groups all 9 types under optgroups with identical payloads', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('COMPOSER_GROUPS'), 'grouped definition exists alongside the flat list');
+  assert.ok(source.includes("element('optgroup'"), 'compact select-based grouping (no card grid)');
+  for (const label of ['Discuss', 'Japanese', 'Progress', 'Learning material']) {
+    assert.ok(source.includes(`label: '${label}'`), `group "${label}" exists`);
+  }
+  for (const value of ['text', 'example', 'question', 'progress', 'share_deck', 'share_reading', 'share_vocab', 'share_kanji', 'share_grammar']) {
+    assert.ok(source.includes(`value: '${value}'`), `grouped picker keeps type value ${value}`);
+  }
+  assert.ok(source.includes('What do you want to share?'), 'picker has a short discovery label');
+  assert.ok(source.includes('aria-live') && source.includes('composerGroupFor'), 'one-line per-group description updates with selection');
+  // Payloads byte-identical: same value drives the same conditional fields.
+  assert.ok(source.includes('const payload = { postType: type }'), 'publish still keys off the select value');
+  assert.ok(source.includes('payload.body') && source.includes('payload.japaneseText'), 'body/japaneseText wiring untouched');
+  assert.ok(source.includes('payload.translation') && source.includes('payload.includeStats'), 'translation/verified-stats flag untouched');
+  assert.ok(source.includes('Object.assign(payload, link)'), 'linked-content payload untouched');
+  assert.ok(source.includes("type === 'example'") && source.includes("type.startsWith('share_')"), 'conditional field gates untouched');
+  assert.ok(source.includes('statsWrap.hidden'), 'progress stats gate untouched');
+});
+
+test('avatars render img with lazy + fallback wherever identity is served', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes("element('img'"), 'avatar <img> rendered when served');
+  assert.ok(source.includes('loading') && source.includes('lazy'), 'avatars lazy-load');
+  assert.ok(source.includes('alt:'), 'avatars carry alt="{name}"');
+  assert.ok(source.includes("addEventListener('error'"), 'onerror fallback hides the img revealing initials');
+  assert.ok(source.includes('initialsFor'), 'initials remain the fallback');
+  assert.ok(source.includes('authorAvatar') && source.includes('avatarUrl') && source.includes('actorAvatar'), 'all served avatar keys consumed');
+  assert.ok(source.includes('avatarUrlFor'), 'single safe resolver for every surface');
+  assert.ok(source.includes('avatarFace('), 'shared face renderer reused');
+  assert.ok(source.includes('avatarFace(reply.authorDisplay'), 'replies render avatars');
+  assert.ok(source.includes('avatarFace(comment.authorDisplay'), 'comments render avatars');
+  assert.ok(source.includes('avatarFace(note.actorDisplayName'), 'notifications render actor avatars');
+  assert.ok(source.includes('avatarFace(profile.displayName'), 'profiles render avatars');
+  assert.ok(source.includes('avatarFace(person.displayName'), 'person rows / followers lists render avatars');
+  assert.ok(!source.toLowerCase().includes('avatar upload'), 'no avatar upload UI (backend does not exist)');
+});
+
+test('profiles render interests, gate honestly, and never invent a streak', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('profile.interests'), 'interests consumed from the served profile payload');
+  assert.ok(source.includes('Interests:'), 'interests rendered with a compact label');
+  assert.ok(source.includes('This profile is private'), 'honest locked state for gated profiles');
+  assert.ok(source.includes('error?.status === 404'), 'gated/404 branch reuses the existing handling');
+  assert.ok(source.includes('emptyState({'), 'private state guides instead of erroring');
+  assert.ok(!source.includes('profile.streak'), 'no invented profile streak (payload serves none)');
+});
+
+test('comment/menu polish uses errorState, Escape, and loading-first viewers', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(!source.includes('Search is unavailable.'), 'search errors use errorState, not plain <p>');
+  assert.ok(!source.includes('Notifications are unavailable.'), 'notification errors use errorState, not plain <p>');
+  assert.ok(!source.includes('Comments are unavailable.'), 'comment errors use errorState, not plain <p>');
+  assert.ok(!source.includes('Unable to load.'), 'followers errors use errorState, not plain <p>');
+  assert.ok(!source.includes('Posts are unavailable.'), 'author-timeline errors use errorState, not plain <p>');
+  assert.ok(source.includes('errorState(error, () => runSearch'), 'search retry preserved');
+  assert.ok(source.includes('errorState(error, () => reloadComments'), 'comments retry preserved');
+  assert.ok(source.includes('errorState(error, () => showList'), 'followers retry preserved');
+  assert.ok(source.includes('errorState(error, () => load'), 'timeline/notifications/deck viewers retry in place');
+  assert.ok(source.includes("'Escape'") && source.includes('close(true)'), 'post menu Escape-closes');
+  assert.ok(source.includes('toggle.focus()'), 'post menu returns focus to the toggle');
+  assert.ok(source.includes("loadingState('Loading deck"), 'deck viewer opens with a skeleton first');
+  assert.ok(source.includes("loadingState('Loading preview"), 'reading preview opens with a skeleton first');
+  assert.ok(source.includes('errorState(error, () => loadDeck'), 'deck errors stay in-dialog with retry');
+  assert.ok(source.includes('errorState(error, () => loadPreview'), 'preview errors stay in-dialog with retry');
+});

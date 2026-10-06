@@ -27,6 +27,49 @@ const COMPOSER_TYPES = [
   { value: 'share_grammar', label: 'Share Grammar' }
 ];
 
+// Grouped discovery for the same 9 values above (payloads byte-identical —
+// only the picker UX is grouped). Compact select-based (no card grid) so
+// 360px layouts never overflow. Values are never renamed here.
+const COMPOSER_GROUPS = [
+  {
+    label: 'Discuss',
+    hint: 'Text posts and questions for the community.',
+    types: [
+      { value: 'text', label: 'Text post' },
+      { value: 'question', label: 'Question' }
+    ]
+  },
+  {
+    label: 'Japanese',
+    hint: 'Share a sentence you found or wrote.',
+    types: [
+      { value: 'example', label: 'Japanese Example' }
+    ]
+  },
+  {
+    label: 'Progress',
+    hint: 'Milestones with an optional verified snapshot.',
+    types: [
+      { value: 'progress', label: 'Study Progress' }
+    ]
+  },
+  {
+    label: 'Learning material',
+    hint: 'Share decks, readings, and saved items.',
+    types: [
+      { value: 'share_deck', label: 'Share a Deck' },
+      { value: 'share_reading', label: 'Share a Reading' },
+      { value: 'share_vocab', label: 'Share Vocabulary' },
+      { value: 'share_kanji', label: 'Share Kanji' },
+      { value: 'share_grammar', label: 'Share Grammar' }
+    ]
+  }
+];
+
+function composerGroupFor(value) {
+  return COMPOSER_GROUPS.find((group) => group.types.some((type) => type.value === value)) || null;
+}
+
 function timeAgo(iso) {
   try {
     const then = new Date(iso).getTime();
@@ -51,20 +94,62 @@ function initialsFor(display, username) {
   return (letters.slice(0, 2).join('') || '?').toUpperCase();
 }
 
-function avatarNode(post, onProfile) {
-  const face = element('span', {
-    className: 'grid size-10 shrink-0 place-items-center rounded-full bg-ink font-display text-sm font-semibold text-paper',
-    text: initialsFor(post.authorDisplay, post.authorUsername),
+function isSafeAvatarUrl(value) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return false;
+  // Backend avatar_url values are https storage URLs (or relative paths).
+  // Never render javascript:/data-non-image schemes into <img src>.
+  return /^(https?:\/\/|\/|data:image\/)/i.test(trimmed);
+}
+
+function avatarUrlFor(source) {
+  if (!source || typeof source !== 'object') return null;
+  const candidate = source.authorAvatar || source.avatarUrl || source.actorAvatar || null;
+  if (!candidate) return null;
+  const trimmed = String(candidate).trim();
+  return isSafeAvatarUrl(trimmed) ? trimmed : null;
+}
+
+function avatarFace(display, username, avatarUrl, sizeClass = 'size-10 text-sm') {
+  const name = String(display || username || 'Someone').trim() || 'Someone';
+  const initials = element('span', {
+    className: 'grid place-items-center',
+    text: initialsFor(display, username),
     attrs: { 'aria-hidden': 'true' }
   });
+  const face = element('span', {
+    className: `relative grid ${sizeClass} shrink-0 place-items-center overflow-hidden rounded-full bg-ink font-display font-semibold text-paper`
+  });
+  const safe = isSafeAvatarUrl(avatarUrl) ? String(avatarUrl).trim() : null;
+  if (!safe) {
+    face.setAttribute('aria-hidden', 'true');
+    face.textContent = initialsFor(display, username);
+    return face;
+  }
+  face.appendChild(initials);
+  const img = element('img', {
+    className: 'absolute inset-0 h-full w-full object-cover',
+    attrs: { src: safe, alt: name, loading: 'lazy' }
+  });
+  // Fallback: hiding the img reveals the initials node underneath.
+  img.addEventListener('error', () => { try { img.remove(); } catch { /* noop */ } });
+  face.appendChild(img);
+  return face;
+}
+
+function avatarNode(post, onProfile) {
+  const display = post?.authorDisplay ?? post?.displayName ?? null;
+  const username = post?.authorUsername ?? post?.username ?? null;
+  const avatarUrl = avatarUrlFor(post);
+  const face = avatarFace(display, username, avatarUrl, 'size-10 text-sm');
   // Usernames AND avatars open profiles — discoverability must not depend
   // on hitting the small handle text.
-  if (post.authorUsername && typeof onProfile === 'function') {
+  if (username && typeof onProfile === 'function') {
     const button = element('button', {
       className: 'shrink-0 rounded-full',
-      attrs: { type: 'button', 'aria-label': `Open profile of ${post.authorUsername}` }
+      attrs: { type: 'button', 'aria-label': `Open profile of ${username}` }
     });
-    button.addEventListener('click', (event) => { event.stopPropagation(); onProfile(post.authorUsername); });
+    button.addEventListener('click', (event) => { event.stopPropagation(); onProfile(username); });
     button.appendChild(face);
     return button;
   }
@@ -314,14 +399,36 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       className: 'absolute right-0 z-20 hidden min-w-36 rounded-lg border border-stone bg-paper p-1 shadow-lg',
       attrs: { role: 'menu' }
     });
-    const close = () => { menu.classList.add('hidden'); toggle.setAttribute('aria-expanded', 'false'); };
+    const close = (refocus = false) => {
+      if (menu.classList.contains('hidden')) return;
+      menu.classList.add('hidden');
+      toggle.setAttribute('aria-expanded', 'false');
+      if (refocus) { try { toggle.focus(); } catch { /* noop */ } }
+    };
+    const openMenu = () => {
+      menu.classList.remove('hidden');
+      toggle.setAttribute('aria-expanded', 'true');
+    };
     toggle.addEventListener('click', (event) => {
       event.stopPropagation();
-      const open = menu.classList.contains('hidden');
-      menu.classList.toggle('hidden', !open);
-      toggle.setAttribute('aria-expanded', String(open));
+      const willOpen = menu.classList.contains('hidden');
+      if (willOpen) openMenu();
+      else close(false);
     });
-    document.addEventListener('click', close);
+    // Keyboard-dismissable: Escape closes and returns focus to the toggle.
+    toggle.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { event.stopPropagation(); close(true); }
+    });
+    menu.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { event.stopPropagation(); close(true); }
+    });
+    document.addEventListener('click', (event) => {
+      if (wrap.contains(event.target)) return;
+      close(false);
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !menu.classList.contains('hidden')) close(true);
+    });
     const addItem = (label, handler) => {
       const itemButton = element('button', {
         className: 'flex w-full items-center rounded-md px-3 py-2 text-left text-sm font-medium text-ink transition hover:bg-paper',
@@ -329,7 +436,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       });
       // Stop bubbling: without this the click reaches the post card
       // underneath and opens the detail dialog on top of the confirm.
-      itemButton.addEventListener('click', (event) => { event.stopPropagation(); close(); handler(); });
+      itemButton.addEventListener('click', (event) => { event.stopPropagation(); close(false); handler(); });
       menu.appendChild(itemButton);
     };
     if (post.mine) {
@@ -413,27 +520,35 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   }
 
   async function openReadingPreview(readingId, fallbackTitle) {
-    let detail = null;
-    try {
-      detail = await apiRequest(`/api/reading/publications/${encodeURIComponent(readingId)}`);
-    } catch (error) {
-      showToast(error?.message || 'Unable to load the preview.', 'error');
-      return;
-    }
-    const points = Array.from(String(detail?.text || ''));
-    const excerpt = points.length > 1500 ? `${points.slice(0, 1500).join('')}…` : points.join('');
+    // Loading-first: the dialog opens with a skeleton immediately, then the
+    // excerpt (or an in-dialog errorState) replaces it. No fetch-then-open.
+    const bodyHost = element('div', { className: 'grid min-w-0 gap-3' }, [loadingState('Loading preview…')]);
     openDialog({
-      title: detail?.title || fallbackTitle || 'Reading preview',
-      description: `${detail?.level ? `Level ${detail.level} (reference)` : 'No level'}${detail?.text ? ` · ${points.length.toLocaleString()} characters` : ''}`,
-      content: [element('div', { className: 'grid gap-3' }, [
-        excerpt
-          ? element('p', { className: 'whitespace-pre-wrap break-words font-jp text-sm leading-7 text-ink', text: excerpt, attrs: { lang: 'ja' } })
-          : element('p', { className: 'text-sm text-muted', text: 'Excerpt unavailable.' }),
-        importReadingButton(readingId)
-      ])],
+      title: fallbackTitle || 'Reading preview',
+      description: 'Loading…',
+      content: [bodyHost],
       submitLabel: 'Close',
       onSubmit: async (form, close) => close()
     });
+    const loadPreview = async () => {
+      bodyHost.replaceChildren(loadingState('Loading preview…'));
+      try {
+        const detail = await apiRequest(`/api/reading/publications/${encodeURIComponent(readingId)}`);
+        const points = Array.from(String(detail?.text || ''));
+        const excerpt = points.length > 1500 ? `${points.slice(0, 1500).join('')}…` : points.join('');
+        const meta = `${detail?.level ? `Level ${detail.level} (reference)` : 'No level'}${detail?.text ? ` · ${points.length.toLocaleString()} characters` : ''}`;
+        bodyHost.replaceChildren(element('div', { className: 'grid min-w-0 gap-3' }, [
+          element('p', { className: 'break-words text-xs text-muted', text: meta }),
+          excerpt
+            ? element('p', { className: 'whitespace-pre-wrap break-words font-jp text-sm leading-7 text-ink', text: excerpt, attrs: { lang: 'ja' } })
+            : element('p', { className: 'text-sm text-muted', text: 'Excerpt unavailable.' }),
+          importReadingButton(readingId)
+        ]));
+      } catch (error) {
+        bodyHost.replaceChildren(errorState(error, () => loadPreview()));
+      }
+    };
+    await loadPreview();
   }
 
   function practiceLink() {
@@ -546,72 +661,84 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   }
 
   async function openDeckViewer(deckId, title) {
-    let detail = null;
-    try {
-      detail = await apiRequest(`/api/decks/${encodeURIComponent(deckId)}`);
-    } catch (error) {
-      showToast(error?.message || 'Unable to open the deck.', 'error');
-      return;
-    }
-    const items = Array.isArray(detail?.items) ? detail.items : [];
-    const rows = element('div', { className: 'grid grid-cols-2 gap-2 xl:grid-cols-3' });
-    const saveAll = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: `Save all (${items.length}) to my library`, attrs: { type: 'button' } });
-    // Existing #review hub only — no per-deck review route exists. Read-only
-    // link beside Save-all; the deck itself is unchanged.
-    const startReview = element('a', { className: 'button-secondary inline-flex min-h-9 items-center px-3 py-1.5 text-xs', text: 'Start Review', attrs: { href: '#review', 'aria-label': 'Start Review in the review hub' } });
-    const topRow = element('div', { className: 'flex flex-wrap gap-2' }, [saveAll, startReview]);
-    const savedIds = new Set();
-    const paintRows = () => {
-      rows.replaceChildren(...items.map((entry, index) => {
-        const kind = entry.entityType || detail.entityType || 'vocabulary';
-        const label = deckItemDisplay(kind, entry) || `Item ${index + 1}`;
-        const saved = savedIds.has(`${kind}:${label}`);
-        const saveable = deckItemSaveable(kind, entry);
-        const saveDisabledReason = !isUsableMeaning(entry?.meaning)
-          ? 'No dictionary meaning available'
-          : (kind === 'kanji' ? 'Single kanji character required' : 'Cannot save this item');
-        const save = element('button', {
-          className: `button-secondary min-h-8 shrink-0 px-2.5 py-1 text-xs${saveable && !saved ? '' : ' opacity-60'}`,
-          text: saved ? 'Saved ✓' : 'Save',
-          attrs: { type: 'button', ...((saved || !saveable) ? { disabled: '', title: saved ? 'Already saved' : saveDisabledReason, 'aria-label': saved ? `Saved ${label}` : `Save unavailable for ${label} — ${saveDisabledReason.toLowerCase()}` } : { 'aria-label': `Save ${label} to library` }) }
-        });
-        if (!saved && saveable) {
-          save.addEventListener('click', async () => {
-            const ok = await saveDeckItem(kind, entry);
-            if (ok) { savedIds.add(`${kind}:${label}`); paintRows(); }
-          });
-        }
-        return element('div', { className: 'flex items-center justify-between gap-3 rounded-xl border border-stone bg-paper px-3 py-2' }, [
-          element('div', { className: 'min-w-0' }, [
-            element('p', { className: 'truncate font-jp text-sm font-semibold text-ink', text: label, attrs: { lang: 'ja' } }),
-            ...(entry.meaning ? [element('p', { className: 'truncate text-xs text-muted', text: entry.meaning })] : [])
-          ]),
-          save
-        ]);
-      }));
-    };
-    paintRows();
-    saveAll.addEventListener('click', () => withPendingAction(saveAll, async () => {
-      let saved = 0;
-      let skipped = 0;
-      for (const entry of items) {
-        const kind = entry.entityType || detail.entityType || 'vocabulary';
-        // eslint-disable-next-line no-await-in-loop
-        if (await saveDeckItem(kind, entry)) {
-          saved += 1;
-          savedIds.add(`${kind}:${deckItemDisplay(kind, entry)}`);
-        } else skipped += 1;
-      }
-    paintRows();
-      showToast(saved ? `Saved ${saved} item${saved === 1 ? '' : 's'}${skipped ? `, ${skipped} skipped (already saved or unavailable)` : ''}.` : 'Nothing new to save (already saved or no dictionary meaning).', saved ? 'success' : 'info');
-    }).catch((error) => showToast(error?.message || 'Unable to save.', 'error')));
+    // Loading-first: the dialog opens with a skeleton immediately, then the
+    // deck content (or an in-dialog errorState) replaces it. No fetch-then-open.
+    const bodyHost = element('div', { className: 'grid min-w-0 gap-3' }, [loadingState('Loading deck…')]);
     openDialog({
       title: title || 'Shared deck',
-      description: `${items.length} items`,
-      content: [element('div', { className: 'grid gap-3' }, [topRow, rows])],
+      description: 'Loading…',
+      content: [bodyHost],
       submitLabel: 'Close',
       onSubmit: async (form, close) => close()
     });
+    const loadDeck = async () => {
+      bodyHost.replaceChildren(loadingState('Loading deck…'));
+      let detail = null;
+      try {
+        detail = await apiRequest(`/api/decks/${encodeURIComponent(deckId)}`);
+      } catch (error) {
+        bodyHost.replaceChildren(errorState(error, () => loadDeck()));
+        return;
+      }
+      const items = Array.isArray(detail?.items) ? detail.items : [];
+      const rows = element('div', { className: 'grid min-w-0 grid-cols-2 gap-2 xl:grid-cols-3' });
+      const saveAll = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: `Save all (${items.length}) to my library`, attrs: { type: 'button' } });
+      // Existing #review hub only — no per-deck review route exists. Read-only
+      // link beside Save-all; the deck itself is unchanged.
+      const startReview = element('a', { className: 'button-secondary inline-flex min-h-9 items-center px-3 py-1.5 text-xs', text: 'Start Review', attrs: { href: '#review', 'aria-label': 'Start Review in the review hub' } });
+      const topRow = element('div', { className: 'flex flex-wrap gap-2' }, [saveAll, startReview]);
+      const savedIds = new Set();
+      const paintRows = () => {
+        rows.replaceChildren(...items.map((entry, index) => {
+          const kind = entry.entityType || detail.entityType || 'vocabulary';
+          const label = deckItemDisplay(kind, entry) || `Item ${index + 1}`;
+          const saved = savedIds.has(`${kind}:${label}`);
+          const saveable = deckItemSaveable(kind, entry);
+          const saveDisabledReason = !isUsableMeaning(entry?.meaning)
+            ? 'No dictionary meaning available'
+            : (kind === 'kanji' ? 'Single kanji character required' : 'Cannot save this item');
+          const save = element('button', {
+            className: `button-secondary min-h-8 shrink-0 px-2.5 py-1 text-xs${saveable && !saved ? '' : ' opacity-60'}`,
+            text: saved ? 'Saved ✓' : 'Save',
+            attrs: { type: 'button', ...((saved || !saveable) ? { disabled: '', title: saved ? 'Already saved' : saveDisabledReason, 'aria-label': saved ? `Saved ${label}` : `Save unavailable for ${label} — ${saveDisabledReason.toLowerCase()}` } : { 'aria-label': `Save ${label} to library` }) }
+          });
+          if (!saved && saveable) {
+            save.addEventListener('click', async () => {
+              const ok = await saveDeckItem(kind, entry);
+              if (ok) { savedIds.add(`${kind}:${label}`); paintRows(); }
+            });
+          }
+          return element('div', { className: 'flex min-w-0 items-center justify-between gap-3 rounded-xl border border-stone bg-paper px-3 py-2' }, [
+            element('div', { className: 'min-w-0' }, [
+              element('p', { className: 'truncate font-jp text-sm font-semibold text-ink', text: label, attrs: { lang: 'ja' } }),
+              ...(entry.meaning ? [element('p', { className: 'truncate text-xs text-muted', text: entry.meaning })] : [])
+            ]),
+            save
+          ]);
+        }));
+      };
+      paintRows();
+      saveAll.addEventListener('click', () => withPendingAction(saveAll, async () => {
+        let saved = 0;
+        let skipped = 0;
+        for (const entry of items) {
+          const kind = entry.entityType || detail.entityType || 'vocabulary';
+          // eslint-disable-next-line no-await-in-loop
+          if (await saveDeckItem(kind, entry)) {
+            saved += 1;
+            savedIds.add(`${kind}:${deckItemDisplay(kind, entry)}`);
+          } else skipped += 1;
+        }
+      paintRows();
+        showToast(saved ? `Saved ${saved} item${saved === 1 ? '' : 's'}${skipped ? `, ${skipped} skipped (already saved or unavailable)` : ''}.` : 'Nothing new to save (already saved or no dictionary meaning).', saved ? 'success' : 'info');
+      }).catch((error) => showToast(error?.message || 'Unable to save.', 'error')));
+      bodyHost.replaceChildren(
+        element('p', { className: 'break-words text-xs text-muted', text: `${items.length} items` }),
+        topRow,
+        rows
+      );
+    };
+    await loadDeck();
   }
 
   function openDeckViewerRefresh() {}
@@ -843,7 +970,8 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
             element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Report', attrs: { type: 'button', 'aria-label': 'Report reply' } })
           ]);
         const replyRow = element('div', { className: 'min-w-0 rounded-lg border border-stone bg-paper p-2' }, [
-          element('div', { className: 'flex min-w-0 items-center justify-between gap-2' }, [
+          element('div', { className: 'flex min-w-0 items-center gap-2' }, [
+            avatarFace(reply.authorDisplay, reply.authorUsername, avatarUrlFor(reply), 'size-8 text-xs'),
             element('p', { className: 'min-w-0 flex-1 truncate text-xs font-semibold text-ink', text: replyAuthor }),
             replyHeadRight
           ]),
@@ -927,7 +1055,8 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
         };
         replyButton.addEventListener('click', () => openReplyComposer(comment, composerHost, replyButton, paintReplies));
         const row = element('div', { className: 'min-w-0 rounded-xl border border-stone bg-paper p-3' }, [
-          element('div', { className: 'flex min-w-0 items-center justify-between gap-2' }, [
+          element('div', { className: 'flex min-w-0 items-center gap-2' }, [
+            avatarFace(comment.authorDisplay, comment.authorUsername, avatarUrlFor(comment), 'size-8 text-xs'),
             element('p', { className: 'min-w-0 flex-1 truncate text-xs font-semibold text-ink', text: authorName }),
             headRight
           ]),
@@ -971,8 +1100,8 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
             return;
           }
           commentsWrap.replaceChildren(...items.map((comment) => buildTopLevel(comment)));
-        } catch {
-          commentsWrap.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Comments are unavailable.' }));
+        } catch (error) {
+          commentsWrap.replaceChildren(errorState(error, () => reloadComments()));
         }
       }
       const followRow = (post.mine || !post.authorUsername) ? null : followButton(post.authorUsername, () => {});
@@ -1086,8 +1215,22 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   // ---- composer (collapsed by default so posts own the viewport)
   function composerCard(onPublished) {
     const wrap = element('div', { className: 'surface p-4 sm:p-5', attrs: { 'data-composer': 'true' } });
-    const typeSelect = element('select', { className: 'field-control', attrs: { 'aria-label': 'Post type' } },
-      COMPOSER_TYPES.map((type) => element('option', { text: type.label, attrs: { value: type.value } })));
+    // Grouped discovery: same 9 type values as COMPOSER_TYPES (payloads
+    // byte-identical), only the picker UX is grouped. Compact select-based
+    // with <optgroup> so 360px never overflows — no card grid.
+    const typeSelect = element('select', { className: 'field-control w-full', attrs: { 'aria-label': 'Post type' } },
+      COMPOSER_GROUPS.map((group) => element('optgroup', { attrs: { label: group.label } },
+        group.types.map((type) => element('option', { text: type.label, attrs: { value: type.value } })))));
+    const typeHint = element('p', { className: 'break-words text-xs text-muted', text: '', attrs: { 'aria-live': 'polite' } });
+    const paintTypeHint = () => {
+      const group = composerGroupFor(typeSelect.value);
+      typeHint.textContent = group ? `${group.label}: ${group.hint}` : '';
+    };
+    const typeField = element('label', { className: 'grid min-w-0 gap-1.5' }, [
+      element('span', { className: 'text-sm font-semibold text-ink', text: 'What do you want to share?' }),
+      typeSelect,
+      typeHint
+    ]);
     const titleInput = element('input', { className: 'field-control', attrs: { type: 'text', maxlength: '200', placeholder: 'Title (optional)', 'aria-label': 'Post title' } });
     const bodyInput = element('textarea', { className: 'field-control min-h-24 w-full', attrs: { rows: '3', maxlength: '2000', placeholder: "What's on your mind?", 'aria-label': 'Post text' } });
     const japaneseInput = element('textarea', { className: 'field-control min-h-20 w-full', attrs: { rows: '2', maxlength: '2000', placeholder: 'Japanese sentence…', 'aria-label': 'Japanese text' } });
@@ -1207,7 +1350,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       });
       return select;
     }
-    typeSelect.addEventListener('change', paintLink);
+    typeSelect.addEventListener('change', () => { paintTypeHint(); paintLink(); });
     publish.addEventListener('click', () => withPendingAction(publish, async () => {
       const type = typeSelect.value;
       const payload = { postType: type };
@@ -1236,7 +1379,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       setCollapsed(true);
       if (typeof onPublished === 'function') onPublished(post);
     }, { pendingLabel: 'Publishing…' }).catch((error) => showToast(error?.message || 'Unable to publish.', 'error')));
-    fields.append(typeSelect, titleInput, bodyInput, japaneseInput, translationInput, linkBox, statsWrap, publish);
+    fields.append(typeField, titleInput, bodyInput, japaneseInput, translationInput, linkBox, statsWrap, publish);
     // Collapsed by default: a summary toggle owns the viewport emphasis,
     // posts below stay the focus. Expands on demand, collapses after publish.
     const toggleGlyph = element('span', { className: 'shrink-0 text-lg text-muted', text: '+', attrs: { 'aria-hidden': 'true' } });
@@ -1259,6 +1402,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     };
     toggle.addEventListener('click', () => setCollapsed(!collapsible.hidden));
     wrap.append(toggle, collapsible);
+    paintTypeHint();
     paintLink();
     return wrap;
   }
@@ -1511,8 +1655,8 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
           for (const text of data.reading || []) pushRow(readingRow(text));
         }
         results.replaceChildren(...(blocks.length ? blocks : [element('p', { className: 'text-sm text-muted', text: 'Nothing found. Try another search.' })]));
-      } catch {
-        results.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Search is unavailable.' }));
+      } catch (error) {
+        results.replaceChildren(errorState(error, () => runSearch(query, safeType)));
       }
     }
     async function loadDiscover() {
@@ -1583,8 +1727,8 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     const hasInitial = rawFollowing === true || rawFollowing === false;
     const nameButton = element('button', { className: 'flex min-w-0 flex-1 items-center gap-3 text-left', attrs: { type: 'button', 'aria-label': `Open profile of ${person.username}` } }, [
       // Plain face here: the whole row button already navigates (buttons
-      // cannot nest).
-      avatarNode({ authorDisplay: person.displayName, authorUsername: person.username }, null),
+      // cannot nest). Avatar renders when avatarUrl is served, else initials.
+      avatarFace(person.displayName, person.username, avatarUrlFor({ avatarUrl: person.avatarUrl, authorAvatar: person.authorAvatar }), 'size-10 text-sm'),
       element('div', { className: 'min-w-0' }, [
         element('p', { className: 'truncate text-sm font-semibold text-ink', text: person.displayName || person.username }),
         element('p', { className: 'truncate text-xs text-muted', text: `@${person.username}${person.bio ? ` · ${person.bio}` : ''}` }),
@@ -1617,11 +1761,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       const head = element('div', { className: 'surface p-5 sm:p-6' }, [
         element('div', { className: 'flex flex-wrap items-start justify-between gap-4' }, [
           element('div', { className: 'flex min-w-0 items-center gap-4' }, [
-            element('span', {
-              className: 'grid size-16 shrink-0 place-items-center rounded-full bg-ink font-display text-xl font-semibold text-paper',
-              text: initialsFor(profile.displayName, profile.username),
-              attrs: { 'aria-hidden': 'true' }
-            }),
+            avatarFace(profile.displayName, profile.username, avatarUrlFor(profile), 'size-16 text-xl'),
             element('div', { className: 'min-w-0' }, [
               element('h2', { className: 'truncate font-display text-xl font-semibold text-ink', text: profile.displayName || profile.username }),
               element('p', { className: 'truncate text-sm text-muted', text: `@${profile.username}` }),
@@ -1634,7 +1774,12 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
               // Settings distinguishes Current level vs Studying toward —
               // render both labels (never bare "Studying N3" for the current
               // level). Your tags, not official JLPT data.
-              ...((profile.jlptLevel || profile.targetJlpt) ? [element('p', { className: 'mt-1 text-xs text-muted', text: `${profile.jlptLevel ? `Current level ${profile.jlptLevel}` : ''}${profile.jlptLevel && profile.targetJlpt ? ' · ' : ''}${profile.targetJlpt ? `Studying toward ${profile.targetJlpt}` : ''}`, attrs: { title: 'Your JLPT tags — not official data' } })] : [])
+              ...((profile.jlptLevel || profile.targetJlpt) ? [element('p', { className: 'mt-1 break-words text-xs text-muted', text: `${profile.jlptLevel ? `Current level ${profile.jlptLevel}` : ''}${profile.jlptLevel && profile.targetJlpt ? ' · ' : ''}${profile.targetJlpt ? `Studying toward ${profile.targetJlpt}` : ''}`, attrs: { title: 'Your JLPT tags — not official data' } })] : []),
+              // Interests are editable in Settings and served on the profile
+              // payload — render them here (previously never displayed).
+              ...(profile.interests ? [element('p', { className: 'mt-1 break-words text-xs text-muted', text: `Interests: ${profile.interests}` })] : [])
+              // Streak: OMITTED — getCommunityProfile serves no streak key
+              // (only share-stats / post stats carry streakDays). Never invent.
             ])
           ]),
           ...(profile.isSelf ? [] : [followButton(profile.username, () => {}, {
@@ -1661,26 +1806,39 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
           const data = await apiRequest(`/api/community/users/${encodeURIComponent(username)}/${direction}?limit=20`);
           const items = Array.isArray(data?.items) ? data.items : [];
           postsHost.replaceChildren(...(items.length ? items.map((person) => personRow({ username: person.username, displayName: person.displayName, avatarUrl: person.avatarUrl, bio: person.bio, viewerFollowing: person.viewerFollowing, following: person.following ?? person.viewerFollowing, followsYou: person.followsYou, mutual: person.mutual }, showList.bind(null, direction), openProfile)) : [element('p', { className: 'text-sm text-muted', text: 'Nobody here yet.' })]));
-        } catch {
-          postsHost.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Unable to load.' }));
+        } catch (error) {
+          postsHost.replaceChildren(errorState(error, () => showList(direction)));
         }
       };
       followersBtn.addEventListener('click', () => showList('followers'));
       followingBtn.addEventListener('click', () => showList('following'));
       // Author timeline through the same gated feed.
-      postsHost.replaceChildren(loadingState('Loading posts…'));
-      try {
-        const data = await apiRequest(`/api/community/feed?tab=latest&author=${encodeURIComponent(username)}&page=1&limit=10`);
-        const items = Array.isArray(data?.items) ? data.items : [];
-        postsHost.replaceChildren(...(items.length
-          ? items.map((post) => postCard(post, { onProfile: openProfile, onRefresh: () => renderProfile(username) }))
-          : [element('p', { className: 'text-sm text-muted', text: 'No public posts yet.' })]));
-      } catch {
-        postsHost.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Posts are unavailable.' }));
-      }
+      const loadAuthorPosts = async () => {
+        postsHost.replaceChildren(loadingState('Loading posts…'));
+        try {
+          const data = await apiRequest(`/api/community/feed?tab=latest&author=${encodeURIComponent(username)}&page=1&limit=10`);
+          const items = Array.isArray(data?.items) ? data.items : [];
+          postsHost.replaceChildren(...(items.length
+            ? items.map((post) => postCard(post, { onProfile: openProfile, onRefresh: () => renderProfile(username) }))
+            : [element('p', { className: 'text-sm text-muted', text: 'No public posts yet.' })]));
+        } catch (error) {
+          postsHost.replaceChildren(errorState(error, () => loadAuthorPosts()));
+        }
+      };
+      await loadAuthorPosts();
     } catch (error) {
       const backButton = element('button', { className: 'mb-4 text-sm font-semibold text-vermilion hover:underline', text: '← Back', attrs: { type: 'button' } });
       backButton.addEventListener('click', backToFeed);
+      // Gated (private/blocked/missing) profiles 404 with the same
+      // "User not found." shape — show an honest locked state, not a
+      // generic load error. Other failures keep errorState with retry.
+      if (error?.status === 404) {
+        body.replaceChildren(backButton, emptyState({
+          title: '🔒 This profile is private',
+          description: 'This learner keeps their profile private, or the account is no longer available.'
+        }));
+        return;
+      }
       body.replaceChildren(backButton, errorState(error, () => renderProfile(username)));
     }
   }
@@ -1715,10 +1873,14 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
           const stamp = timeAgo(note.createdAt) || (note.createdAt ? new Date(note.createdAt).toLocaleString() : '');
           const timeLine = stamp ? element('p', { className: 'mt-0.5 text-xs text-muted', text: stamp }) : null;
           const row = element('button', {
-            className: `flex w-full items-start gap-3 rounded-xl border border-stone bg-paper px-3 py-2.5 text-left ${note.isRead ? '' : 'border-ink/40'}`,
+            className: `flex w-full min-w-0 items-start gap-3 rounded-xl border border-stone bg-paper px-3 py-2.5 text-left ${note.isRead ? '' : 'border-ink/40'}`,
             attrs: { type: 'button', 'aria-label': `${actorName} ${label}` }
           }, [
-            element('span', { className: 'mt-0.5 shrink-0', text: note.kind === 'like' ? '❤️' : note.kind === 'comment' || note.kind === 'reply' ? '💬' : '👤', attrs: { 'aria-hidden': 'true' } }),
+            (() => {
+              const actorAvatar = avatarUrlFor({ actorAvatar: note.actorAvatar, avatarUrl: note.avatarUrl });
+              if (actorAvatar) return avatarFace(note.actorDisplayName || note.actorDisplay, note.actorUsername, actorAvatar, 'size-8 text-xs');
+              return element('span', { className: 'mt-0.5 shrink-0', text: note.kind === 'like' ? '❤️' : note.kind === 'comment' || note.kind === 'reply' ? '💬' : '👤', attrs: { 'aria-hidden': 'true' } });
+            })(),
             element('div', { className: 'min-w-0 flex-1' }, [kindLine, excerptLine, timeLine].filter(Boolean))
           ]);
           row.addEventListener('click', async () => {
@@ -1744,8 +1906,8 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
           moreWrap.appendChild(more);
         }
         refreshBell();
-      } catch {
-        list.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Notifications are unavailable.' }));
+      } catch (error) {
+        list.replaceChildren(errorState(error, () => load(true)));
       }
     }
     const markAll = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Mark all read', attrs: { type: 'button' } });
