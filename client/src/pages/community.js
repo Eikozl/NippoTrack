@@ -315,12 +315,10 @@ const PICKER_TYPES = [
   { key: 'grammar', label: 'Grammar', endpoint: '/api/grammar/options', idKey: 'id_grammar', titleOf: (row) => row.grammar_point, subOf: (row) => [row.meaning].filter(Boolean).join(' · ') }
 ];
 
-export async function renderCommunity(container) {
-  container.replaceChildren(pageHeader({
-    eyebrow: 'Social',
-    title: 'Decks',
-    description: 'Discover, publish, share and collect decks and reading texts. Everything social lives here.'
-  }));
+export async function renderDecksHub(container) {
+  // Decks hub home (legacy V5.x surface, preserved verbatim for V6.0):
+  // publishing, sharing, importing, browsing and collections. Mounted as
+  // the Decks tab of the Community shell — no header of its own.
   const feed = section('Feed', 'Public decks. Filter, listen, open details, follow.');
   const publish = section('Publish', 'Pick items from your collection and publish a deck — or pick a text tab to publish reading texts.');
   const share = section('Share & import', 'Signed codes: share your own items, import codes as new rows.');
@@ -952,4 +950,24 @@ export async function renderCommunity(container) {
     }
   };
   await refreshCollections();
+}
+
+// V6.0 Community shell: social tabs own the page; the legacy decks hub
+// mounts untouched as the Decks tab (zero regression surface).
+export async function renderCommunity(container) {
+  const { mountSocialFeed } = await import('./communityFeed.js');
+  const actions = element('div', { className: 'flex items-center gap-2' });
+  container.replaceChildren(element('section', {}, [
+    pageHeader({
+      eyebrow: 'Social',
+      title: 'Community',
+      description: 'Learn Japanese with other learners: follow people, share what you study, save what inspires you.',
+      action: actions
+    })
+  ]));
+  const shell = container.firstChild;
+  const tabs = element('div', { className: 'flex flex-wrap gap-2', attrs: { role: 'tablist', 'aria-label': 'Community sections' } });
+  const body = element('div', { className: 'mt-5' });
+  shell.append(tabs, body);
+  await mountSocialFeed({ tabs, body, actions, renderDecksHub });
 }
