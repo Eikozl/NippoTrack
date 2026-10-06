@@ -45,6 +45,7 @@ async function listFeed(req, res) {
     const { page, limit } = parsePagination(query);
     const result = await community.listFeed(pool, req.user.id, {
       tab: query.tab || 'latest',
+      author: query.author || null,
       page,
       limit
     });

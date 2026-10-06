@@ -282,8 +282,6 @@ async function toggleLike(executor, userId, postId) {
   const id = cleanId(postId, 'post');
   const visible = await getPost(executor, userId, id);
   if (!visible) return null;
-  // Authors cannot inflate their own posts.
-  if (visible.mine) return visible;
   const [existing] = await executor.execute(
     'SELECT 1 FROM post_likes WHERE id_community_post = ? AND user_id = ?',
     [id, userId]

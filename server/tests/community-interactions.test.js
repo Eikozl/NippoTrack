@@ -60,10 +60,14 @@ test('like toggles idempotently and never on own posts', async () => {
   });
   await withPoolExecute(async (sql) => {
     if (/FROM community_posts p/i.test(sql)) return [[{ ...VISIBLE_POST, author_id: USER_ID }]];
+    if (/SELECT 1 FROM post_likes/i.test(sql)) return [[]];
+    if (/INSERT INTO post_likes/i.test(sql)) return [{ affectedRows: 1 }];
     throw new Error(`Unexpected SQL: ${sql.slice(0, 60)}`);
   }, async () => {
+    // Self-likes register like any other (networks allow them; the inbox
+    // never notifies the author about their own tap).
     const own = await service.toggleLike(pool, USER_ID, 7);
-    assert.equal(own.liked, false, 'authors cannot inflate own posts');
+    assert.equal(own.liked, true);
   });
 });
 
