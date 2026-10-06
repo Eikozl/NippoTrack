@@ -43,6 +43,9 @@ test('GET /api/dashboard anchors all windows on ?today (local client date)', asy
   const calls = [];
   await withPoolQuery(async (sql, params = []) => {
     calls.push({ sql, params });
+    // Strict driver-like binding check: every ? gets exactly one param.
+    // (Two V6.0 outages came from misaligned params that stubs ignored.)
+    assert.equal(params.length, (sql.match(/\?/g) || []).length, 'params match placeholders');
     return [[{
       minutes_today: 30,
       minutes_week: 60,

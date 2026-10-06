@@ -36,7 +36,6 @@ async function getDashboard(req, res) {
           + COALESCE((SELECT today FROM reading_minutes), 0) AS minutes_today,
         COALESCE((SELECT SUM(duration_minutes) FROM user_sessions WHERE session_date >= date_trunc('week', COALESCE(?::date, CURRENT_DATE))::date AND session_date <= COALESCE(?::date, CURRENT_DATE)), 0)
           + COALESCE((SELECT week FROM reading_minutes), 0) AS minutes_week,
-        COALESCE((SELECT SUM(duration_minutes) FROM user_sessions WHERE session_date >= date_trunc('week', COALESCE(?::date, CURRENT_DATE))::date AND session_date <= COALESCE(?::date, CURRENT_DATE)), 0) AS minutes_week,
         (SELECT COUNT(*) FROM user_vocabulary) AS vocabulary_count,
         (SELECT COUNT(*) FROM user_kanji) AS kanji_count,
         (SELECT COUNT(*) FROM user_grammar) AS grammar_count,
