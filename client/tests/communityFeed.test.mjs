@@ -367,3 +367,33 @@ test('comment/menu polish uses errorState, Escape, and loading-first viewers', (
   assert.ok(source.includes('errorState(error, () => loadDeck'), 'deck errors stay in-dialog with retry');
   assert.ok(source.includes('errorState(error, () => loadPreview'), 'preview errors stay in-dialog with retry');
 });
+
+test('phase 7: like costs one mutation without full feed reload', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('/api/community/posts/${post.id}/like'), 'like mutation present');
+  assert.ok(source.includes('function likeButton(post)'), 'like button takes post only (no onRefresh reload)');
+  assert.ok(!source.includes('likeButton(post, onRefresh)'), 'like no longer wires full feed reload');
+  assert.ok(source.includes('post.liked') && source.includes('post.likeCount'), 'local count delta + painted state kept');
+  assert.ok(source.includes('Unable to like.'), 'like failure toasts (with revert)');
+  assert.ok(source.includes('prevLiked') && source.includes('prevCount'), 'failure reverts to previous state');
+  assert.ok(source.includes('await reloadComments()'), 'comment list reload kept where load-bearing for the visible list');
+  assert.ok(source.includes('postMenuButton(post, onRefresh)'), 'menu edit/delete/block still refresh (load-bearing)');
+});
+
+test('phase 7: bell badge uses cheap unread-count, inbox flows unchanged', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('/api/community/notifications/unread-count'), 'badge uses cheap unread-count');
+  assert.ok(!source.includes('/api/community/notifications?limit=1'), 'expensive list?limit=1 badge fetch removed');
+  assert.ok(source.includes('/api/community/notifications?page='), 'inbox paging unchanged');
+  assert.ok(source.includes('/notifications/${note.id}/read'), 'single mark-read unchanged');
+  assert.ok(source.includes('/notifications/read-all'), 'mark-all unchanged');
+});
+
+test('phase 7: flagged rows reuse follow flags without per-row profile fetch', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('viewerFollowing') && source.includes('followsYou'), 'follow flags consumed');
+  assert.ok(source.includes('hasInitial'), 'flagged rows skip the fetch');
+  assert.ok(source.includes('initialFollowing'), 'initial state comes from the payload');
+  assert.ok(source.includes('/api/community/profile/${encodeURIComponent(username)}'), 'single profile fetch kept only where flags are genuinely absent (post dialog)');
+  assert.ok(source.includes('genuinely absent'), 'absent-flags surface documented in code');
+});

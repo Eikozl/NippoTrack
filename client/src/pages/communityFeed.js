@@ -303,10 +303,13 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   bell.append(document.createTextNode('🔔'), bellBadge);
   bell.addEventListener('click', openNotifications);
   tabs.appendChild(bell);
+  // Phase 7-frontend trimming: cheap badge — GET unread-count (single indexed
+  // COUNT) for mount + after-inbox-close, never list?limit=1. Inbox
+  // open/mark-read/mark-all flows below are unchanged.
   async function refreshBell() {
     try {
-      const inbox = await apiRequest('/api/community/notifications?limit=1');
-      const unread = Number(inbox?.unread || 0);
+      const data = await apiRequest('/api/community/notifications/unread-count');
+      const unread = Number(data?.unread || 0);
       bellBadge.textContent = unread > 99 ? '99+' : String(unread);
       bellBadge.style.display = unread > 0 ? 'grid' : 'none';
       bell.setAttribute('aria-label', unread > 0 ? `${unread} unread notifications` : 'Notifications');
@@ -353,7 +356,13 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   }
 
   // ---- shared post card
-  function likeButton(post, onChange) {
+  // Phase 7-frontend trimming: optimistic like costs 1 request (the mutation).
+  // Local count delta + painted state are the source of truth until the next
+  // natural feed/discover/search load — no onRefresh → load(true) full page-1
+  // refetch after like success. Paint runs AFTER withPendingAction settles so
+  // it survives the pending-state snapshot restore; on failure revert + toast.
+  // Menu edit/delete/block still use onRefresh (load-bearing); like never does.
+  function likeButton(post) {
     const button = element('button', {
       className: 'inline-flex min-h-9 items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-sm text-muted transition hover:text-ink',
       attrs: { type: 'button', 'aria-pressed': String(post.liked === true), 'aria-label': `Like post (${post.likeCount || 0} likes)` }
@@ -368,13 +377,20 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     paint(post.liked === true, Number(post.likeCount || 0));
     button.addEventListener('click', (event) => {
       event.stopPropagation();
+      const prevLiked = post.liked === true;
+      const prevCount = Number(post.likeCount || 0);
       withPendingAction(button, async () => {
         const updated = await apiRequest(`/api/community/posts/${post.id}/like`, { method: 'POST' });
         post.liked = updated.liked === true;
-        post.likeCount = Number(updated.likeCount || 0);
+        post.likeCount = Number(updated.likeCount ?? 0);
+      }).then(() => {
         paint(post.liked, post.likeCount);
-        if (typeof onChange === 'function') onChange(post);
-      }).catch((error) => showToast(error?.message || 'Unable to like.', 'error'));
+      }).catch((error) => {
+        post.liked = prevLiked;
+        post.likeCount = prevCount;
+        paint(prevLiked, prevCount);
+        showToast(error?.message || 'Unable to like.', 'error');
+      });
     });
     return button;
   }
@@ -843,7 +859,9 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       card.appendChild(box);
     }
     const foot = element('div', { className: 'mt-3 flex items-center gap-1 border-t border-stone pt-3' }, [
-      likeButton(post, onRefresh),
+      // Phase 7: like costs 1 mutation only — no onRefresh full reload.
+      // postMenuButton above keeps onRefresh (edit/delete/block load-bearing).
+      likeButton(post),
       commentButton(post, () => openPostDialog(post.id, { onProfile, onRefresh, focusComments: true }))
     ]);
     foot.addEventListener('click', (event) => event.stopPropagation());
@@ -851,9 +869,12 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     return card;
   }
 
+  // onRefresh is legacy for like/comment (now local-only, no feed reload) and
+  // stays only so menu edit/delete/block callers keep working; dialog
+  // like/comment paths intentionally never invoke it.
   function openPostDialog(postId, { onProfile, onRefresh, focusComments = false } = {}) {
     apiRequest(`/api/community/posts/${encodeURIComponent(postId)}`).then((post) => {
-      const like = likeButton(post, onRefresh);
+      const like = likeButton(post);
       const commentsWrap = element('div', { className: 'grid gap-2' }, [element('p', { className: 'text-sm text-muted', text: 'Loading comments…' })]);
       const input = element('input', { className: 'field-control', attrs: { type: 'text', maxlength: '1000', placeholder: 'Write a comment…', 'aria-label': 'Write a comment' } });
       const send = element('button', { className: 'icon-button shrink-0', text: '➤', attrs: { type: 'button', 'aria-label': 'Send comment' } });
@@ -863,8 +884,9 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
         await apiRequest(`/api/community/posts/${post.id}/comments`, { method: 'POST', body: { body: text } });
         input.value = '';
         post.commentCount = Number(post.commentCount || 0) + 1;
+        // Phase 7: reloadComments is load-bearing for the visible list only.
+        // No onRefresh full feed reload — the dialog count delta stands alone.
         await reloadComments();
-        if (typeof onRefresh === 'function') onRefresh();
       }).catch((error) => showToast(error?.message || 'Unable to comment.', 'error'));
       send.addEventListener('click', submitComment);
       input.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); submitComment(); } });
@@ -941,7 +963,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
           post.commentCount = Number(post.commentCount || 0) + 1;
           closeComposer(false);
           paintReplies();
-          if (typeof onRefresh === 'function') onRefresh();
+          // Phase 7: local paintReplies + count delta only — no full reload.
           try { replyButton.focus(); } catch { /* noop */ }
         }, { pendingLabel: 'Sending…' }).catch((error) => showToast(error?.message || 'Unable to reply.', 'error'));
         replySend.addEventListener('click', submitReply);
@@ -994,7 +1016,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
                   parent.replyCount = Math.max(0, Number(parent.replyCount || 1) - 1);
                   post.commentCount = Math.max(0, Number(post.commentCount || 1) - 1);
                   paintReplies();
-                  if (typeof onRefresh === 'function') onRefresh();
+                  // Phase 7: local list update only — no full feed reload.
                 } catch (error) {
                   showToast(error?.message || 'Unable to delete.', 'error');
                 }
@@ -1079,8 +1101,9 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
                 try {
                   await apiRequest(`/api/community/comments/${comment.id}`, { method: 'DELETE' });
                   post.commentCount = Math.max(0, Number(post.commentCount || 1) - 1);
+                  // Phase 7: reloadComments is load-bearing for the list;
+                  // no onRefresh full feed reload.
                   await reloadComments();
-                  if (typeof onRefresh === 'function') onRefresh();
                 } catch (error) {
                   showToast(error?.message || 'Unable to delete.', 'error');
                 }
@@ -1104,6 +1127,8 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
           commentsWrap.replaceChildren(errorState(error, () => reloadComments()));
         }
       }
+      // Dialog follow: post payloads carry no follow flags (genuinely absent),
+      // so the single profile fetch in followButton stays (per-dialog, kept).
       const followRow = (post.mine || !post.authorUsername) ? null : followButton(post.authorUsername, () => {});
       // Linked learning content renders inline (same boxes as the cards —
       // reading titles open the excerpt dialog, decks open the viewer).
@@ -1140,6 +1165,11 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     // following kept for compat), followsYou, mutual. The button only
     // PRESENTS those decisions — Follow back when they follow you, Mutual
     // when both directions hold. No auth logic is derived here.
+    // Phase 7: flagged rows (personRow, profile head, followers lists) pass
+    // options and never fetch. The single fallback GET below fires only where
+    // flags are genuinely absent — the post dialog (feed/discover/search post
+    // payloads carry like/comment counts + identity, never follow flags).
+    // That fetch is per-dialog-open (1 request), never per-row in a list.
     let following = options.initialFollowing ?? null;
     let followsYou = options.followsYou ?? false;
     let mutual = options.mutual ?? false;
@@ -1894,6 +1924,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
               closePanel();
               openProfile(note.actorUsername);
             }
+            // Cheap badge refresh after the read + navigation (1 indexed COUNT).
             refreshBell();
           });
           list.appendChild(row);
@@ -1905,7 +1936,8 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
           more.addEventListener('click', () => { page += 1; load(); });
           moreWrap.appendChild(more);
         }
-        refreshBell();
+        // Phase 7: no per-page badge fetch — badge refreshes on mount + after
+        // the inbox dialog closes (cheap unread-count), never during paging.
       } catch (error) {
         list.replaceChildren(errorState(error, () => load(true)));
       }
@@ -1924,7 +1956,8 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       description: '',
       content: [element('div', { className: 'grid gap-3' }, [markAll, list, moreWrap])],
       submitLabel: 'Close',
-      onSubmit: async (form, close) => close()
+      // Phase 7: cheap badge refresh after the inbox closes (mount + close only).
+      onSubmit: async (form, close) => { close(); refreshBell().catch(() => {}); }
     });
     load(true);
   }
