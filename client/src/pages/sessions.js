@@ -359,43 +359,118 @@ export function renderSessions(container) {
         window.location.hash = `#${page}`;
       };
       const linkedCount = (record.vocabulary || []).length + (record.kanji || []).length + (record.grammar || []).length;
+      // Day-link: one-click "link what I studied that day" merges
+      // GET /api/sessions/day-items?date=YYYY-MM-DD ({id,label} per kind,
+      // cap 50/kind) into the three pickers below. Manual picks are never
+      // wiped (duplicates skipped); content[] is read-only note only, never
+      // submitted (content links live on the Content Log side; POST/PUT
+      // accepts vocabulary_ids/kanji_ids/grammar_ids ONLY).
+      const dayLinkButton = element('button', {
+        className: 'button-secondary min-h-9 justify-self-start px-3 py-1.5 text-xs',
+        text: 'Link what I studied that day',
+        attrs: { type: 'button', 'aria-label': 'Link what I studied that day' }
+      });
+      const dayContentNote = element('p', {
+        className: 'text-xs leading-5 text-muted',
+        text: 'Content links live on the Content Log side — day content is never submitted here.',
+        attrs: { 'aria-live': 'polite' }
+      });
+      const vocabPicker = searchableMultiSelect({
+        name: 'vocabulary_ids',
+        label: 'Related vocabulary',
+        options: options.vocabulary,
+        value: (record.vocabulary || []).map((item) => item.id_vocabulary),
+        placeholder: 'Search vocabulary…',
+        emptyMessage: 'No vocabulary records yet. Add vocabulary before linking it to this session.',
+        createLabel: 'Add vocabulary',
+        onCreate: () => goToLibrary('vocabulary'),
+        loadOptions: loadVocabularyOptions
+      });
+      const kanjiPicker = searchableMultiSelect({
+        name: 'kanji_ids',
+        label: 'Related kanji',
+        options: options.kanji,
+        value: (record.kanji || []).map((item) => item.id_kanji),
+        placeholder: 'Search kanji…',
+        emptyMessage: 'No kanji records yet. Add kanji before linking it to this session.',
+        createLabel: 'Add kanji',
+        onCreate: () => goToLibrary('kanji'),
+        loadOptions: loadKanjiOptions
+      });
+      const grammarPicker = searchableMultiSelect({
+        name: 'grammar_ids',
+        label: 'Related grammar',
+        options: options.grammar,
+        value: (record.grammar || []).map((item) => item.id_grammar),
+        placeholder: 'Search grammar…',
+        emptyMessage: 'No grammar records yet. Add grammar before linking it to this session.',
+        createLabel: 'Add grammar',
+        onCreate: () => goToLibrary('grammar'),
+        loadOptions: loadGrammarOptions
+      });
+      dayLinkButton.addEventListener('click', () => {
+        const form = dayLinkButton.closest('form');
+        const dateValue = String(form?.elements?.session_date?.value || '').slice(0, 10).trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue) || Number.isNaN(new Date(`${dateValue}T00:00:00`).getTime())) {
+          showToast('Pick a date first — day-link needs the session date.', 'error');
+          return;
+        }
+        withPendingAction(dayLinkButton, async () => {
+          let dayItems;
+          try {
+            dayItems = await apiRequest(`/api/sessions/day-items?date=${encodeURIComponent(dateValue)}`);
+          } catch (error) {
+            showToast(error?.message || 'Unable to load day items.', 'error');
+            return;
+          }
+          const cleanPairs = (list) => (Array.isArray(list) ? list : [])
+            .filter((entry) => entry && Number.isInteger(Number(entry.id)) && Number(entry.id) > 0 && typeof entry.label === 'string' && entry.label.trim())
+            .map((entry) => ({ id: Number(entry.id), label: String(entry.label) }));
+          const vocabPairs = cleanPairs(dayItems?.vocabulary);
+          const kanjiPairs = cleanPairs(dayItems?.kanji);
+          const grammarPairs = cleanPairs(dayItems?.grammar);
+          const contentPairs = cleanPairs(dayItems?.content);
+          // {id,label} maps directly onto picker shapes via the shared
+          // option builders (label-only records: no reading/meaning invented).
+          const vocabRecords = vocabPairs.map(({ id, label }) => ({ id_vocabulary: id, word: label }));
+          const kanjiRecords = kanjiPairs.map(({ id, label }) => ({ id_kanji: id, character_kanji: label }));
+          const grammarRecords = grammarPairs.map(({ id, label }) => ({ id_grammar: id, grammar_point: label }));
+          const mergedVocabOptions = mergeOptions(options.vocabulary, vocabRecords, vocabularyOption);
+          const mergedKanjiOptions = mergeOptions(options.kanji, kanjiRecords, kanjiOption);
+          const mergedGrammarOptions = mergeOptions(options.grammar, grammarRecords, grammarOption);
+          const currentVocab = new Set(selectedNumbers(form.elements.vocabulary_ids).map(String));
+          const currentKanji = new Set(selectedNumbers(form.elements.kanji_ids).map(String));
+          const currentGrammar = new Set(selectedNumbers(form.elements.grammar_ids).map(String));
+          const newVocabIds = vocabPairs.map(({ id }) => id).filter((id) => !currentVocab.has(String(id)));
+          const newKanjiIds = kanjiPairs.map(({ id }) => id).filter((id) => !currentKanji.has(String(id)));
+          const newGrammarIds = grammarPairs.map(({ id }) => id).filter((id) => !currentGrammar.has(String(id)));
+          vocabPicker.appendLinkedOptions(mergedVocabOptions, newVocabIds);
+          kanjiPicker.appendLinkedOptions(mergedKanjiOptions, newKanjiIds);
+          grammarPicker.appendLinkedOptions(mergedGrammarOptions, newGrammarIds);
+          options.vocabulary = mergedVocabOptions;
+          options.kanji = mergedKanjiOptions;
+          options.grammar = mergedGrammarOptions;
+          if (contentPairs.length) {
+            dayContentNote.textContent = `${contentPairs.length} content ${contentPairs.length === 1 ? 'entry' : 'entries'} that day — link them from Content Log`;
+          } else {
+            dayContentNote.textContent = 'No content entries that day.';
+          }
+          const linked = newVocabIds.length + newKanjiIds.length + newGrammarIds.length;
+          const available = vocabPairs.length + kanjiPairs.length + grammarPairs.length;
+          if (linked > 0) showToast(`${linked} items linked from ${dateValue}.`);
+          else if (available === 0) showToast('Nothing studied that day — pick manually.');
+          else showToast(`Already linked — nothing new from ${dateValue}.`);
+        }, { pendingLabel: 'Linking…' }).catch((error) => showToast(error?.message || 'Unable to link day items.', 'error'));
+      });
       const linkedSection = element('details', { className: 'rounded-lg border border-stone bg-paper/40 px-4 py-3 sm:col-span-2' }, [
         element('summary', { className: 'cursor-pointer font-semibold text-ink', text: `Link studied items (optional)${linkedCount ? ` (${linkedCount} linked)` : ''}` }),
         element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: 'Pick what you actually studied. Nothing is linked automatically.' }),
         element('div', { className: 'mt-3 grid gap-3' }, [
-          searchableMultiSelect({
-            name: 'vocabulary_ids',
-            label: 'Related vocabulary',
-            options: options.vocabulary,
-            value: (record.vocabulary || []).map((item) => item.id_vocabulary),
-            placeholder: 'Search vocabulary…',
-            emptyMessage: 'No vocabulary records yet. Add vocabulary before linking it to this session.',
-            createLabel: 'Add vocabulary',
-            onCreate: () => goToLibrary('vocabulary'),
-            loadOptions: loadVocabularyOptions
-          }),
-          searchableMultiSelect({
-            name: 'kanji_ids',
-            label: 'Related kanji',
-            options: options.kanji,
-            value: (record.kanji || []).map((item) => item.id_kanji),
-            placeholder: 'Search kanji…',
-            emptyMessage: 'No kanji records yet. Add kanji before linking it to this session.',
-            createLabel: 'Add kanji',
-            onCreate: () => goToLibrary('kanji'),
-            loadOptions: loadKanjiOptions
-          }),
-          searchableMultiSelect({
-            name: 'grammar_ids',
-            label: 'Related grammar',
-            options: options.grammar,
-            value: (record.grammar || []).map((item) => item.id_grammar),
-            placeholder: 'Search grammar…',
-            emptyMessage: 'No grammar records yet. Add grammar before linking it to this session.',
-            createLabel: 'Add grammar',
-            onCreate: () => goToLibrary('grammar'),
-            loadOptions: loadGrammarOptions
-          })
+          dayLinkButton,
+          dayContentNote,
+          vocabPicker,
+          kanjiPicker,
+          grammarPicker
         ])
       ]);
       const notesField = field({ name: 'notes', label: 'Notes', type: 'textarea', maxLength: 1500, value: record.notes || '', description: 'Reflections, observations, reminders.' });

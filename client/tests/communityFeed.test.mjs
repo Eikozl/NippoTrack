@@ -134,14 +134,20 @@ test('discover deck and reading rows open live viewers, never dead ends', () => 
   assert.ok(source.includes('min-w-0'), 'rows bound widths so 360px never overflows');
 });
 
-test('search offers category chips and compact learning rows', () => {
+test('search offers a single filter selector and compact learning rows', () => {
   const source = readSource('src/pages/communityFeed.js');
   assert.ok(source.includes('/api/community/search'), 'search endpoint used');
   for (const value of ["value: 'all'", "value: 'people'", "value: 'posts'", "value: 'vocabulary'", "value: 'kanji'", "value: 'grammar'", "value: 'decks'", "value: 'reading'"]) {
-    assert.ok(source.includes(value), `chip ${value} exists`);
+    assert.ok(source.includes(value), `filter ${value} exists`);
   }
-  assert.ok(source.includes('Search category'), 'chip group labeled');
-  assert.ok(source.includes('aria-pressed'), 'chip selection exposed');
+  assert.ok(source.includes('SEARCH_FILTERS'), 'single filter definition replaces chips');
+  assert.ok(!source.includes('SEARCH_CHIPS'), 'chip array gone');
+  assert.ok(!source.includes('chipsWrap'), 'chips row gone');
+  assert.ok(!source.includes('paintChips'), 'chip painter gone');
+  assert.ok(!source.includes('Search category'), 'chip group label gone — selector uses Search filter');
+  assert.ok(source.includes('Search filter'), 'selector labeled for a11y');
+  assert.ok(source.includes("icon('filter'"), 'sliders glyph from icons.js, never emoji');
+  assert.ok(source.includes('Filter: ${'), 'button text shows the current selection');
   assert.ok(source.includes('function learningRow'), 'learning hits render compact rows');
   assert.ok(source.includes('font-jp'), 'display uses Japanese type');
   assert.ok(source.includes("lang: 'ja'"), 'display/reading tagged lang=ja');
@@ -153,6 +159,34 @@ test('search offers category chips and compact learning rows', () => {
   assert.ok(source.includes('openDeckViewer(hit.deckId'), 'deck hit opens the source deck viewer');
   assert.ok(source.includes('clearTimeout') && source.includes('setTimeout'), 'debounce preserved');
   assert.ok(!source.includes('innerHTML'), 'no innerHTML in search rendering');
+});
+
+test('filter selector is one YouTube-style button with an accessible menu', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  const icons = readSource('src/icons.js');
+  assert.ok(icons.includes('SlidersHorizontal'), 'lucide sliders glyph imported');
+  assert.ok(icons.includes('filter:'), 'icons.js serves a filter glyph');
+  assert.ok(source.includes("aria-haspopup") && source.includes("'menu'"), 'button announces the menu');
+  assert.ok(source.includes("aria-expanded"), 'button exposes open state');
+  assert.ok(source.includes("role: 'menu'") || source.includes("role:'menu'") || source.includes("'menu'"), 'popup uses role=menu');
+  assert.ok(source.includes("role: 'menuitem'") || source.includes("role:'menuitem'") || source.includes('menuitem'), 'options are real buttons with role=menuitem');
+  assert.ok(source.includes('aria-current'), 'active filter marked with aria-current');
+  assert.ok(source.includes("element('button'"), 'keyboard-navigable real buttons');
+  assert.ok(source.includes("'Escape'") && source.includes('closeFilter(true)'), 'Escape closes and returns focus to the button');
+  assert.ok(source.includes('filterWrap.contains(event.target)'), 'outside-click closes');
+  assert.ok(source.includes('ArrowDown'), 'arrow keys move between filter options');
+  assert.ok(source.includes('max-w-[70vw]') || source.includes('max-w-full'), 'menu stays inside 360px viewports');
+});
+
+test('selecting a filter searches immediately, empty text browses recent content', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('{ browse: true }'), 'filter select passes browse mode with the current query text');
+  assert.ok(source.includes('opts.browse === true') || source.includes('browse === true'), 'empty text from a filter select enters browse mode');
+  assert.ok(source.includes('/api/community/search?type='), 'browse fetch omits q and lists recent content of that type');
+  assert.ok(source.includes('Browsing'), 'browse loading state distinct from text search');
+  assert.ok(source.includes('Nothing here yet. Try another filter.'), 'browse empty state guides to another filter');
+  assert.ok(source.includes('if (!query && !browseMode)'), 'clearing the query restores Discover');
+  assert.ok(source.includes('discoverHost.hidden = false'), 'Discover returns when the query clears');
 });
 
 test('legacy latest and following tabs stay untouched', () => {

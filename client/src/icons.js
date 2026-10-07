@@ -1,7 +1,7 @@
 import {
   Bell, BookOpen, BookOpenText, CalendarDays, CalendarRange, ChartNoAxesCombined, Check, Circle, CircleUserRound,
   Clock, createElement, Ellipsis, FileText, Flag, Flame, Globe, History, House, LayoutDashboard, Library, Languages,
-  Menu, MessagesSquare, Moon, Newspaper, PieChart, Plus, RefreshCw, ScanText, Search, Settings, Square, Star, Sun, Tag, Target, Trash2, Users, Volume2, X, Zap
+  Menu, MessagesSquare, Moon, Newspaper, PieChart, Plus, RefreshCw, ScanText, Search, Settings, SlidersHorizontal, Square, Star, Sun, Tag, Target, Trash2, Users, Volume2, X, Zap
 } from 'lucide';
 
 const ICONS = {
@@ -39,6 +39,7 @@ const ICONS = {
   dots: Ellipsis,
   menu: Menu,
   search: Search,
+  filter: SlidersHorizontal,
   close: X,
   check: Check,
   trash: Trash2,

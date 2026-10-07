@@ -229,3 +229,33 @@ test('Session UX: form restores the compact optional linking section', () => {
   assert.ok(source.includes('/api/vocabulary/options') && source.includes('/api/kanji/options') && source.includes('/api/grammar/options'), 'pickers reuse the existing options endpoints');
   assert.ok(source.includes('selectedNumbers(form.elements.vocabulary_ids)'), 'submit reads the picker selections');
 });
+
+test('Session UX: day-link button merges studied items without wiping manual picks', () => {
+  const source = readSource('src/pages/sessions.js');
+  assert.ok(source.includes('Link what I studied that day'), 'day-link entry point labeled');
+  assert.ok(source.includes('/api/sessions/day-items?date='), 'day-items fetched for the current session_date');
+  assert.ok(source.includes('Pick a date first'), 'honest message when no valid date is set');
+  assert.ok(source.includes('mergeOptions(options.vocabulary') || source.includes('mergeOptions('), 'merge reuses mergeOptions, never replaces');
+  assert.ok(source.includes('vocabularyOption') && source.includes('kanjiOption') && source.includes('grammarOption'), 'day {id,label} maps through the shared option shapes');
+  assert.ok(source.includes('appendLinkedOptions'), 'merge lands in the existing pickers via the multiselect slot');
+  assert.ok(source.includes('!currentVocab.has') && source.includes('!currentKanji.has') && source.includes('!currentGrammar.has'), 'duplicates skipped per kind');
+  assert.ok(source.includes('items linked from ${dateValue}'), 'honest linked-count toast');
+  assert.ok(source.includes('Nothing studied that day'), 'honest empty-day toast guiding to manual picks');
+  assert.ok(source.includes('Already linked'), 'honest already-linked outcome when only duplicates remain');
+  assert.ok(source.includes('Unable to load day items.'), 'fetch failure toasts with pickers untouched');
+  assert.ok(source.includes('Linking'), 'pending/disabled state while loading');
+  assert.ok(!source.includes('content_ids'), 'content ids never submitted with the session');
+});
+
+test('Session UX: day content stays a read-only note for the Content Log side', () => {
+  const source = readSource('src/pages/sessions.js');
+  assert.ok(source.includes('link them from Content Log'), 'subtle read-only content note with count');
+  assert.ok(source.includes('No content entries that day.'), 'zero-content day stays honest');
+  assert.ok(source.includes("aria-live"), 'content note announces politely');
+});
+
+test('Session UX: multiselect exposes a merge slot that preserves selections', () => {
+  const source = readSource('src/ui.js');
+  assert.ok(source.includes('appendLinkedOptions'), 'searchableMultiSelect exposes a day-link merge slot');
+  assert.ok(source.includes('selectedValues.add'), 'merge adds without removing manual picks');
+});

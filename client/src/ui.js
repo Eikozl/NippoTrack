@@ -279,7 +279,26 @@ export function searchableMultiSelect({
   });
 
   renderOptions(options);
-  return element('div', { className: 'field' }, [header, search, chips, optionsList, hiddenSelect]);
+  const wrapper = element('div', { className: 'field' }, [header, search, chips, optionsList, hiddenSelect]);
+  // Day-link merge slot (sessions "Link what I studied that day"): appends
+  // externally-fetched options without wiping manual picks. Selected ids
+  // persist in selectedValues so the hidden select (submit source) and chips
+  // stay correct even when the new rows are not in the current filtered view.
+  // Never removes existing selections; callers skip duplicates before calling.
+  wrapper.appendLinkedOptions = (linkedOptions = [], idsToSelect = []) => {
+    for (const option of Array.isArray(linkedOptions) ? linkedOptions : []) {
+      if (!option || option.value === undefined || option.value === null) continue;
+      const key = String(option.value);
+      if (!optionLabels.has(key)) optionLabels.set(key, option.chipLabel || option.label || key);
+      if (!options.some((entry) => String(entry.value) === key)) options.push(option);
+    }
+    for (const id of Array.isArray(idsToSelect) ? idsToSelect : []) {
+      if (id === undefined || id === null || id === '') continue;
+      selectedValues.add(String(id));
+    }
+    syncSelection();
+  };
+  return wrapper;
 }
 
 export function paginationControls(pagination, onPageChange) {

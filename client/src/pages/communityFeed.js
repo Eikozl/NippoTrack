@@ -1583,17 +1583,18 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     });
   }
 
-  // ---- discover: search + sections (Phase 4-frontend)
-  // Search box stays on top; category chips filter the search endpoint.
-  // Sections below come from a single GET /api/community/discover fetch
-  // (one loading state, one error with retry). Empty sections hide —
-  // no dead "see more" ends. Deck/reading rows reuse openDeckViewer /
-  // openReadingPreview so none are dead. Post sections reuse postCard;
-  // person sections reuse personRow (Follow + Follows-you from backend).
+  // ---- discover: search + sections (Phase 4-frontend, V6.1 filter selector)
+  // Search box stays on top; ONE YouTube-style filter selector button
+  // (sliders icon + "Filter: <type>") filters the search endpoint. Sections
+  // below come from a single GET /api/community/discover fetch (one loading
+  // state, one error with retry). Empty sections hide — no dead "see more"
+  // ends. Deck/reading rows reuse openDeckViewer / openReadingPreview so none
+  // are dead. Post sections reuse postCard; person sections reuse personRow
+  // (Follow + Follows-you from backend).
   function renderDiscover() {
     body.replaceChildren();
     const searchInput = element('input', { className: 'field-control', attrs: { type: 'search', placeholder: 'Search people, posts, Japanese words…', 'aria-label': 'Search community' } });
-    const SEARCH_CHIPS = [
+    const SEARCH_FILTERS = [
       { value: 'all', label: 'All' },
       { value: 'people', label: 'People' },
       { value: 'posts', label: 'Posts' },
@@ -1603,35 +1604,100 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       { value: 'decks', label: 'Decks' },
       { value: 'reading', label: 'Reading' }
     ];
-    const chipsWrap = element('div', { className: 'flex flex-wrap gap-2', attrs: { role: 'group', 'aria-label': 'Search category' } });
-    const chipButtons = new Map();
-    const paintChips = () => {
-      for (const [value, button] of chipButtons) {
+    if (!SEARCH_FILTERS.some((entry) => entry.value === state.searchType)) state.searchType = 'all';
+    const filterLabelFor = (value) => (SEARCH_FILTERS.find((entry) => entry.value === value) || SEARCH_FILTERS[0]).label;
+    // Single selector button: sliders glyph (icons.js `filter` → lucide
+    // SlidersHorizontal, never emoji) + current selection text.
+    const filterText = element('span', { className: 'truncate', text: `Filter: ${filterLabelFor(state.searchType)}` });
+    const filterButton = element('button', {
+      className: 'button-secondary inline-flex min-h-9 max-w-full items-center gap-2 px-3 py-1.5 text-xs',
+      attrs: { type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': `Search filter, current filter: ${filterLabelFor(state.searchType)}` }
+    }, [icon('filter', { size: 16 }), filterText]);
+    const filterMenu = element('div', {
+      className: 'absolute left-0 top-[calc(100%+.25rem)] z-20 hidden min-w-44 max-w-[70vw] rounded-lg border border-stone bg-paper p-1 shadow-lg',
+      attrs: { role: 'menu', 'aria-label': 'Search filter' }
+    });
+    const filterWrap = element('div', { className: 'relative inline-flex max-w-full' }, [filterButton, filterMenu]);
+    const filterItems = new Map();
+    const paintFilter = () => {
+      const current = filterLabelFor(state.searchType);
+      filterText.textContent = `Filter: ${current}`;
+      filterButton.setAttribute('aria-label', `Search filter, current filter: ${current}`);
+      for (const [value, item] of filterItems) {
         const active = value === state.searchType;
-        button.setAttribute('aria-pressed', String(active));
-        button.classList.toggle('is-active', active);
+        item.classList.toggle('is-active', active);
+        if (active) item.setAttribute('aria-current', 'true');
+        else item.removeAttribute('aria-current');
+        const check = item.querySelector('[data-check]');
+        if (check) check.hidden = !active;
       }
     };
-    for (const chip of SEARCH_CHIPS) {
-      const button = element('button', {
-        className: 'button-secondary min-h-9 px-3 py-1.5 text-xs',
-        text: chip.label,
-        attrs: { type: 'button', 'aria-pressed': 'false' }
+    let filterOpen = false;
+    const closeFilter = (refocus = false) => {
+      if (!filterOpen) return;
+      filterOpen = false;
+      filterMenu.classList.add('hidden');
+      filterButton.setAttribute('aria-expanded', 'false');
+      if (refocus) { try { filterButton.focus(); } catch { /* focus is best-effort */ } }
+    };
+    const openFilter = () => {
+      filterOpen = true;
+      filterMenu.classList.remove('hidden');
+      filterButton.setAttribute('aria-expanded', 'true');
+      try { (filterItems.get(state.searchType) || [...filterItems.values()][0])?.focus(); } catch { /* noop */ }
+    };
+    for (const entry of SEARCH_FILTERS) {
+      const check = element('span', { className: 'shrink-0 font-bold', text: '✓', attrs: { 'aria-hidden': 'true', 'data-check': '' } });
+      check.hidden = entry.value !== state.searchType;
+      const item = element('button', {
+        className: 'flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm font-medium text-ink transition hover:bg-paper',
+        attrs: { type: 'button', role: 'menuitem', 'aria-label': `Filter by ${entry.label}` }
+      }, [element('span', { text: entry.label }), check]);
+      if (entry.value === state.searchType) item.setAttribute('aria-current', 'true');
+      item.addEventListener('click', () => {
+        state.searchType = entry.value;
+        paintFilter();
+        closeFilter(true);
+        // Immediate search with the current query text — including EMPTY
+        // text (backend browse-mode lists recent content of that type).
+        runSearch(searchInput.value.trim(), state.searchType, { browse: true });
       });
-      button.addEventListener('click', () => {
-        state.searchType = chip.value;
-        paintChips();
-        runSearch(searchInput.value.trim(), state.searchType);
-      });
-      chipButtons.set(chip.value, button);
-      chipsWrap.appendChild(button);
+      filterItems.set(entry.value, item);
+      filterMenu.appendChild(item);
     }
-    if (!SEARCH_CHIPS.some((chip) => chip.value === state.searchType)) state.searchType = 'all';
-    paintChips();
+    paintFilter();
+    filterButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (filterOpen) closeFilter(false);
+      else openFilter();
+    });
+    filterButton.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { event.stopPropagation(); closeFilter(true); }
+      if (event.key === 'ArrowDown' && !filterOpen) { event.preventDefault(); openFilter(); }
+    });
+    filterMenu.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { event.stopPropagation(); closeFilter(true); return; }
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+      event.preventDefault();
+      const items = [...filterItems.values()];
+      const currentIndex = items.indexOf(document.activeElement);
+      const next = event.key === 'ArrowDown'
+        ? items[(currentIndex + 1 + items.length) % items.length]
+        : items[(currentIndex - 1 + items.length) % items.length];
+      try { next?.focus(); } catch { /* noop */ }
+    });
+    document.addEventListener('click', (event) => {
+      if (!filterOpen) return;
+      if (filterWrap.contains(event.target)) return;
+      closeFilter(false);
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && filterOpen) closeFilter(true);
+    });
     const results = element('div', { className: 'mt-4 grid min-w-0 gap-3', attrs: { 'aria-live': 'polite' } });
     const discoverHost = element('div', { className: 'mt-6 grid min-w-0 gap-6' });
     body.append(
-      element('div', { className: 'grid min-w-0 gap-3' }, [searchInput, chipsWrap]),
+      element('div', { className: 'grid min-w-0 gap-3' }, [searchInput, filterWrap]),
       results,
       discoverHost
     );
@@ -1715,14 +1781,21 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       window.clearTimeout(timer);
       timer = window.setTimeout(() => runSearch(searchInput.value.trim(), state.searchType), 300);
     });
-    async function runSearch(query, type) {
+    async function runSearch(query, type, opts = {}) {
       const safeType = type || state.searchType || 'all';
-      if (!query) { results.replaceChildren(); discoverHost.hidden = false; return; }
+      // Typing keeps the 300ms debounce above; clearing the query restores
+      // Discover. Filter-select passes {browse:true} so EMPTY text browses
+      // recent content of that type (backend query-less browse, b6c4ab5).
+      const browseMode = !query && opts.browse === true;
+      if (!query && !browseMode) { results.replaceChildren(); discoverHost.hidden = false; return; }
       discoverHost.hidden = true;
-      results.replaceChildren(loadingState('Searching…'));
+      results.replaceChildren(loadingState(browseMode ? 'Browsing…' : 'Searching…'));
       try {
-        const data = await apiRequest(`/api/community/search?q=${encodeURIComponent(query)}&type=${safeType}&limit=10`);
-        const refresh = () => runSearch(query, safeType);
+        const url = browseMode
+          ? `/api/community/search?type=${encodeURIComponent(safeType)}&limit=10`
+          : `/api/community/search?q=${encodeURIComponent(query)}&type=${safeType}&limit=10`;
+        const data = await apiRequest(url);
+        const refresh = () => runSearch(query, safeType, opts);
         const blocks = [];
         const pushRow = (node) => { if (node) blocks.push(node); };
         if (safeType === 'all' || safeType === 'people') {
@@ -1742,9 +1815,9 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
         if (safeType === 'all' || safeType === 'reading') {
           for (const text of data.reading || []) pushRow(readingRow(text));
         }
-        results.replaceChildren(...(blocks.length ? blocks : [element('p', { className: 'text-sm text-muted', text: 'Nothing found. Try another search.' })]));
+        results.replaceChildren(...(blocks.length ? blocks : [element('p', { className: 'text-sm text-muted', text: browseMode ? 'Nothing here yet. Try another filter.' : 'Nothing found. Try another search.' })]));
       } catch (error) {
-        results.replaceChildren(errorState(error, () => runSearch(query, safeType)));
+        results.replaceChildren(errorState(error, () => runSearch(query, safeType, opts)));
       }
     }
     async function loadDiscover() {
