@@ -79,7 +79,6 @@ export const ENTITY_CONFIGS = {
     endpoint: '/api/vocabulary',
     idKey: 'id_vocabulary',
     exampleIdKey: 'id_usage_example',
-    eyebrow: 'Lexicon',
     title: 'Vocabulary',
     singular: 'vocabulary entry',
     description: 'Capture words, readings, meanings and learning status.',
@@ -194,7 +193,6 @@ export const ENTITY_CONFIGS = {
   kanji: {
     endpoint: '/api/kanji',
     idKey: 'id_kanji',
-    eyebrow: 'Characters',
     title: 'Kanji',
     singular: 'kanji entry',
     description: 'Track character meanings, readings and familiarity.',
@@ -338,7 +336,6 @@ renderDetail: (item) => {
     endpoint: '/api/grammar',
     idKey: 'id_grammar',
     exampleIdKey: 'id_grammar_example',
-    eyebrow: 'Patterns',
     title: 'Grammar',
     singular: 'grammar point',
     description: 'Keep structures, examples and mastery status in one place.',
@@ -680,7 +677,7 @@ export function renderEntityPage(container, config) {
   const results = element('div');
   const filterBar = element('div', { className: 'surface mb-5 grid gap-3 p-4 md:grid-cols-[minmax(14rem,1fr)_10rem_11rem]' }, [search, jlpt, status]);
   const page = element('section', {}, [
-    pageHeader({ eyebrow: config.eyebrow, title: config.title, description: config.description, action: addButton }),
+    pageHeader({ title: config.title, description: config.description, action: addButton }),
     filterBar,
     results
   ]);

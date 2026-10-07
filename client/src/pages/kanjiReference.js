@@ -44,11 +44,11 @@ function mountStrokeOrderSlots(root) {
 }
 
 export async function renderKanjiReference(container, character) {
-  const header = () => pageHeader({ eyebrow: 'Reference', title: 'Kanji reference', description: 'Reference details for this kanji.' });
+  const header = () => pageHeader({ title: 'Kanji reference', description: 'Reference details for this kanji.' });
   container.replaceChildren(header(), loadingState('Loading kanji reference…'));
   try {
     const reference = await apiRequest(`/api/kanji/lookup/${encodeURIComponent(character)}`);
-    container.replaceChildren(pageHeader({ eyebrow: 'Reference', title: `Kanji ${reference.character}`, description: 'Shared JLPT reference data. Classifications are community/reference data, not an official syllabus.' }), referenceContent(reference));
+    container.replaceChildren(pageHeader({ title: `Kanji ${reference.character}`, description: 'Shared JLPT reference data. Classifications are community/reference data, not an official syllabus.' }), referenceContent(reference));
     mountStrokeOrderSlots(container);
   } catch (error) {
     const message = error?.status === 404 ? 'This kanji is not present in the shared JLPT reference data.' : error;

@@ -444,6 +444,10 @@ test('profile library counts hide undisclosed null values', () => {
   assert.ok(!source.includes('${profile.counts.vocabulary} words'), 'no raw null-vocabulary interpolation');
   assert.ok(!source.includes('${profile.counts.kanji} kanji'), 'no raw null-kanji interpolation');
   assert.ok(!source.includes('${profile.counts.grammar} patterns'), 'no raw null-grammar interpolation');
+  assert.ok(!source.includes('${counts.grammar} patterns'), 'grammar count no longer uses the patterns label');
+  assert.ok(source.includes('${counts.grammar} grammar'), 'grammar count uses the grammar label');
+  assert.ok(source.includes('${counts.vocabulary} words'), 'words label unchanged');
+  assert.ok(source.includes('${counts.kanji} kanji'), 'kanji label unchanged');
   assert.ok(source.includes('undisclosed'), 'null-means-undisclosed documented in code');
   assert.ok(source.includes("parts.join(' · ')"), 'remaining non-null values joined, row omitted when all null');
   assert.ok(source.includes('posts} posts'), 'public posts/followers/following row unchanged');
@@ -472,18 +476,47 @@ test('bottom nav restyles the existing tabs node as a floating glass pill', () =
   assert.ok(!source.includes('ml-auto'), 'old trailing-bell alignment removed');
 });
 
-test('bottom nav carries six icon-only buttons with aria-labels, no emoji', () => {
+test('bottom nav carries pill buttons plus an overflow menu, no emoji', () => {
   const source = readSource('src/pages/communityFeed.js');
-  for (const label of ['Feed', 'Following', 'Discover', 'Share something', 'Notifications', 'Decks']) {
-    assert.ok(source.includes(label), `icon button labeled "${label}"`);
+  for (const label of ['Feed', 'Following', 'Discover', 'Share something', 'Notifications', 'More options']) {
+    assert.ok(source.includes(label), `pill button labeled "${label}"`);
+  }
+  for (const item of ['Decks', 'My profile', 'Notifications']) {
+    assert.ok(source.includes(item), `overflow menu item "${item}"`);
   }
   assert.ok(!source.includes('🔔'), 'no emoji bell anywhere in the new bar');
   assert.ok(source.includes("icon('bell'"), 'bell reuses the monochrome icons.js set');
   assert.ok(source.includes("iconName: 'home'") && source.includes("iconName: 'users'") && source.includes("iconName: 'search'"), 'feed/following/discover glyphs come from icons.js');
-  assert.ok(source.includes("icon('plus'") && source.includes("iconName: 'dots'"), 'share/decks glyphs come from icons.js');
+  assert.ok(source.includes("icon('plus'") && source.includes("iconName: 'dots'"), 'share/overflow glyphs come from icons.js');
+  assert.ok(source.includes("role: 'menu'") && source.includes("role: 'menuitem'"), 'overflow uses the menu pattern with real buttons');
   assert.ok(source.includes('min-h-11') && source.includes('min-w-11'), 'compact 44px touch targets fit 360px');
   assert.ok(source.includes('bg-vermilion'), 'vermilion unread count badge kept (it carries information)');
   assert.ok(source.includes('unread notifications'), 'badge aria-label updates kept');
+});
+
+test('overflow menu opens upward with Esc/outside-click close and focus return', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes("'aria-haspopup': 'menu'"), 'toggle exposes the menu relationship');
+  assert.ok(source.includes("'aria-expanded'"), 'toggle exposes open state');
+  assert.ok(source.includes('bottom-full'), 'menu opens upward from the floating pill');
+  assert.ok(source.includes('max-w-[calc(100vw-2rem)]'), 'menu never overflows the viewport at 360px');
+  assert.ok(source.includes('closeOverflow(true)'), 'Escape/outside paths return focus to the toggle');
+  assert.ok(source.includes('overflowWrap.contains(event.target)'), 'outside clicks close without stealing focus');
+  assert.ok(source.includes("querySelector('button')?.focus"), 'opening moves focus to the first menu item');
+  assert.ok(source.includes("element('button'"), 'menu items are real buttons, keyboard reachable');
+  assert.ok(source.includes("classList.toggle('is-active'"), 'active pill highlight toggles with the tab');
+});
+
+test('overflow items reuse existing destinations, profiles resolve via the own-profile endpoint', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes("showTab('decks')"), 'Decks item mounts the untouched hub');
+  assert.ok(source.includes('renderDecksHub(body)'), 'Decks destination still mounts the untouched hub');
+  assert.ok(source.includes("bell.addEventListener('click', openNotifications)"), 'standalone bell stays');
+  assert.ok(source.includes('openNotifications()'), 'Notifications item reuses the same inbox action');
+  assert.ok(source.includes('/api/users/me'), 'own profile resolves through the existing own-profile endpoint');
+  assert.ok(source.includes('openProfile(ownUsername)'), 'own profile reuses the standard profile path');
+  assert.ok(source.includes('Claim a username in Settings'), 'unclaimed usernames get guidance, never a dead navigation');
+  assert.ok(source.includes('Unable to open your profile.'), 'own-profile failure toasts');
 });
 
 test('bottom nav keeps tab semantics, keyboard reachability and active state', () => {
@@ -510,8 +543,9 @@ test('share entry reuses the feed composer instead of inventing a new one', () =
 
 test('community nav glyphs all resolve inside the shared icons.js set', () => {
   const source = readSource('src/icons.js');
-  for (const key of ['home:', 'users:', 'bell:', 'plus:', 'dots:']) {
+  for (const key of ['home:', 'users:', 'bell:', 'plus:', 'dots:', 'book:', 'user:']) {
     assert.ok(source.includes(key), `icons.js serves "${key}"`);
   }
   assert.ok(source.includes('House') && source.includes('Users') && source.includes('Bell') && source.includes('Plus') && source.includes('Ellipsis'), 'lucide glyphs reused, no inline one-off SVG');
+  assert.ok(source.includes('BookOpen'), 'overflow Decks item reuses the existing book-family glyph');
 });

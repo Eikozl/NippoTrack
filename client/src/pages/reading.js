@@ -448,7 +448,6 @@ async function renderLibraryView(container) {
 
   container.replaceChildren(element('section', { className: 'mx-auto w-full max-w-6xl' }, [
     pageHeader({
-      eyebrow: 'Library',
       title: 'Graded Reading',
       description: 'Read real Japanese matched to your level. Tap annotated words to study them.'
     }),
@@ -1526,7 +1525,6 @@ async function renderProgressView(container) {
   container.replaceChildren(element('section', { className: 'mx-auto w-full max-w-4xl' }, [
     element('a', { className: 'text-sm font-medium text-muted underline-offset-4 hover:text-ink hover:underline', text: '← Back to library', attrs: { href: '#reading' } }),
     pageHeader({
-      eyebrow: 'Statistics',
       title: 'Reading progress',
       description: 'Your reading activity in minutes. Kanji coverage lives on the Statistics page.'
     }),

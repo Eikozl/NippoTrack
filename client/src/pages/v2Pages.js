@@ -43,7 +43,7 @@ const sharedLinkGroups = ['sessions', 'vocabulary', 'kanji', 'grammar'];
 
 export const CONFIGS = {
   goals: {
-    endpoint: '/api/goals', id: 'id_goal', eyebrow: 'Plan', title: 'Goals', singular: 'goal', description: 'Set measurable targets; progress is calculated from your real records.', emptyDescription: 'Goals help you turn study intentions into measurable targets. Progress updates automatically from your sessions and library entries.',
+    endpoint: '/api/goals', id: 'id_goal', title: 'Goals', singular: 'goal', description: 'Set measurable targets; progress is calculated from your real records.', emptyDescription: 'Goals help you turn study intentions into measurable targets. Progress updates automatically from your sessions and library entries.',
     fields: [
       { name: 'title', label: 'Title', required: true, maxLength: 120 },
       { name: 'goal_type', label: 'Measure', required: true, options: [{ value: '', label: 'Choose a measure' }, ...measureOptions] },
@@ -62,7 +62,7 @@ export const CONFIGS = {
     ]
   },
   content: {
-    endpoint: '/api/content', id: 'id_content_entry', eyebrow: 'Log', title: 'Content Log', singular: 'content entry', description: 'Record what you watched, read, listened to, or used for study. Sessions record focused study time.', emptyDescription: 'Content entries record the Japanese media or conversations you spend time with, so you can remember what you studied and how it felt.',
+    endpoint: '/api/content', id: 'id_content_entry', title: 'Content Log', singular: 'content entry', description: 'Record what you watched, read, listened to, or used for study. Sessions record focused study time.', emptyDescription: 'Content entries record the Japanese media or conversations you spend time with, so you can remember what you studied and how it felt.',
     linkGroups: ['sessions'],
     // Stories link to study sessions from the Content Log UX (user-approved
     // V5.6 addition). Backend link endpoints, relation tables, and stored
@@ -83,7 +83,7 @@ export const CONFIGS = {
     ]
   },
   notes: {
-    endpoint: '/api/notes', id: 'id_note', eyebrow: 'Capture', title: 'Notes', singular: 'note', description: 'Save questions, corrections, resources and free-form study notes.', emptyDescription: 'Notes give you a place to keep explanations, questions, corrections and useful resources outside a single vocabulary or grammar entry.',
+    endpoint: '/api/notes', id: 'id_note', title: 'Notes', singular: 'note', description: 'Save questions, corrections, resources and free-form study notes.', emptyDescription: 'Notes give you a place to keep explanations, questions, corrections and useful resources outside a single vocabulary or grammar entry.',
     // Manual vocabulary/kanji/grammar linking is hidden from the normal
     // Notes UX; session linking stays. Backend link endpoints, relation
     // tables, and stored relationships are fully preserved.
@@ -96,7 +96,7 @@ export const CONFIGS = {
     card: (item) => [noteCategoryLabel(item.category), item.body, item.updated_at ? `Updated ${formatDate(item.updated_at)}` : '']
   },
   tags: {
-    endpoint: '/api/tags', id: 'id_tag', eyebrow: 'Organize', title: 'Tags', singular: 'tag', description: 'Create reusable labels for the V2 relationship features.', emptyDescription: 'Tags are short reusable labels—such as “Genki”, “N5” or “travel”—that will help you group and find related study records as relationships are added.',
+    endpoint: '/api/tags', id: 'id_tag', title: 'Tags', singular: 'tag', description: 'Create reusable labels for the V2 relationship features.', emptyDescription: 'Tags are short reusable labels—such as “Genki”, “N5” or “travel”—that will help you group and find related study records as relationships are added.',
     linkGroups: sharedLinkGroups,
     fields: [{ name: 'name', label: 'Name', required: true, maxLength: 60 }],
     card: (item) => [item.normalized_name, '', '']
@@ -154,7 +154,7 @@ export function renderV2Page(container, kind) {
   let page = 1;
 
   container.replaceChildren(element('section', {}, [
-    pageHeader({ eyebrow: config.eyebrow, title: config.title, description: config.description, action: addButton }),
+    pageHeader({ title: config.title, description: config.description, action: addButton }),
     search,
     element('div', { className: 'mt-5' }, [records])
   ]));

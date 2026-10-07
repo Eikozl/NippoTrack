@@ -21,14 +21,18 @@ export function element(tagName, { className, text, attrs, dataset } = {}, child
   return node;
 }
 
-export function pageHeader({ eyebrow, title, description, action }) {
+// v6.1: decorative section eyebrows retired — the small-caps descriptor above
+// the title restated the section and read as AI-generated. The `eyebrow`
+// param stays accepted so existing call sites keep working, but it is
+// intentionally never rendered. Functional labels (onboarding steps,
+// landing copy, kanji ownership) live outside this helper and are untouched.
+export function pageHeader({ eyebrow: _eyebrow, title, description, action }) {
   const headerIcon = iconForTitle(title);
   const heading = element('div', { className: 'flex items-center gap-3' }, [
     ...(headerIcon ? [iconTile(headerIcon, { className: 'page-header-icon' })] : []),
     element('h1', { className: 'font-display text-2xl font-semibold tracking-tight text-ink sm:text-3xl', text: title })
   ]);
   const copy = element('div', {}, [
-    element('p', { className: 'eyebrow', text: eyebrow }),
     element('div', { className: 'mt-2' }, [heading]),
     element('p', { className: 'mt-2 max-w-2xl text-sm leading-6 text-muted', text: description })
   ]);

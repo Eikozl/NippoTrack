@@ -313,7 +313,7 @@ export async function renderSettings(container) {
     return button;
   }));
   container.replaceChildren(element('section', {}, [
-    pageHeader({ eyebrow: 'Preferences', title: 'Settings', description: 'Your profile, learning preferences, appearance, and account actions.' }),
+    pageHeader({ title: 'Settings', description: 'Your profile, learning preferences, appearance, and account actions.' }),
     element('div', { className: 'settings-layout max-w-6xl' }, [sectionNav, panel])
   ]));
 

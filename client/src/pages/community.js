@@ -1064,7 +1064,6 @@ export async function renderCommunity(container) {
   const { mountSocialFeed } = await import('./communityFeed.js');
   container.replaceChildren(element('section', {}, [
     pageHeader({
-      eyebrow: 'Social',
       title: 'Community',
       description: 'Learn Japanese with other learners: follow people, share what you study, save what inspires you.'
     })

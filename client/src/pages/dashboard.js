@@ -53,7 +53,6 @@ function studyNowSection(studyNow) {
   return element('section', { className: 'surface study-now p-5 sm:p-6', attrs: { 'aria-label': 'Study now recommendation' } }, [
     element('div', { className: 'flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between' }, [
       element('div', { className: 'min-w-0' }, [
-        element('p', { className: 'eyebrow', text: 'Study now' }),
         element('h2', { className: 'mt-1 font-display text-lg font-semibold tracking-tight text-ink', text: primary.title || 'Keep studying' }),
         element('p', { className: 'mt-1 max-w-2xl text-sm leading-6 text-muted', text: primary.reason || '' }),
         ...(primary.estimate ? [element('p', { className: 'mt-2 text-xs font-semibold uppercase tracking-[0.13em] text-muted', text: primary.estimate })] : [])
@@ -215,7 +214,6 @@ function continueSection(studyNow) {
       attrs: { href: `#reading?id=${encodeURIComponent(cont.reading.id)}`, 'aria-label': `Continue reading ${cont.reading.title || 'your text'}` }
     }, [
       element('div', { className: 'min-w-0' }, [
-        element('p', { className: 'eyebrow', text: 'Reading' }),
         element('p', { className: 'mt-1 break-words font-semibold text-ink', text: cont.reading.title || 'Untitled text' }),
         element('p', { className: 'mt-1 text-xs text-muted', text: 'Pick up where you left off' })
       ]),
@@ -230,7 +228,6 @@ function continueSection(studyNow) {
       attrs: { href: `#review?retake=${encodeURIComponent(cont.reviewSession.id)}`, 'aria-label': `Resume review session with ${remaining} cards left` }
     }, [
       element('div', { className: 'min-w-0' }, [
-        element('p', { className: 'eyebrow', text: 'Review' }),
         element('p', { className: 'mt-1 break-words font-semibold text-ink', text: `Unfinished review — ${remaining} of ${total} left` }),
         element('p', { className: 'mt-1 text-xs text-muted', text: 'Resume where you left off' })
       ]),
@@ -324,7 +321,7 @@ function isEmptyDashboardSnapshot(data) {
 export async function renderDashboard(container) {
   destroyCharts();
   const content = element('div', { className: 'dashboard-frame' });
-  container.replaceChildren(element('section', {}, [pageHeader({ eyebrow: 'Study home', title: 'Dashboard', description: 'Your learning home — what to do now, and what you’ve done.' }), content]));
+  container.replaceChildren(element('section', {}, [pageHeader({ title: 'Dashboard', description: 'Your learning home — what to do now, and what you’ve done.' }), content]));
   content.replaceChildren(loadingState('Loading your study overview…'));
   async function load() {
     try {

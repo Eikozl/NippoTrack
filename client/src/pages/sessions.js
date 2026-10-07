@@ -253,7 +253,6 @@ export function renderSessions(container) {
 
   container.replaceChildren(element('section', {}, [
     pageHeader({
-      eyebrow: 'Record',
       title: 'Study sessions',
       description: 'Record focused time and connect it to the material you studied.',
       action: addButton

@@ -87,7 +87,6 @@ export async function renderImmersion(container) {
 
   container.replaceChildren(element('section', {}, [
     pageHeader({
-      eyebrow: 'Study tools',
       title: 'Immersion',
       description: 'Paste a text you are reading, pick the words, kanji, and grammar you want to study, and turn them into a review session.'
     }),

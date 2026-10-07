@@ -351,16 +351,93 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   bell.addEventListener('click', openNotifications);
   tabs.appendChild(bell);
 
-  // Decks hub overflow entry (three-dots): the legacy hub still mounts
-  // untouched via renderDecksHub — only its entry point moved into the pill.
+  // Overflow menu (three-dots): profiles were reachable only from
+  // publications, so the "…" entry is now a small popup menu instead of a
+  // straight jump to the Decks hub. Same menu pattern as the post actions
+  // above (role=menu/menuitem, Esc/outside-click close, focus return, real
+  // buttons). The standalone bell stays — this menu only duplicates its
+  // action for thumb reach. The legacy decks hub still mounts untouched via
+  // renderDecksHub; only its entry point moved behind the Decks item.
   const decksDef = { key: 'decks', label: 'Decks', iconName: 'dots' };
-  const decksButton = element('button', {
+  const overflowWrap = element('div', { className: 'relative shrink-0' });
+  const overflowButton = element('button', {
     className: navButtonClass,
-    attrs: { type: 'button', role: 'tab', 'aria-selected': 'false', 'aria-label': decksDef.label }
+    attrs: { type: 'button', 'aria-label': 'More options', 'aria-haspopup': 'menu', 'aria-expanded': 'false' }
   }, [icon(decksDef.iconName, { size: 22 })]);
-  decksButton.addEventListener('click', () => showTab(decksDef.key));
-  tabButtons.set(decksDef.key, decksButton);
-  tabs.appendChild(decksButton);
+  // Opens upward from the floating pill (never under the home indicator);
+  // right-aligned to the toggle with a viewport-width cap so the menu never
+  // overflows at 360px.
+  const overflowMenu = element('div', {
+    className: 'absolute bottom-full right-0 z-50 mb-2 hidden w-52 max-w-[calc(100vw-2rem)] rounded-2xl border border-stone/60 bg-paper p-1.5 shadow-lg',
+    attrs: { role: 'menu', 'aria-label': 'More community options' }
+  });
+  const closeOverflow = (refocus = false) => {
+    if (overflowMenu.classList.contains('hidden')) return;
+    overflowMenu.classList.add('hidden');
+    overflowButton.setAttribute('aria-expanded', 'false');
+    if (refocus) { try { overflowButton.focus(); } catch { /* focus is best-effort */ } }
+  };
+  const openOverflow = () => {
+    overflowMenu.classList.remove('hidden');
+    overflowButton.setAttribute('aria-expanded', 'true');
+    try {
+      overflowMenu.querySelector('button')?.focus({ preventScroll: true });
+    } catch { /* focus is best-effort */ }
+  };
+  overflowButton.addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (overflowMenu.classList.contains('hidden')) openOverflow();
+    else closeOverflow(false);
+  });
+  overflowButton.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') { event.stopPropagation(); closeOverflow(true); }
+  });
+  overflowMenu.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') { event.stopPropagation(); closeOverflow(true); }
+  });
+  document.addEventListener('click', (event) => {
+    if (overflowWrap.contains(event.target)) return;
+    closeOverflow(false);
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !overflowMenu.classList.contains('hidden')) closeOverflow(true);
+  });
+  const addOverflowItem = (label, itemIconName, handler) => {
+    const item = element('button', {
+      className: 'flex min-h-11 w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-ink transition hover:bg-paper',
+      attrs: { type: 'button', role: 'menuitem' }
+    }, [icon(itemIconName, { size: 18 }), element('span', { text: label })]);
+    item.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      closeOverflow(true);
+      await handler();
+    });
+    overflowMenu.appendChild(item);
+    return item;
+  };
+  addOverflowItem(decksDef.label, 'book', async () => { await showTab(decksDef.key); });
+  addOverflowItem('My profile', 'user', async () => {
+    // Own profile: the viewer username comes from the existing own-profile
+    // endpoint (GET /api/users/me, same one Settings + the composer use),
+    // then reuses the standard openProfile/renderProfile path — so the
+    // followers/following lists on the own profile lead onward to any other
+    // profile. Unclaimed usernames stay in Community with guidance instead
+    // of a dead navigation.
+    try {
+      const me = await apiRequest('/api/users/me');
+      const ownUsername = me?.username || me?.user?.username || null;
+      if (!ownUsername) {
+        showToast('Claim a username in Settings to open your profile.', 'error');
+        return;
+      }
+      openProfile(ownUsername);
+    } catch (error) {
+      showToast(error?.message || 'Unable to open your profile.', 'error');
+    }
+  });
+  addOverflowItem('Notifications', 'bell', async () => { await openNotifications(); });
+  overflowWrap.append(overflowButton, overflowMenu);
+  tabs.appendChild(overflowWrap);
   // Phase 7-frontend trimming: cheap badge — GET unread-count (single indexed
   // COUNT) for mount + after-inbox-close, never list?limit=1. Inbox
   // open/mark-read/mark-all flows below are unchanged.
@@ -382,6 +459,10 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       button.setAttribute('aria-selected', String(active));
       button.classList.toggle('is-active', active);
     }
+    // The overflow toggle is an action button (not a tab), so it carries no
+    // aria-selected — but it keeps the same .is-active pill highlight while
+    // the Decks destination it opens is current.
+    overflowButton.classList.toggle('is-active', state.tab === 'decks' && !state.profile);
   }
 
   async function showTab(tab) {
@@ -1960,7 +2041,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
             const parts = [
               (counts.vocabulary === null || counts.vocabulary === undefined) ? null : `${counts.vocabulary} words`,
               (counts.kanji === null || counts.kanji === undefined) ? null : `${counts.kanji} kanji`,
-              (counts.grammar === null || counts.grammar === undefined) ? null : `${counts.grammar} patterns`
+              (counts.grammar === null || counts.grammar === undefined) ? null : `${counts.grammar} grammar`
             ].filter(Boolean);
             if (!parts.length) return [];
             return [element('p', { className: 'text-muted', text: parts.join(' · ') })];

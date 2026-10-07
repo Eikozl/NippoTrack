@@ -21,7 +21,8 @@ test('dashboard fetches Study Now fail-open alongside existing signals', () => {
 test('Study Now renders explainable next action with CTA', () => {
   const source = readSource('src/pages/dashboard.js');
   assert.ok(source.includes('function studyNowSection'), 'dedicated section');
-  assert.ok(source.includes('Study now'), 'eyebrow labels the recommendation');
+  assert.ok(!source.includes("text: 'Study now'"), 'decorative eyebrow removed from the recommendation');
+  assert.ok(source.includes('Study now recommendation'), 'section keeps its accessible name, not a decorative eyebrow');
   assert.ok(source.includes('aria-label'), 'accessible section label');
   assert.ok(source.includes('button-primary'), 'primary CTA reuses existing style');
   assert.ok(source.includes('min-h-11'), 'touch target meets mobile minimum');
@@ -45,7 +46,7 @@ test('Study Now never blocks dashboard when payload is missing', () => {
 
 test('dashboard header frames Study Home without breaking routes', () => {
   const source = readSource('src/pages/dashboard.js');
-  assert.ok(source.includes('Study home'), 'study-home eyebrow');
+  assert.ok(!source.includes('Study home'), 'decorative study-home eyebrow removed');
   assert.ok(source.includes("title: 'Dashboard'"), 'stable title for existing tests/routes');
 });
 

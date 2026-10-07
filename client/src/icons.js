@@ -35,6 +35,7 @@ const ICONS = {
   users: Users,
   home: House,
   bell: Bell,
+  book: BookOpen,
   plus: Plus,
   dots: Ellipsis,
   menu: Menu,

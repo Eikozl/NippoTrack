@@ -414,7 +414,6 @@ export async function renderReview(container) {
   const heroSurface = element('div', { className: 'surface p-5 sm:p-8' });
 
   const introBlock = element('div', {}, [
-    element('p', { className: 'eyebrow', text: 'Review' }),
     element('h2', { className: 'mt-2 text-2xl font-semibold tracking-tight text-ink sm:text-3xl', text: 'Want to review your JLPT study?', attrs: { tabindex: '-1' } }),
     element('p', { className: 'mt-3 max-w-2xl text-sm leading-6 text-muted', text: 'Short recall now saves re-study later. Again, Hard and Good only set timing — pick how each item felt and keep going.' })
   ]);
@@ -818,7 +817,7 @@ export async function renderReview(container) {
   patternsBlock.hidden = true;
 
   container.replaceChildren(element('section', {}, [
-    pageHeader({ eyebrow: 'Recall', title: 'Review', description: 'Choose recent activity and review it at a steady pace.' }),
+    pageHeader({ title: 'Review', description: 'Choose recent activity and review it at a steady pace.' }),
     heroSurface,
     summaryBar,
     candidatesBlock,
