@@ -330,7 +330,13 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   // Share (+) is an action button co-located in the same pill for thumb reach
   // (same toolbar pattern as the app header actions). The bell lives ONLY in
   // the … overflow menu — no standalone bell in the pill, no duplicate.
-  tabs.className = 'community-bottom-nav fixed bottom-4 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 items-center justify-between gap-1 rounded-full border border-stone/60 bg-paper/80 px-2 py-2 shadow-lg backdrop-blur-md';
+  // Desktop centering: the pill is viewport-fixed, but on lg+ the app shell
+  // shows a 17rem sticky sidebar (index.html lg:grid-cols-[17rem_1fr]), so
+  // viewport centering would sit half-a-sidebar left of the content column.
+  // lg:left shifts the anchor by half the sidebar (8.5rem) so -translate-x-1/2
+  // centers the pill within the MAIN CONTENT column. Below lg there is no
+  // sidebar (off-canvas drawer), so the base left-1/2 viewport centering stays.
+  tabs.className = 'community-bottom-nav fixed bottom-4 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 items-center justify-between gap-1 rounded-full border border-stone/60 bg-paper/80 px-2 py-2 shadow-lg backdrop-blur-md lg:left-[calc(50%+8.5rem)]';
   tabs.setAttribute('role', 'tablist');
   tabs.setAttribute('aria-label', 'Community sections');
   // Safe-area: the pill floats above the home indicator, never under it.
@@ -1314,7 +1320,11 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   function openPostDialog(postId, { onProfile, onRefresh, focusComments = false } = {}) {
     apiRequest(`/api/community/posts/${encodeURIComponent(postId)}`).then((post) => {
       const like = likeButton(post);
-      const commentsWrap = element('div', { className: 'grid gap-2' }, [skeleton({ rows: 2, variant: 'rows', label: 'Loading comments…' })]);
+      // Desktop dead-space fix: the comments region scrolls internally once it
+      // passes ~38vh on sm+ (sm: prefix, so mobile keeps its natural height).
+      // Long threads no longer push the footer an ocean away; short threads
+      // (1-2 comments) leave no blank to scroll. Reply styling untouched.
+      const commentsWrap = element('div', { className: 'grid min-w-0 gap-2 sm:max-h-[38vh] sm:overflow-y-auto sm:overscroll-contain sm:pr-1' }, [skeleton({ rows: 2, variant: 'rows', label: 'Loading comments…' })]);
       commentsWrap.setAttribute('aria-busy', 'true');
       const input = element('input', { className: 'field-control', attrs: { type: 'text', maxlength: '1000', placeholder: 'Write a comment…', 'aria-label': 'Write a comment' } });
       const send = element('button', { className: 'icon-button shrink-0', text: '➤', attrs: { type: 'button', 'aria-label': 'Send comment' } });
@@ -1589,7 +1599,12 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       openDialog({
         title: `${post.authorDisplay || post.authorUsername || 'Someone'} · ${POST_TYPE_LABEL[post.postType] || post.postType}`,
         description: post.createdAt ? new Date(post.createdAt).toLocaleString() : '',
-        content: [element('div', { className: 'grid gap-3' }, [
+        // Desktop dead-space fix: the generic openDialog body is a 2-column grid
+        // on sm+ (ui.js), so this single content node spans both columns
+        // (sm:col-span-2) instead of leaving the whole right half an empty
+        // void. Tight gap-3, no min-height, no large gaps — the footer sits
+        // right under the content. Mobile stays single-column, unchanged.
+        content: [element('div', { className: 'grid min-w-0 gap-3 sm:col-span-2' }, [
           ...(post.japaneseText ? [element('p', { className: 'break-words font-jp text-lg leading-8 text-ink', text: post.japaneseText, attrs: { lang: 'ja' } })] : []),
           ...(post.title ? [element('p', { className: 'break-words font-semibold text-ink', text: post.title })] : []),
           ...(post.body ? [element('p', { className: 'break-words text-sm leading-6 text-ink/90', text: post.body })] : []),

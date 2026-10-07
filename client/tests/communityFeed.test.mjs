@@ -677,3 +677,28 @@ test('v6.1: bell lives ONLY in the … menu with badge on the toggle', () => {
   assert.ok(source.includes('bg-vermilion'), 'vermilion unread signal preserved on the toggle');
   assert.ok(!source.includes("icon('bell', { size: 22 })"), 'no standalone 22px bell glyph in the pill');
 });
+
+test('post dialog leaves no desktop dead space: full-width body, capped comments scroll', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('function openPostDialog'), 'post dialog builder exists');
+  assert.ok(source.includes('grid min-w-0 gap-3 sm:col-span-2'), 'single content node spans the full dialog body on desktop (no empty second column)');
+  assert.ok(source.includes('sm:max-h-[38vh]'), 'comments region capped on desktop so the footer stays reachable');
+  assert.ok(source.includes('sm:overflow-y-auto'), 'capped comments scroll internally on desktop');
+  assert.ok(source.includes('sm:overscroll-contain'), 'internal scroll does not chain to the page');
+  assert.ok(!source.includes("commentsWrap = element('div', { className: 'grid gap-2' }"), 'uncapped comments wrap gone');
+  assert.ok(source.includes("content: [element('div', { className: 'grid min-w-0 gap-3 sm:col-span-2' }"), 'post dialog body is the full-width node');
+  assert.ok(source.includes("submitLabel: 'Close'"), 'footer Close kept, reachable without scrolling whitespace');
+  assert.ok(source.includes('border-l-2 border-stone pl-2'), 'reply threading styling untouched');
+  assert.ok(source.includes('min-w-0 rounded-xl border border-stone bg-paper p-3'), 'comment card styling untouched');
+});
+
+test('bottom nav pill centers within the content column on desktop, viewport on mobile', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('lg:left-[calc(50%+8.5rem)]'), 'desktop anchor offset by half the 17rem sidebar so the pill centers on the content column');
+  assert.ok(source.includes('fixed bottom-4') && source.includes('left-1/2'), 'mobile keeps viewport centering (no sidebar below lg)');
+  assert.ok(source.includes('-translate-x-1/2'), 'centering translate preserved');
+  assert.ok(source.includes('max-w-md'), 'desktop width cap preserved');
+  assert.ok(source.includes('safe-area-inset-bottom'), 'home-indicator safe area preserved');
+  assert.ok(source.includes('bottom-full'), 'overflow menu still opens upward from the pill');
+  assert.ok(source.includes('overflowButton.appendChild(overflowBadge)'), 'unread badge stays on the … toggle');
+});

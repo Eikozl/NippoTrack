@@ -363,8 +363,11 @@ function dashboardStudyHomeSkeleton() {
     element('div', { className: 'skeleton-block mt-3 h-8 w-1/3' }),
     element('div', { className: 'skeleton-block mt-2 h-3 w-2/3' })
   ]);
-  const snapshot = element('div', { className: 'dashboard-metrics mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4', attrs: { 'aria-hidden': 'true' } }, [
-    metricCard(), metricCard(), metricCard(), metricCard()
+  // Six snapshot tiles fill two full rows of three on desktop
+  // (sm 2 cols = three full rows, mobile single column). xl:grid-cols-4 left
+  // a 4+2 split with a half-empty void row at 1280-1920px.
+  const snapshot = element('div', { className: 'dashboard-metrics mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3', attrs: { 'aria-hidden': 'true' } }, [
+    metricCard(), metricCard(), metricCard(), metricCard(), metricCard(), metricCard()
   ]);
   // Goals preview + community pulse share the compact card shape above; one
   // representative row covers that area without reserving full page height.
@@ -468,7 +471,7 @@ export async function renderDashboard(container) {
         // V5.6 Completion Pass: the metrics grid no longer duplicates what
         // Study Now (due reviews → action) and Today's Progress (today's
         // minutes → done) already answer. It keeps week/streaks/collection.
-        element('div', { className: 'dashboard-metrics reveal-group grid gap-4 sm:grid-cols-2 xl:grid-cols-4' }, [metric('week', 'This week', data.minutesThisWeek, 'minutes studied'), metric('streak', 'Current streak', activity.currentStreak, 'consecutive active days'), metric('streak', 'Longest streak', activity.longestStreak, 'best run of active days'), metric('vocabulary', 'Vocabulary', data.vocabularyCount, 'saved words', 'vocabulary'), metric('kanji', 'Kanji', data.kanjiCount, 'tracked characters', 'kanji'), metric('grammar', 'Grammar', data.grammarCount, 'saved patterns', 'grammar')]),
+        element('div', { className: 'dashboard-metrics reveal-group grid gap-4 sm:grid-cols-2 xl:grid-cols-3' }, [metric('week', 'This week', data.minutesThisWeek, 'minutes studied'), metric('streak', 'Current streak', activity.currentStreak, 'consecutive active days'), metric('streak', 'Longest streak', activity.longestStreak, 'best run of active days'), metric('vocabulary', 'Vocabulary', data.vocabularyCount, 'saved words', 'vocabulary'), metric('kanji', 'Kanji', data.kanjiCount, 'tracked characters', 'kanji'), metric('grammar', 'Grammar', data.grammarCount, 'saved patterns', 'grammar')]),
         // Zero eligible goals: this section never renders — no empty card,
         // no placeholder, no reserved space.
         ...(previewGoals.length ? [goalsPreview(previewGoals, eligibleGoals.length > 3)] : []),

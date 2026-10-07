@@ -159,7 +159,7 @@ test('v6.1: dashboard skeleton covers Study Now, today, continue, snapshot/goals
   assert.ok(source.includes('skeleton-block h-4 w-5/6'), 'Study Now reason text lines');
   assert.ok(source.includes('skeleton-block h-11 w-28'), 'Study Now CTA button shape');
   assert.ok(source.includes('flex items-baseline justify-between gap-3 py-2'), 'Today rows mirror label/counter layout');
-  assert.ok(source.includes('dashboard-metrics mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4'), 'snapshot grid matches real metrics spacing');
+  assert.ok(source.includes('dashboard-metrics mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3'), 'snapshot grid matches real metrics spacing (two full rows of three, no half-empty row)');
   assert.ok(source.includes('metric-card p-5'), 'metric tile shape with counter lines');
   assert.ok(source.includes('mt-3 grid gap-4 sm:grid-cols-2'), 'Continue/goals cards match real grid spacing');
   assert.ok(source.includes('skeleton-block h-8 w-20'), 'Continue card button shape');
@@ -168,4 +168,14 @@ test('v6.1: dashboard skeleton covers Study Now, today, continue, snapshot/goals
   const css = readSource('src/styles.css');
   assert.ok(css.includes('.skeleton-block'), 'shimmer style shared');
   assert.ok(css.includes('prefers-reduced-motion'), 'reduced-motion still stills the shimmer');
+});
+
+test('dashboard snapshot fills whole rows on desktop: 6 tiles in 3 columns', () => {
+  const source = readSource('src/pages/dashboard.js');
+  assert.ok(source.includes('dashboard-metrics reveal-group grid gap-4 sm:grid-cols-2 xl:grid-cols-3'), 'real metrics grid uses 3 desktop columns (3+3, no 4+2 void)');
+  assert.ok(!source.includes('dashboard-metrics reveal-group grid gap-4 sm:grid-cols-2 xl:grid-cols-4'), 'old 4-column void layout gone');
+  for (const label of ['This week', 'Current streak', 'Longest streak', 'Vocabulary', 'Kanji', 'Grammar']) {
+    assert.ok(source.includes(`'${label}'`), `tile "${label}" kept (design untouched)`);
+  }
+  assert.ok(source.includes('metricCard(), metricCard(), metricCard(), metricCard(), metricCard(), metricCard()'), 'skeleton mirrors all six tiles');
 });
