@@ -54,11 +54,20 @@ test('deck viewer lays items out in a wrapping multi-column grid', () => {
   assert.ok(source.includes('grid-cols-2') && source.includes('xl:grid-cols-3'), 'columns from mobile up, more when space allows');
 });
 
-test('composer stays collapsed behind a summary toggle', () => {
+test('composer lives ONLY in the + dialog, no inline card remains', () => {
   const source = readSource('src/pages/communityFeed.js');
-  assert.ok(source.includes('data-composer'), 'composer identifiable');
-  assert.ok(source.includes('aria-expanded'), 'toggle exposes state');
-  assert.ok(source.includes('setCollapsed(true)'), 'collapses after publish');
+  assert.ok(!source.includes('data-composer'), 'no inline composer card left behind');
+  assert.ok(!source.includes('composerCard'), 'inline builder gone');
+  assert.ok(!source.includes('setCollapsed'), 'collapsed teaser gone');
+  assert.ok(source.includes('function openComposerDialog'), 'dialog builder is the sole entry');
+  assert.ok(source.includes("title: 'Share something'"), 'dialog titled');
+  assert.ok(source.includes('Closing discards your draft'), 'draft-loss documented, Escape cancels');
+  assert.ok(source.includes("submitLabel: 'Publish'"), 'dialog publishes');
+  assert.ok(source.includes('Published to Community.'), 'toast + close + refresh on success');
+  assert.ok(source.includes('COMPOSER_GROUPS'), 'same 9 grouped picker');
+  assert.ok(source.includes("element('optgroup'"), 'grouped picker unchanged');
+  assert.ok(source.includes('Object.assign(payload, link)'), 'payloads byte-identical');
+  assert.ok(!source.includes('innerHTML'), 'no innerHTML in composer');
 });
 
 test('shared deck items show han characters, never generic placeholders', () => {
@@ -194,7 +203,7 @@ test('legacy latest and following tabs stay untouched', () => {
   assert.ok(source.includes('function feedLoader'), 'paged feed loader preserved');
   assert.ok(source.includes("state.tab === 'following'"), 'following tab still routes');
   assert.ok(source.includes("'following' : 'latest'") || source.includes("'latest'"), 'latest tab still routes');
-  assert.ok(source.includes('composerCard'), 'composer untouched');
+  assert.ok(source.includes('openComposerDialog'), 'composer dialog entry preserved');
   assert.ok(source.includes('Your community is quiet'), 'following empty state untouched');
 });
 
@@ -283,20 +292,25 @@ test('kanji saves require a single Han character before any request', () => {
   assert.ok(source.includes('deckItemSaveable'), 'deck per-item gating reuses the same rule');
 });
 
-test('shared vocab/kanji/grammar boxes gain Practice and Details via existing routes only', () => {
+test('shared vocab/kanji/grammar boxes keep the honest Practice hub link', () => {
   const source = readSource('src/pages/communityFeed.js');
   assert.ok(source.includes('Practice in Review'), 'practice action present');
-  assert.ok(source.includes("href: '#review'"), 'practice links the existing review hub');
+  assert.ok(source.includes("href: '#review'"), 'single-item practice keeps the hub link (documented kept link)');
+  assert.ok(source.includes('KEPT hub link'), 'kept link documented in code');
   assert.ok(source.includes('save first to include'), 'practice never claims the item is queued');
   assert.ok(source.includes('kanji-reference/'), 'kanji details reuse the existing reference route');
   assert.ok(source.includes('function detailsLink') || source.includes('Details'), 'details helper present with omission for vocab/grammar');
 });
 
-test('shared deck viewer adds Start Review beside Save-all with gated per-item saves', () => {
+test('shared deck viewer Start Review builds a real session, never a hub link', () => {
   const source = readSource('src/pages/communityFeed.js');
   assert.ok(source.includes('Start Review'), 'deck viewer review entry present');
-  assert.ok(source.includes("href: '#review'"), 'deck review links the existing hub, no new study logic');
-  assert.ok(source.includes('topRow') || source.includes('Save all'), 'save-all stays beside the new link');
+  assert.ok(!source.includes("text: 'Start Review', attrs: { href:"), 'deck Start Review is a button, not a bare #review link');
+  assert.ok(source.includes('/api/review/sessions'), 'session creation contract used');
+  assert.ok(source.includes('ensureDeckOwnedId'), 'foreign snapshots saved first to owned ids');
+  assert.ok(source.includes('jlt-immersion-review-queue'), 'immersion hand-off pattern reused');
+  assert.ok(source.includes('#review?reviewSessionId='), 'navigates to the created session');
+  assert.ok(source.includes('topRow') || source.includes('Save all'), 'save-all stays beside the session button');
   assert.ok(source.includes("lang: 'ja'"), 'deck han labels tagged lang=ja');
 });
 
@@ -396,8 +410,8 @@ test('comment/menu polish uses errorState, Escape, and loading-first viewers', (
   assert.ok(source.includes('errorState(error, () => load'), 'timeline/notifications/deck viewers retry in place');
   assert.ok(source.includes("'Escape'") && source.includes('close(true)'), 'post menu Escape-closes');
   assert.ok(source.includes('toggle.focus()'), 'post menu returns focus to the toggle');
-  assert.ok(source.includes("loadingState('Loading deck"), 'deck viewer opens with a skeleton first');
-  assert.ok(source.includes("loadingState('Loading preview"), 'reading preview opens with a skeleton first');
+  assert.ok(source.includes("skeleton({ rows: 4, variant: 'grid'"), 'deck viewer opens with a grid skeleton first');
+  assert.ok(source.includes("skeleton({ rows: 2, variant: 'cards'"), 'reading preview opens with a card skeleton first');
   assert.ok(source.includes('errorState(error, () => loadDeck'), 'deck errors stay in-dialog with retry');
   assert.ok(source.includes('errorState(error, () => loadPreview'), 'preview errors stay in-dialog with retry');
 });
@@ -531,13 +545,12 @@ test('bottom nav keeps tab semantics, keyboard reachability and active state', (
   assert.ok(styles.includes('.community-bottom-nav [role="tab"].is-active'), 'active state styled in the shared stylesheet');
 });
 
-test('share entry reuses the feed composer instead of inventing a new one', () => {
+test('share entry opens the composer dialog, the sole entry point', () => {
   const source = readSource('src/pages/communityFeed.js');
-  assert.ok(source.includes('data-composer'), 'share targets the existing composer');
-  assert.ok(source.includes("showTab('feed')"), 'share switches to the feed tab when needed');
-  assert.ok(source.includes('scrollIntoView'), 'share scrolls to the composer');
-  assert.ok(source.includes('.focus('), 'share focuses the composer');
-  assert.ok(source.includes('aria-expanded'), 'share expands the collapsed composer');
+  assert.ok(source.includes('openComposerDialog'), 'share opens the dialog composer');
+  assert.ok(!source.includes('data-composer'), 'no inline composer targeted');
+  assert.ok(!source.includes('scrollIntoView'), 'no scroll-to-card behavior remains');
+  assert.ok(source.includes("showTab('feed')"), 'publish refreshes the feed');
   assert.ok(source.includes("showTab('decks')"), 'decks overflow entry still mounts the untouched hub');
 });
 
@@ -548,4 +561,73 @@ test('community nav glyphs all resolve inside the shared icons.js set', () => {
   }
   assert.ok(source.includes('House') && source.includes('Users') && source.includes('Bell') && source.includes('Plus') && source.includes('Ellipsis'), 'lucide glyphs reused, no inline one-off SVG');
   assert.ok(source.includes('BookOpen'), 'overflow Decks item reuses the existing book-family glyph');
+});
+
+test('batch A: skeleton helper renders pulsing blocks with AT text and reduced-motion', () => {
+  const ui = readSource('src/ui.js');
+  assert.ok(ui.includes('export function skeleton'), 'additive skeleton helper exists');
+  assert.ok(ui.includes('skeleton-block'), 'pulsing placeholder blocks');
+  assert.ok(ui.includes("aria-hidden"), 'visual blocks aria-hidden');
+  assert.ok(ui.includes("role: 'status'") || ui.includes("role:'status'") || ui.includes('role'), 'role=status for AT');
+  assert.ok(ui.includes('visually-hidden'), 'Loading… text for AT, not bare visible text');
+  assert.ok(ui.includes('aria-label'), 'label announced');
+  const css = readSource('src/styles.css');
+  assert.ok(css.includes('.skeleton-block'), 'shimmer style exists');
+  assert.ok(css.includes('prefers-reduced-motion'), 'animation disabled under reduced-motion');
+});
+
+test('batch A: community async surfaces use skeletons with aria-busy, error/empty untouched', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('skeleton({'), 'skeleton helper used');
+  for (const label of ['Loading posts…', 'Loading Discover…', 'Searching…', 'Loading comments…', 'Loading deck…', 'Loading preview…', 'Loading notifications…', 'Loading…']) {
+    assert.ok(source.includes(label), `skeleton label "${label}" present`);
+  }
+  assert.ok(source.includes("variant: 'cards'"), 'cards shape for lists');
+  assert.ok(source.includes("variant: 'rows'"), 'rows shape for people/notifications');
+  assert.ok(source.includes("variant: 'grid'"), 'grid shape for deck viewer');
+  assert.ok(source.includes('aria-busy'), 'containers expose aria-busy while loading');
+  assert.ok(source.includes('errorState(error'), 'error semantics untouched');
+  assert.ok(source.includes('emptyState({'), 'empty semantics untouched');
+  assert.ok(!source.includes('innerHTML'), 'no innerHTML in skeleton rendering');
+});
+
+test('batch A: saving from Community confirms first with pending state', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  const ui = readSource('src/ui.js');
+  assert.ok(source.includes('saveEntityButton'), 'shared save entry present');
+  assert.ok(source.includes('confirmDialog({'), 'confirm wrapper used');
+  assert.ok(source.includes('Save "'), 'single confirm names what will be saved');
+  assert.ok(source.includes('to your library?'), 'confirm copy asks to save');
+  assert.ok(source.includes('Save ${items.length} items to your library?'), 'Save-all confirms with count');
+  assert.ok(source.includes("pendingLabel: 'Saving…'"), 'pending state on confirm');
+  assert.ok(source.includes("confirmClassName: 'button-primary'"), 'save confirm is not danger-styled');
+  assert.ok(ui.includes("pendingLabel"), 'confirmDialog supports pending labels');
+  assert.ok(source.includes('entityCreateBody(post.entityType'), 'honesty gates unchanged');
+  assert.ok(source.includes('deckItemSaveable'), 'deck gating unchanged');
+  assert.ok(!source.includes('innerHTML'), 'no innerHTML in confirm copy');
+});
+
+test('batch A: deck review saves foreign items first, then queues owned ids', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('/api/review/sessions'), 'session creation contract');
+  assert.ok(source.includes('sourceFrom') && source.includes('sourceTo'), 'date range sent');
+  assert.ok(source.includes('items: capped.map(({ entityType, entityId })'), 'queue carries identity only');
+  assert.ok(source.includes('ensureDeckOwnedId'), 'unsaved items saved first');
+  assert.ok(source.includes('findOwnedEntityId'), 'already-in-library reused, not duplicated');
+  assert.ok(source.includes('/api/vocabulary') && source.includes('/api/kanji') && source.includes('/api/grammar'), 'existing save endpoints reused');
+  assert.ok(source.includes('already in library'), 'honest already-count reported');
+  assert.ok(source.includes('skipped'), 'unqueueable items excluded with honest count');
+  assert.ok(source.includes('jlt-immersion-review-queue'), 'immersion hand-off storage reused');
+  assert.ok(source.includes('sessionStorage'), 'queue stashed per-tab');
+  assert.ok(source.includes('#review?reviewSessionId='), 'navigates to the created session');
+  assert.ok(source.includes('Unable to start the review.'), 'failure toasts, no navigation');
+});
+
+test('batch A: no bare deck #review links remain, kept hub link documented', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  const deckLinkMatches = source.match(/Start Review[\s\S]{0,200}href:\s*'#review'/g) || [];
+  assert.equal(deckLinkMatches.length, 0, 'deck Start Review is never a bare hub link');
+  assert.ok(source.includes("href: '#review'"), 'single kept hub link remains');
+  assert.ok(source.includes('KEPT hub link'), 'kept link documented with why a session cannot be built there');
+  assert.ok(!source.includes("href: '#review'") || source.includes('save first to include'), 'kept link never claims queueing');
 });

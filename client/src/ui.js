@@ -48,6 +48,68 @@ export function loadingState(label = 'Loading data…') {
   ]);
 }
 
+// Community skeletons (additive, loadingState untouched): pulsing placeholder
+// blocks shaped like the upcoming rows/cards. Visual blocks are aria-hidden;
+// AT hears role=status "Loading…" via the visually-hidden line. Pulse uses
+// .skeleton-block (nt-skeleton shimmer), which the stylesheet already stills
+// under prefers-reduced-motion (animation: none). Callers set aria-busy on
+// the loading container while the skeleton is shown.
+export function skeleton({ rows = 3, variant = 'cards', label = 'Loading…' } = {}) {
+  const count = Math.max(1, Math.min(6, Number(rows) || 3));
+  const visualChildren = [];
+  if (variant === 'grid') {
+    for (let index = 0; index < count; index += 1) {
+      visualChildren.push(element('div', { className: 'rounded-xl border border-stone bg-paper px-3 py-2' }, [
+        element('div', { className: 'skeleton-block h-4 w-3/4' }),
+        element('div', { className: 'skeleton-block mt-2 h-3 w-1/2' })
+      ]));
+    }
+    const visual = element('div', { className: 'grid min-w-0 grid-cols-2 gap-2 xl:grid-cols-3', attrs: { 'aria-hidden': 'true' } }, visualChildren);
+    return element('div', { className: 'grid gap-2', attrs: { role: 'status', 'aria-live': 'polite', 'aria-label': label } }, [
+      visual,
+      element('p', { className: 'visually-hidden', text: label })
+    ]);
+  }
+  if (variant === 'rows') {
+    for (let index = 0; index < count; index += 1) {
+      visualChildren.push(element('div', { className: 'surface flex items-center gap-3 p-3' }, [
+        element('span', { className: 'skeleton-block size-10 shrink-0 rounded-full' }),
+        element('div', { className: 'grid min-w-0 flex-1 gap-2' }, [
+          element('div', { className: 'skeleton-block h-4 w-1/3' }),
+          element('div', { className: 'skeleton-block h-3 w-2/3' })
+        ])
+      ]));
+    }
+    const visual = element('div', { className: 'grid gap-3', attrs: { 'aria-hidden': 'true' } }, visualChildren);
+    return element('div', { className: 'grid gap-2', attrs: { role: 'status', 'aria-live': 'polite', 'aria-label': label } }, [
+      visual,
+      element('p', { className: 'visually-hidden', text: label })
+    ]);
+  }
+  // Default 'cards' (also used for 'preview' text shapes): post-card shaped
+  // placeholders with a header row + text lines, like feed/discover/profile
+  // cards and the reading excerpt.
+  for (let index = 0; index < count; index += 1) {
+    visualChildren.push(element('div', { className: 'surface p-4 sm:p-5' }, [
+      element('div', { className: 'flex items-center gap-3' }, [
+        element('span', { className: 'skeleton-block size-10 shrink-0 rounded-full' }),
+        element('div', { className: 'grid flex-1 gap-2' }, [
+          element('div', { className: 'skeleton-block h-4 w-1/3' }),
+          element('div', { className: 'skeleton-block h-3 w-1/4' })
+        ])
+      ]),
+      element('div', { className: 'skeleton-block mt-3 h-4 w-5/6' }),
+      element('div', { className: 'skeleton-block mt-2 h-4 w-full' }),
+      element('div', { className: 'skeleton-block mt-2 h-4 w-2/3' })
+    ]));
+  }
+  const visual = element('div', { className: 'grid gap-3', attrs: { 'aria-hidden': 'true' } }, visualChildren);
+  return element('div', { className: 'grid gap-2', attrs: { role: 'status', 'aria-live': 'polite', 'aria-label': label } }, [
+    visual,
+    element('p', { className: 'visually-hidden', text: label })
+  ]);
+}
+
 export function emptyState({ title = 'Nothing here yet', description = 'Create your first record to get started.', icon = null, action = null } = {}) {
   return element('div', { className: 'surface empty-state grid min-h-52 place-items-center p-8 text-center' }, [
     element('div', { className: 'grid max-w-md justify-items-center' }, [
@@ -554,14 +616,14 @@ export function openDetailModal({ title, subtitle = null, content = [], actions 
   return close;
 }
 
-export function confirmDialog({ title = 'Confirm deletion', description, confirmLabel = 'Delete', onConfirm }) {
+export function confirmDialog({ title = 'Confirm deletion', description, confirmLabel = 'Delete', confirmClassName = 'button-danger', pendingLabel = 'Deleting…', onConfirm }) {
   return openDialog({
     title,
     description,
     content: [],
     submitLabel: confirmLabel,
-    submitClassName: 'button-danger',
-    pendingLabel: 'Deleting…',
+    submitClassName: confirmClassName,
+    pendingLabel,
     onSubmit: async (form, close) => {
       await onConfirm();
       close();

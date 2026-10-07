@@ -7,7 +7,7 @@ import { icon } from '../icons';
 import { speakJapanese } from '../speech.js';
 import {
   element, emptyState, errorState, loadingState, openDialog, confirmDialog,
-  showToast, withPendingAction
+  showToast, withPendingAction, skeleton
 } from '../ui';
 
 const POST_TYPE_LABEL = {
@@ -307,31 +307,20 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     tabs.appendChild(button);
   }
 
-  // Share (+) switches to the feed tab when needed, then scrolls to and
-  // focuses the composer ("Share something" lives there now) — expanding it
-  // when collapsed.
+  // Share (+) is the SOLE composer entry: it opens the full composer inside
+  // an openDialog (same 9 types, grouped picker, conditional fields,
+  // byte-identical payloads). Escape cancels and discards the draft
+  // (documented in the dialog description). No inline composer remains in
+  // the feed body.
   const share = element('button', {
     className: navButtonClass,
     attrs: { type: 'button', 'aria-label': 'Share something — open the composer' }
   }, [icon('plus', { size: 22 })]);
-  share.addEventListener('click', async () => {
-    if (state.tab !== 'feed' || state.profile) await showTab('feed');
-    const composer = body.querySelector('[data-composer]');
-    if (!composer) return;
-    const toggle = composer.querySelector(':scope > button[aria-expanded]');
-    if (toggle && toggle.getAttribute('aria-expanded') === 'false') toggle.click();
-    try {
-      composer.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    } catch {
-      composer.scrollIntoView();
-    }
-    window.setTimeout(() => {
-      try {
-        const target = composer.querySelector('textarea[aria-label="Post text"]')
-          || composer.querySelector('select, textarea, input, button');
-        target?.focus({ preventScroll: true });
-      } catch { /* focus is best-effort */ }
-    }, 60);
+  share.addEventListener('click', () => {
+    openComposerDialog(async () => {
+      if (state.profile || state.tab !== 'feed') await showTab('feed');
+      else renderFeedRoot();
+    });
   });
   tabs.appendChild(share);
 
@@ -677,7 +666,8 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   async function openReadingPreview(readingId, fallbackTitle) {
     // Loading-first: the dialog opens with a skeleton immediately, then the
     // excerpt (or an in-dialog errorState) replaces it. No fetch-then-open.
-    const bodyHost = element('div', { className: 'grid min-w-0 gap-3' }, [loadingState('Loading preview…')]);
+    const bodyHost = element('div', { className: 'grid min-w-0 gap-3' }, [skeleton({ rows: 2, variant: 'cards', label: 'Loading preview…' })]);
+    bodyHost.setAttribute('aria-busy', 'true');
     openDialog({
       title: fallbackTitle || 'Reading preview',
       description: 'Loading…',
@@ -686,12 +676,14 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       onSubmit: async (form, close) => close()
     });
     const loadPreview = async () => {
-      bodyHost.replaceChildren(loadingState('Loading preview…'));
+      bodyHost.setAttribute('aria-busy', 'true');
+      bodyHost.replaceChildren(skeleton({ rows: 2, variant: 'cards', label: 'Loading preview…' }));
       try {
         const detail = await apiRequest(`/api/reading/publications/${encodeURIComponent(readingId)}`);
         const points = Array.from(String(detail?.text || ''));
         const excerpt = points.length > 1500 ? `${points.slice(0, 1500).join('')}…` : points.join('');
         const meta = `${detail?.level ? `Level ${detail.level} (reference)` : 'No level'}${detail?.text ? ` · ${points.length.toLocaleString()} characters` : ''}`;
+        bodyHost.setAttribute('aria-busy', 'false');
         bodyHost.replaceChildren(element('div', { className: 'grid min-w-0 gap-3' }, [
           element('p', { className: 'break-words text-xs text-muted', text: meta }),
           excerpt
@@ -700,6 +692,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
           importReadingButton(readingId)
         ]));
       } catch (error) {
+        bodyHost.setAttribute('aria-busy', 'false');
         bodyHost.replaceChildren(errorState(error, () => loadPreview()));
       }
     };
@@ -707,9 +700,13 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   }
 
   function practiceLink() {
-    // Existing #review hub only: no per-entity deep link exists (review has
-    // no entity query param), so link the hub without claiming this item is
-    // queued. Honest title says to save first.
+    // KEPT hub link (single shared vocab/kanji/grammar): no per-entity deep
+    // link exists (review has no entity query param), and a 1-item session
+    // cannot be built without an implicit save of a foreign snapshot — the
+    // hub link honestly says "save first to include this item" instead of
+    // auto-saving + navigating. Deck viewer Start Review below DOES build a
+    // real session (save-then-queue), so this is the only kept '#review' hub
+    // link in Community.
     const link = element('a', { className: 'button-secondary inline-flex min-h-9 items-center px-3 py-1.5 text-xs', text: 'Practice in Review', attrs: { href: '#review', title: 'Opens Review — save first to include this item', 'aria-label': 'Open Review to practice your due items' } });
     link.addEventListener('click', (event) => event.stopPropagation());
     return link;
@@ -736,6 +733,100 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     if (!isUsableMeaning(entry?.meaning)) return false;
     if (kind === 'kanji' && !SINGLE_HAN.test(String(display))) return false;
     return true;
+  }
+
+  // Owned-id helpers for the deck review session flow (POST
+  // /api/review/sessions requires OWNED library ids: {entityType, entityId}).
+  // Deck snapshots are foreign, so unsaved items are saved first via the
+  // existing POST /api/vocabulary|kanji|grammar endpoints. Never fakes an id.
+  function ownedIdFromSaveResponse(kind, data) {
+    if (!data || typeof data !== 'object') return null;
+    const candidates = kind === 'kanji'
+      ? [data.id_kanji, data.idKanji, data.id, data.insertId]
+      : kind === 'grammar'
+        ? [data.id_grammar, data.idGrammar, data.id, data.insertId]
+        : [data.id_vocabulary, data.idVocabulary, data.id, data.insertId];
+    for (const candidate of candidates) {
+      const id = Number(candidate);
+      if (Number.isInteger(id) && id > 0) return id;
+    }
+    return null;
+  }
+
+  async function findOwnedEntityId(kind, display) {
+    const text = String(display || '').trim();
+    if (!text) return null;
+    const endpoint = kind === 'kanji' ? '/api/kanji/options' : kind === 'grammar' ? '/api/grammar/options' : '/api/vocabulary/options';
+    try {
+      const data = await apiRequest(`${endpoint}?search=${encodeURIComponent(text)}&limit=20`);
+      const rows = Array.isArray(data?.items) ? data.items : [];
+      for (const row of rows) {
+        if (!row || typeof row !== 'object') continue;
+        if (kind === 'kanji' && String(row.character_kanji || '') === text) {
+          const id = Number(row.id_kanji);
+          if (Number.isInteger(id) && id > 0) return id;
+        } else if (kind === 'grammar' && String(row.grammar_point || '') === text) {
+          const id = Number(row.id_grammar);
+          if (Number.isInteger(id) && id > 0) return id;
+        } else if (kind !== 'kanji' && kind !== 'grammar' && String(row.word || '') === text) {
+          const id = Number(row.id_vocabulary);
+          if (Number.isInteger(id) && id > 0) return id;
+        }
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  async function saveDeckItemReturningId(kind, entry) {
+    const display = deckItemDisplay(kind, entry);
+    const meaning = String(entry?.meaning || '').trim();
+    if (!display || !isUsableMeaning(meaning)) return null;
+    if (kind === 'kanji' && !SINGLE_HAN.test(String(display))) return null;
+    try {
+      let created = null;
+      if (kind === 'kanji') {
+        created = await apiRequest('/api/kanji', { method: 'POST', body: { character_kanji: display, meaning } });
+      } else if (kind === 'grammar') {
+        created = await apiRequest('/api/grammar', { method: 'POST', body: { grammar_point: display, meaning } });
+      } else {
+        created = await apiRequest('/api/vocabulary', { method: 'POST', body: { word: display, ...(entry.reading ? { reading: entry.reading } : {}), meaning } });
+      }
+      const entityId = ownedIdFromSaveResponse(kind, created);
+      return entityId ? { entityId, saved: true } : null;
+    } catch (error) {
+      if (error?.status === 409) {
+        const existing = error?.data?.existingKanji;
+        const existingId = Number(existing?.idKanji ?? existing?.id_kanji ?? existing?.id);
+        if (Number.isInteger(existingId) && existingId > 0) return { entityId: existingId, already: true };
+      }
+      return null;
+    }
+  }
+
+  // Search-first to avoid creating duplicates for vocabulary/grammar (which
+  // allow duplicate words): reuse the owned row when the exact display
+  // already exists, otherwise save. Returns {entityId, saved} or
+  // {entityId, already} or null (unsaveable/unqueueable — honestly skipped).
+  async function ensureDeckOwnedId(kind, entry) {
+    const display = deckItemDisplay(kind, entry);
+    if (!display || !deckItemSaveable(kind, entry)) return null;
+    const existing = await findOwnedEntityId(kind, display);
+    if (existing) return { entityId: existing, already: true };
+    const saved = await saveDeckItemReturningId(kind, entry);
+    if (saved) return saved;
+    const retry = await findOwnedEntityId(kind, display);
+    if (retry) return { entityId: retry, already: true };
+    return null;
+  }
+
+  function todayISODate() {
+    try {
+      return new Date().toISOString().slice(0, 10);
+    } catch {
+      return '2026-01-01';
+    }
   }
 
   function exampleActions(post) {
@@ -818,8 +909,9 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   async function openDeckViewer(deckId, title) {
     // Loading-first: the dialog opens with a skeleton immediately, then the
     // deck content (or an in-dialog errorState) replaces it. No fetch-then-open.
-    const bodyHost = element('div', { className: 'grid min-w-0 gap-3' }, [loadingState('Loading deck…')]);
-    openDialog({
+    const bodyHost = element('div', { className: 'grid min-w-0 gap-3' }, [skeleton({ rows: 4, variant: 'grid', label: 'Loading deck…' })]);
+    bodyHost.setAttribute('aria-busy', 'true');
+    const closeViewer = openDialog({
       title: title || 'Shared deck',
       description: 'Loading…',
       content: [bodyHost],
@@ -827,20 +919,27 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       onSubmit: async (form, close) => close()
     });
     const loadDeck = async () => {
-      bodyHost.replaceChildren(loadingState('Loading deck…'));
+      bodyHost.setAttribute('aria-busy', 'true');
+      bodyHost.replaceChildren(skeleton({ rows: 4, variant: 'grid', label: 'Loading deck…' }));
       let detail = null;
       try {
         detail = await apiRequest(`/api/decks/${encodeURIComponent(deckId)}`);
       } catch (error) {
+        bodyHost.setAttribute('aria-busy', 'false');
         bodyHost.replaceChildren(errorState(error, () => loadDeck()));
         return;
       }
       const items = Array.isArray(detail?.items) ? detail.items : [];
+      bodyHost.setAttribute('aria-busy', 'false');
       const rows = element('div', { className: 'grid min-w-0 grid-cols-2 gap-2 xl:grid-cols-3' });
-      const saveAll = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: `Save all (${items.length}) to my library`, attrs: { type: 'button' } });
-      // Existing #review hub only — no per-deck review route exists. Read-only
-      // link beside Save-all; the deck itself is unchanged.
-      const startReview = element('a', { className: 'button-secondary inline-flex min-h-9 items-center px-3 py-1.5 text-xs', text: 'Start Review', attrs: { href: '#review', 'aria-label': 'Start Review in the review hub' } });
+      rows.setAttribute('aria-busy', 'false');
+      const saveAll = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: `Save all (${items.length}) to my library`, attrs: { type: 'button', 'aria-label': `Save all ${items.length} items to your library` } });
+      // Deck review builds a REAL session (save-then-queue): foreign snapshot
+      // items are saved first via the existing POST endpoints, then POST
+      // /api/review/sessions queues the OWNED ids and hands off like the
+      // immersion flow (sessionStorage queue → #review?reviewSessionId=…).
+      // Never fakes a queue; unqueueable items are reported, never included.
+      const startReview = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Start Review', attrs: { type: 'button', 'aria-label': 'Save deck items and start a review session' } });
       const topRow = element('div', { className: 'flex flex-wrap gap-2' }, [saveAll, startReview]);
       const savedIds = new Set();
       const paintRows = () => {
@@ -858,9 +957,25 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
             attrs: { type: 'button', ...((saved || !saveable) ? { disabled: '', title: saved ? 'Already saved' : saveDisabledReason, 'aria-label': saved ? `Saved ${label}` : `Save unavailable for ${label} — ${saveDisabledReason.toLowerCase()}` } : { 'aria-label': `Save ${label} to library` }) }
           });
           if (!saved && saveable) {
-            save.addEventListener('click', async () => {
-              const ok = await saveDeckItem(kind, entry);
-              if (ok) { savedIds.add(`${kind}:${label}`); paintRows(); }
+            save.addEventListener('click', () => {
+              const meaningNote = String(entry?.meaning || '').trim();
+              confirmDialog({
+                title: `Save "${label}" to your library?`,
+                description: meaningNote ? `${label} — ${meaningNote}. This adds it to your library and review queue.` : `${label} will be added to your library and review queue.`,
+                confirmLabel: 'Save',
+                confirmClassName: 'button-primary',
+                pendingLabel: 'Saving…',
+                onConfirm: async () => {
+                  const ok = await saveDeckItem(kind, entry);
+                  if (ok) {
+                    savedIds.add(`${kind}:${label}`);
+                    paintRows();
+                    showToast('Saved to your library.');
+                  } else {
+                    showToast('Unable to save (it may already be saved).', 'error');
+                  }
+                }
+              });
             });
           }
           return element('div', { className: 'flex min-w-0 items-center justify-between gap-3 rounded-xl border border-stone bg-paper px-3 py-2' }, [
@@ -873,20 +988,121 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
         }));
       };
       paintRows();
-      saveAll.addEventListener('click', () => withPendingAction(saveAll, async () => {
-        let saved = 0;
-        let skipped = 0;
+      saveAll.addEventListener('click', () => {
+        confirmDialog({
+          title: `Save ${items.length} items to your library?`,
+          description: `Save ${items.length} items from this deck to your library? Items already saved or without a dictionary meaning will be skipped.`,
+          confirmLabel: 'Save all',
+          confirmClassName: 'button-primary',
+          pendingLabel: 'Saving…',
+          onConfirm: async () => {
+            await withPendingAction(saveAll, async () => {
+              let saved = 0;
+              let skipped = 0;
+              for (const entry of items) {
+                const kind = entry.entityType || detail.entityType || 'vocabulary';
+                // eslint-disable-next-line no-await-in-loop
+                if (await saveDeckItem(kind, entry)) {
+                  saved += 1;
+                  savedIds.add(`${kind}:${deckItemDisplay(kind, entry)}`);
+                } else skipped += 1;
+              }
+              paintRows();
+              showToast(saved ? `Saved ${saved} item${saved === 1 ? '' : 's'}${skipped ? `, ${skipped} skipped (already saved or unavailable)` : ''}.` : 'Nothing new to save (already saved or no dictionary meaning).', saved ? 'success' : 'info');
+            });
+          }
+        });
+      });
+      startReview.addEventListener('click', () => withPendingAction(startReview, async () => {
+        // Save-then-queue: resolve OWNED ids first (search-first reuse to
+        // avoid duplicates, then POST the missing ones). Honesty gates
+        // (deckItemSaveable) decide saveability; failures are skipped, never
+        // faked. Only owned ids reach POST /api/review/sessions.
+        let savedCount = 0;
+        let alreadyCount = 0;
+        let skippedCount = 0;
+        const owned = [];
+        const seen = new Set();
         for (const entry of items) {
           const kind = entry.entityType || detail.entityType || 'vocabulary';
+          const display = deckItemDisplay(kind, entry);
+          if (!display || !deckItemSaveable(kind, entry)) {
+            skippedCount += 1;
+            continue;
+          }
           // eslint-disable-next-line no-await-in-loop
-          if (await saveDeckItem(kind, entry)) {
-            saved += 1;
-            savedIds.add(`${kind}:${deckItemDisplay(kind, entry)}`);
-          } else skipped += 1;
+          const resolved = await ensureDeckOwnedId(kind, entry);
+          if (!resolved) {
+            skippedCount += 1;
+            continue;
+          }
+          if (resolved.already) alreadyCount += 1;
+          else savedCount += 1;
+          const key = `${kind}:${resolved.entityId}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          savedIds.add(`${kind}:${display}`);
+          owned.push({
+            entityType: kind,
+            entityId: resolved.entityId,
+            display,
+            ...(entry.reading ? { reading: entry.reading } : {}),
+            ...(entry.meaning ? { meaning: entry.meaning } : {})
+          });
         }
-      paintRows();
-        showToast(saved ? `Saved ${saved} item${saved === 1 ? '' : 's'}${skipped ? `, ${skipped} skipped (already saved or unavailable)` : ''}.` : 'Nothing new to save (already saved or no dictionary meaning).', saved ? 'success' : 'info');
-      }).catch((error) => showToast(error?.message || 'Unable to save.', 'error')));
+        paintRows();
+        if (!owned.length) {
+          showToast('Nothing reviewable — items need a dictionary meaning first.', 'error');
+          return;
+        }
+        const capped = owned.slice(0, 500);
+        const cappedSkipped = owned.length - capped.length;
+        if (cappedSkipped > 0) skippedCount += cappedSkipped;
+        const today = todayISODate();
+        let session = null;
+        try {
+          session = await apiRequest('/api/review/sessions', {
+            method: 'POST',
+            body: {
+              sourceFrom: today,
+              sourceTo: today,
+              items: capped.map(({ entityType, entityId }) => ({ entityType, entityId }))
+            }
+          });
+        } catch (error) {
+          showToast(error?.message || 'Unable to start the review.', 'error');
+          return;
+        }
+        const sessionId = Number(session?.id);
+        if (!Number.isInteger(sessionId) || sessionId <= 0) {
+          showToast('Unable to start the review.', 'error');
+          return;
+        }
+        // Immersion hand-off pattern (stories.js): stash the queue for the
+        // freshly created OPEN session, then navigate. Grading still validates
+        // ownership server-side.
+        const contextByKey = new Map((Array.isArray(session?.items) ? session.items : []).map((entry) => [`${entry.entityType}:${entry.entityId}`, entry.context]));
+        const queueItems = capped.map((item) => {
+          const context = contextByKey.get(`${item.entityType}:${item.entityId}`);
+          return context ? { ...item, context } : item;
+        });
+        try {
+          if (window.sessionStorage) {
+            window.sessionStorage.setItem('jlt-immersion-review-queue', JSON.stringify({
+              reviewSessionId: sessionId,
+              items: queueItems
+            }));
+          }
+        } catch { /* storage blocked: review falls back to its banner */ }
+        const parts = [];
+        if (savedCount) parts.push(`Saved ${savedCount}`);
+        if (alreadyCount) parts.push(`${alreadyCount} already in library`);
+        const prefix = parts.length ? `${parts.join(', ')} — ` : '';
+        const skippedNote = skippedCount ? ` (${skippedCount} skipped)` : '';
+        showToast(`${prefix}starting review with ${capped.length}${skippedNote}.`);
+        try { closeViewer({ silent: true }); } catch { /* close is best-effort */ }
+        window.location.hash = `#review?reviewSessionId=${sessionId}`;
+      }, { pendingLabel: 'Starting…' }).catch((error) => showToast(error?.message || 'Unable to start the review.', 'error')));
       bodyHost.replaceChildren(
         element('p', { className: 'break-words text-xs text-muted', text: `${items.length} items` }),
         topRow,
@@ -949,10 +1165,26 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
         showToast('This kanji cannot be saved — a single kanji character is required.', 'error');
         return;
       }
-      withPendingAction(button, async () => {
-        await apiRequest(entityCreateEndpoint(post.entityType), { method: 'POST', body });
-        showToast('Saved to your library.');
-      }, { pendingLabel: 'Saving…' }).catch((error) => showToast(error?.message || 'Unable to save (it may already be saved).', 'error'));
+      const display = String(snapshot.display || '');
+      const meaningNote = String(snapshot.meaning || '').trim();
+      const readingNote = String(snapshot.reading || '').trim();
+      confirmDialog({
+        title: `Save "${display}" to your library?`,
+        description: `${display}${readingNote ? ` · ${readingNote}` : ''}${meaningNote ? ` — ${meaningNote}` : ''}. This adds it to your library and review queue.`,
+        confirmLabel: 'Save',
+        confirmClassName: 'button-primary',
+        pendingLabel: 'Saving…',
+        onConfirm: async () => {
+          try {
+            await withPendingAction(button, async () => {
+              await apiRequest(entityCreateEndpoint(post.entityType), { method: 'POST', body });
+              showToast('Saved to your library.');
+            }, { pendingLabel: 'Saving…' });
+          } catch (error) {
+            showToast(error?.message || 'Unable to save (it may already be saved).', 'error');
+          }
+        }
+      });
     });
     return button;
   }
@@ -1014,7 +1246,8 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   function openPostDialog(postId, { onProfile, onRefresh, focusComments = false } = {}) {
     apiRequest(`/api/community/posts/${encodeURIComponent(postId)}`).then((post) => {
       const like = likeButton(post);
-      const commentsWrap = element('div', { className: 'grid gap-2' }, [element('p', { className: 'text-sm text-muted', text: 'Loading comments…' })]);
+      const commentsWrap = element('div', { className: 'grid gap-2' }, [skeleton({ rows: 2, variant: 'rows', label: 'Loading comments…' })]);
+      commentsWrap.setAttribute('aria-busy', 'true');
       const input = element('input', { className: 'field-control', attrs: { type: 'text', maxlength: '1000', placeholder: 'Write a comment…', 'aria-label': 'Write a comment' } });
       const send = element('button', { className: 'icon-button shrink-0', text: '➤', attrs: { type: 'button', 'aria-label': 'Send comment' } });
       const submitComment = () => withPendingAction(send, async () => {
@@ -1254,15 +1487,20 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
         return row;
       };
       async function reloadComments() {
+        commentsWrap.setAttribute('aria-busy', 'true');
+        // Keep the skeleton visible on reloads (replaces bare "Loading…" text).
+        if (!commentsWrap.querySelector('[role="status"]')) commentsWrap.replaceChildren(skeleton({ rows: 2, variant: 'rows', label: 'Loading comments…' }));
         try {
           const data = await apiRequest(`/api/community/posts/${post.id}/comments?limit=30`);
           const items = Array.isArray(data?.items) ? data.items : [];
+          commentsWrap.setAttribute('aria-busy', 'false');
           if (!items.length) {
             commentsWrap.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'No comments yet. Start the conversation.' }));
             return;
           }
           commentsWrap.replaceChildren(...items.map((comment) => buildTopLevel(comment)));
         } catch (error) {
+          commentsWrap.setAttribute('aria-busy', 'false');
           commentsWrap.replaceChildren(errorState(error, () => reloadComments()));
         }
       }
@@ -1381,9 +1619,12 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     });
   }
 
-  // ---- composer (collapsed by default so posts own the viewport)
-  function composerCard(onPublished) {
-    const wrap = element('div', { className: 'surface p-4 sm:p-5', attrs: { 'data-composer': 'true' } });
+  // ---- composer (dialog-only: the + nav button is the SOLE entry, no
+  // inline card remains in the feed body). Same 9 types, grouped picker,
+  // conditional fields, and byte-identical payloads as the retired inline
+  // card. Opens in openDialog; focus lands on the first field automatically,
+  // Escape cancels and discards the draft (see dialog description).
+  function openComposerDialog(onPublished) {
     // Grouped discovery: same 9 type values as COMPOSER_TYPES (payloads
     // byte-identical), only the picker UX is grouped. Compact select-based
     // with <optgroup> so 360px never overflows — no card grid.
@@ -1405,8 +1646,6 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     const japaneseInput = element('textarea', { className: 'field-control min-h-20 w-full', attrs: { rows: '2', maxlength: '2000', placeholder: 'Japanese sentence…', 'aria-label': 'Japanese text' } });
     const translationInput = element('textarea', { className: 'field-control min-h-16 w-full', attrs: { rows: '2', maxlength: '2000', placeholder: 'Translation (optional)…', 'aria-label': 'Translation' } });
     const linkBox = element('div', { className: 'grid gap-2' });
-    const fields = element('div', { className: 'mt-3 grid gap-3' });
-    const publish = element('button', { className: 'button-primary mt-3 min-h-11 px-5 py-2.5 text-sm font-semibold', text: 'Publish', attrs: { type: 'button' } });
     // Progress (#7): "Attach my stats" toggle fetches the caller's OWN
     // verified snapshot for an honest preview. Client numbers are NEVER
     // sent — publish sends only includeStats:true + the personal message.
@@ -1520,60 +1759,43 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       return select;
     }
     typeSelect.addEventListener('change', () => { paintTypeHint(); paintLink(); });
-    publish.addEventListener('click', () => withPendingAction(publish, async () => {
-      const type = typeSelect.value;
-      const payload = { postType: type };
-      if (titleInput.value.trim()) payload.title = titleInput.value.trim();
-      if (type === 'text' || type === 'question' || type === 'progress') {
-        payload.body = bodyInput.value.trim();
-      } else if (bodyInput.value.trim()) {
-        payload.body = bodyInput.value.trim();
-      }
-      if (type === 'example') payload.japaneseText = japaneseInput.value.trim();
-      else if (japaneseInput.value.trim() && !japaneseInput.hidden) payload.japaneseText = japaneseInput.value.trim();
-      if (translationInput.value.trim() && !translationInput.hidden) payload.translation = translationInput.value.trim();
-      // Verified progress: flag only — server mints the snapshot, client
-      // numbers are never sent (and would be ignored).
-      if (type === 'progress' && attachBox.checked) payload.includeStats = true;
-      Object.assign(payload, link);
-      const post = await apiRequest('/api/community/posts', { method: 'POST', body: payload });
-      titleInput.value = '';
-      bodyInput.value = '';
-      japaneseInput.value = '';
-      translationInput.value = '';
-      attachBox.checked = false;
-      statsCache = null;
-      statsPreview.replaceChildren(element('p', { className: 'text-xs text-muted', text: 'Post without stats — body only.' }));
-      showToast('Published to Community.');
-      setCollapsed(true);
-      if (typeof onPublished === 'function') onPublished(post);
-    }, { pendingLabel: 'Publishing…' }).catch((error) => showToast(error?.message || 'Unable to publish.', 'error')));
-    fields.append(typeField, titleInput, bodyInput, japaneseInput, translationInput, linkBox, statsWrap, publish);
-    // Collapsed by default: a summary toggle owns the viewport emphasis,
-    // posts below stay the focus. Expands on demand, collapses after publish.
-    const toggleGlyph = element('span', { className: 'shrink-0 text-lg text-muted', text: '+', attrs: { 'aria-hidden': 'true' } });
-    const toggle = element('button', {
-      className: 'flex w-full items-center justify-between gap-3 text-left',
-      attrs: { type: 'button', 'aria-expanded': 'false' }
-    }, [
-      element('div', { className: 'min-w-0' }, [
-        element('h2', { className: 'font-semibold text-ink', text: 'Share something' }),
-        element('p', { className: 'mt-1 text-sm text-muted', text: 'Post an example, a question, a milestone — or share learning content.' })
-      ]),
-      toggleGlyph
-    ]);
-    const collapsible = element('div', { className: 'mt-3 grid gap-3' }, [fields]);
-    collapsible.hidden = true;
-    const setCollapsed = (collapsed) => {
-      collapsible.hidden = collapsed;
-      toggle.setAttribute('aria-expanded', String(!collapsed));
-      toggleGlyph.textContent = collapsed ? '+' : '−';
-    };
-    toggle.addEventListener('click', () => setCollapsed(!collapsible.hidden));
-    wrap.append(toggle, collapsible);
     paintTypeHint();
     paintLink();
-    return wrap;
+    const fields = element('div', { className: 'grid gap-3 sm:col-span-2' }, [typeField, titleInput, bodyInput, japaneseInput, translationInput, linkBox, statsWrap]);
+    // Dialog submit carries the byte-identical publish (same conditional
+    // fields, same payload keys). Toast + close + refresh on success.
+    openDialog({
+      title: 'Share something',
+      description: 'Post an example, a question, a milestone — or share learning content. Closing discards your draft.',
+      content: [fields],
+      submitLabel: 'Publish',
+      pendingLabel: 'Publishing…',
+      onSubmit: async (form, close) => {
+        const type = typeSelect.value;
+        const payload = { postType: type };
+        if (titleInput.value.trim()) payload.title = titleInput.value.trim();
+        if (type === 'text' || type === 'question' || type === 'progress') {
+          payload.body = bodyInput.value.trim();
+        } else if (bodyInput.value.trim()) {
+          payload.body = bodyInput.value.trim();
+        }
+        if (type === 'example') payload.japaneseText = japaneseInput.value.trim();
+        else if (japaneseInput.value.trim() && !japaneseInput.hidden) payload.japaneseText = japaneseInput.value.trim();
+        if (translationInput.value.trim() && !translationInput.hidden) payload.translation = translationInput.value.trim();
+        // Verified progress: flag only — server mints the snapshot, client
+        // numbers are never sent (and would be ignored).
+        if (type === 'progress' && attachBox.checked) payload.includeStats = true;
+        Object.assign(payload, link);
+        try {
+          const post = await apiRequest('/api/community/posts', { method: 'POST', body: payload });
+          showToast('Published to Community.');
+          close();
+          if (typeof onPublished === 'function') await onPublished(post);
+        } catch (error) {
+          showToast(error?.message || 'Unable to publish.', 'error');
+        }
+      }
+    });
   }
 
   // ---- feed tabs
@@ -1584,11 +1806,13 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     host.replaceChildren(list, moreWrap);
     async function load(reset = false) {
       if (reset) { page = 1; list.replaceChildren(); }
-      list.appendChild(loadingState('Loading posts…'));
+      list.setAttribute('aria-busy', 'true');
+      list.appendChild(skeleton({ rows: 3, variant: 'cards', label: 'Loading posts…' }));
       try {
         const data = await apiRequest(`/api/community/feed?tab=${tab}&page=${page}&limit=10`);
         const items = Array.isArray(data?.items) ? data.items : [];
         list.querySelectorAll('[role="status"]').forEach((node) => node.remove());
+        list.setAttribute('aria-busy', 'false');
         if (!items.length && page === 1) {
           list.replaceChildren(feedEmptyState(tab));
           moreWrap.replaceChildren();
@@ -1607,6 +1831,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
         }
       } catch (error) {
         list.querySelectorAll('[role="status"]').forEach((node) => node.remove());
+        list.setAttribute('aria-busy', 'false');
         list.appendChild(errorState(error, () => load(true)));
       }
     }
@@ -1635,15 +1860,13 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   function renderFeedRoot() {
     if (state.tab === 'discover') return renderDiscover();
     body.replaceChildren();
-    // UI tab "feed" is the backend "latest" tab everywhere, composer
-    // refresh included (the backend only knows latest/following/discover;
-    // sending "feed" 400s with a scary error right after publishing).
+    // UI tab "feed" is the backend "latest" tab everywhere (the backend only
+    // knows latest/following/discover; sending "feed" 400s with a scary error
+    // right after publishing). No inline composer remains — the + nav button
+    // is the SOLE entry via openComposerDialog.
     const apiTab = state.tab === 'following' ? 'following' : 'latest';
     const listHost = element('div', { className: 'mt-5' });
     const refreshFeed = () => feedLoader(listHost, apiTab);
-    if (state.tab === 'feed') {
-      body.appendChild(composerCard(() => refreshFeed()));
-    }
     body.appendChild(listHost);
     refreshFeed();
     wireEmptyActions();
@@ -1656,9 +1879,10 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       }
       if (button.textContent === 'Create a post') {
         button.addEventListener('click', () => {
-          const composerToggle = body.querySelector('[data-composer] > button');
-          if (composerToggle && composerToggle.getAttribute('aria-expanded') === 'false') composerToggle.click();
-          else window.scrollTo({ top: 0, behavior: 'smooth' });
+          openComposerDialog(async () => {
+            if (state.profile || state.tab !== 'feed') await showTab('feed');
+            else renderFeedRoot();
+          });
         });
       }
     });
@@ -1868,9 +2092,10 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       // Discover. Filter-select passes {browse:true} so EMPTY text browses
       // recent content of that type (backend query-less browse, b6c4ab5).
       const browseMode = !query && opts.browse === true;
-      if (!query && !browseMode) { results.replaceChildren(); discoverHost.hidden = false; return; }
+      if (!query && !browseMode) { results.replaceChildren(); results.setAttribute('aria-busy', 'false'); discoverHost.hidden = false; return; }
       discoverHost.hidden = true;
-      results.replaceChildren(loadingState(browseMode ? 'Browsing…' : 'Searching…'));
+      results.setAttribute('aria-busy', 'true');
+      results.replaceChildren(skeleton({ rows: 3, variant: 'cards', label: browseMode ? 'Browsing…' : 'Searching…' }));
       try {
         const url = browseMode
           ? `/api/community/search?type=${encodeURIComponent(safeType)}&limit=10`
@@ -1897,13 +2122,16 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
           for (const text of data.reading || []) pushRow(readingRow(text));
         }
         results.replaceChildren(...(blocks.length ? blocks : [element('p', { className: 'text-sm text-muted', text: browseMode ? 'Nothing here yet. Try another filter.' : 'Nothing found. Try another search.' })]));
+        results.setAttribute('aria-busy', 'false');
       } catch (error) {
+        results.setAttribute('aria-busy', 'false');
         results.replaceChildren(errorState(error, () => runSearch(query, safeType, opts)));
       }
     }
     async function loadDiscover() {
       discoverHost.hidden = false;
-      discoverHost.replaceChildren(loadingState('Loading Discover…'));
+      discoverHost.setAttribute('aria-busy', 'true');
+      discoverHost.replaceChildren(skeleton({ rows: 3, variant: 'cards', label: 'Loading Discover…' }));
       try {
         const data = await apiRequest('/api/community/discover');
         const learners = Array.isArray(data?.learners) ? data.learners.slice(0, 5) : [];
@@ -1949,11 +2177,14 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
           sections.push(section);
         }
         if (!sections.length) {
+          discoverHost.setAttribute('aria-busy', 'false');
           discoverHost.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Nothing to discover yet. Follow learners or share something to get started.' }));
           return;
         }
+        discoverHost.setAttribute('aria-busy', 'false');
         discoverHost.replaceChildren(...sections);
       } catch (error) {
+        discoverHost.setAttribute('aria-busy', 'false');
         discoverHost.replaceChildren(errorState(error, () => loadDiscover()));
       }
     }
@@ -1995,7 +2226,8 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
 
   // ---- profile
   async function renderProfile(username) {
-    body.replaceChildren(loadingState('Loading profile…'));
+    body.setAttribute('aria-busy', 'true');
+    body.replaceChildren(skeleton({ rows: 2, variant: 'cards', label: 'Loading profile…' }));
     try {
       const profile = await apiRequest(`/api/community/profile/${encodeURIComponent(username)}`);
       const back = element('button', { className: 'mb-4 text-sm font-semibold text-vermilion hover:underline', text: '← Back', attrs: { type: 'button' } });
@@ -2051,6 +2283,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       ]);
       const lists = element('div', { className: 'mt-4 flex flex-wrap gap-2' });
       const postsHost = element('div', { className: 'mt-4 grid gap-3' });
+      body.setAttribute('aria-busy', 'false');
       body.replaceChildren(back, head, lists, postsHost);
       const followersBtn = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: `Followers (${profile.counts.followers})`, attrs: { type: 'button' } });
       const followingBtn = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: `Following (${profile.counts.following})`, attrs: { type: 'button' } });
@@ -2063,12 +2296,16 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       // + list refresh) driving DELETE /api/community/blocks with { username }.
       // Block itself stays in the post menu — this surface only lists/unblocks.
       const showBlocked = async (page = 1, append = false) => {
-        if (!append) postsHost.replaceChildren(loadingState('Loading blocked users…'));
+        if (!append) {
+          postsHost.setAttribute('aria-busy', 'true');
+          postsHost.replaceChildren(skeleton({ rows: 3, variant: 'rows', label: 'Loading blocked users…' }));
+        }
         try {
           const data = await apiRequest(`/api/community/blocks?page=${page}&limit=20`);
           const items = Array.isArray(data?.items) ? data.items : [];
           const pagination = data?.pagination || {};
           if (!append) postsHost.replaceChildren();
+          postsHost.setAttribute('aria-busy', 'false');
           if (!items.length && page === 1) {
             postsHost.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'No blocked users. People you block will appear here.' }));
             return;
@@ -2111,6 +2348,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
             postsHost.appendChild(more);
           }
         } catch (error) {
+          postsHost.setAttribute('aria-busy', 'false');
           if (!append) postsHost.replaceChildren(errorState(error, () => showBlocked(1)));
           else showToast(error?.message || 'Unable to load more.', 'error');
         }
@@ -2121,12 +2359,15 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
         lists.append(blockedBtn);
       }
       const showList = async (direction) => {
-        postsHost.replaceChildren(loadingState('Loading…'));
+        postsHost.setAttribute('aria-busy', 'true');
+        postsHost.replaceChildren(skeleton({ rows: 3, variant: 'rows', label: 'Loading…' }));
         try {
           const data = await apiRequest(`/api/community/users/${encodeURIComponent(username)}/${direction}?limit=20`);
           const items = Array.isArray(data?.items) ? data.items : [];
+          postsHost.setAttribute('aria-busy', 'false');
           postsHost.replaceChildren(...(items.length ? items.map((person) => personRow({ username: person.username, displayName: person.displayName, avatarUrl: person.avatarUrl, bio: person.bio, viewerFollowing: person.viewerFollowing, following: person.following ?? person.viewerFollowing, followsYou: person.followsYou, mutual: person.mutual }, showList.bind(null, direction), openProfile)) : [element('p', { className: 'text-sm text-muted', text: 'Nobody here yet.' })]));
         } catch (error) {
+          postsHost.setAttribute('aria-busy', 'false');
           postsHost.replaceChildren(errorState(error, () => showList(direction)));
         }
       };
@@ -2134,19 +2375,23 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       followingBtn.addEventListener('click', () => showList('following'));
       // Author timeline through the same gated feed.
       const loadAuthorPosts = async () => {
-        postsHost.replaceChildren(loadingState('Loading posts…'));
+        postsHost.setAttribute('aria-busy', 'true');
+        postsHost.replaceChildren(skeleton({ rows: 2, variant: 'cards', label: 'Loading posts…' }));
         try {
           const data = await apiRequest(`/api/community/feed?tab=latest&author=${encodeURIComponent(username)}&page=1&limit=10`);
           const items = Array.isArray(data?.items) ? data.items : [];
+          postsHost.setAttribute('aria-busy', 'false');
           postsHost.replaceChildren(...(items.length
             ? items.map((post) => postCard(post, { onProfile: openProfile, onRefresh: () => renderProfile(username) }))
             : [element('p', { className: 'text-sm text-muted', text: 'No public posts yet.' })]));
         } catch (error) {
+          postsHost.setAttribute('aria-busy', 'false');
           postsHost.replaceChildren(errorState(error, () => loadAuthorPosts()));
         }
       };
       await loadAuthorPosts();
     } catch (error) {
+      body.setAttribute('aria-busy', 'false');
       const backButton = element('button', { className: 'mb-4 text-sm font-semibold text-vermilion hover:underline', text: '← Back', attrs: { type: 'button' } });
       backButton.addEventListener('click', backToFeed);
       // Gated (private/blocked/missing) profiles 404 with the same
@@ -2170,10 +2415,19 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     const moreWrap = element('div', { className: 'flex justify-center' });
     async function load(reset = false) {
       if (reset) page = 1;
+      if (reset) {
+        list.setAttribute('aria-busy', 'true');
+        list.replaceChildren(skeleton({ rows: 3, variant: 'rows', label: 'Loading notifications…' }));
+      } else {
+        list.setAttribute('aria-busy', 'true');
+        list.appendChild(skeleton({ rows: 1, variant: 'rows', label: 'Loading notifications…' }));
+      }
       try {
         const data = await apiRequest(`/api/community/notifications?page=${page}&limit=15`);
         const items = Array.isArray(data?.items) ? data.items : [];
+        list.querySelectorAll('[role="status"]').forEach((node) => node.remove());
         if (reset) list.replaceChildren();
+        list.setAttribute('aria-busy', 'false');
         if (!items.length && page === 1) {
           list.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'No notifications yet. Likes, comments and follows will appear here.' }));
         }
@@ -2229,6 +2483,8 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
         // Phase 7: no per-page badge fetch — badge refreshes on mount + after
         // the inbox dialog closes (cheap unread-count), never during paging.
       } catch (error) {
+        list.querySelectorAll('[role="status"]').forEach((node) => node.remove());
+        list.setAttribute('aria-busy', 'false');
         list.replaceChildren(errorState(error, () => load(true)));
       }
     }
