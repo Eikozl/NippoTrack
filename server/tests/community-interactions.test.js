@@ -217,7 +217,9 @@ test('blocks sever follows both ways; profiles gate private and blocked', async 
 });
 
 test('search validates and scopes every class', async () => {
-  await assert.rejects(service.searchCommunity(pool, USER_ID, ''), /q is required/);
+  // V6.1 query-less browse: empty q no longer 400s (covered in the browse
+  // suite); overlong q and bad type still 400.
+  await assert.rejects(service.searchCommunity(pool, USER_ID, 'x'.repeat(101)), /must not exceed 100/);
   await assert.rejects(service.searchCommunity(pool, USER_ID, 'x', { type: 'viral' }), /type must be/);
   const calls = [];
   await withPoolExecute(async (sql, params = []) => {

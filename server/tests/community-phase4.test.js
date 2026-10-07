@@ -388,7 +388,18 @@ test('discover controller returns sections; search rejects garbage', async () =>
     const payload = body();
     assert.deepEqual(Object.keys(payload).sort(), ['content', 'learners', 'popular', 'questions']);
   });
-  await assert.rejects(service.searchCommunity(pool, USER_ID, '', { type: 'vocabulary' }), /q is required/);
+  // V6.1 query-less browse: empty q browses recent gated rows (never 400).
+  await withPoolExecute(async (sql) => {
+    if (/FROM community_posts p/i.test(sql)) return [[]];
+    if (/JOIN deck_publication_items/i.test(sql)) return [[]];
+    throw new Error(`Unexpected SQL: ${sql.slice(0, 60)}`);
+  }, async () => {
+    const browse = await service.searchCommunity(pool, USER_ID, '', { type: 'vocabulary' });
+    assert.deepEqual(browse.vocabulary, [], 'empty q browses (no rejection)');
+    assert.equal(browse.page, 1);
+    const blank = await service.searchCommunity(pool, USER_ID, '   ', { type: 'vocabulary' });
+    assert.deepEqual(blank.vocabulary, [], 'blank q browses too');
+  });
   await assert.rejects(service.searchCommunity(pool, USER_ID, 'x'.repeat(101), { type: 'kanji' }), /must not exceed 100/);
 });
 

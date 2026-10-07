@@ -160,11 +160,63 @@ function mapDeckItemHit(row, displayKey) {
   };
 }
 
+// V6.1 query-less browse ordering (EXACT — also restated in the
+// searchCommunity header; change both if this ever changes):
+// - posts:    ORDER BY p.id_community_post DESC (monotonic → newest first)
+// - decks:    ORDER BY d.id_deck_publication DESC (newest first)
+// - reading:  ORDER BY r.id_reading_publication DESC (newest first)
+// - people:   ORDER BY up.updated_at DESC, up.username ASC (recently-touched
+//             public profiles first, username tiebreak). user_profile carries
+//             no created_at, so updated_at is the only recency signal; a
+//             recent-post-activity join would hide profiles without posts and
+//             change directory semantics, so browse keeps directory semantics.
+// - vocabulary/kanji/grammar: share-post hits ORDER BY p.id DESC then
+//             deck-item hits ORDER BY d.id DESC, i.position ASC, merged
+//             (posts then decks) and truncated to safeLimit — the same
+//             deterministic merge as text search, minus the text predicate.
+// Every browse query reuses its text-search gate posture verbatim
+// (visibilityWhere / owner-publicity / both-ways block); only the ILIKE +
+// level predicates are omitted. Same per-type caps (MAX_SEARCH_LIMIT) and
+// same OFFSET paging; same hit shapes; empty arrays when nothing, never 500.
 // One learning-item type, two bounded gated queries merged deterministically:
 // share-post hits (newest first) then deck-item hits (newest deck, position
 // order), truncated to `limit`. Both sources page with the same OFFSET; deep
 // pages may thin the merged list — acceptable for capped typeahead search.
 // displayKey is an internal constant per type (never user input).
+async function browseLearningType(executor, viewerId, learningType, { safeLimit, offset }) {
+  const def = LEARNING_SEARCH[learningType];
+  const postPromise = executor.execute(
+    `SELECT p.id_community_post AS id, p.post_type, p.title, p.snapshot_json, p.created_at,
+       up.username AS author_username, up.display_name AS author_display, up.avatar_url AS author_avatar
+      FROM community_posts p
+      JOIN user_profile up ON up.user_id = p.author_id
+      WHERE NOT p.is_deleted AND ${visibilityWhere('p', 'up')}
+        AND p.post_type = ?
+      ORDER BY p.id_community_post DESC LIMIT ? OFFSET ?`,
+    [...visibilityParams(viewerId), def.sharePostType, safeLimit, offset]
+  );
+  // FROM deck_publications (not the items table) so the Phase 2b
+  // owner-publicity + block posture reads exactly like the deck browse above.
+  const deckPromise = executor.execute(
+    `SELECT d.id_deck_publication AS deck_id, d.title AS deck_title, d.entity_type,
+       up.username AS owner_username, i.position AS position, i.item_json AS item_json
+      FROM deck_publications d
+      JOIN deck_publication_items i ON i.id_deck_publication = d.id_deck_publication
+      LEFT JOIN user_profile up ON up.user_id = d.owner_id
+      WHERE d.is_public AND d.entity_type = ?
+        AND (d.owner_id = ? OR up.is_public)
+        AND NOT EXISTS (
+          SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = d.owner_id) OR (b.blocker_id = d.owner_id AND b.blocked_id = ?))
+      ORDER BY d.id_deck_publication DESC, i.position ASC LIMIT ? OFFSET ?`,
+    [learningType, viewerId, viewerId, viewerId, safeLimit, offset]
+  );
+  const [[postRows], [deckRows]] = await Promise.all([postPromise, deckPromise]);
+  const hits = [];
+  for (const row of Array.isArray(postRows) ? postRows : []) hits.push(mapSharePostHit(row));
+  for (const row of Array.isArray(deckRows) ? deckRows : []) hits.push(mapDeckItemHit(row, def.displayKey));
+  return hits.slice(0, safeLimit);
+}
+
 async function searchLearningType(executor, viewerId, learningType, { like, level, safeLimit, offset }) {
   const def = LEARNING_SEARCH[learningType];
   const postLevelFilter = level ? ` OR UPPER(COALESCE(p.snapshot_json->>'jlpt_level', '')) = ?` : '';
@@ -1370,44 +1422,72 @@ async function getCommunityProfile(executor, viewerId, username) {
 async function searchCommunity(executor, viewerId, query, { type = 'all', page = 1, limit = 20 } = {}) {
   if (!SEARCH_TYPES.includes(type)) throw new ValidationError('type must be all, posts, people, decks, reading, vocabulary, kanji, or grammar.');
   const text = String(query || '').trim();
-  if (!text) throw new ValidationError('q is required.');
   if (text.length > 100) throw new ValidationError('q must not exceed 100 characters.');
+  // V6.1 query-less browse: missing/blank q returns recent content per
+  // requested type instead of text matches. Ordering EXACT (see header above
+  // browseLearningType): posts p.id DESC; decks d.id DESC; reading r.id
+  // DESC; people up.updated_at DESC, up.username ASC; learning share-post
+  // hits p.id DESC then deck-item hits d.id DESC, position ASC. Gates, caps
+  // (MAX_SEARCH_LIMIT), OFFSET paging and hit shapes are identical to text
+  // search; only the ILIKE + level predicates are omitted. Non-empty q is
+  // byte-identical to the pre-browse behavior below.
+  const browse = !text;
   const safePage = Number.isSafeInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
   const safeLimit = Number.isSafeInteger(Number(limit)) && Number(limit) > 0 ? Math.min(MAX_SEARCH_LIMIT, Number(limit)) : 20;
   // Phase 2b: page was accepted but ignored — every class now pages with a
   // real OFFSET (caps unchanged). The LIKE pattern is wildcard-escaped above.
   const offset = (safePage - 1) * safeLimit;
-  const like = `%${escapeLikePattern(text)}%`;
+  const like = browse ? null : `%${escapeLikePattern(text)}%`;
   // Phase 4: bare level queries ("N4") also match level-tagged snapshots.
-  const level = parseLevelQuery(text);
+  const level = browse ? null : parseLevelQuery(text);
   const learningOpts = { like, level, safeLimit, offset };
+  const browseLearningOpts = { safeLimit, offset };
   const out = { people: [], posts: [], decks: [], reading: [], vocabulary: [], kanji: [], grammar: [] };
   const jobs = [];
   let rawPeople = [];
   if (type === 'all' || type === 'people') {
-    jobs.push(executor.execute(
-      `SELECT up.user_id, up.username, up.display_name, up.avatar_url, up.bio
-       FROM user_profile up
-       WHERE up.username IS NOT NULL AND up.is_public
-         AND (up.username ILIKE ? ESCAPE '\\' OR COALESCE(up.display_name, '') ILIKE ? ESCAPE '\\')
-         AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = up.user_id) OR (b.blocker_id = up.user_id AND b.blocked_id = ?))
-       ORDER BY up.username ASC LIMIT ? OFFSET ?`,
-      [like, like, viewerId, viewerId, safeLimit, offset]
-    ).then(([rows]) => {
+    jobs.push((browse
+      ? executor.execute(
+        `SELECT up.user_id, up.username, up.display_name, up.avatar_url, up.bio
+         FROM user_profile up
+         WHERE up.username IS NOT NULL AND up.is_public
+           AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = up.user_id) OR (b.blocker_id = up.user_id AND b.blocked_id = ?))
+         ORDER BY up.updated_at DESC, up.username ASC LIMIT ? OFFSET ?`,
+        [viewerId, viewerId, safeLimit, offset]
+      )
+      : executor.execute(
+        `SELECT up.user_id, up.username, up.display_name, up.avatar_url, up.bio
+         FROM user_profile up
+         WHERE up.username IS NOT NULL AND up.is_public
+           AND (up.username ILIKE ? ESCAPE '\\' OR COALESCE(up.display_name, '') ILIKE ? ESCAPE '\\')
+           AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = up.user_id) OR (b.blocker_id = up.user_id AND b.blocked_id = ?))
+         ORDER BY up.username ASC LIMIT ? OFFSET ?`,
+        [like, like, viewerId, viewerId, safeLimit, offset]
+      )).then(([rows]) => {
       rawPeople = Array.isArray(rows) ? rows : [];
     }));
   }
   if (type === 'all' || type === 'posts') {
-    jobs.push(executor.execute(
-      `SELECT p.id_community_post AS id, p.post_type, p.title, p.body, p.japanese_text, p.created_at,
-         up.username AS author_username, up.display_name AS author_display, up.avatar_url AS author_avatar
-        FROM community_posts p
-        JOIN user_profile up ON up.user_id = p.author_id
-        WHERE NOT p.is_deleted AND ${visibilityWhere('p', 'up')}
-          AND (COALESCE(p.title, '') ILIKE ? ESCAPE '\\' OR COALESCE(p.body, '') ILIKE ? ESCAPE '\\' OR COALESCE(p.japanese_text, '') ILIKE ? ESCAPE '\\')
-        ORDER BY p.id_community_post DESC LIMIT ? OFFSET ?`,
-      [...visibilityParams(viewerId), like, like, like, safeLimit, offset]
-    ).then(([rows]) => {
+    jobs.push((browse
+      ? executor.execute(
+        `SELECT p.id_community_post AS id, p.post_type, p.title, p.body, p.japanese_text, p.created_at,
+           up.username AS author_username, up.display_name AS author_display, up.avatar_url AS author_avatar
+          FROM community_posts p
+          JOIN user_profile up ON up.user_id = p.author_id
+          WHERE NOT p.is_deleted AND ${visibilityWhere('p', 'up')}
+          ORDER BY p.id_community_post DESC LIMIT ? OFFSET ?`,
+        [...visibilityParams(viewerId), safeLimit, offset]
+      )
+      : executor.execute(
+        `SELECT p.id_community_post AS id, p.post_type, p.title, p.body, p.japanese_text, p.created_at,
+           up.username AS author_username, up.display_name AS author_display, up.avatar_url AS author_avatar
+          FROM community_posts p
+          JOIN user_profile up ON up.user_id = p.author_id
+          WHERE NOT p.is_deleted AND ${visibilityWhere('p', 'up')}
+            AND (COALESCE(p.title, '') ILIKE ? ESCAPE '\\' OR COALESCE(p.body, '') ILIKE ? ESCAPE '\\' OR COALESCE(p.japanese_text, '') ILIKE ? ESCAPE '\\')
+          ORDER BY p.id_community_post DESC LIMIT ? OFFSET ?`,
+        [...visibilityParams(viewerId), like, like, like, safeLimit, offset]
+      )).then(([rows]) => {
       out.posts = (Array.isArray(rows) ? rows : []).map((row) => ({
         id: Number(row.id), postType: row.post_type, title: row.title || null, body: row.body || null,
         japaneseText: row.japanese_text || null, authorUsername: row.author_username || null,
@@ -1418,17 +1498,29 @@ async function searchCommunity(executor, viewerId, query, { type = 'all', page =
   if (type === 'all' || type === 'decks') {
     // Phase 2b (F9): deck hits require a public deck from a public owner
     // (the viewer's own rows always pass), plus the both-ways block gate.
-    jobs.push(executor.execute(
-      `SELECT d.id_deck_publication AS id, d.title, d.entity_type, up.username AS owner_username
-       FROM deck_publications d
-       LEFT JOIN user_profile up ON up.user_id = d.owner_id
-       WHERE d.is_public AND d.title ILIKE ? ESCAPE '\\'
-        AND (d.owner_id = ? OR up.is_public)
-        AND NOT EXISTS (
-         SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = d.owner_id) OR (b.blocker_id = d.owner_id AND b.blocked_id = ?))
-       ORDER BY d.id_deck_publication DESC LIMIT ? OFFSET ?`,
-      [like, viewerId, viewerId, viewerId, safeLimit, offset]
-    ).then(([rows]) => {
+    jobs.push((browse
+      ? executor.execute(
+        `SELECT d.id_deck_publication AS id, d.title, d.entity_type, up.username AS owner_username
+         FROM deck_publications d
+         LEFT JOIN user_profile up ON up.user_id = d.owner_id
+         WHERE d.is_public
+          AND (d.owner_id = ? OR up.is_public)
+          AND NOT EXISTS (
+           SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = d.owner_id) OR (b.blocker_id = d.owner_id AND b.blocked_id = ?))
+         ORDER BY d.id_deck_publication DESC LIMIT ? OFFSET ?`,
+        [viewerId, viewerId, viewerId, safeLimit, offset]
+      )
+      : executor.execute(
+        `SELECT d.id_deck_publication AS id, d.title, d.entity_type, up.username AS owner_username
+         FROM deck_publications d
+         LEFT JOIN user_profile up ON up.user_id = d.owner_id
+         WHERE d.is_public AND d.title ILIKE ? ESCAPE '\\'
+          AND (d.owner_id = ? OR up.is_public)
+          AND NOT EXISTS (
+           SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = d.owner_id) OR (b.blocker_id = d.owner_id AND b.blocked_id = ?))
+         ORDER BY d.id_deck_publication DESC LIMIT ? OFFSET ?`,
+        [like, viewerId, viewerId, viewerId, safeLimit, offset]
+      )).then(([rows]) => {
       out.decks = (Array.isArray(rows) ? rows : []).map((row) => ({
         id: Number(row.id), title: row.title, entityType: row.entity_type, ownerUsername: row.owner_username || null
       }));
@@ -1436,17 +1528,29 @@ async function searchCommunity(executor, viewerId, query, { type = 'all', page =
   }
   if (type === 'all' || type === 'reading') {
     // Phase 2b (F9): same owner-publicity gate as deck hits.
-    jobs.push(executor.execute(
-      `SELECT r.id_reading_publication AS id, r.title, r.level, p.username AS owner_username
-       FROM reading_publications r
-       LEFT JOIN user_profile p ON p.user_id = r.owner_id
-       WHERE r.is_public AND r.title ILIKE ? ESCAPE '\\'
-        AND (r.owner_id = ? OR p.is_public)
-        AND NOT EXISTS (
-         SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = r.owner_id) OR (b.blocker_id = r.owner_id AND b.blocked_id = ?))
-       ORDER BY r.id_reading_publication DESC LIMIT ? OFFSET ?`,
-      [like, viewerId, viewerId, viewerId, safeLimit, offset]
-    ).then(([rows]) => {
+    jobs.push((browse
+      ? executor.execute(
+        `SELECT r.id_reading_publication AS id, r.title, r.level, p.username AS owner_username
+         FROM reading_publications r
+         LEFT JOIN user_profile p ON p.user_id = r.owner_id
+         WHERE r.is_public
+          AND (r.owner_id = ? OR p.is_public)
+          AND NOT EXISTS (
+           SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = r.owner_id) OR (b.blocker_id = r.owner_id AND b.blocked_id = ?))
+         ORDER BY r.id_reading_publication DESC LIMIT ? OFFSET ?`,
+        [viewerId, viewerId, viewerId, safeLimit, offset]
+      )
+      : executor.execute(
+        `SELECT r.id_reading_publication AS id, r.title, r.level, p.username AS owner_username
+         FROM reading_publications r
+         LEFT JOIN user_profile p ON p.user_id = r.owner_id
+         WHERE r.is_public AND r.title ILIKE ? ESCAPE '\\'
+          AND (r.owner_id = ? OR p.is_public)
+          AND NOT EXISTS (
+           SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = r.owner_id) OR (b.blocker_id = r.owner_id AND b.blocked_id = ?))
+         ORDER BY r.id_reading_publication DESC LIMIT ? OFFSET ?`,
+        [like, viewerId, viewerId, viewerId, safeLimit, offset]
+      )).then(([rows]) => {
       out.reading = (Array.isArray(rows) ? rows : []).map((row) => ({
         id: Number(row.id), title: row.title, level: row.level || null, ownerUsername: row.owner_username || null
       }));
@@ -1459,7 +1563,9 @@ async function searchCommunity(executor, viewerId, query, { type = 'all', page =
   if (type === 'all' || type === 'vocabulary' || type === 'kanji' || type === 'grammar') {
     const wanted = type === 'all' ? ['vocabulary', 'kanji', 'grammar'] : [type];
     await Promise.all(wanted.map(async (learningType) => {
-      out[learningType] = await searchLearningType(executor, viewerId, learningType, learningOpts);
+      out[learningType] = browse
+        ? await browseLearningType(executor, viewerId, learningType, browseLearningOpts)
+        : await searchLearningType(executor, viewerId, learningType, learningOpts);
     }));
   }
   // V6.1 Phase 3: viewer-relative people flags via a single batched edge
