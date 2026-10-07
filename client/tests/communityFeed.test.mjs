@@ -724,3 +724,25 @@ test('bottom nav pill centers within the content column on desktop, viewport on 
   assert.ok(source.includes('bottom-full'), 'overflow menu still opens upward from the pill');
   assert.ok(source.includes('overflowButton.appendChild(overflowBadge)'), 'unread badge stays on the … toggle');
 });
+
+test('deck + reading dialogs never leave a stale loading header', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  const previewBlock = source.slice(source.indexOf('async function openReadingPreview'), source.indexOf('function practiceLink'));
+  const viewerBlock = source.slice(source.indexOf('async function openDeckViewer'), source.indexOf('function openDeckViewerRefresh'));
+  // Header must not claim loading: neither dialog opens with a loading description,
+  // so nothing sticks at the top after the skeleton body is replaced.
+  assert.ok(!previewBlock.includes("description: 'Loading"), 'reading preview opens without a loading description');
+  assert.ok(!viewerBlock.includes("description: 'Loading"), 'deck viewer opens without a loading description');
+  // Loading-first skeleton + honest busy signalling untouched.
+  assert.ok(previewBlock.includes("skeleton({ rows: 2, variant: 'cards'"), 'preview loading skeleton untouched');
+  assert.ok(viewerBlock.includes("skeleton({ rows: 4, variant: 'grid'"), 'deck loading skeleton untouched');
+  assert.ok(previewBlock.includes('aria-busy') && viewerBlock.includes('aria-busy'), 'containers expose aria-busy while loading');
+  assert.ok(previewBlock.includes("setAttribute('aria-busy', 'false')"), 'preview clears busy on settle (no perpetual loading for AT)');
+  assert.ok(viewerBlock.includes("setAttribute('aria-busy', 'false')"), 'deck clears busy on settle (no perpetual loading for AT)');
+  // Success renders real content in the body, not a header: count/meta replace the skeleton.
+  assert.ok(viewerBlock.includes('items.length} items'), 'deck success shows the real count in the body');
+  assert.ok(previewBlock.includes('characters'), 'preview success shows the real meta in the body');
+  // Error renders errorState in the body; the header never claims loading either.
+  assert.ok(viewerBlock.includes('errorState(error, () => loadDeck'), 'deck error stays in-dialog with retry, no loading header');
+  assert.ok(previewBlock.includes('errorState(error, () => loadPreview'), 'preview error stays in-dialog with retry, no loading header');
+});

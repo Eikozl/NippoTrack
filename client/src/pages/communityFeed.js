@@ -721,11 +721,14 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   async function openReadingPreview(readingId, fallbackTitle) {
     // Loading-first: the dialog opens with a skeleton immediately, then the
     // excerpt (or an in-dialog errorState) replaces it. No fetch-then-open.
+    // No dialog description: the title already names the reading and the body
+    // shows the real meta (or errorState). A loading description would stick
+    // at the top after the skeleton is replaced, and the skeleton role=status
+    // already announces loading honestly via aria-busy.
     const bodyHost = element('div', { className: 'grid min-w-0 gap-3' }, [skeleton({ rows: 2, variant: 'cards', label: 'Loading preview…' })]);
     bodyHost.setAttribute('aria-busy', 'true');
     openDialog({
       title: fallbackTitle || 'Reading preview',
-      description: 'Loading…',
       content: [bodyHost],
       submitLabel: 'Close',
       onSubmit: async (form, close) => close()
@@ -983,6 +986,10 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   async function openDeckViewer(deckId, title) {
     // Loading-first: the dialog opens with a skeleton immediately, then the
     // deck content (or an in-dialog errorState) replaces it. No fetch-then-open.
+    // No dialog description: the title already names the deck and the body
+    // shows the real count ("N items") or errorState. A loading
+    // description would stick at the top after the skeleton is replaced, and
+    // the grid skeleton role=status already announces loading via aria-busy.
     // Desktop cramping fix: openDialog bodies are a 2-col grid on sm+ (ui.js),
     // so this single content node spans both columns (sm:col-span-2, same as
     // the post dialog) instead of squeezing into the left half. Without the
@@ -992,7 +999,6 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     bodyHost.setAttribute('aria-busy', 'true');
     const closeViewer = openDialog({
       title: title || 'Shared deck',
-      description: 'Loading…',
       content: [bodyHost],
       submitLabel: 'Close',
       onSubmit: async (form, close) => close()
