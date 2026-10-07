@@ -1,7 +1,7 @@
 import { apiRequest } from '../api';
 import { destroyCharts } from '../chartRegistry';
 import { iconTile } from '../icons';
-import { element, errorState, formatDate, loadingState, pageHeader, showToast, withPendingAction } from '../ui';
+import { element, errorState, formatDate, pageHeader, showToast, withPendingAction } from '../ui';
 import { profileStore } from '../accountProfile.js';
 import { dashboardWelcomeModel, localDayKey, readVisitRecord, recordDashboardVisit } from '../dashboardWelcome.js';
 import { smartGoalsWidget } from '../smartGoals.js';
@@ -318,11 +318,73 @@ function isEmptyDashboardSnapshot(data) {
   return true;
 }
 
+function dashboardStudyHomeSkeleton() {
+  // Study Home loading skeleton: shaped placeholders mirroring the real
+  // render order (Study Now → Today's Progress → Continue → snapshot/goals).
+  // Same .skeleton-block shimmer primitive as ui.js skeleton() (still under
+  // prefers-reduced-motion via styles.css), visual blocks aria-hidden with a
+  // single visually-hidden status line for AT. Matching surface/padding/margin
+  // classes keep spacing identical so real content swaps in with no shift.
+  const studyNow = element('section', { className: 'surface study-now p-5 sm:p-6', attrs: { 'aria-hidden': 'true' } }, [
+    element('div', { className: 'flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between' }, [
+      element('div', { className: 'grid min-w-0 flex-1 gap-2' }, [
+        element('div', { className: 'skeleton-block h-6 w-1/3' }),
+        element('div', { className: 'skeleton-block h-4 w-5/6' }),
+        element('div', { className: 'skeleton-block h-4 w-2/3' }),
+        element('div', { className: 'skeleton-block mt-1 h-3 w-1/4' })
+      ]),
+      element('div', { className: 'skeleton-block h-11 w-28 shrink-0 rounded-xl' })
+    ])
+  ]);
+  const todayRow = () => element('div', { className: 'flex items-baseline justify-between gap-3 py-2' }, [
+    element('div', { className: 'skeleton-block h-4 w-24' }),
+    element('div', { className: 'skeleton-block h-4 w-32' })
+  ]);
+  const today = element('section', { className: 'surface mt-5 p-5 sm:p-6', attrs: { 'aria-hidden': 'true' } }, [
+    element('div', { className: 'flex items-center gap-3' }, [
+      element('span', { className: 'skeleton-block size-10 shrink-0 rounded-full' }),
+      element('div', { className: 'skeleton-block h-5 w-36' })
+    ]),
+    element('div', { className: 'mt-2 divide-y divide-stone' }, [todayRow(), todayRow(), todayRow()])
+  ]);
+  const continueCard = () => element('div', { className: 'surface flex items-center justify-between gap-4 p-4' }, [
+    element('div', { className: 'grid min-w-0 flex-1 gap-2' }, [
+      element('div', { className: 'skeleton-block h-4 w-3/4' }),
+      element('div', { className: 'skeleton-block h-3 w-1/2' })
+    ]),
+    element('div', { className: 'skeleton-block h-8 w-20 shrink-0 rounded-lg' })
+  ]);
+  const cont = element('section', { className: 'mt-5', attrs: { 'aria-hidden': 'true' } }, [
+    element('div', { className: 'skeleton-block h-5 w-48' }),
+    element('div', { className: 'mt-3 grid gap-4 sm:grid-cols-2' }, [continueCard(), continueCard()])
+  ]);
+  const metricCard = () => element('div', { className: 'surface metric-card p-5' }, [
+    element('div', { className: 'skeleton-block h-3 w-1/2' }),
+    element('div', { className: 'skeleton-block mt-3 h-8 w-1/3' }),
+    element('div', { className: 'skeleton-block mt-2 h-3 w-2/3' })
+  ]);
+  const snapshot = element('div', { className: 'dashboard-metrics mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4', attrs: { 'aria-hidden': 'true' } }, [
+    metricCard(), metricCard(), metricCard(), metricCard()
+  ]);
+  // Goals preview + community pulse share the compact card shape above; one
+  // representative row covers that area without reserving full page height.
+  const goals = element('section', { className: 'mt-5', attrs: { 'aria-hidden': 'true' } }, [
+    element('div', { className: 'skeleton-block h-5 w-32' }),
+    element('div', { className: 'mt-3 grid gap-4 sm:grid-cols-2' }, [continueCard(), continueCard()])
+  ]);
+  const visual = element('div', { className: 'grid', attrs: { 'aria-hidden': 'true' } }, [studyNow, today, cont, snapshot, goals]);
+  return element('div', { className: 'grid gap-2', attrs: { role: 'status', 'aria-live': 'polite', 'aria-label': 'Loading your study overview…' } }, [
+    visual,
+    element('p', { className: 'visually-hidden', text: 'Loading your study overview…' })
+  ]);
+}
+
 export async function renderDashboard(container) {
   destroyCharts();
   const content = element('div', { className: 'dashboard-frame' });
   container.replaceChildren(element('section', {}, [pageHeader({ title: 'Dashboard', description: 'Your learning home — what to do now, and what you’ve done.' }), content]));
-  content.replaceChildren(loadingState('Loading your study overview…'));
+  content.setAttribute('aria-busy', 'true');
+  content.replaceChildren(dashboardStudyHomeSkeleton());
   async function load() {
     try {
       // Phase 9 refinement: the study-level estimate lives in the header
@@ -380,6 +442,7 @@ export async function renderDashboard(container) {
               firstExperience,
               dashboard: data
             });
+            content.setAttribute('aria-busy', 'false');
             return;
           }
         } catch {
@@ -414,7 +477,8 @@ export async function renderDashboard(container) {
         weeklyInsightsWidget(),
         element('p', { className: 'dashboard-footnote mt-5 text-center text-sm' }, [element('a', { className: 'font-semibold text-vermilion hover:underline', text: 'View detailed analytics in Statistics', attrs: { href: '#statistics' } })])
       );
-    } catch (error) { content.replaceChildren(errorState(error, load)); }
+      content.setAttribute('aria-busy', 'false');
+    } catch (error) { content.setAttribute('aria-busy', 'false'); content.replaceChildren(errorState(error, load)); }
   }
   await load();
 }

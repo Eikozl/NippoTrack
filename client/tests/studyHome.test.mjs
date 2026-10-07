@@ -136,3 +136,36 @@ test('session and review verbs are consistent', () => {
   const community = readSource('src/pages/community.js');
   assert.ok(!community.includes('`Ver más'), 'no mixed-language feed button');
 });
+
+test('v6.1: Study Home loads with a shaped skeleton, not a bare placeholder', () => {
+  const source = readSource('src/pages/dashboard.js');
+  assert.ok(!source.includes("loadingState('Loading your study overview"), 'bare overview placeholder removed');
+  assert.ok(!source.includes('Loading your study overview…') || source.includes('dashboardStudyHomeSkeleton'), 'overview text only inside the skeleton AT label');
+  assert.ok(source.includes('function dashboardStudyHomeSkeleton'), 'dedicated skeleton mirrors the Study Home layout');
+  assert.ok(source.includes('skeleton-block'), 'shaped skeleton uses the same shimmer primitive');
+  assert.ok(source.includes("role: 'status'"), 'skeleton announces via role=status');
+  assert.ok(source.includes('visually-hidden'), 'AT hears a hidden Loading… line, visuals stay aria-hidden');
+  assert.ok(source.includes("aria-hidden"), 'visual placeholder blocks hidden from AT');
+  assert.ok(source.includes('aria-busy'), 'container exposes aria-busy while loading');
+  assert.ok(source.includes("content.setAttribute('aria-busy', 'true')"), 'busy on skeleton mount');
+  assert.ok(source.includes("content.setAttribute('aria-busy', 'false')"), 'busy cleared when real content swaps in');
+  assert.ok(source.includes('errorState(error, load)'), 'error semantics untouched');
+});
+
+test('v6.1: dashboard skeleton covers Study Now, today, continue, snapshot/goals', () => {
+  const source = readSource('src/pages/dashboard.js');
+  assert.ok(source.includes('surface study-now p-5 sm:p-6'), 'Study Now card shape with matching surface/padding');
+  assert.ok(source.includes('skeleton-block h-6 w-1/3'), 'Study Now title bar shape');
+  assert.ok(source.includes('skeleton-block h-4 w-5/6'), 'Study Now reason text lines');
+  assert.ok(source.includes('skeleton-block h-11 w-28'), 'Study Now CTA button shape');
+  assert.ok(source.includes('flex items-baseline justify-between gap-3 py-2'), 'Today rows mirror label/counter layout');
+  assert.ok(source.includes('dashboard-metrics mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4'), 'snapshot grid matches real metrics spacing');
+  assert.ok(source.includes('metric-card p-5'), 'metric tile shape with counter lines');
+  assert.ok(source.includes('mt-3 grid gap-4 sm:grid-cols-2'), 'Continue/goals cards match real grid spacing');
+  assert.ok(source.includes('skeleton-block h-8 w-20'), 'Continue card button shape');
+  const ui = readSource('src/ui.js');
+  assert.ok(ui.includes('export function skeleton'), 'shared skeleton helper still exists');
+  const css = readSource('src/styles.css');
+  assert.ok(css.includes('.skeleton-block'), 'shimmer style shared');
+  assert.ok(css.includes('prefers-reduced-motion'), 'reduced-motion still stills the shimmer');
+});

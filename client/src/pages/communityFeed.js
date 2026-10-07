@@ -275,9 +275,10 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   // the old top tab-buttons row (Feed/Following/Discover/Decks plus the
   // trailing bell) is gone, never duplicated. Tab logic (showTab / state.tab /
   // profile interplay / setTabPressed) is unchanged; only presentation +
-  // placement moved. The four section entries keep role=tab + aria-selected;
-  // Share (+) and Notifications are action buttons co-located in the same
-  // pill for thumb reach (same toolbar pattern as the app header actions).
+  // placement moved. The three section entries keep role=tab + aria-selected;
+  // Share (+) is an action button co-located in the same pill for thumb reach
+  // (same toolbar pattern as the app header actions). The bell lives ONLY in
+  // the … overflow menu — no standalone bell in the pill, no duplicate.
   tabs.className = 'community-bottom-nav fixed bottom-4 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 items-center justify-between gap-1 rounded-full border border-stone/60 bg-paper/80 px-2 py-2 shadow-lg backdrop-blur-md';
   tabs.setAttribute('role', 'tablist');
   tabs.setAttribute('aria-label', 'Community sections');
@@ -292,7 +293,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     { key: 'discover', label: 'Discover', iconName: 'search' }
   ];
   const tabButtons = new Map();
-  // Icon-only buttons: compact 44px touch targets (6 × 44px + gaps fits
+  // Icon-only buttons: compact 44px touch targets (5 × 44px + gaps fits
   // 360px with no page h-scroll). Monochrome like the rest of the set —
   // active state comes from .is-active (see styles.css), never color alone
   // without the pill highlight.
@@ -324,35 +325,29 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   });
   tabs.appendChild(share);
 
-  // Notifications bell: neutral monochrome glyph (the yellow emoji is gone)
-  // with the small vermilion count badge it carries (information, kept).
-  const bell = element('button', {
-    className: navButtonClass,
-    attrs: { type: 'button', 'aria-label': 'Notifications' }
-  }, [icon('bell', { size: 22 })]);
-  const bellBadge = element('span', {
-    className: 'absolute -right-0.5 -top-0.5 hidden min-w-5 place-items-center rounded-full bg-vermilion px-1 text-[10px] font-bold text-paper',
-    text: '0',
-    attrs: { 'aria-label': 'unread notifications' }
-  });
-  bellBadge.style.display = 'none';
-  bell.appendChild(bellBadge);
-  bell.addEventListener('click', openNotifications);
-  tabs.appendChild(bell);
-
   // Overflow menu (three-dots): profiles were reachable only from
   // publications, so the "…" entry is now a small popup menu instead of a
   // straight jump to the Decks hub. Same menu pattern as the post actions
   // above (role=menu/menuitem, Esc/outside-click close, focus return, real
-  // buttons). The standalone bell stays — this menu only duplicates its
-  // action for thumb reach. The legacy decks hub still mounts untouched via
-  // renderDecksHub; only its entry point moved behind the Decks item.
+  // buttons). The bell lives ONLY here — no standalone bell in the pill, so
+  // the pill holds 5 targets (Home/Users/Search/+/…). The legacy decks hub
+  // still mounts untouched via renderDecksHub; only its entry point moved
+  // behind the Decks item.
   const decksDef = { key: 'decks', label: 'Decks', iconName: 'dots' };
   const overflowWrap = element('div', { className: 'relative shrink-0' });
   const overflowButton = element('button', {
     className: navButtonClass,
     attrs: { type: 'button', 'aria-label': 'More options', 'aria-haspopup': 'menu', 'aria-expanded': 'false' }
   }, [icon(decksDef.iconName, { size: 22 })]);
+  // Unread signal lives ONLY on this toggle (no standalone bell): the small
+  // vermilion count badge it carries preserves the signal (information, kept).
+  const overflowBadge = element('span', {
+    className: 'absolute -right-0.5 -top-0.5 hidden min-w-5 place-items-center rounded-full bg-vermilion px-1 text-[10px] font-bold text-paper',
+    text: '0',
+    attrs: { 'aria-hidden': 'true' }
+  });
+  overflowBadge.style.display = 'none';
+  overflowButton.appendChild(overflowBadge);
   // Opens upward from the floating pill (never under the home indicator);
   // right-aligned to the toggle with a viewport-width cap so the menu never
   // overflows at 360px.
@@ -429,16 +424,19 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   tabs.appendChild(overflowWrap);
   // Phase 7-frontend trimming: cheap badge — GET unread-count (single indexed
   // COUNT) for mount + after-inbox-close, never list?limit=1. Inbox
-  // open/mark-read/mark-all flows below are unchanged.
-  async function refreshBell() {
+  // open/mark-read/mark-all flows below are unchanged. The badge lives on the
+  // … toggle (bell is menu-only), so the label reads "More options, N unread
+  // notifications" when unread > 0, plain "More options" otherwise.
+  async function refreshOverflowBadge() {
     try {
       const data = await apiRequest('/api/community/notifications/unread-count');
       const unread = Number(data?.unread || 0);
-      bellBadge.textContent = unread > 99 ? '99+' : String(unread);
-      bellBadge.style.display = unread > 0 ? 'grid' : 'none';
-      bell.setAttribute('aria-label', unread > 0 ? `${unread} unread notifications` : 'Notifications');
+      overflowBadge.textContent = unread > 99 ? '99+' : String(unread);
+      overflowBadge.style.display = unread > 0 ? 'grid' : 'none';
+      overflowButton.setAttribute('aria-label', unread > 0 ? `More options, ${unread} unread notifications` : 'More options');
     } catch {
-      bellBadge.style.display = 'none';
+      overflowBadge.style.display = 'none';
+      overflowButton.setAttribute('aria-label', 'More options');
     }
   }
 
@@ -2548,7 +2546,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
               openProfile(note.actorUsername);
             }
             // Cheap badge refresh after the read + navigation (1 indexed COUNT).
-            refreshBell();
+            refreshOverflowBadge();
           });
           list.appendChild(row);
         }
@@ -2582,12 +2580,12 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       content: [element('div', { className: 'grid gap-3' }, [markAll, list, moreWrap])],
       submitLabel: 'Close',
       // Phase 7: cheap badge refresh after the inbox closes (mount + close only).
-      onSubmit: async (form, close) => { close(); refreshBell().catch(() => {}); }
+      onSubmit: async (form, close) => { close(); refreshOverflowBadge().catch(() => {}); }
     });
     load(true);
   }
 
-  await refreshBell();
+  await refreshOverflowBadge();
   await showTab('feed');
-  refreshBell().catch(() => {});
+  refreshOverflowBadge().catch(() => {});
 }
