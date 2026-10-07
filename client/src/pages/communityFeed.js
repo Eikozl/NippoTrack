@@ -1820,16 +1820,94 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
         ]),
         element('div', { className: 'mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm' }, [
           element('p', { className: 'text-muted', text: `${profile.counts.posts} posts · ${profile.counts.followers} followers · ${profile.counts.following} following` }),
-          element('p', { className: 'text-muted', text: `${profile.counts.vocabulary} words · ${profile.counts.kanji} kanji · ${profile.counts.grammar} patterns` })
+          // Library sizes are owner-only: the backend sends null (= undisclosed,
+          // never zero) for non-self viewers. Hide each null value; omit the row
+          // entirely when all three are null so "null words" never renders.
+          // Own profile (real numbers) renders unchanged.
+          ...(() => {
+            const counts = profile.counts || {};
+            const parts = [
+              (counts.vocabulary === null || counts.vocabulary === undefined) ? null : `${counts.vocabulary} words`,
+              (counts.kanji === null || counts.kanji === undefined) ? null : `${counts.kanji} kanji`,
+              (counts.grammar === null || counts.grammar === undefined) ? null : `${counts.grammar} patterns`
+            ].filter(Boolean);
+            if (!parts.length) return [];
+            return [element('p', { className: 'text-muted', text: parts.join(' · ') })];
+          })()
         ]),
         ...(profile.isSelf ? [element('a', { className: 'mt-3 inline-block text-sm font-semibold text-vermilion hover:underline', text: 'Edit profile in Settings', attrs: { href: '#settings' } })] : [])
       ]);
-      const lists = element('div', { className: 'mt-4 flex gap-2' });
+      const lists = element('div', { className: 'mt-4 flex flex-wrap gap-2' });
       const postsHost = element('div', { className: 'mt-4 grid gap-3' });
       body.replaceChildren(back, head, lists, postsHost);
       const followersBtn = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: `Followers (${profile.counts.followers})`, attrs: { type: 'button' } });
       const followingBtn = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: `Following (${profile.counts.following})`, attrs: { type: 'button' } });
       lists.append(followersBtn, followingBtn);
+      // Blocked-users management lives on the own-profile lists row (a self-only
+      // "Blocked users" button beside Followers/Following — the smallest coherent
+      // spot, reusing the same postsHost + loading/error primitives). Lists via
+      // paged GET /api/community/blocks ({ items, pagination }); each row carries
+      // an Unblock button (confirmDialog + withPendingAction pending state + toast
+      // + list refresh) driving DELETE /api/community/blocks with { username }.
+      // Block itself stays in the post menu — this surface only lists/unblocks.
+      const showBlocked = async (page = 1, append = false) => {
+        if (!append) postsHost.replaceChildren(loadingState('Loading blocked users…'));
+        try {
+          const data = await apiRequest(`/api/community/blocks?page=${page}&limit=20`);
+          const items = Array.isArray(data?.items) ? data.items : [];
+          const pagination = data?.pagination || {};
+          if (!append) postsHost.replaceChildren();
+          if (!items.length && page === 1) {
+            postsHost.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'No blocked users. People you block will appear here.' }));
+            return;
+          }
+          for (const person of items) {
+            const name = person.displayName || person.username || 'Someone';
+            const unblock = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Unblock', attrs: { type: 'button', 'aria-label': `Unblock ${person.username || 'user'}` } });
+            unblock.addEventListener('click', () => {
+              confirmDialog({
+                title: `Unblock @${person.username || 'user'}?`,
+                description: 'You will be able to see each other in Community again.',
+                confirmLabel: 'Unblock',
+                onConfirm: async () => {
+                  try {
+                    await withPendingAction(unblock, async () => {
+                      await apiRequest('/api/community/blocks', { method: 'DELETE', body: { username: person.username } });
+                    }, { pendingLabel: 'Unblocking…' });
+                    showToast('User unblocked.');
+                    await showBlocked(1);
+                  } catch (error) {
+                    showToast(error?.message || 'Unable to unblock.', 'error');
+                  }
+                }
+              });
+            });
+            postsHost.appendChild(element('div', { className: 'surface flex items-center justify-between gap-3 p-3' }, [
+              element('div', { className: 'flex min-w-0 flex-1 items-center gap-3' }, [
+                avatarFace(person.displayName, person.username, avatarUrlFor({ avatarUrl: person.avatarUrl, authorAvatar: person.authorAvatar }), 'size-10 text-sm'),
+                element('div', { className: 'min-w-0' }, [
+                  element('p', { className: 'truncate text-sm font-semibold text-ink', text: name }),
+                  ...(person.username ? [element('p', { className: 'truncate text-xs text-muted', text: `@${person.username}` })] : [])
+                ])
+              ]),
+              unblock
+            ]));
+          }
+          if (Number(pagination.totalPages || 0) > page) {
+            const more = element('button', { className: 'button-secondary min-h-9 self-center px-3 py-1.5 text-xs', text: 'Load more', attrs: { type: 'button' } });
+            more.addEventListener('click', () => { more.remove(); showBlocked(page + 1, true); });
+            postsHost.appendChild(more);
+          }
+        } catch (error) {
+          if (!append) postsHost.replaceChildren(errorState(error, () => showBlocked(1)));
+          else showToast(error?.message || 'Unable to load more.', 'error');
+        }
+      };
+      if (profile.isSelf) {
+        const blockedBtn = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Blocked users', attrs: { type: 'button' } });
+        blockedBtn.addEventListener('click', () => showBlocked(1));
+        lists.append(blockedBtn);
+      }
       const showList = async (direction) => {
         postsHost.replaceChildren(loadingState('Loading…'));
         try {

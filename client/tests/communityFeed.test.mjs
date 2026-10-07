@@ -389,6 +389,32 @@ test('phase 7: bell badge uses cheap unread-count, inbox flows unchanged', () =>
   assert.ok(source.includes('/notifications/read-all'), 'mark-all unchanged');
 });
 
+test('own profile manages blocked users with an unblock path', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('/api/community/blocks?page='), 'blocked list uses the paged GET endpoint');
+  assert.ok(source.includes("method: 'DELETE'") && source.includes('/api/community/blocks'), 'unblock uses DELETE /api/community/blocks');
+  assert.ok(source.includes('Blocked users'), 'self-only entry point beside Followers/Following');
+  assert.ok(source.includes('profile.isSelf'), 'blocked surface is self-only');
+  assert.ok(source.includes('Unblock'), 'per-row unblock action with confirm');
+  assert.ok(source.includes('Unblock @'), 'unblock confirm names the user');
+  assert.ok(source.includes('Unblocking…'), 'unblock pending state');
+  assert.ok(source.includes('User unblocked.'), 'unblock success toast plus list refresh');
+  assert.ok(source.includes('Unable to unblock.'), 'unblock failure toast');
+  assert.ok(source.includes('No blocked users.'), 'blocked empty state guides');
+  assert.ok(source.includes('Loading blocked users'), 'blocked loading state');
+  assert.ok(source.includes('Load more'), 'blocked paging beyond page one');
+});
+
+test('profile library counts hide undisclosed null values', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(!source.includes('${profile.counts.vocabulary} words'), 'no raw null-vocabulary interpolation');
+  assert.ok(!source.includes('${profile.counts.kanji} kanji'), 'no raw null-kanji interpolation');
+  assert.ok(!source.includes('${profile.counts.grammar} patterns'), 'no raw null-grammar interpolation');
+  assert.ok(source.includes('undisclosed'), 'null-means-undisclosed documented in code');
+  assert.ok(source.includes("parts.join(' · ')"), 'remaining non-null values joined, row omitted when all null');
+  assert.ok(source.includes('posts} posts'), 'public posts/followers/following row unchanged');
+});
+
 test('phase 7: flagged rows reuse follow flags without per-row profile fetch', () => {
   const source = readSource('src/pages/communityFeed.js');
   assert.ok(source.includes('viewerFollowing') && source.includes('followsYou'), 'follow flags consumed');
