@@ -122,7 +122,7 @@ async function getReadingPublication(executor, publicationId, viewerId) {
     `SELECT r.id_reading_publication AS id, r.owner_id, r.title, r.description, r.level, r.text,
        r.translations_json, r.is_public, r.created_at,
        p.username AS owner_username, p.display_name AS owner_display, p.is_public AS owner_is_public,
-       CASE WHEN ? IS NULL THEN NULL ELSE EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = r.owner_id) OR (b.blocker_id = r.owner_id AND b.blocked_id = ?)) END AS viewer_blocked
+        CASE WHEN ?::uuid IS NULL THEN NULL ELSE EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = r.owner_id) OR (b.blocker_id = r.owner_id AND b.blocked_id = ?)) END AS viewer_blocked
       FROM reading_publications r
       LEFT JOIN user_profile p ON p.user_id = r.owner_id
       WHERE r.id_reading_publication = ?
