@@ -52,7 +52,29 @@ test('reading posts preview the text inside the detail dialog', () => {
 
 test('deck viewer lays items out in a wrapping multi-column grid', () => {
   const source = readSource('src/pages/communityFeed.js');
-  assert.ok(source.includes('grid-cols-2') && source.includes('xl:grid-cols-3'), 'columns from mobile up, more when space allows');
+  const viewerBlock = source.slice(source.indexOf('async function openDeckViewer'), source.indexOf('function openDeckViewerRefresh'));
+  assert.ok(viewerBlock.includes('grid-cols-2'), 'mobile keeps the compact 2-up grid');
+  assert.ok(viewerBlock.includes('auto-fill') && viewerBlock.includes('minmax(14rem,1fr)'), 'desktop tracks use a sensible min width so text rarely truncates');
+});
+
+test('deck viewer desktop shows roomy readable items, mobile stays compact', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  const viewerBlock = source.slice(source.indexOf('async function openDeckViewer'), source.indexOf('function openDeckViewerRefresh'));
+  assert.ok(viewerBlock.includes('sm:col-span-2'), 'viewer body spans the full dialog body on desktop (no half-width trap like the post dialog fix)');
+  assert.ok(viewerBlock.includes('grid-cols-2'), 'mobile keeps compact 2-up grid (unchanged at 360px)');
+  assert.ok(viewerBlock.includes('minmax(14rem,1fr)'), 'desktop tracks have a 14rem min so short strings rarely truncate');
+  assert.ok(viewerBlock.includes('auto-fill'), 'tracks fill the available dialog width instead of fixed narrow counts');
+  assert.ok(!viewerBlock.includes('xl:grid-cols-3'), 'no forced 3-up squeeze inside the capped dialog');
+  assert.ok(!viewerBlock.includes('w-36') && !viewerBlock.includes('w-32'), 'no hard narrow fixed widths on viewer tracks');
+  assert.ok(viewerBlock.includes('truncate'), 'truncate kept only as last resort for genuinely long strings');
+  assert.ok(viewerBlock.includes('min-w-0') && viewerBlock.includes('max-w-full'), 'tracks shrink without horizontal page scroll');
+  assert.ok(viewerBlock.includes("skeleton({ rows: 4, variant: 'grid'"), 'loading skeleton untouched');
+  assert.ok(viewerBlock.includes('errorState(error, () => loadDeck'), 'in-dialog error with retry untouched');
+  assert.ok(viewerBlock.includes('Start Review') && viewerBlock.includes('Save all'), 'Save/Start-Review flows untouched');
+  const hub = readSource('src/pages/community.js');
+  assert.ok(hub.includes('index += 4'), 'decks hub strict 4-per-column chunking preserved');
+  assert.ok(hub.includes('placeDividers') && hub.includes("element('hr'"), 'hub real-wrap hr dividers keep working');
+  assert.ok(hub.includes('sm:col-span-2'), 'hub dialog content still spans the full body');
 });
 
 test('composer lives ONLY in the + dialog, no inline card remains', () => {

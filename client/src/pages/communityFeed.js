@@ -983,7 +983,12 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   async function openDeckViewer(deckId, title) {
     // Loading-first: the dialog opens with a skeleton immediately, then the
     // deck content (or an in-dialog errorState) replaces it. No fetch-then-open.
-    const bodyHost = element('div', { className: 'grid min-w-0 gap-3' }, [skeleton({ rows: 4, variant: 'grid', label: 'Loading deck…' })]);
+    // Desktop cramping fix: openDialog bodies are a 2-col grid on sm+ (ui.js),
+    // so this single content node spans both columns (sm:col-span-2, same as
+    // the post dialog) instead of squeezing into the left half. Without the
+    // span the inner 2-up item grid got ~148px tracks and short strings
+    // truncated after 1-2 chars.
+    const bodyHost = element('div', { className: 'grid min-w-0 gap-3 sm:col-span-2' }, [skeleton({ rows: 4, variant: 'grid', label: 'Loading deck…' })]);
     bodyHost.setAttribute('aria-busy', 'true');
     const closeViewer = openDialog({
       title: title || 'Shared deck',
@@ -1005,7 +1010,15 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       }
       const items = Array.isArray(detail?.items) ? detail.items : [];
       bodyHost.setAttribute('aria-busy', 'false');
-      const rows = element('div', { className: 'grid min-w-0 grid-cols-2 gap-2 xl:grid-cols-3' });
+      // Roomy tracks: mobile keeps the compact grid-cols-2 (correct at 360px).
+      // On sm+ auto-fill with a 14rem min fills the now-full-width body with
+      // ~2 roomy columns inside the capped dialog, so short
+      // grammar/vocab strings rarely truncate. The old viewport-3-up rule forced
+      // a squeeze (~200px tracks) at wide viewports for no extra room.
+      // truncate stays on the label/meaning nodes as a last resort for
+      // genuinely long strings; min-w-0 + w-full/max-w-full keep 360px free
+      // of horizontal scroll.
+      const rows = element('div', { className: 'grid min-w-0 w-full max-w-full grid-cols-2 gap-2 sm:grid-cols-[repeat(auto-fill,minmax(14rem,1fr))]' });
       rows.setAttribute('aria-busy', 'false');
       const saveAll = bookmarkSaveButton({ ariaLabel: `Save all ${items.length} items to your library`, title: `Save all ${items.length} items to your library` });
       // Deck review builds a REAL session (save-then-queue): foreign snapshot
