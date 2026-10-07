@@ -1,5 +1,5 @@
 import {
-  Bell, BookOpen, BookOpenText, CalendarDays, CalendarRange, ChartNoAxesCombined, Check, Circle, CircleUserRound,
+  Bell, BookMarked, BookOpen, BookOpenText, Bookmark, CalendarDays, CalendarRange, ChartNoAxesCombined, Check, Circle, CircleUserRound,
   Clock, createElement, Ellipsis, FileText, Flag, Flame, Globe, History, House, LayoutDashboard, Library, Languages,
   Menu, MessagesSquare, Moon, Newspaper, PieChart, Plus, RefreshCw, ScanText, Search, Settings, SlidersHorizontal, Square, Star, Sun, Tag, Target, Trash2, Users, Volume2, X, Zap
 } from 'lucide';
@@ -43,6 +43,8 @@ const ICONS = {
   filter: SlidersHorizontal,
   close: X,
   check: Check,
+  bookmark: Bookmark,
+  bookmarkSaved: BookMarked,
   trash: Trash2,
   star: Star,
   volume: Volume2,

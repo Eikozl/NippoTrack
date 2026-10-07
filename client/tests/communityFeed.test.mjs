@@ -37,7 +37,8 @@ test('post cards show identity, counts and learning actions', () => {
   assert.ok(source.includes('authorDisplay'), 'display name shown');
   assert.ok(source.includes('likeCount') && source.includes('commentCount'), 'counts shown');
   assert.ok(source.includes('function timeAgo'), 'relative dates, no raw timestamps');
-  assert.ok(source.includes('Save to library'), 'save action present');
+  assert.ok(source.includes("icon('bookmark'") || source.includes('bookmarkSaveButton'), 'save action present as bookmark icon');
+  assert.ok(source.includes('to library'), 'save aria-label present');
   assert.ok(source.includes('/api/reading/publications/'), 'reading import reuses the idempotent endpoint');
   assert.ok(source.includes('Open deck'), 'shared decks open with per-item save');
   assert.ok(!source.includes('innerHTML'), 'no innerHTML anywhere in social rendering');
@@ -347,7 +348,7 @@ test('shared readings keep Import and preview-as-Read with Analyze honestly omit
 test('japanese examples save gated plus TTS, never fabricated analysis', () => {
   const source = readSource('src/pages/communityFeed.js');
   assert.ok(source.includes('function exampleActions'), 'per-example actions exist');
-  assert.ok(source.includes('Save as vocab'), 'example save present');
+  assert.ok(source.includes('Save example as vocabulary') || source.includes('bookmarkSaveButton'), 'example save present as bookmark icon');
   assert.ok(source.includes('speakJapanese'), 'TTS reuses the shared speech infrastructure');
   assert.ok(source.includes('playJapaneseText'), 'single-utterance wrapper, no queue invention');
   assert.ok(!source.includes('<ruby') && !source.includes('furigana:'), 'no fabricated ruby/furigana markup');

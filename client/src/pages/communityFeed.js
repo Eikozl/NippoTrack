@@ -285,6 +285,43 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     searchType: 'all'
   };
 
+  // BATCH 1 (v6.1) — Instagram-style bookmark saves: every Save affordance on
+  // shared Community content is an icon-only button using the lucide bookmark
+  // glyph (icons.js `bookmark`, saved state `bookmarkSaved` = BookMarked).
+  // Confirm-then-save, honesty gates, and aria-labels are unchanged — only
+  // presentation moved from text buttons to icons. Icon-only targets keep
+  // min-h-11/min-w-11 (44px), real <button> keyboard reachability, and the
+  // global + .icon-button focus-visible ring. Saved = filled-feel BookMarked
+  // (fill-current) + disabled + "Already saved" tooltip.
+  const BOOKMARK_BUTTON_CLASS = 'icon-button min-h-11 min-w-11 shrink-0';
+  const BOOKMARK_ICON_SIZE = 20;
+  function bookmarkSaveButton({ ariaLabel, title, disabled = false, saved = false }) {
+    const glyph = saved ? 'bookmarkSaved' : 'bookmark';
+    const button = element('button', {
+      className: `${BOOKMARK_BUTTON_CLASS}${disabled || saved ? ' opacity-60' : ''}`,
+      attrs: {
+        type: 'button',
+        ...((disabled || saved) ? { disabled: '', ...(title ? { title } : {}), 'aria-label': ariaLabel } : { 'aria-label': ariaLabel, ...(title ? { title } : {}) })
+      }
+    }, [icon(glyph, { size: BOOKMARK_ICON_SIZE, ...(saved ? { className: 'fill-current' } : {}) })]);
+    // Stop card/dialog click-through on every save affordance (enabled presses
+    // add their own confirm listener second — same-element listeners both run).
+    button.addEventListener('click', (event) => event.stopPropagation());
+    return button;
+  }
+
+  // BATCH 2(a) (v6.1) — Minimal text actions: Reply/Report are borderless,
+  // background-less plain text (muted, hover underline/semibold). Edit/Delete
+  // share the old bordered style but stay untouched per spec (reported below).
+  // Real <button>s keep aria-labels, keyboard reachability, and the pending
+  // flows of their composers/dialogs.
+  const COMMENT_TEXT_ACTION_CLASS = 'min-h-9 rounded px-1 text-xs font-medium text-muted transition hover:text-ink hover:underline focus-visible:underline';
+  function commentTextAction({ text, ariaLabel, onPress }) {
+    const button = element('button', { className: COMMENT_TEXT_ACTION_CLASS, text, attrs: { type: 'button', 'aria-label': ariaLabel } });
+    if (typeof onPress === 'function') button.addEventListener('click', onPress);
+    return button;
+  }
+
   // Bottom floating glass nav: the EXISTING `tabs` node is restyled in place —
   // the old top tab-buttons row (Feed/Following/Discover/Decks plus the
   // trailing bell) is gone, never duplicated. Tab logic (showTab / state.tab /
@@ -852,7 +889,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     const saveable = isUsableMeaning(meaning);
     const rowChildren = [];
     if (saveable) {
-      const save = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Save as vocab', attrs: { type: 'button', 'aria-label': 'Save example as vocabulary' } });
+      const save = bookmarkSaveButton({ ariaLabel: 'Save example as vocabulary', title: 'Save example to library' });
       save.addEventListener('click', (event) => {
         event.stopPropagation();
         // Save-from-Community confirmation (same display + meaning pattern as
@@ -878,7 +915,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       });
       rowChildren.push(save);
     } else {
-      const disabled = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs opacity-60', text: 'Save as vocab', attrs: { type: 'button', disabled: '', title: 'No dictionary meaning available', 'aria-label': 'Save unavailable — no dictionary meaning available' } });
+      const disabled = bookmarkSaveButton({ ariaLabel: 'Save unavailable — no dictionary meaning available', title: 'No dictionary meaning available', disabled: true });
       disabled.addEventListener('click', (event) => event.stopPropagation());
       rowChildren.push(disabled);
     }
@@ -964,7 +1001,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       bodyHost.setAttribute('aria-busy', 'false');
       const rows = element('div', { className: 'grid min-w-0 grid-cols-2 gap-2 xl:grid-cols-3' });
       rows.setAttribute('aria-busy', 'false');
-      const saveAll = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: `Save all (${items.length}) to my library`, attrs: { type: 'button', 'aria-label': `Save all ${items.length} items to your library` } });
+      const saveAll = bookmarkSaveButton({ ariaLabel: `Save all ${items.length} items to your library`, title: `Save all ${items.length} items to your library` });
       // Deck review builds a REAL session (save-then-queue): foreign snapshot
       // items are saved first via the existing POST endpoints, then POST
       // /api/review/sessions queues the OWNED ids and hands off like the
@@ -982,11 +1019,11 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
           const saveDisabledReason = !isUsableMeaning(entry?.meaning)
             ? 'No dictionary meaning available'
             : (kind === 'kanji' ? 'Single kanji character required' : 'Cannot save this item');
-          const save = element('button', {
-            className: `button-secondary min-h-8 shrink-0 px-2.5 py-1 text-xs${saveable && !saved ? '' : ' opacity-60'}`,
-            text: saved ? 'Saved ✓' : 'Save',
-            attrs: { type: 'button', ...((saved || !saveable) ? { disabled: '', title: saved ? 'Already saved' : saveDisabledReason, 'aria-label': saved ? `Saved ${label}` : `Save unavailable for ${label} — ${saveDisabledReason.toLowerCase()}` } : { 'aria-label': `Save ${label} to library` }) }
-          });
+          const save = saved
+            ? bookmarkSaveButton({ saved: true, ariaLabel: `Saved ${label}`, title: 'Already saved' })
+            : !saveable
+              ? bookmarkSaveButton({ disabled: true, ariaLabel: `Save unavailable for ${label} — ${saveDisabledReason.toLowerCase()}`, title: saveDisabledReason })
+              : bookmarkSaveButton({ ariaLabel: `Save ${label} to library`, title: `Save ${label} to library` });
           if (!saved && saveable) {
             save.addEventListener('click', () => {
               const meaningNote = String(entry?.meaning || '').trim();
@@ -1185,11 +1222,11 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     const snapshot = post.snapshot || {};
     const body = entityCreateBody(post.entityType, snapshot);
     if (!body) {
-      const disabled = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs opacity-60', text: 'Save to library', attrs: { type: 'button', disabled: '', title: 'No dictionary meaning available', 'aria-label': 'Save unavailable — no dictionary meaning available' } });
+      const disabled = bookmarkSaveButton({ disabled: true, ariaLabel: 'Save unavailable — no dictionary meaning available', title: 'No dictionary meaning available' });
       disabled.addEventListener('click', (event) => event.stopPropagation());
       return disabled;
     }
-    const button = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Save to library', attrs: { type: 'button', 'aria-label': `Save ${snapshot.display} to library` } });
+    const button = bookmarkSaveButton({ ariaLabel: `Save ${snapshot.display} to library`, title: `Save ${snapshot.display} to library` });
     button.addEventListener('click', (event) => {
       event.stopPropagation();
       if (post.entityType === 'kanji' && !SINGLE_HAN.test(String(snapshot.display || ''))) {
@@ -1384,6 +1421,8 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
         // Single level only: replies show NO Reply button of their own.
         // Own replies reuse the comment edit/delete path; others reuse the
         // comment report path (targetType comment).
+        // BATCH 2(a): Report is plain text (borderless, background-less);
+        // Edit/Delete stay untouched (bordered) per spec.
         const replyHeadRight = reply.mine
           ? element('div', { className: 'flex shrink-0 items-center gap-1' }, [
             replyTime,
@@ -1392,7 +1431,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
           ])
           : element('div', { className: 'flex shrink-0 items-center gap-1' }, [
             replyTime,
-            element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Report', attrs: { type: 'button', 'aria-label': 'Report reply' } })
+            commentTextAction({ text: 'Report', ariaLabel: 'Report reply' })
           ]);
         const replyRow = element('div', { className: 'min-w-0 rounded-lg border border-stone bg-paper p-2' }, [
           element('div', { className: 'flex min-w-0 items-center gap-2' }, [
@@ -1451,10 +1490,12 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
         // Reply affordance lives only on top-level comments (one-level
         // threading). No comment likes per spec. Report reuses the comment
         // report path for others.
-        const replyButton = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Reply', attrs: { type: 'button', 'aria-label': `Reply to ${authorName}` } });
+        // BATCH 2(a): Reply + Report are plain text (borderless,
+        // background-less); Edit/Delete above stay untouched per spec.
+        const replyButton = commentTextAction({ text: 'Reply', ariaLabel: `Reply to ${authorName}` });
         const reportButton = comment.mine
           ? null
-          : element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Report', attrs: { type: 'button', 'aria-label': 'Report comment' } });
+          : commentTextAction({ text: 'Report', ariaLabel: 'Report comment' });
         if (reportButton) reportButton.addEventListener('click', () => openReportDialog('comment', comment.id));
         const actions = element('div', { className: 'mt-2 flex flex-wrap items-center gap-2' }, [replyButton, reportButton].filter(Boolean));
         // Shallow indent via left border + small padding (pl-2) so 360px

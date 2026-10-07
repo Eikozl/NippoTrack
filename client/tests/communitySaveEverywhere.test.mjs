@@ -13,7 +13,7 @@ const readSource = (path) => readFileSync(join(root, path), 'utf8');
 test('item1: example Save-as-vocab now confirms with display + meaning', () => {
   const source = readSource('src/pages/communityFeed.js');
   assert.ok(source.includes('function exampleActions'), 'example renderer exists');
-  assert.ok(source.includes('Save as vocab'), 'example save affordance present');
+  assert.ok(source.includes('Save example as vocabulary') || source.includes('bookmarkSaveButton'), 'example save affordance present as bookmark icon');
   // The saveable branch must wrap the POST in confirmDialog (same pattern as
   // saveEntityButton: display + meaning, Save + pending).
   const exampleStart = source.indexOf('function exampleActions');
@@ -40,7 +40,7 @@ test('item1: linkedBox single saves confirm (share_vocab/kanji/grammar)', () => 
 
 test('item1: deck viewer per-item Save and Save-all confirm with counts', () => {
   const source = readSource('src/pages/communityFeed.js');
-  assert.ok(source.includes('Save all (${items.length})'), 'Save-all names the count');
+  assert.ok(source.includes('Save all ${items.length} items to your library'), 'Save-all bookmark aria-label names the count');
   assert.ok(source.includes('Save ${items.length} items to your library?'), 'Save-all confirms with count');
   assert.ok(source.includes("confirmLabel: 'Save all'"), 'Save-all confirm labeled');
   assert.ok(source.includes('Save "${label}" to your library?'), 'per-item confirm names the item');
