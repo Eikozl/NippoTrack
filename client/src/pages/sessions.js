@@ -25,6 +25,7 @@ import {
   openDialog,
   pageHeader,
   paginationControls,
+  searchableMultiSelect,
   setActionPending,
   showToast,
   withGlobalLoading,
@@ -155,19 +156,24 @@ function sessionOverflowMenu(onDelete) {
 }
 
 // Visible Session form field order is defined in ../sessionHistory.js
-// (SESSION_FORM_FIELD_ORDER: Basic → Resource → Writing → Notes).
-// Manual linking controls (vocabulary/kanji/grammar) and Writing notes are
-// intentionally hidden from the form and never submitted, so the backend
-// preserves existing relationships and writing notes on edit.
+// (SESSION_FORM_FIELD_ORDER: Basic → Linked material → Writing → Notes).
+// Manual linking is a single compact collapsible section ("Link studied
+// items (optional)") with three small multi-pickers reusing the loaders
+// below. There is no automatic linking: the backend stores exactly what the
+// learner picks (omitted arrays preserve on edit, supplied arrays replace).
+// Writing notes stay hidden and are never submitted, so the backend keeps
+// existing writing notes on edit.
 
 function selectedNumbers(select) {
+  if (!select || typeof select.selectedOptions === 'undefined') return [];
   return Array.from(select.selectedOptions, (option) => Number(option.value));
 }
 
-// Preserved for compatibility: manual session-linking helpers. The linking
-// UI is intentionally hidden from the Session form, but these loaders stay
-// available (backend contracts, junction tables, and stored relationships
-// are untouched).
+// Manual session-linking helpers. The pickers submit vocabulary_ids /
+// kanji_ids / grammar_ids through buildSessionSubmitPayload; the backend
+// (validateStudySessionPayload + junction tables, verified against
+// server/src/controllers/sessionsController.js) inserts on create and
+// replaces-when-supplied / preserves-when-omitted on update.
 
 function mergeOptions(loadedOptions, selectedRecords, mapRecord) {
   const merged = new Map(loadedOptions.map((option) => [String(option.value), option]));
@@ -340,10 +346,58 @@ export function renderSessions(container) {
   async function openSessionDialog(record = {}) {
     if (!setActionPending(addButton, true, { pendingLabel: 'Loading…' })) return;
     try {
-      // Visible order: Basic → Resource → Writing → Notes.
-      // Manual linking controls and Writing notes are intentionally hidden
-      // from this form (see buildSessionSubmitPayload), but the underlying
-      // linking system, API contracts, and stored data are fully preserved.
+      // Visible order: Basic → Linked material → Writing → Notes. Linking is
+      // one compact collapsible with three small multi-pickers, honestly
+      // labeled optional — nothing auto-links. Edit pre-selects the
+      // record's current links so saving round-trips them; omitted arrays
+      // would preserve, supplied arrays replace (backend partial-update
+      // semantics). Writing notes stay hidden (backend keeps them on edit).
+      const options = await loadRelationshipOptions(record);
+      let closeDialog;
+      const goToLibrary = (page) => {
+        closeDialog?.();
+        window.location.hash = `#${page}`;
+      };
+      const linkedCount = (record.vocabulary || []).length + (record.kanji || []).length + (record.grammar || []).length;
+      const linkedSection = element('details', { className: 'rounded-lg border border-stone bg-paper/40 px-4 py-3 sm:col-span-2' }, [
+        element('summary', { className: 'cursor-pointer font-semibold text-ink', text: `Link studied items (optional)${linkedCount ? ` (${linkedCount} linked)` : ''}` }),
+        element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: 'Pick what you actually studied. Nothing is linked automatically.' }),
+        element('div', { className: 'mt-3 grid gap-3' }, [
+          searchableMultiSelect({
+            name: 'vocabulary_ids',
+            label: 'Related vocabulary',
+            options: options.vocabulary,
+            value: (record.vocabulary || []).map((item) => item.id_vocabulary),
+            placeholder: 'Search vocabulary…',
+            emptyMessage: 'No vocabulary records yet. Add vocabulary before linking it to this session.',
+            createLabel: 'Add vocabulary',
+            onCreate: () => goToLibrary('vocabulary'),
+            loadOptions: loadVocabularyOptions
+          }),
+          searchableMultiSelect({
+            name: 'kanji_ids',
+            label: 'Related kanji',
+            options: options.kanji,
+            value: (record.kanji || []).map((item) => item.id_kanji),
+            placeholder: 'Search kanji…',
+            emptyMessage: 'No kanji records yet. Add kanji before linking it to this session.',
+            createLabel: 'Add kanji',
+            onCreate: () => goToLibrary('kanji'),
+            loadOptions: loadKanjiOptions
+          }),
+          searchableMultiSelect({
+            name: 'grammar_ids',
+            label: 'Related grammar',
+            options: options.grammar,
+            value: (record.grammar || []).map((item) => item.id_grammar),
+            placeholder: 'Search grammar…',
+            emptyMessage: 'No grammar records yet. Add grammar before linking it to this session.',
+            createLabel: 'Add grammar',
+            onCreate: () => goToLibrary('grammar'),
+            loadOptions: loadGrammarOptions
+          })
+        ])
+      ]);
       const notesField = field({ name: 'notes', label: 'Notes', type: 'textarea', maxLength: 1500, value: record.notes || '', description: 'Reflections, observations, reminders.' });
       notesField.classList.add('sm:col-span-2');
       const formFields = [
@@ -351,6 +405,7 @@ export function renderSessions(container) {
         field({ name: 'session_date', label: 'Date', type: 'date', required: true, value: String(record.session_date || '').slice(0, 10) }),
         field({ name: 'duration_minutes', label: 'Duration (minutes)', type: 'number', required: true, value: record.duration_minutes || 30 }),
         field({ name: 'resource', label: 'Resource', maxLength: 255, value: record.resource || '', placeholder: 'Genki, NHK, conversation…', description: 'What you studied with. For a media diary, use Content Log.' }),
+        linkedSection,
         element('section', { className: 'rounded-lg border border-stone bg-paper/40 p-4 sm:col-span-2' }, [
           element('h3', { className: 'font-semibold text-ink', text: 'Writing' }),
           element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: 'Your study output — the content you created.' }),
@@ -362,7 +417,7 @@ export function renderSessions(container) {
         notesField
       ];
 
-      openDialog({
+      closeDialog = openDialog({
         title: record.id_session ? 'Edit study session' : 'Add study session',
         content: formFields,
         submitLabel: record.id_session ? 'Save changes' : 'Create session',
@@ -373,6 +428,9 @@ export function renderSessions(container) {
             session_date: formData.get('session_date'),
             duration_minutes: formData.get('duration_minutes'),
             resource: formData.get('resource'),
+            vocabulary_ids: selectedNumbers(form.elements.vocabulary_ids),
+            kanji_ids: selectedNumbers(form.elements.kanji_ids),
+            grammar_ids: selectedNumbers(form.elements.grammar_ids),
             writing_title: formData.get('writing_title'),
             writing_content: formData.get('writing_content'),
             notes: formData.get('notes')

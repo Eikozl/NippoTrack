@@ -3,6 +3,7 @@
 // untouched (mounted as the Decks tab). All bodies render via textContent;
 // all identity comes from the server payloads (req.user.id server-side).
 import { apiRequest } from '../api';
+import { icon } from '../icons';
 import { speakJapanese } from '../speech.js';
 import {
   element, emptyState, errorState, loadingState, openDialog, confirmDialog,
@@ -270,39 +271,96 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     searchType: 'all'
   };
 
+  // Bottom floating glass nav: the EXISTING `tabs` node is restyled in place —
+  // the old top tab-buttons row (Feed/Following/Discover/Decks plus the
+  // trailing bell) is gone, never duplicated. Tab logic (showTab / state.tab /
+  // profile interplay / setTabPressed) is unchanged; only presentation +
+  // placement moved. The four section entries keep role=tab + aria-selected;
+  // Share (+) and Notifications are action buttons co-located in the same
+  // pill for thumb reach (same toolbar pattern as the app header actions).
+  tabs.className = 'community-bottom-nav fixed bottom-4 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 items-center justify-between gap-1 rounded-full border border-stone/60 bg-paper/80 px-2 py-2 shadow-lg backdrop-blur-md';
+  tabs.setAttribute('role', 'tablist');
+  tabs.setAttribute('aria-label', 'Community sections');
+  // Safe-area: the pill floats above the home indicator, never under it.
+  tabs.style.paddingBottom = 'max(0.5rem, env(safe-area-inset-bottom))';
+  // Reserve room so the floating pill never covers the last posts or pager.
+  body.style.paddingBottom = '6.5rem';
+
   const tabDefs = [
-    { key: 'feed', label: 'Feed' },
-    { key: 'following', label: 'Following' },
-    { key: 'discover', label: 'Discover' },
-    { key: 'decks', label: 'Decks' }
+    { key: 'feed', label: 'Feed', iconName: 'home' },
+    { key: 'following', label: 'Following', iconName: 'users' },
+    { key: 'discover', label: 'Discover', iconName: 'search' }
   ];
   const tabButtons = new Map();
+  // Icon-only buttons: compact 44px touch targets (6 × 44px + gaps fits
+  // 360px with no page h-scroll). Monochrome like the rest of the set —
+  // active state comes from .is-active (see styles.css), never color alone
+  // without the pill highlight.
+  const navButtonClass = 'relative grid min-h-11 min-w-11 shrink-0 place-items-center rounded-full text-muted transition hover:text-ink';
   for (const def of tabDefs) {
     const button = element('button', {
-      className: 'button-secondary min-h-9 px-3 py-1.5 text-sm',
-      text: def.label,
-      attrs: { type: 'button', role: 'tab', 'aria-selected': 'false' }
-    });
+      className: navButtonClass,
+      attrs: { type: 'button', role: 'tab', 'aria-selected': 'false', 'aria-label': def.label }
+    }, [icon(def.iconName, { size: 22 })]);
     button.addEventListener('click', () => showTab(def.key));
     tabButtons.set(def.key, button);
     tabs.appendChild(button);
   }
 
-  // Notifications bell sits last in the tabs row, aligned with the tab
-  // buttons (never floating in the header).
-  const bell = element('button', {
-    className: 'icon-button relative ml-auto min-h-9',
-    attrs: { type: 'button', 'aria-label': 'Notifications' }
+  // Share (+) switches to the feed tab when needed, then scrolls to and
+  // focuses the composer ("Share something" lives there now) — expanding it
+  // when collapsed.
+  const share = element('button', {
+    className: navButtonClass,
+    attrs: { type: 'button', 'aria-label': 'Share something — open the composer' }
+  }, [icon('plus', { size: 22 })]);
+  share.addEventListener('click', async () => {
+    if (state.tab !== 'feed' || state.profile) await showTab('feed');
+    const composer = body.querySelector('[data-composer]');
+    if (!composer) return;
+    const toggle = composer.querySelector(':scope > button[aria-expanded]');
+    if (toggle && toggle.getAttribute('aria-expanded') === 'false') toggle.click();
+    try {
+      composer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch {
+      composer.scrollIntoView();
+    }
+    window.setTimeout(() => {
+      try {
+        const target = composer.querySelector('textarea[aria-label="Post text"]')
+          || composer.querySelector('select, textarea, input, button');
+        target?.focus({ preventScroll: true });
+      } catch { /* focus is best-effort */ }
+    }, 60);
   });
+  tabs.appendChild(share);
+
+  // Notifications bell: neutral monochrome glyph (the yellow emoji is gone)
+  // with the small vermilion count badge it carries (information, kept).
+  const bell = element('button', {
+    className: navButtonClass,
+    attrs: { type: 'button', 'aria-label': 'Notifications' }
+  }, [icon('bell', { size: 22 })]);
   const bellBadge = element('span', {
-    className: 'absolute -right-1 -top-1 hidden min-w-5 place-items-center rounded-full bg-vermilion px-1 text-[10px] font-bold text-paper',
+    className: 'absolute -right-0.5 -top-0.5 hidden min-w-5 place-items-center rounded-full bg-vermilion px-1 text-[10px] font-bold text-paper',
     text: '0',
     attrs: { 'aria-label': 'unread notifications' }
   });
   bellBadge.style.display = 'none';
-  bell.append(document.createTextNode('🔔'), bellBadge);
+  bell.appendChild(bellBadge);
   bell.addEventListener('click', openNotifications);
   tabs.appendChild(bell);
+
+  // Decks hub overflow entry (three-dots): the legacy hub still mounts
+  // untouched via renderDecksHub — only its entry point moved into the pill.
+  const decksDef = { key: 'decks', label: 'Decks', iconName: 'dots' };
+  const decksButton = element('button', {
+    className: navButtonClass,
+    attrs: { type: 'button', role: 'tab', 'aria-selected': 'false', 'aria-label': decksDef.label }
+  }, [icon(decksDef.iconName, { size: 22 })]);
+  decksButton.addEventListener('click', () => showTab(decksDef.key));
+  tabButtons.set(decksDef.key, decksButton);
+  tabs.appendChild(decksButton);
   // Phase 7-frontend trimming: cheap badge — GET unread-count (single indexed
   // COUNT) for mount + after-inbox-close, never list?limit=1. Inbox
   // open/mark-read/mark-all flows below are unchanged.

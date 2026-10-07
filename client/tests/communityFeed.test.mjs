@@ -167,7 +167,7 @@ test('legacy latest and following tabs stay untouched', () => {
 test('avatars and names both open profiles', () => {
   const source = readSource('src/pages/communityFeed.js');
   assert.ok(source.includes('Open profile of'), 'profile entry points labeled');
-  assert.ok(source.includes('tabs.appendChild(bell)'), 'bell sits last in the tabs row, aligned with tabs');
+  assert.ok(source.includes('tabs.appendChild(bell)'), 'bell sits in the bottom pill with the tabs');
 });
 
 test('empty states guide instead of dead-ending', () => {
@@ -422,4 +422,62 @@ test('phase 7: flagged rows reuse follow flags without per-row profile fetch', (
   assert.ok(source.includes('initialFollowing'), 'initial state comes from the payload');
   assert.ok(source.includes('/api/community/profile/${encodeURIComponent(username)}'), 'single profile fetch kept only where flags are genuinely absent (post dialog)');
   assert.ok(source.includes('genuinely absent'), 'absent-flags surface documented in code');
+});
+
+test('bottom nav restyles the existing tabs node as a floating glass pill', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('community-bottom-nav'), 'pill owns a dedicated class');
+  assert.ok(source.includes('backdrop-blur'), 'glass background uses backdrop blur');
+  assert.ok(source.includes('bg-paper/80'), 'translucent surface');
+  assert.ok(source.includes('rounded-full'), 'pill shape');
+  assert.ok(source.includes('safe-area-inset-bottom'), 'home-indicator safe area respected');
+  assert.ok(source.includes('fixed bottom-4') && source.includes('-translate-x-1/2'), 'fixed bottom, centered placement');
+  assert.ok(source.includes('max-w-md'), 'desktop width capped');
+  assert.ok(source.includes('paddingBottom'), 'content reserve so the pill never covers the last posts');
+  assert.ok(!source.includes('button-secondary min-h-9 px-3 py-1.5 text-sm'), 'old top tab buttons removed');
+  assert.ok(!source.includes('ml-auto'), 'old trailing-bell alignment removed');
+});
+
+test('bottom nav carries six icon-only buttons with aria-labels, no emoji', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  for (const label of ['Feed', 'Following', 'Discover', 'Share something', 'Notifications', 'Decks']) {
+    assert.ok(source.includes(label), `icon button labeled "${label}"`);
+  }
+  assert.ok(!source.includes('🔔'), 'no emoji bell anywhere in the new bar');
+  assert.ok(source.includes("icon('bell'"), 'bell reuses the monochrome icons.js set');
+  assert.ok(source.includes("iconName: 'home'") && source.includes("iconName: 'users'") && source.includes("iconName: 'search'"), 'feed/following/discover glyphs come from icons.js');
+  assert.ok(source.includes("icon('plus'") && source.includes("iconName: 'dots'"), 'share/decks glyphs come from icons.js');
+  assert.ok(source.includes('min-h-11') && source.includes('min-w-11'), 'compact 44px touch targets fit 360px');
+  assert.ok(source.includes('bg-vermilion'), 'vermilion unread count badge kept (it carries information)');
+  assert.ok(source.includes('unread notifications'), 'badge aria-label updates kept');
+});
+
+test('bottom nav keeps tab semantics, keyboard reachability and active state', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes("'tablist'"), 'pill keeps the tablist role');
+  assert.ok(source.includes("role: 'tab'"), 'section entries keep role=tab');
+  assert.ok(source.includes('aria-selected'), 'selection stays exposed');
+  assert.ok(source.includes("element('button'"), 'real buttons, keyboard reachable');
+  const styles = readSource('src/styles.css');
+  assert.ok(styles.includes('button:focus-visible'), 'global focus-visible ring covers the pill buttons');
+  assert.ok(source.includes("classList.toggle('is-active'"), 'active pill highlight toggles with the tab');
+  assert.ok(styles.includes('.community-bottom-nav [role="tab"].is-active'), 'active state styled in the shared stylesheet');
+});
+
+test('share entry reuses the feed composer instead of inventing a new one', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('data-composer'), 'share targets the existing composer');
+  assert.ok(source.includes("showTab('feed')"), 'share switches to the feed tab when needed');
+  assert.ok(source.includes('scrollIntoView'), 'share scrolls to the composer');
+  assert.ok(source.includes('.focus('), 'share focuses the composer');
+  assert.ok(source.includes('aria-expanded'), 'share expands the collapsed composer');
+  assert.ok(source.includes("showTab('decks')"), 'decks overflow entry still mounts the untouched hub');
+});
+
+test('community nav glyphs all resolve inside the shared icons.js set', () => {
+  const source = readSource('src/icons.js');
+  for (const key of ['home:', 'users:', 'bell:', 'plus:', 'dots:']) {
+    assert.ok(source.includes(key), `icons.js serves "${key}"`);
+  }
+  assert.ok(source.includes('House') && source.includes('Users') && source.includes('Bell') && source.includes('Plus') && source.includes('Ellipsis'), 'lucide glyphs reused, no inline one-off SVG');
 });

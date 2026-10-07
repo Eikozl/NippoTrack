@@ -85,6 +85,13 @@
   /* Selected state: restrained accent-soft wash + subtle border + emphasis
      text. No giant filled blocks; the icon carries the accent. */
   .nav-item.is-active { color:var(--jlt-ink); background:var(--jlt-primary-soft); border:1px solid color-mix(in srgb,var(--jlt-border) 70%,transparent); box-shadow:var(--shadow-raised-sm); }
+  /* Community bottom floating glass nav: icon-only entries share the
+     nav-item selected language (accent-soft wash + subtle border + raised
+     shadow) so the active tab reads as a pill highlight, never color alone.
+     The bar itself carries its Tailwind pill classes in communityFeed.js;
+     only the selected state lives here with the other .is-active rules. */
+  .community-bottom-nav [role="tab"].is-active { color:var(--jlt-ink); background:var(--jlt-primary-soft); border:1px solid color-mix(in srgb,var(--jlt-border) 70%,transparent); box-shadow:var(--shadow-raised-sm); }
+  .community-bottom-nav [role="tab"]:not(.is-active) { border:1px solid transparent; }
   .icon-button { @apply grid size-10 place-items-center rounded-[12px] text-lg text-ink transition disabled:cursor-not-allowed disabled:opacity-55; background:var(--jlt-surface); border:1px solid var(--jlt-border); box-shadow:var(--nt-shadow-sm); }
   .icon-button:hover { color:var(--jlt-primary); border-color:color-mix(in srgb,var(--jlt-border) 55%,var(--jlt-primary)); }
   .icon-button:active { box-shadow:var(--shadow-inset-sm); }

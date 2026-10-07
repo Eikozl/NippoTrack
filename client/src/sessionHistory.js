@@ -6,18 +6,25 @@
 // rows ONLY for fields with real information. Absent fields are omitted
 // entirely — never rendered as "No X recorded" placeholders.
 //
-// SESSION_FORM_FIELD_ORDER + buildSessionSubmitPayload drive the simplified
-// Add/Edit form (Basic → Resource → Writing → Notes). Manual linking
-// controls and Writing notes are hidden from the form and never submitted:
-// the backend treats omitted relationship arrays as "leave untouched" (no
-// DELETE) and omitted writing_notes as "keep current notes", so hidden
-// existing data survives edit/save.
+// SESSION_FORM_FIELD_ORDER + buildSessionSubmitPayload drive the Add/Edit
+// form (Basic → Linked material → Writing → Notes). Manual linking is a
+// compact optional section: vocabulary_ids / kanji_ids / grammar_ids travel
+// only when the form supplies them. The backend treats omitted relationship
+// arrays as "leave untouched" (no DELETE) and supplied arrays (even empty)
+// as "replace", so Add sends the pickers' values and Edit round-trips the
+// record's current links — nothing is ever silently cleared. Writing notes
+// stay hidden from the form and are never submitted, so the backend keeps
+// existing writing notes on edit. No automatic/magical linking is attempted:
+// the form only records what the learner explicitly links.
 
 export const SESSION_FORM_FIELD_ORDER = [
   'category',
   'session_date',
   'duration_minutes',
   'resource',
+  'vocabulary_ids',
+  'kanji_ids',
+  'grammar_ids',
   'writing_title',
   'writing_content',
   'notes'
@@ -63,9 +70,11 @@ export function sessionCardModel(session) {
   };
 }
 
-// Builds the create/update payload from visible form values only.
-// Linking IDs and writing_notes are NEVER included. Writing title/content
-// travel only when the user actually wrote something.
+// Builds the create/update payload from form values. Linking ID arrays pass
+// through only when the form supplies them (the compact "Linked material"
+// pickers); when absent they are omitted so an edit preserves existing links.
+// Writing title/content travel only when the user actually wrote something.
+// writing_notes is NEVER included (hidden from the form, backend keeps it).
 export function buildSessionSubmitPayload(values) {
   const source = values && typeof values === 'object' ? values : {};
   const text = (value) => {
@@ -80,6 +89,11 @@ export function buildSessionSubmitPayload(values) {
     resource: text(source.resource),
     notes: text(source.notes)
   };
+  for (const field of LINKING_FIELD_NAMES) {
+    if (source[field] === undefined) continue;
+    const ids = Array.isArray(source[field]) ? source[field] : [];
+    payload[field] = [...new Set(ids.map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+  }
   const writingTitle = text(source.writing_title);
   const writingContent = text(source.writing_content);
   if (writingTitle.trim() || writingContent.trim()) {
@@ -89,6 +103,10 @@ export function buildSessionSubmitPayload(values) {
   return payload;
 }
 
+// True when the payload names no linking arrays and no writing_notes — the
+// edit-safe omit path where the backend preserves existing relationships and
+// writing notes. Payloads built from the "Linked material" pickers name the
+// linking arrays explicitly (replace semantics) and correctly return false.
 export function submitPayloadOmitsHiddenFields(payload) {
   const present = payload && typeof payload === 'object' ? Object.keys(payload) : [];
   return [...LINKING_FIELD_NAMES, 'writing_notes'].every((field) => !present.includes(field));
