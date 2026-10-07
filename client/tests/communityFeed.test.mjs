@@ -220,11 +220,32 @@ test('empty states guide instead of dead-ending', () => {
   assert.ok(source.includes('No posts yet'), 'empty latest invites creation');
 });
 
-test('settings edits the full public identity incl. visibility', () => {
-  const source = readSource('src/pages/settings.js');
+test('community owns the full public identity incl. visibility (moved from settings)', () => {
+  const feed = readSource('src/pages/communityFeed.js');
   for (const marker of ['profile-level', 'profile-target', 'profile-interests', 'profile-public', 'jlpt_level', 'target_jlpt']) {
-    assert.ok(source.includes(marker), `settings edits ${marker}`);
+    assert.ok(feed.includes(marker), `community dialog edits ${marker}`);
   }
+  const settings = readSource('src/pages/settings.js');
+  for (const marker of ['profile-level', 'profile-target', 'profile-interests', 'profile-public', 'jlpt_level', 'target_jlpt']) {
+    assert.ok(!settings.includes(marker), `settings no longer edits ${marker}`);
+  }
+});
+
+test('own profile offers an Edit profile dialog reusing the same PUT path', () => {
+  const feed = readSource('src/pages/communityFeed.js');
+  assert.ok(feed.includes('function openEditProfileDialog'), 'dialog builder exists');
+  assert.ok(feed.includes("text: 'Edit profile'"), 'self-only entry point labeled');
+  assert.ok(feed.includes('profile.isSelf'), 'entry point gated to the own profile');
+  assert.ok(feed.includes("title: 'Edit profile'"), 'dialog titled');
+  assert.ok(feed.includes('/api/users/me'), 'prefill + save reuse the existing profile endpoint');
+  assert.ok(feed.includes("method: 'PUT'"), 'save uses explicit PUT');
+  assert.ok(feed.includes('username: String(usernameInput.value'), 'username payload shape unchanged');
+  assert.ok(feed.includes('is_public: publicBox.checked'), 'visibility payload shape unchanged');
+  assert.ok(feed.includes('Public profile: ${saved.username}'), 'success toast presents the saved username');
+  assert.ok(feed.includes('Unable to save the public profile.'), 'failure toast preserved');
+  assert.ok(feed.includes('renderProfile(next)'), 'save refreshes the profile view');
+  assert.ok(!feed.includes('Edit profile in Settings'), 'old settings link removed');
+  assert.ok(!feed.includes("href: '#settings'"), 'no dead settings anchor on the profile');
 });
 
 test('reply threads nest single-level with inline composer', () => {
@@ -331,7 +352,7 @@ test('japanese examples save gated plus TTS, never fabricated analysis', () => {
   assert.ok(!source.includes('<ruby') && !source.includes('furigana:'), 'no fabricated ruby/furigana markup');
 });
 
-test('jlpt labels qualify bare levels and profile renders both settings fields', () => {
+test('jlpt labels qualify bare levels and profile renders both editor fields', () => {
   const source = readSource('src/pages/communityFeed.js');
   assert.ok(source.includes('Current level') && source.includes('Studying toward'), 'profile shows both settings labels, never bare Studying N3');
   assert.ok(source.includes('Your tag') || source.includes('Your JLPT tag'), 'level pills qualified per entityPage convention');
@@ -529,7 +550,7 @@ test('overflow items reuse existing destinations, profiles resolve via the own-p
   assert.ok(source.includes('openNotifications()'), 'Notifications item reuses the same inbox action');
   assert.ok(source.includes('/api/users/me'), 'own profile resolves through the existing own-profile endpoint');
   assert.ok(source.includes('openProfile(ownUsername)'), 'own profile reuses the standard profile path');
-  assert.ok(source.includes('Claim a username in Settings'), 'unclaimed usernames get guidance, never a dead navigation');
+  assert.ok(source.includes('Claim a username to open your profile.'), 'unclaimed usernames get guidance, never a dead navigation');
   assert.ok(source.includes('Unable to open your profile.'), 'own-profile failure toasts');
 });
 

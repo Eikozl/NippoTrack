@@ -121,13 +121,15 @@ test('applyAppThemeAttributes keeps data-theme + data-nippotrack-theme in sync',
   assert.deepEqual(invalid.documentElement.dataset, {});
 });
 
-test('main.js + settings.js sync both attributes on every theme change', () => {
+test('main.js syncs both attributes on every theme change; settings no longer touches theme', () => {
   const main = readSource('src/main.js');
   assert.ok(main.includes('applyAppThemeAttributes(savedTheme)'), 'boot syncs both attributes');
   assert.ok(main.includes('applyAppThemeAttributes(theme)'), 'runtime toggle syncs both attributes');
   assert.ok(main.includes('applyAppThemeAttributes(next)'), 'theme-change listener re-syncs');
+  // Appearance removed from Settings: the switch UI is gone and the persisted
+  // theme (localStorage) stays as-is. No replacement switcher is invented.
   const settings = readSource('src/pages/settings.js');
-  assert.ok(settings.includes('applyAppThemeAttributes(theme)'), 'settings syncs both attributes');
+  assert.ok(!settings.includes('applyAppThemeAttributes'), 'settings no longer syncs theme attributes');
 });
 
 // --- wiring -------------------------------------------------------------------
@@ -146,11 +148,12 @@ test('main.js keeps compat surface while writing both keys', () => {
   assert.ok(!main.includes('JLT_logo-png'), 'legacy JLT mark removed from app shell');
 });
 
-test('settings.js writes both keys without changing event semantics', () => {
+test('settings.js no longer writes theme keys; persisted theme stays as-is', () => {
   const settings = readSource('src/pages/settings.js');
-  assert.ok(settings.includes('persistAppTheme'), 'settings writes both keys');
-  assert.ok(settings.includes('isAllowedAppTheme'), 'settings rejects arbitrary strings');
-  assert.ok(settings.includes('jlt-theme-change'), 'settings keeps event name');
+  assert.ok(!settings.includes('persistAppTheme'), 'settings no longer writes theme keys');
+  assert.ok(!settings.includes('isAllowedAppTheme'), 'settings no longer validates themes');
+  assert.ok(!settings.includes('jlt-theme-change'), 'settings no longer emits theme events');
+  assert.ok(!settings.includes("key: 'appearance'"), 'appearance nav entry removed');
 });
 
 test('theme-init.js migrates legacy pre-paint and keeps landing behavior', () => {

@@ -416,7 +416,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       const me = await apiRequest('/api/users/me');
       const ownUsername = me?.username || me?.user?.username || null;
       if (!ownUsername) {
-        showToast('Claim a username in Settings to open your profile.', 'error');
+        showToast('Claim a username to open your profile.', 'error');
         return;
       }
       openProfile(ownUsername);
@@ -2224,6 +2224,81 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     ]);
   }
 
+  // ---- edit own public profile (moved from Settings)
+  // The same public-profile fields Settings used to own (username / bio /
+  // current JLPT level / target JLPT / interests / is_public) now open in a
+  // dialog from the own Community profile. Same GET prefill (/api/users/me)
+  // and same PUT endpoint + payload shape byte-identically
+  // ({ username: trimmed, bio, jlpt_level, target_jlpt, interests,
+  // is_public }); success toasts + refreshes the profile view.
+  function openEditProfileDialog(currentUsername) {
+    const JLPT_PROFILE_OPTIONS = ['', 'N5', 'N4', 'N3', 'N2', 'N1'];
+    const usernameInput = element('input', {
+      className: 'field-control', attrs: { id: 'profile-username', name: 'username', type: 'text', maxlength: '30', autocomplete: 'username', placeholder: 'username', 'aria-describedby': 'profile-username-hint' }
+    });
+    const bioInput = element('textarea', {
+      className: 'field-control', attrs: { id: 'profile-bio', name: 'bio', maxlength: '500', placeholder: 'A short bio (optional)' }
+    });
+    const levelSelect = element('select', { className: 'field-control', attrs: { id: 'profile-level', name: 'jlpt_level', 'aria-label': 'Current JLPT level' } },
+      JLPT_PROFILE_OPTIONS.map((value) => element('option', { text: value === '' ? 'Current level: not set' : value, attrs: { value } })));
+    const targetSelect = element('select', { className: 'field-control', attrs: { id: 'profile-target', name: 'target_jlpt', 'aria-label': 'Target JLPT level' } },
+      JLPT_PROFILE_OPTIONS.map((value) => element('option', { text: value === '' ? 'Target level: not set' : value, attrs: { value } })));
+    const interestsInput = element('input', {
+      className: 'field-control', attrs: { id: 'profile-interests', name: 'interests', type: 'text', maxlength: '500', placeholder: 'Interests: manga, N3 grammar, travel…' }
+    });
+    const publicBox = element('input', { attrs: { id: 'profile-public', name: 'is_public', type: 'checkbox' } });
+    const fillFrom = (saved) => {
+      usernameInput.value = saved.username || '';
+      bioInput.value = saved.bio || '';
+      levelSelect.value = saved.jlptLevel || '';
+      targetSelect.value = saved.targetJlpt || '';
+      interestsInput.value = saved.interests || '';
+      publicBox.checked = Boolean(saved.isPublic);
+    };
+    openDialog({
+      title: 'Edit profile',
+      description: 'Only what you publish is public.',
+      content: [
+        element('p', { className: 'text-sm text-muted sm:col-span-2', attrs: { id: 'profile-username-hint' }, text: 'Claim a username to be followable in Community. Only what you publish is public.' }),
+        element('label', { className: 'field sm:col-span-2', attrs: { for: 'profile-username' } }, [element('span', { text: 'Username (2–30, lowercase, hyphens)' }), usernameInput]),
+        element('label', { className: 'field sm:col-span-2', attrs: { for: 'profile-bio' } }, [element('span', { text: 'Bio' }), bioInput]),
+        element('label', { className: 'field', attrs: { for: 'profile-level' } }, [element('span', { text: 'Current level' }), levelSelect]),
+        element('label', { className: 'field', attrs: { for: 'profile-target' } }, [element('span', { text: 'Studying toward' }), targetSelect]),
+        element('label', { className: 'field sm:col-span-2', attrs: { for: 'profile-interests' } }, [element('span', { text: 'Interests' }), interestsInput]),
+        element('label', { className: 'flex items-center gap-2 text-sm text-ink sm:col-span-2', attrs: { for: 'profile-public' } }, [publicBox, element('span', { text: 'Public profile' })])
+      ],
+      submitLabel: 'Save changes',
+      onSubmit: async (form, close) => {
+        try {
+          const saved = await apiRequest('/api/users/me', {
+            method: 'PUT',
+            body: {
+              username: String(usernameInput.value || '').trim(),
+              bio: bioInput.value,
+              jlpt_level: levelSelect.value || '',
+              target_jlpt: targetSelect.value || '',
+              interests: interestsInput.value,
+              is_public: publicBox.checked
+            }
+          });
+          fillFrom(saved);
+          showToast(saved.username ? `Public profile: ${saved.username}.` : 'Profile saved (private).');
+          close();
+          const next = saved.username || currentUsername;
+          state.profile = next;
+          renderProfile(next);
+        } catch (error) {
+          showToast(error?.message || 'Unable to save the public profile.', 'error');
+        }
+      }
+    });
+    // Fail-open prefill (same GET Settings used): blanks stay editable when
+    // the fetch fails, so a save is still possible.
+    apiRequest('/api/users/me').then(fillFrom).catch(() => {
+      showToast('Could not load your profile. You can still edit and save.', 'error');
+    });
+  }
+
   // ---- profile
   async function renderProfile(username) {
     body.setAttribute('aria-busy', 'true');
@@ -2232,6 +2307,10 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       const profile = await apiRequest(`/api/community/profile/${encodeURIComponent(username)}`);
       const back = element('button', { className: 'mb-4 text-sm font-semibold text-vermilion hover:underline', text: '← Back', attrs: { type: 'button' } });
       back.addEventListener('click', backToFeed);
+      // Self-only entry point to the public-profile editor dialog (moved from
+      // Settings). Other viewers never see it (profile.isSelf gate).
+      const editProfileButton = element('button', { className: 'mt-3 inline-block text-sm font-semibold text-vermilion hover:underline', text: 'Edit profile', attrs: { type: 'button', 'aria-label': 'Edit profile' } });
+      editProfileButton.addEventListener('click', () => openEditProfileDialog(profile.username));
       const head = element('div', { className: 'surface p-5 sm:p-6' }, [
         element('div', { className: 'flex flex-wrap items-start justify-between gap-4' }, [
           element('div', { className: 'flex min-w-0 items-center gap-4' }, [
@@ -2245,12 +2324,12 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
                 element('span', { className: 'status-pill text-xs', text: 'Follows you' })
               ])] : []),
               ...(profile.bio ? [element('p', { className: 'mt-1 break-words text-sm leading-6 text-ink/80', text: profile.bio })] : []),
-              // Settings distinguishes Current level vs Studying toward —
+              // The editor distinguishes Current level vs Studying toward —
               // render both labels (never bare "Studying N3" for the current
               // level). Your tags, not official JLPT data.
               ...((profile.jlptLevel || profile.targetJlpt) ? [element('p', { className: 'mt-1 break-words text-xs text-muted', text: `${profile.jlptLevel ? `Current level ${profile.jlptLevel}` : ''}${profile.jlptLevel && profile.targetJlpt ? ' · ' : ''}${profile.targetJlpt ? `Studying toward ${profile.targetJlpt}` : ''}`, attrs: { title: 'Your JLPT tags — not official data' } })] : []),
-              // Interests are editable in Settings and served on the profile
-              // payload — render them here (previously never displayed).
+              // Interests are editable in the Edit profile dialog and served on
+              // the profile payload — render them here (previously never displayed).
               ...(profile.interests ? [element('p', { className: 'mt-1 break-words text-xs text-muted', text: `Interests: ${profile.interests}` })] : [])
               // Streak: OMITTED — getCommunityProfile serves no streak key
               // (only share-stats / post stats carry streakDays). Never invent.
@@ -2279,7 +2358,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
             return [element('p', { className: 'text-muted', text: parts.join(' · ') })];
           })()
         ]),
-        ...(profile.isSelf ? [element('a', { className: 'mt-3 inline-block text-sm font-semibold text-vermilion hover:underline', text: 'Edit profile in Settings', attrs: { href: '#settings' } })] : [])
+        ...(profile.isSelf ? [editProfileButton] : [])
       ]);
       const lists = element('div', { className: 'mt-4 flex flex-wrap gap-2' });
       const postsHost = element('div', { className: 'mt-4 grid gap-3' });

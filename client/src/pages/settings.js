@@ -2,7 +2,6 @@ import { apiRequest } from '../api';
 import { icon } from '../icons';
 import { profileStore, MAX_DISPLAY_NAME_LENGTH, normalizeDisplayName } from '../accountProfile.js';
 import { element, loadingState, pageHeader, showToast, withPendingAction } from '../ui';
-import { applyAppThemeAttributes, isAllowedAppTheme, persistAppTheme } from '../appTheme';
 import { smartGoalsSettingsSection } from '../smartGoals.js';
 import { enterPlacement, placementResultFromState, placementResultNode, selfReportResultNode } from '../firstExperience.js';
 import { targetLevelOptions } from '../jlptTarget.js';
@@ -10,7 +9,6 @@ import { targetLevelOptions } from '../jlptTarget.js';
 const SETTINGS_SECTIONS = [
   { key: 'profile', label: 'Profile' },
   { key: 'learning', label: 'Learning' },
-  { key: 'appearance', label: 'Appearance' },
   { key: 'account', label: 'Account' }
 ];
 
@@ -145,80 +143,8 @@ async function renderProfileSection(slot) {
   slot.replaceChildren(sectionSurface('Profile', 'How you appear inside NippoTrack.', [
     element('div', { className: 'account-identity-preview mt-6' }, [identityPreview(profile)]),
     form,
-    publicProfileBlock(),
     ...(loadError ? [element('p', { className: 'mt-4 text-sm text-muted', text: 'Profile could not be loaded. You can still try saving a display name.' })] : [])
   ]));
-}
-
-// Community handle + visibility. Separate save from the display-name
-// form; fail-open with toasts.
-function publicProfileBlock() {
-  const JLPT_PROFILE_OPTIONS = ['', 'N5', 'N4', 'N3', 'N2', 'N1'];
-  const usernameInput = element('input', {
-    className: 'field-control', attrs: { id: 'profile-username', name: 'username', type: 'text', maxlength: '30', autocomplete: 'username', placeholder: 'username', 'aria-describedby': 'profile-username-hint' }
-  });
-  const bioInput = element('textarea', {
-    className: 'field-control', attrs: { id: 'profile-bio', name: 'bio', maxlength: '500', placeholder: 'A short bio (optional)' }
-  });
-  const levelSelect = element('select', { className: 'field-control', attrs: { id: 'profile-level', name: 'jlpt_level', 'aria-label': 'Current JLPT level' } },
-    JLPT_PROFILE_OPTIONS.map((value) => element('option', { text: value === '' ? 'Current level: not set' : value, attrs: { value } })));
-  const targetSelect = element('select', { className: 'field-control', attrs: { id: 'profile-target', name: 'target_jlpt', 'aria-label': 'Target JLPT level' } },
-    JLPT_PROFILE_OPTIONS.map((value) => element('option', { text: value === '' ? 'Target level: not set' : value, attrs: { value } })));
-  const interestsInput = element('input', {
-    className: 'field-control', attrs: { id: 'profile-interests', name: 'interests', type: 'text', maxlength: '500', placeholder: 'Interests: manga, N3 grammar, travel…' }
-  });
-  const publicBox = element('input', { attrs: { id: 'profile-public', name: 'is_public', type: 'checkbox' } });
-  const saveButton = element('button', { className: 'button-secondary', text: 'Save public profile', attrs: { type: 'button' } });
-  const status = element('p', { className: 'min-h-5 text-sm text-muted', attrs: { 'aria-live': 'polite' } });
-  const block = element('div', { className: 'mt-8 grid max-w-2xl gap-4 border-t border-stone pt-6' }, [
-    element('h3', { className: 'text-base font-semibold text-ink', text: 'Public profile' }),
-    element('p', { className: 'text-sm text-muted', attrs: { id: 'profile-username-hint' }, text: 'Claim a username to be followable in Community. Only what you publish is public.' }),
-    element('label', { className: 'field', attrs: { for: 'profile-username' } }, [element('span', { text: 'Username (2–30, lowercase, hyphens)' }), usernameInput]),
-    element('label', { className: 'field', attrs: { for: 'profile-bio' } }, [element('span', { text: 'Bio' }), bioInput]),
-    element('div', { className: 'grid gap-4 sm:grid-cols-2' }, [
-      element('label', { className: 'field', attrs: { for: 'profile-level' } }, [element('span', { text: 'Current level' }), levelSelect]),
-      element('label', { className: 'field', attrs: { for: 'profile-target' } }, [element('span', { text: 'Studying toward' }), targetSelect])
-    ]),
-    element('label', { className: 'field', attrs: { for: 'profile-interests' } }, [element('span', { text: 'Interests' }), interestsInput]),
-    element('label', { className: 'flex items-center gap-2 text-sm text-ink', attrs: { for: 'profile-public' } }, [publicBox, element('span', { text: 'Public profile' })]),
-    status,
-    element('div', { className: 'flex justify-end' }, [saveButton])
-  ]);
-  apiRequest('/api/users/me').then((saved) => {
-    usernameInput.value = saved.username || '';
-    bioInput.value = saved.bio || '';
-    levelSelect.value = saved.jlptLevel || '';
-    targetSelect.value = saved.targetJlpt || '';
-    interestsInput.value = saved.interests || '';
-    publicBox.checked = Boolean(saved.isPublic);
-  }).catch(() => {});
-  saveButton.addEventListener('click', () => {
-    withPendingAction(saveButton, async () => {
-      status.textContent = 'Saving…';
-      const saved = await apiRequest('/api/users/me', {
-        method: 'PUT',
-        body: {
-          username: String(usernameInput.value || '').trim(),
-          bio: bioInput.value,
-          jlpt_level: levelSelect.value || '',
-          target_jlpt: targetSelect.value || '',
-          interests: interestsInput.value,
-          is_public: publicBox.checked
-        }
-      });
-      usernameInput.value = saved.username || '';
-      bioInput.value = saved.bio || '';
-      levelSelect.value = saved.jlptLevel || '';
-      targetSelect.value = saved.targetJlpt || '';
-      interestsInput.value = saved.interests || '';
-      publicBox.checked = Boolean(saved.isPublic);
-      status.textContent = saved.username ? `Public profile: ${saved.username}.` : 'Profile saved (private).';
-    }, { pendingLabel: 'Saving…' }).catch((error) => {
-      status.textContent = '';
-      showToast(error?.message || 'Unable to save the public profile.', 'error');
-    });
-  });
-  return block;
 }
 
 async function renderLearningSection(slot) {
@@ -255,16 +181,6 @@ async function renderLearningSection(slot) {
   const targetSection = sectionSurface('Learning', 'Keep your study target and historical Japanese starting point together.', targetChildren);
   const placement = startingPointBlock(firstExperiencePromise.catch(() => null));
   slot.replaceChildren(element('div', { className: 'grid gap-5' }, [targetSection, smartGoalsSettingsSection(), placement]));
-}
-
-function renderAppearanceSection(slot) {
-  const current = document.documentElement.dataset.theme || 'light';
-  const light = element('button', { className: `theme-option ${current === 'light' ? 'button-primary' : 'button-secondary'}`, text: 'Light mode', attrs: { type: 'button', 'aria-pressed': String(current === 'light') } });
-  const dark = element('button', { className: `theme-option ${current === 'dark' ? 'button-primary' : 'button-secondary'}`, text: 'Dark mode', attrs: { type: 'button', 'aria-pressed': String(current === 'dark') } });
-  const setTheme = (theme) => { if (!isAllowedAppTheme(theme)) return; persistAppTheme(theme, localStorage); applyAppThemeAttributes(theme); window.dispatchEvent(new CustomEvent('jlt-theme-change', { detail: theme })); showToast(`${theme === 'dark' ? 'Dark' : 'Light'} theme selected.`); renderAppearanceSection(slot); };
-  light.addEventListener('click', () => setTheme('light'));
-  dark.addEventListener('click', () => setTheme('dark'));
-  slot.replaceChildren(sectionSurface('Appearance', 'Choose the existing light or dark surface for NippoTrack.', [element('div', { className: 'mt-5 flex flex-wrap gap-3' }, [light, dark])]));
 }
 
 function renderAccountSection(slot) {
@@ -313,14 +229,13 @@ export async function renderSettings(container) {
     return button;
   }));
   container.replaceChildren(element('section', {}, [
-    pageHeader({ title: 'Settings', description: 'Your profile, learning preferences, appearance, and account actions.' }),
+    pageHeader({ title: 'Settings', description: 'Your profile, learning preferences, and account actions.' }),
     element('div', { className: 'settings-layout max-w-6xl' }, [sectionNav, panel])
   ]));
 
   async function renderActive() {
     if (active === 'profile') return renderProfileSection(panel);
     if (active === 'learning') return renderLearningSection(panel);
-    if (active === 'appearance') return renderAppearanceSection(panel);
     return renderAccountSection(panel);
   }
   await renderActive();

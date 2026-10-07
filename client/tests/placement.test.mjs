@@ -557,7 +557,7 @@ test('settings starting-point block: restrained take-vs-result states, no re-ent
   assert.ok(!source.match(/retake/i), 'no re-entry wording');
   assert.ok(!source.match(/reset/i), 'no reset wording');
   assert.ok(!source.match(/repeat/i), 'no repeat wording');
-  for (const marker of ['Profile', 'Learning', 'Appearance', 'Account']) {
+  for (const marker of ['Profile', 'Learning', 'Account']) {
     assert.ok(source.includes(marker), `Settings section present: ${marker}`);
   }
   assert.ok(source.includes('notifyAuth: false'), 'stored read without auth side effects');

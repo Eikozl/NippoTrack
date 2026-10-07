@@ -173,7 +173,7 @@ test('Part B pages: shared primitives only, kanji detail token-only, settings in
   assert.ok(sharedKanji.includes('font-jp'), 'Japanese paths use font-jp');
   const settings = readSource('src/pages/settings.js');
   assert.ok(settings.includes('max-w-5xl'), 'settings cards keep desktop canvas');
-  assert.ok(settings.includes('persistAppTheme') && settings.includes('jlt-theme-change'), 'settings theme semantics intact');
+  assert.ok(!settings.includes('persistAppTheme') && !settings.includes('jlt-theme-change'), 'appearance removed: no theme writes from settings');
 });
 
 // --- icons / japanese / dark / responsive ---------------------------------------
