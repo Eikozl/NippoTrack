@@ -64,6 +64,7 @@ app.get('/api', (req, res) => {
       'GET /api/dashboard/study-now',
       'GET /api/sessions',
       'POST /api/sessions',
+      'GET /api/sessions/day-items',
       'GET /api/vocabulary',
       'POST /api/vocabulary',
       'GET /api/vocabulary/:id/encounters',
