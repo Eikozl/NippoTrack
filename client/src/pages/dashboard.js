@@ -149,10 +149,16 @@ function todayProgressSection(studyNow) {
     element('p', { className: 'text-sm text-muted', text: label }),
     element('p', { className: 'text-sm font-semibold tabular-nums text-ink', text: value })
   ]);
+  // Reviews line: with pending reviews show done-of-expected ("7 of 10");
+  // with none pending show only what was done ("52 reviews done") — never
+  // a self-referential "52 of 52". done/due are disjoint server-side.
+  const reviewsLine = due > 0
+    ? `${done} of ${done + due} reviews done`
+    : (done > 0 ? `${done} review${done === 1 ? '' : 's'} done` : 'No reviews due');
   return element('section', { className: 'surface mt-5 p-5 sm:p-6', attrs: { 'aria-label': "Today's progress" } }, [
     element('div', { className: 'flex items-center gap-3' }, [iconTile('today', { className: 'panel-icon' }), element('h2', { className: 'font-semibold text-ink', text: 'Today’s progress' })]),
     element('div', { className: 'mt-2 divide-y divide-stone' }, [
-      row('Reviews', done > 0 || due > 0 ? `${done} of ${done + due} reviews done` : 'No reviews due'),
+      row('Reviews', reviewsLine),
       row('Study time', minutes > 0 ? `${minutes} min today` : 'Nothing logged yet'),
       row('New items', fresh > 0 ? `${fresh} new item${fresh === 1 ? '' : 's'} today` : 'Nothing added yet')
     ])
