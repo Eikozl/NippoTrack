@@ -30,7 +30,13 @@ function speechPieces() {
 
 // Sequential TTS queue with a stop flag: each utterance ends into the next.
 // A fresh play flushes the previous queue first (no overlaps).
+// Rapid-press cooldown: overlapping play presses still restart the queue
+// (last wins); only duplicate error toasts are suppressed silently.
+// Stop stays explicit via stopQueue.
+// Play affordances use the speaker/bocina glyph (icons.js volume, no emoji).
 const player = { stopped: true, playing: false };
+let lastDecksPlayAt = 0;
+const DECKS_PLAY_COOLDOWN_MS = 600;
 function stopQueue() {
   player.stopped = true;
   player.playing = false;
@@ -39,6 +45,12 @@ function stopQueue() {
   } catch { /* stop is best-effort */ }
 }
 function playQueue(texts, onProgress) {
+  let isRapidQueue = false;
+  try {
+    const now = Date.now();
+    isRapidQueue = Boolean(lastDecksPlayAt) && (now - lastDecksPlayAt < DECKS_PLAY_COOLDOWN_MS);
+    lastDecksPlayAt = now;
+  } catch { /* cooldown tracking is best-effort */ }
   stopQueue();
   const queue = (Array.isArray(texts) ? texts : []).map((text) => String(text || '').trim()).filter(Boolean);
   if (!queue.length) { showToast('Nothing to play.', 'error'); return; }
@@ -58,6 +70,7 @@ function playQueue(texts, onProgress) {
     if (!verdict.ok) {
       player.playing = false;
       if (typeof onProgress === 'function') onProgress(-1);
+      if (isRapidQueue) return;
       showToast(verdict.message || 'Audio playback is unavailable.', 'error');
     }
   };

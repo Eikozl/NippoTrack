@@ -203,11 +203,25 @@ function speechPieces() {
 // Single-utterance TTS reusing the shared speakJapanese infrastructure
 // (same pattern as the Decks hub playQueue single-item path). No furigana
 // or analysis is fabricated — the given text plays as-is.
+// Rapid-press cooldown: overlapping presses still speak (last wins via the
+// shared cancel inside speakJapanese); only duplicate error toasts are
+// suppressed silently. Genuine no-voice verdicts still surface once.
+let lastCommunityPlayAt = 0;
+const COMMUNITY_PLAY_COOLDOWN_MS = 600;
 function playJapaneseText(text) {
   const say = String(text || '').trim();
   if (!say) { showToast('Nothing to play.', 'error'); return; }
+  let isRapid = false;
+  try {
+    const now = Date.now();
+    isRapid = Boolean(lastCommunityPlayAt) && (now - lastCommunityPlayAt < COMMUNITY_PLAY_COOLDOWN_MS);
+    lastCommunityPlayAt = now;
+  } catch { /* cooldown tracking is best-effort */ }
   const verdict = speakJapanese(say, { ...speechPieces() });
-  if (!verdict.ok) showToast(verdict.message || 'Audio playback is unavailable.', 'error');
+  if (!verdict.ok) {
+    if (isRapid) return;
+    showToast(verdict.message || 'Audio playback is unavailable.', 'error');
+  }
 }
 
 // Verified progress snapshot block (additive `stats`, null when absent).
@@ -841,10 +855,26 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       const save = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Save as vocab', attrs: { type: 'button', 'aria-label': 'Save example as vocabulary' } });
       save.addEventListener('click', (event) => {
         event.stopPropagation();
-        withPendingAction(save, async () => {
-          await apiRequest('/api/vocabulary', { method: 'POST', body: { word: text, meaning } });
-          showToast('Saved to your library.');
-        }, { pendingLabel: 'Saving…' }).catch((error) => showToast(error?.message || 'Unable to save (it may already be saved).', 'error'));
+        // Save-from-Community confirmation (same display + meaning pattern as
+        // saveEntityButton and the deck viewer per-item saves): old example
+        // posts hit this path, so it must confirm like every other save.
+        confirmDialog({
+          title: `Save "${text}" to your library?`,
+          description: `${text} — ${meaning}. This adds it to your library and review queue.`,
+          confirmLabel: 'Save',
+          confirmClassName: 'button-primary',
+          pendingLabel: 'Saving…',
+          onConfirm: async () => {
+            try {
+              await withPendingAction(save, async () => {
+                await apiRequest('/api/vocabulary', { method: 'POST', body: { word: text, meaning } });
+                showToast('Saved to your library.');
+              }, { pendingLabel: 'Saving…' });
+            } catch (error) {
+              showToast(error?.message || 'Unable to save (it may already be saved).', 'error');
+            }
+          }
+        });
       });
       rowChildren.push(save);
     } else {
@@ -852,7 +882,10 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       disabled.addEventListener('click', (event) => event.stopPropagation());
       rowChildren.push(disabled);
     }
-    const play = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: '🔊 Play', attrs: { type: 'button', 'aria-label': 'Play example aloud' } });
+    // Speaker/bocina glyph from icons.js (volume), no emoji: matches the Decks
+    // hub play affordances (icon('volume')) with a text label for this row.
+    // Stop behavior is N/A here (single utterance, no queue).
+    const play = element('button', { className: 'button-secondary inline-flex min-h-9 items-center gap-1.5 px-3 py-1.5 text-xs', attrs: { type: 'button', 'aria-label': 'Play example aloud' } }, [icon('volume', { size: 16 }), element('span', { text: 'Play' })]);
     play.addEventListener('click', (event) => { event.stopPropagation(); playJapaneseText(text); });
     rowChildren.push(play);
     return element('div', { className: 'mt-2 flex flex-wrap gap-2' }, rowChildren);

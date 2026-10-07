@@ -46,10 +46,15 @@ let detachReviewKeys = null;
 // - Warm the voice list (getVoices is empty until voiceschanged fires).
 // - Defer speak after cancel so the utterance is not dropped.
 // - Surface a missing Japanese voice with guidance instead of silence.
+// - Rapid-press cooldown: overlapping speak presses within the window are
+//   ignored silently (no red toast). The "Audio playback unavailable" toast
+//   below fires only on genuine playback problems, never on cooldown.
 let activeUtterance = null;
 let cachedVoices = null;
 let voicesWarmAttached = false;
 let pendingSpeakTimer = null;
+let lastSpeakAt = 0;
+const SPEAK_COOLDOWN_MS = 600;
 
 function warmCachedVoices() {
   try {
@@ -1190,6 +1195,17 @@ const CARD_TYPE_DESCRIPTIONS = {
   // voice when one is listed, slows the rate slightly for learners, and says
   // so out loud via toast when the platform cannot speak at all.
   function speakDisplay(text) {
+    // Cooldown tracking (no early return — speaks still coalesce via the
+    // pendingSpeakTimer + cancel path so rapid double-play keeps one live
+    // utterance and Kun/On switching replays immediately; only error toasts
+    // are gated). Overlapping/superseded utterances stay silent; genuine
+    // no-voice guidance is preserved.
+    let isRapidPress = false;
+    try {
+      const now = Date.now();
+      isRapidPress = Boolean(lastSpeakAt) && (now - lastSpeakAt < SPEAK_COOLDOWN_MS);
+      lastSpeakAt = now;
+    } catch { /* cooldown tracking is best-effort */ }
     try {
       if (typeof window === 'undefined' || !window.speechSynthesis) {
         showToast('Audio is not supported in this browser.', 'error');
@@ -1207,15 +1223,20 @@ const CARD_TYPE_DESCRIPTIONS = {
       } catch { /* handler attach is best-effort */ }
       try {
         utterance.onerror = () => {
+          const wasCurrent = activeUtterance === utterance;
           clearIfCurrent();
+          if (!wasCurrent) return;
           try {
             const voices = readVoices(synthesis);
             if (voices.length && !hasJapaneseVoice(voices)) {
               showToast(japaneseVoiceGuidance(), 'error');
+            } else if (isRapidPress) {
+              return;
             } else {
               showToast('Audio playback is unavailable on this device right now.', 'error');
             }
           } catch {
+            if (isRapidPress) return;
             showToast('Audio playback is unavailable on this device right now.', 'error');
           }
         };
@@ -1256,6 +1277,7 @@ const CARD_TYPE_DESCRIPTIONS = {
             synthesis.speak(utterance);
           } catch {
             clearIfCurrent();
+            if (isRapidPress) return;
             showToast('Audio playback is unavailable on this device right now.', 'error');
           }
         }, 80);
@@ -1277,6 +1299,7 @@ const CARD_TYPE_DESCRIPTIONS = {
         beginSpeaking(true);
       });
     } catch {
+      if (isRapidPress) return;
       showToast('Audio playback is unavailable on this device right now.', 'error');
     }
   }

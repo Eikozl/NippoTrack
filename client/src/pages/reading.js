@@ -67,6 +67,129 @@ function levelPill(level) {
   return element('span', { className: 'status-pill', text: level, attrs: { 'aria-label': `Estimated level ${level}` } });
 }
 
+// Reading level confirmation (user-created texts only, not imports or
+// community copies). The backend owns detection (POST /api/reading/user-text
+// returns { level } from the existing analyzer estimate); this flow never
+// invents a level — it only presents created.level for confirmation.
+// Language: surrounding copy on this page is English ("Add your own text",
+// "Graded Reading"), so the confirm uses English ("We detected level X…,
+// do you agree?") with Yes/No, not the Spanish literal.
+// No server-side level-edit endpoint exists (gradedReader routes offer only
+// POST user-text + PUT progress/translations), so a changed choice is saved
+// as a local presentation override into the existing level field display
+// (localStorage, no schema change, no server change). Library + reader below
+// read through effectiveReadingLevel().
+const READING_LEVEL_OVERRIDE_PREFIX = 'jlt-reading-level-override-';
+
+function normalizeDetectedReadingLevel(value) {
+  const level = String(value || '').trim().toUpperCase();
+  return LEVELS.includes(level) ? level : null;
+}
+
+function readingOverrideKey(id) {
+  return `${READING_LEVEL_OVERRIDE_PREFIX}${Number(id)}`;
+}
+
+function effectiveReadingLevel(id, serverLevel) {
+  try {
+    if (id === undefined || id === null) return normalizeDetectedReadingLevel(serverLevel);
+    const stored = window.localStorage.getItem(readingOverrideKey(id));
+    if (stored === null) return normalizeDetectedReadingLevel(serverLevel);
+    if (stored === '') return null;
+    return normalizeDetectedReadingLevel(stored) || normalizeDetectedReadingLevel(serverLevel);
+  } catch {
+    return normalizeDetectedReadingLevel(serverLevel);
+  }
+}
+
+function saveReadingLevelOverride(id, chosen) {
+  // chosen: 'N5'..'N1' or '' for no level / not sure (model supports null
+  // for short/grammar-only texts). Stored locally; the server row is untouched.
+  try {
+    if (id === undefined || id === null) return;
+    window.localStorage.setItem(readingOverrideKey(id), String(chosen || ''));
+  } catch { /* override is best-effort */ }
+}
+
+function openReadingLevelSelector({ detected, textId, onSaved }) {
+  const select = element('select', {
+    className: 'field-control sm:col-span-2',
+    attrs: { 'aria-label': 'Choose the reading level' }
+  }, [
+    ...LEVELS.map((level) => element('option', {
+      text: level,
+      attrs: { value: level, ...(level === detected ? { selected: '' } : {}) }
+    })),
+    element('option', {
+      text: 'No level / Not sure',
+      attrs: { value: '', ...(detected ? {} : { selected: '' }) }
+    })
+  ]);
+  openDialog({
+    title: 'Choose the reading level',
+    description: detected
+      ? `You disagreed with the detected level ${detected}. Pick the level to show for this text (N5–N1, or no level if unsure).`
+      : 'Pick the level to show for this text (N5–N1, or no level if unsure).',
+    content: [
+      element('label', { className: 'grid gap-1.5 sm:col-span-2' }, [
+        element('span', { className: 'text-sm font-semibold text-ink', text: 'Reading level' }),
+        select
+      ])
+    ],
+    submitLabel: 'Save chosen level',
+    pendingLabel: 'Saving…',
+    onSubmit: async (form, close) => {
+      const chosen = String(select.value || '').trim().toUpperCase();
+      const normalized = LEVELS.includes(chosen) ? chosen : '';
+      saveReadingLevelOverride(textId, normalized);
+      showToast(normalized ? `Level saved: ${normalized}.` : 'Saved without a level.');
+      close();
+      if (typeof onSaved === 'function') onSaved(normalized || null);
+    }
+  });
+}
+
+function askReadingLevelConfirm(created, { onDone } = {}) {
+  const textId = Number(created?.id);
+  const detected = normalizeDetectedReadingLevel(created?.level);
+  const finish = (effective) => {
+    if (typeof onDone === 'function') onDone(effective);
+  };
+  // Confirmation dialog with Yes/No (progressive disclosure: compact Yes/No
+  // first, selector only when the learner disagrees). Existing UI primitives
+  // only (openDialog + real buttons), responsive + focus-trapped by ui.js.
+  const yesButton = element('button', {
+    className: 'button-primary min-h-11 px-5 py-2.5 text-sm font-semibold',
+    text: detected ? `Yes, keep ${detected}` : 'Yes, keep without a level',
+    attrs: { type: 'button', 'aria-label': detected ? `Yes, keep detected level ${detected}` : 'Yes, keep without a level' }
+  });
+  const noButton = element('button', {
+    className: 'button-secondary min-h-11 px-5 py-2.5 text-sm font-semibold',
+    text: 'No, choose another',
+    attrs: { type: 'button', 'aria-label': 'No, choose a different level' }
+  });
+  const closeConfirm = openDialog({
+    title: detected ? `We detected level ${detected} in this text. Do you agree?` : 'We could not determine a level for this text. Do you agree?',
+    description: detected
+      ? 'The level comes from automatic analysis and is often strict. Yes keeps it. No lets you choose N5–N1 or no level.'
+      : 'Short or grammar-only texts carry no level instead of a misleading badge. Yes keeps it without a level. No lets you choose N5–N1.',
+    content: [
+      element('div', { className: 'flex flex-col gap-2 sm:col-span-2 sm:flex-row' }, [yesButton, noButton])
+    ],
+    showFooter: false,
+    submitLabel: null
+  });
+  yesButton.addEventListener('click', () => {
+    try { closeConfirm(); } catch { /* close is best-effort */ }
+    finish(detected);
+  });
+  noButton.addEventListener('click', () => {
+    try { closeConfirm(); } catch { /* close is best-effort */ }
+    openReadingLevelSelector({ detected, textId, onSaved: (chosen) => finish(chosen) });
+  });
+  return closeConfirm;
+}
+
 // ---------------------------------------------------------------- library
 
 async function renderLibraryView(container) {
@@ -132,7 +255,7 @@ async function renderLibraryView(container) {
       }, [
         element('div', { className: 'flex items-center justify-between gap-2' }, [
           element('span', { className: 'text-xs uppercase tracking-wide text-muted', text: item.sourceType || 'user' }),
-          levelPill(item.level) || element('span', { className: 'text-xs text-muted', text: '—' })
+          levelPill(effectiveReadingLevel(item.id, item.level)) || element('span', { className: 'text-xs text-muted', text: '—' })
         ]),
         element('p', { className: 'font-semibold text-ink', text: item.title }),
         element('p', { className: 'text-xs leading-5 text-muted', text: `${Number(item.characterCount || 0).toLocaleString()} characters · you know ${known}% of its kanji` })
@@ -432,8 +555,26 @@ async function renderLibraryView(container) {
       window.clearTimeout(progressTimer);
       progressFill.style.width = '100%';
       progressLabel.textContent = '100%';
-      showToast('Text saved. Opening the reader.');
-      window.location.hash = `#reading?id=${Number(created?.id)}`;
+      // Level confirmation for user-created texts only (this paste flow —
+      // never imports or community copies): present the existing estimate
+      // (created.level) with Yes/No; Yes keeps it, No opens the N5–N1 +
+      // no-level selector and saves the chosen value locally into the
+      // existing level field display. The text is already saved server-side,
+      // so dismissing still opens the reader (no data loss).
+      const openReader = () => {
+        window.location.hash = `#reading?id=${Number(created?.id)}`;
+      };
+      try {
+        askReadingLevelConfirm(created, {
+          onDone: () => {
+            showToast('Text saved. Opening the reader.');
+            openReader();
+          }
+        });
+      } catch {
+        showToast('Text saved. Opening the reader.');
+        openReader();
+      }
     }).catch((error) => {
       window.clearTimeout(progressTimer);
       showToast(error?.message || 'Unable to save the text.', 'error');
@@ -1431,7 +1572,7 @@ async function renderReader(container, textId) {
     element('a', { className: 'text-sm font-medium text-muted underline-offset-4 hover:text-ink hover:underline', text: '← Back to library', attrs: { href: '#reading' } }),
     element('header', { className: 'mt-2 flex flex-wrap items-center gap-x-3 gap-y-2' }, [
       element('h1', { className: 'min-w-0 flex-1 break-words text-xl font-semibold text-ink', text: data.title }),
-      levelPill(data.level) || element('span', { className: 'text-xs text-muted', text: data.sourceType || 'user' })
+      levelPill(effectiveReadingLevel(textId, data.level)) || element('span', { className: 'text-xs text-muted', text: data.sourceType || 'user' })
     ]),
     headerCard,
     translationsNote,
