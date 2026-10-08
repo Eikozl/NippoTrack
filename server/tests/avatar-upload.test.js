@@ -401,6 +401,9 @@ test('DELETE controller: storage failure is a 503 with a neutral message', async
 
 test('PUT /api/users/me avatar_url allowlist: own storage URL passes, anything else is 400 pre-write', async () => {
   const poolModule = require('../src/config/db');
+  // Pin check reads the configured storage base: stub it to the fixture host.
+  const originalConfig = profileAvatar.avatarServiceConfig;
+  profileAvatar.avatarServiceConfig = () => ({ url: PUBLIC_BASE });
   const goodUrl = `${PUBLIC_BASE}/storage/v1/object/public/avatars/${USER_ID}/avatar.jpg?v=1234567890123`;
   const runPut = async (avatarUrl, stub) => {
     const original = poolModule.execute;
@@ -426,26 +429,33 @@ test('PUT /api/users/me avatar_url allowlist: own storage URL passes, anything e
     assert.equal(out.body.avatarUrl, goodUrl);
     assert.equal(written, goodUrl);
   }
-  // Reject: foreign host, data: URL, over-long value — all 400 with zero DB writes.
-  const evil = [
-    'https://evil.test/tracker.png',
-    'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"></svg>',
-    `${PUBLIC_BASE}/storage/v1/object/public/avatars/${USER_ID}/avatar.jpg?v=${'9'.repeat(600)}`
-  ];
-  for (const value of evil) {
-    const out = await runPut(value, async () => { throw new Error('must not query on invalid avatar_url'); });
-    assert.equal(out.status, 400, `rejected: ${String(value).slice(0, 40)}`);
-  }
-  // Clear: null/empty clears the column.
-  for (const value of [null, '']) {
-    const row = { username: null, display_name: null, bio: null, avatar_url: null, is_public: false, jlpt_level: null, target_jlpt: null, interests: null };
-    const out = await runPut(value, async (sql) => {
-      if (/INSERT INTO user_profile/i.test(sql)) return [{ affectedRows: 1 }];
-      if (/FROM user_profile WHERE user_id/i.test(sql)) return [[row]];
-      throw new Error(`Unexpected SQL: ${String(sql).slice(0, 60)}`);
-    });
-    assert.equal(out.status, 200);
-    assert.equal(out.body.avatarUrl, null);
+  try {
+    // Reject: foreign host, data: URL, over-long value, and — the P1 case —
+    // ANOTHER user's valid storage URL (cross-user reference). All 400
+    // with zero DB writes.
+    const evil = [
+      'https://evil.test/tracker.png',
+      'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+      `${PUBLIC_BASE}/storage/v1/object/public/avatars/${USER_ID}/avatar.jpg?v=${'9'.repeat(600)}`,
+      `${PUBLIC_BASE}/storage/v1/object/public/avatars/${OTHER_ID}/avatar.jpg?v=7`
+    ];
+    for (const value of evil) {
+      const out = await runPut(value, async () => { throw new Error('must not query on invalid avatar_url'); });
+      assert.equal(out.status, 400, `rejected: ${String(value).slice(0, 60)}`);
+    }
+    // Clear: null/empty clears the column.
+    for (const value of [null, '']) {
+      const row = { username: null, display_name: null, bio: null, avatar_url: null, is_public: false, jlpt_level: null, target_jlpt: null, interests: null };
+      const out = await runPut(value, async (sql) => {
+        if (/INSERT INTO user_profile/i.test(sql)) return [{ affectedRows: 1 }];
+        if (/FROM user_profile WHERE user_id/i.test(sql)) return [[row]];
+        throw new Error(`Unexpected SQL: ${String(sql).slice(0, 60)}`);
+      });
+      assert.equal(out.status, 200);
+      assert.equal(out.body.avatarUrl, null);
+    }
+  } finally {
+    profileAvatar.avatarServiceConfig = originalConfig;
   }
 });
 

@@ -175,8 +175,6 @@ async function getOwnProfile(req, res) {
 
 const OWN_PROFILE_FIELDS = ['username', 'display_name', 'bio', 'avatar_url', 'is_public', 'jlpt_level', 'target_jlpt', 'interests'];
 const PROFILE_JLPT_LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1'];
-// Project-agnostic (testing + production refs): own avatars object only.
-const AVATAR_URL_PATTERN = /^https:\/\/[A-Za-z0-9-]+\.supabase\.co\/storage\/v1\/object\/public\/avatars\/[A-Za-z0-9-]{1,64}\/avatar\.jpg(\?.*)?$/;
 
 async function putOwnProfile(req, res) {
   try {
@@ -201,12 +199,24 @@ async function putOwnProfile(req, res) {
     // POST /api/users/me/avatar, with ?v= cache-buster). Anything else —
     // foreign hosts, data:/blob:/script schemes — is rejected so the open
     // PUT cannot bypass the upload pipeline's magic-byte/type/path controls.
+    // avatar_url allowlist, pinned to the caller (security): only null/empty
+    // (clear) or this user's own avatars object URL exactly as issued by
+    // POST /api/users/me/avatar (with ?v= digits cache-buster). A looser
+    // host/path pattern would let any authenticated user reference another
+    // user's photo (profile impersonation via read-public URL guess).
     if (body.avatar_url !== undefined) {
       const raw = String(body.avatar_url || '');
       if (raw === '') patch.avatar_url = null;
       else {
         if (raw.length > 500) throw new ValidationError('avatar_url is too long.');
-        if (!AVATAR_URL_PATTERN.test(raw)) throw new ValidationError('avatar_url must be your uploaded profile photo.');
+        let expectedPrefix = null;
+        try {
+          const base = profileAvatar.avatarServiceConfig().url.replace(/\/+$/, '');
+          expectedPrefix = `${base}/storage/v1/object/public/avatars/${req.user.id}/avatar.jpg`;
+        } catch { expectedPrefix = null; }
+        const pinned = typeof expectedPrefix === 'string' && expectedPrefix.length > 0
+          && (raw === expectedPrefix || (raw.startsWith(`${expectedPrefix}?v=`) && /^\?v=\d+$/.test(raw.slice(expectedPrefix.length))));
+        if (!pinned) throw new ValidationError('avatar_url must be your uploaded profile photo.');
         patch.avatar_url = raw;
       }
     }
