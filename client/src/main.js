@@ -11,7 +11,6 @@ import { openAuthModal } from './authModal.js';
 import { createLevelEstimateControl } from './levelEstimateControl';
 import { authConfigured, localAuthBypass, localAuthBypassEmail, supabase } from './authClient';
 import { profileStore } from './accountProfile.js';
-import { hasSeenTutorialVideo, mountTutorialVideo } from './tutorialVideo.js';
 import { getLocale, setLocale, t, translateDocument } from './i18n';
 import { authViewFromSearch } from './landing/routing';
 
@@ -215,7 +214,13 @@ async function bootstrapApp() {
         // First-login tutorial: fullscreen takeover over the setup shell
         // (rendered above, so a video failure still leaves setup usable).
         // Once-only per browser via the seen flag; setup itself untouched.
-        if (!hasSeenTutorialVideo()) mountTutorialVideo(document.body);
+        // Dynamic import (like firstExperience above): first-login-only code
+        // stays out of the initial chunk. Fail-open: import failure skips
+        // the takeover silently.
+        try {
+          const tutorial = await import('./tutorialVideo.js');
+          if (!tutorial.hasSeenTutorialVideo()) tutorial.mountTutorialVideo(document.body);
+        } catch { /* tutorial unavailable: setup proceeds without it */ }
         return;
       }
     } catch {
