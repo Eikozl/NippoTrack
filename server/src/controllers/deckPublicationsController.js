@@ -2,7 +2,7 @@
 // follow/unfollow and public author profiles.
 const pool = require('../config/db');
 const { ValidationError, sendRouteError } = require('../errors/http');
-const { parseIdParam } = require('../validation');
+const { parseIdParam, rejectUnknownFields } = require('../validation');
 const {
   deleteDeckPublication,
   getDeckAnalytics,
@@ -17,6 +17,7 @@ const {
   decideSuggestion,
   listSuggestions
 } = require('../services/deckSuggestions');
+const profileAvatar = require('../services/profileAvatar');
 
 async function postPublish(req, res) {
   try {
@@ -140,8 +141,10 @@ async function postDecide(req, res) {
 
 async function getPublicUser(req, res) {
   try {
-    const profile = await getPublicProfile(pool, req.params.username);
-    if (!profile) return res.status(404).json({ error: 'user not found' });
+    // Phase 2b: thread the viewer so private/blocked owners resolve to the
+    // same 404-shape null as a missing user (no oracle). Shape unchanged.
+    const profile = await getPublicProfile(pool, req.params.username, req.user.id);
+    if (!profile || profile.gated) return res.status(404).json({ error: 'user not found' });
     return res.json(profile);
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load the public profile.' });
@@ -151,7 +154,7 @@ async function getPublicUser(req, res) {
 async function getOwnProfile(req, res) {
   try {
     const [rows] = await pool.execute(
-      'SELECT username, display_name, bio, avatar_url, is_public FROM user_profile WHERE user_id = ?',
+      'SELECT username, display_name, bio, avatar_url, is_public, jlpt_level, target_jlpt, interests FROM user_profile WHERE user_id = ?',
       [req.user.id]
     );
     const row = Array.isArray(rows) ? rows[0] : {};
@@ -160,20 +163,23 @@ async function getOwnProfile(req, res) {
       displayName: row?.display_name || null,
       bio: row?.bio || null,
       avatarUrl: row?.avatar_url || null,
-      isPublic: Boolean(row?.is_public)
+      isPublic: Boolean(row?.is_public),
+      jlptLevel: row?.jlpt_level || null,
+      targetJlpt: row?.target_jlpt || null,
+      interests: row?.interests || null
     });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load the profile.' });
   }
 }
 
-const OWN_PROFILE_FIELDS = ['username', 'display_name', 'bio', 'avatar_url', 'is_public'];
+const OWN_PROFILE_FIELDS = ['username', 'display_name', 'bio', 'avatar_url', 'is_public', 'jlpt_level', 'target_jlpt', 'interests'];
+const PROFILE_JLPT_LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1'];
 
 async function putOwnProfile(req, res) {
   try {
     const body = req.body || {};
-    const unknown = Object.keys(body).filter((key) => !OWN_PROFILE_FIELDS.includes(key));
-    if (unknown.length) throw new ValidationError(`Unexpected field(s): ${unknown.join(', ')}.`);
+    rejectUnknownFields(body, OWN_PROFILE_FIELDS);
     const patch = {};
     if (body.username !== undefined) {
       const username = String(body.username || '').toLowerCase();
@@ -187,11 +193,46 @@ async function putOwnProfile(req, res) {
       patch.display_name = displayName === '' ? null : displayName;
     }
     if (body.bio !== undefined) patch.bio = String(body.bio || '').slice(0, 500) || null;
-    if (body.avatar_url !== undefined) patch.avatar_url = String(body.avatar_url || '').slice(0, 500) || null;
+    // avatar_url allowlist (security): only null/empty (clear) or the
+    // caller's own Supabase Storage avatars object URL (as issued by
+    // POST /api/users/me/avatar, with ?v= cache-buster). Anything else —
+    // foreign hosts, data:/blob:/script schemes — is rejected so the open
+    // PUT cannot bypass the upload pipeline's magic-byte/type/path controls.
+    // avatar_url allowlist, pinned to the caller (security): only null/empty
+    // (clear) or this user's own avatars object URL exactly as issued by
+    // POST /api/users/me/avatar (with ?v= digits cache-buster). A looser
+    // host/path pattern would let any authenticated user reference another
+    // user's photo (profile impersonation via read-public URL guess).
+    if (body.avatar_url !== undefined) {
+      const raw = String(body.avatar_url || '');
+      if (raw === '') patch.avatar_url = null;
+      else {
+        if (raw.length > 500) throw new ValidationError('avatar_url is too long.');
+        let expectedPrefix = null;
+        try {
+          const base = profileAvatar.avatarServiceConfig().url.replace(/\/+$/, '');
+          expectedPrefix = `${base}/storage/v1/object/public/avatars/${req.user.id}/avatar.jpg`;
+        } catch { expectedPrefix = null; }
+        const pinned = typeof expectedPrefix === 'string' && expectedPrefix.length > 0
+          && (raw === expectedPrefix || (raw.startsWith(`${expectedPrefix}?v=`) && /^\?v=\d+$/.test(raw.slice(expectedPrefix.length))));
+        if (!pinned) throw new ValidationError('avatar_url must be your uploaded profile photo.');
+        patch.avatar_url = raw;
+      }
+    }
     if (body.is_public !== undefined) {
       if (typeof body.is_public !== 'boolean') throw new ValidationError('is_public must be a boolean');
       patch.is_public = body.is_public;
     }
+    for (const levelKey of ['jlpt_level', 'target_jlpt']) {
+      if (body[levelKey] !== undefined) {
+        const level = String(body[levelKey] || '');
+        if (level !== '' && !PROFILE_JLPT_LEVELS.includes(level)) {
+          throw new ValidationError(`${levelKey} must be one of: ${PROFILE_JLPT_LEVELS.join(', ')}.`);
+        }
+        patch[levelKey] = level === '' ? null : level;
+      }
+    }
+    if (body.interests !== undefined) patch.interests = String(body.interests || '').slice(0, 500) || null;
     const columns = Object.keys(patch);
     if (!columns.length) throw new ValidationError('Nothing to update.');
     const excluded = columns.map((column) => `${column} = EXCLUDED.${column}`).join(', ');
@@ -208,7 +249,7 @@ async function putOwnProfile(req, res) {
       throw error;
     }
     const [rows] = await pool.execute(
-      'SELECT username, display_name, bio, avatar_url, is_public FROM user_profile WHERE user_id = ?',
+      'SELECT username, display_name, bio, avatar_url, is_public, jlpt_level, target_jlpt, interests FROM user_profile WHERE user_id = ?',
       [req.user.id]
     );
     const row = Array.isArray(rows) ? rows[0] : {};
@@ -217,27 +258,74 @@ async function putOwnProfile(req, res) {
       displayName: row?.display_name || null,
       bio: row?.bio || null,
       avatarUrl: row?.avatar_url || null,
-      isPublic: Boolean(row?.is_public)
+      isPublic: Boolean(row?.is_public),
+      jlptLevel: row?.jlpt_level || null,
+      targetJlpt: row?.target_jlpt || null,
+      interests: row?.interests || null
     });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to save the public profile.' });
   }
 }
 
+// Profile avatar upload: stores multipart field `avatar` as the single fixed
+// `<userId>/avatar.jpg` object in the public `avatars` bucket (service-key
+// mediated; see services/profileAvatar). Responds { avatarUrl }; the client
+// persists the URL itself via PUT /api/users/me { avatar_url }.
+async function postOwnAvatar(req, res) {
+  try {
+    const buffer = profileAvatar.extractAvatarFromMultipart(req);
+    profileAvatar.validateAvatarBuffer(buffer);
+    const consumed = profileAvatar.tryConsumeAvatarUpload({ userId: req.user.id });
+    if (!consumed.allowed) {
+      res.setHeader('Retry-After', String(consumed.retryAfterSec));
+      return res.status(429).json({ error: 'Too many avatar uploads. Please try again later.' });
+    }
+    const { avatarUrl } = await profileAvatar.storeAvatar({ userId: req.user.id, buffer });
+    return res.json({ avatarUrl });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to upload the avatar.' });
+  }
+}
+
+// Profile avatar removal: deletes the storage object (not-found ignored) and
+// NULLs avatar_url through the same upsert path as putOwnProfile.
+async function deleteOwnAvatar(req, res) {
+  try {
+    const result = await profileAvatar.clearAvatar({ userId: req.user.id });
+    return res.json(result);
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to remove the avatar.' });
+  }
+}
+
 async function listPublicUserDecks(req, res) {
   try {
-    const profile = await getPublicProfile(pool, req.params.username);
-    if (!profile) return res.status(404).json({ error: 'user not found' });
+    // Phase 2b: thread the viewer (profile gate already 404s private/blocked
+    // owners). Owners browsing their own username path additionally see their
+    // private rows; strangers keep the public-only, unblocked filter. The
+    // { profile, items } shape is unchanged.
+    const profile = await getPublicProfile(pool, req.params.username, req.user.id);
+    if (!profile || profile.gated) return res.status(404).json({ error: 'user not found' });
+    const lname = String(req.params.username || '').toLowerCase();
+    const [ownerRows] = await pool.execute('SELECT user_id FROM user_profile WHERE username = ?', [lname]);
+    const ownerId = Array.isArray(ownerRows) ? ownerRows[0]?.user_id : null;
+    const isSelf = ownerId !== null && ownerId !== undefined && String(ownerId) === String(req.user.id);
+    const gate = isSelf
+      ? ''
+      : 'AND d.is_public = TRUE AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = d.owner_id) OR (b.blocker_id = d.owner_id AND b.blocked_id = ?))';
+    const gateParams = isSelf ? [] : [req.user.id, req.user.id];
     const [rows] = await pool.execute(
       `SELECT d.id_deck_publication AS id, d.title, d.description, d.entity_type, d.created_at,
          (SELECT COUNT(*) FROM deck_follows f WHERE f.id_deck_publication = d.id_deck_publication) AS followers,
          (SELECT COUNT(*) FROM deck_publication_items i WHERE i.id_deck_publication = d.id_deck_publication) AS items
        FROM deck_publications d
        WHERE d.owner_id = (SELECT user_id FROM user_profile WHERE username = ?)
-         AND d.is_public = TRUE
+         ${gate}
        ORDER BY d.id_deck_publication DESC LIMIT ? OFFSET ?`,
       [
-        String(req.params.username || '').toLowerCase(),
+        lname,
+        ...gateParams,
         Math.max(1, Math.min(50, Number(req.query?.limit) || 20)),
         Math.max(0, Number(req.query?.offset) || 0)
       ]
@@ -262,6 +350,7 @@ async function listPublicUserDecks(req, res) {
 module.exports = {
   deleteDeck,
   deleteFollow,
+  deleteOwnAvatar,
   getAnalytics,
   getDeck,
   getOwnProfile,
@@ -272,6 +361,7 @@ module.exports = {
   listSuggest,
   postDecide,
   postFollow,
+  postOwnAvatar,
   postPublish,
   postSuggest,
   putOwnProfile

@@ -171,6 +171,12 @@ test('library returns shared and owned rows with filters and bounded pagination'
     assert.ok(calls.every(({ sql, params }) => !/FROM reading_texts/i.test(sql) || (sql.includes('rt.user_id IS NULL') && params.includes(USER_ID))));
     const listCall = calls.find(({ sql }) => /FROM reading_texts rt LEFT JOIN reading_sources rs/i.test(sql) && /ORDER BY rt.created_at/i.test(sql));
     assert.deepEqual(listCall.params.slice(-2), [1, 1]);
+    // Regression: the SELECT-list mine placeholder leads the SQL text, so
+    // its user_id must lead the params. A [...filters, userId] order bound
+    // the source value to rt.user_id and broke every filtered listing on
+    // real Postgres with "invalid input syntax for type uuid" (stubs never
+    // caught it because they ignore param positions).
+    assert.deepEqual(listCall.params.slice(0, 4), [USER_ID, USER_ID, 'N5', 'aozora'], 'mine, ownership, level, then source filter');
 
     const allRows = mockRes();
     await controller.listLibrary({ query: { page: '1', limit: '2' }, user: { id: USER_ID } }, allRows.res);
@@ -212,8 +218,16 @@ test('progress is user-scoped, validates bounds, and uses an upsert', async () =
       assert.ok(params.includes(USER_ID));
       return [[{ id_reading_text: 31, text: '学生' }]];
     }
+    if (/SELECT time_spent_seconds FROM user_reading_progress/i.test(sql)) {
+      assert.ok(params.includes(USER_ID), 'delta read stays user-scoped');
+      return [[{ time_spent_seconds: 5 }]];
+    }
     if (/INSERT INTO user_reading_progress/i.test(sql)) return [[{ id: 4 }]];
     if (/SELECT position FROM user_reading_progress/i.test(sql)) return [[{ position: '2' }]];
+    if (/INSERT INTO reading_study_days/i.test(sql)) {
+      assert.ok(params.includes(USER_ID), 'daily credit stays user-scoped');
+      return [{ affectedRows: 1 }];
+    }
     throw new Error(`Unexpected progress SQL: ${sql}`);
   } }, async () => {
     const invalid = mockRes();
@@ -231,22 +245,63 @@ test('progress is user-scoped, validates bounds, and uses an upsert', async () =
     assert.match(upsert.sql, /ON CONFLICT \(user_id, text_id\) DO UPDATE/i);
     assert.match(upsert.sql, /GREATEST\(user_reading_progress\.position, EXCLUDED\.position\)/i);
     assert.ok(upsert.params.includes(USER_ID));
+    // Delta credit: submitted 15s minus stored 5s credits 10s to today.
+    const daily = calls.find(({ sql }) => /INSERT INTO reading_study_days/i.test(sql));
+    assert.ok(daily, 'reading time accrues to the daily row');
+    assert.deepEqual(daily.params, [USER_ID, null, 10]);
+    assert.match(daily.sql, /COALESCE\(\?::date, CURRENT_DATE\)/i);
+    assert.match(daily.sql, /ON CONFLICT \(user_id, day\) DO UPDATE/i);
   });
 
   await withPoolStubs({ execute: async (sql, params = []) => {
     if (/SELECT id_reading_text, text FROM reading_texts/i.test(sql)) {
       return [[{ id_reading_text: 31, text: '学生' }]];
     }
+    if (/SELECT time_spent_seconds FROM user_reading_progress/i.test(sql)) {
+      return [[{ time_spent_seconds: 20 }]];
+    }
     // Stored position 5 wins over the submitted 1: progress never regresses,
     // and the response echoes the stored (post-GREATEST) value.
     if (/INSERT INTO user_reading_progress/i.test(sql)) return [[{ id: 4 }]];
     if (/SELECT position FROM user_reading_progress/i.test(sql)) return [[{ position: '5' }]];
+    if (/INSERT INTO reading_study_days/i.test(sql)) {
+      throw new Error('backwards totals must not credit anything');
+    }
     throw new Error(`Unexpected progress SQL: ${sql}`);
   } }, async () => {
     const response = mockRes();
     await controller.updateProgress({ params: { id: '31' }, body: { position: 1, timeSpentSeconds: 15 }, user: { id: USER_ID } }, response.res);
     assert.equal(response.status(), 200);
     assert.equal(response.body().position, 5);
+  });
+
+  const anchoredCalls = [];
+  await withPoolStubs({ execute: async (sql, params = []) => {
+    anchoredCalls.push({ sql, params });
+    if (/SELECT id_reading_text, text FROM reading_texts/i.test(sql)) {
+      return [[{ id_reading_text: 31, text: '学生' }]];
+    }
+    if (/SELECT time_spent_seconds FROM user_reading_progress/i.test(sql)) {
+      return [[{ time_spent_seconds: 5 }]];
+    }
+    if (/INSERT INTO user_reading_progress/i.test(sql)) return [[{ id: 4 }]];
+    if (/SELECT position FROM user_reading_progress/i.test(sql)) return [[{ position: '2' }]];
+    if (/INSERT INTO reading_study_days/i.test(sql)) return [{ affectedRows: 1 }];
+    throw new Error(`Unexpected progress SQL: ${sql}`);
+  } }, async () => {
+    // Client local day anchors the credit row (UTC-4 evenings must not land
+    // on tomorrow's UTC row, or "today" stats read 0).
+    const anchored = mockRes();
+    await controller.updateProgress({ params: { id: '31' }, body: { position: 2, timeSpentSeconds: 15, today: '2026-10-08' }, user: { id: USER_ID } }, anchored.res);
+    assert.equal(anchored.status(), 200);
+    const anchoredDaily = anchoredCalls.find(({ sql }) => /INSERT INTO reading_study_days/i.test(sql));
+    assert.deepEqual(anchoredDaily.params, [USER_ID, '2026-10-08', 10]);
+    // Malformed today is a 400 before any write.
+    for (const bad of ['yesterday', '2026-13-40', '10/08/2026', 20261008]) {
+      const rejected = mockRes();
+      await controller.updateProgress({ params: { id: '31' }, body: { position: 2, timeSpentSeconds: 15, today: bad }, user: { id: USER_ID } }, rejected.res);
+      assert.equal(rejected.status(), 400, `invalid today rejected: ${bad}`);
+    }
   });
 
   await withPoolStubs({ execute: async (sql) => {
@@ -287,29 +342,26 @@ test('source import reads the fixed Aozora work index and reports fetch failures
   const unavailable = await gradedReader.loadAozoraSources(async () => { throw new Error('private network detail'); });
   assert.deepEqual(unavailable, { status: 'unavailable', reason: 'Source request failed.' });
 
-  // The endpoint only validates and enqueues (202): real imports take minutes
-  // (per-text classification), so the work runs detached after the response.
-  const accepted = mockRes();
-  await controller.importSources({ body: { sourceType: 'aozora' }, user: { id: USER_ID }, app: { locals: { readingFetch: async () => { throw new Error('offline'); } } } }, accepted.res);
-  assert.equal(accepted.status(), 202);
-  assert.deepEqual(accepted.body(), { status: 'accepted', sourceType: 'aozora' });
-  // Let the detached background attempt settle (it fails against the offline
-  // fetch stub and logs; it must never reject into the request lifecycle).
-  await new Promise((resolve) => setImmediate(resolve));
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  // Imports run inside the request (never detached: serverless runtimes kill
+  // anything scheduled after the response). An offline source answers with
+  // an honest 502 instead of a fake 202-accepted that never lands.
+  const offline = mockRes();
+  await controller.importSources({ body: { sourceType: 'aozora' }, user: { id: USER_ID }, app: { locals: { readingFetch: async () => { throw new Error('offline'); } } } }, offline.res);
+  assert.equal(offline.status(), 502);
+  assert.match(offline.body().error, /Source request failed/i);
 
   const retired = mockRes();
   await controller.importSources({ body: { sourceType: 'nhk' }, user: { id: USER_ID } }, retired.res);
   assert.equal(retired.status(), 400);
   assert.match(retired.body().error, /sourceType must be aozora or hukumusume/i);
 
-  const hukuAccepted = mockRes();
+  const hukuOffline = mockRes();
   await controller.importSources(
     { body: { sourceType: 'hukumusume', urls: ['https://hukumusume.com/douwa/pc/jap/01/01.htm'], index: '01' }, user: { id: USER_ID }, app: { locals: { readingFetch: async () => { throw new Error('offline'); } } } },
-    hukuAccepted.res
+    hukuOffline.res
   );
-  assert.equal(hukuAccepted.status(), 202);
-  assert.deepEqual(hukuAccepted.body(), { status: 'accepted', sourceType: 'hukumusume' });
+  assert.equal(hukuOffline.status(), 502);
+  assert.match(hukuOffline.body().error, /Source request failed/i);
 
   const badHukuIndex = mockRes();
   await controller.importSources(
@@ -317,8 +369,6 @@ test('source import reads the fixed Aozora work index and reports fetch failures
     badHukuIndex.res
   );
   assert.equal(badHukuIndex.status(), 400);
-  await new Promise((resolve) => setImmediate(resolve));
-  await new Promise((resolve) => setTimeout(resolve, 50));
 });
 
 test('import preview lists selectable works without fetching articles', async () => {
@@ -378,15 +428,22 @@ test('hukumusume preview lists month stories and imports a pasted link', async (
   assert.equal(badMonth.status(), 400);
   assert.match(badMonth.body().error, /index must be one of/);
 
-  // Pasted-link shape validation covers both hosts.
-  for (const url of ['https://hukumusume.com/douwa/pc/jap/01/01.htm.evil', 'https://hukumusume.com/other/page.html', 'https://www.aozora.gr.jp/cards/1/card1.html ']) {
+  // Pasted-link shape validation covers both hosts (no network: invalid
+  // shapes 400 before any fetch; the valid shape is exercised below with an
+  // offline stub proving the awaited import fails honestly, never silently).
+  for (const url of ['https://hukumusume.com/douwa/pc/jap/01/01.htm.evil', 'https://hukumusume.com/other/page.html']) {
     const probe = mockRes();
     await controller.importFromUrl({ body: { url }, user: { id: USER_ID } }, probe.res);
-    if (url.trim().startsWith('https://www.aozora.gr.jp/cards/1/card1.html')) {
-      assert.equal(probe.status(), 202, 'aozora card link still accepted');
-    } else {
-      assert.equal(probe.status(), 400, `url rejected: ${url}`);
-    }
+    assert.equal(probe.status(), 400, `url rejected: ${url}`);
+  }
+  {
+    const offline = mockRes();
+    await controller.importFromUrl(
+      { body: { url: 'https://www.aozora.gr.jp/cards/1/card1.html' }, user: { id: USER_ID }, app: { locals: { readingFetch: async () => { throw new Error('offline'); } } } },
+      offline.res
+    );
+    assert.equal(offline.status(), 502, 'offline source fails honestly');
+    assert.match(offline.body().error, /Source request failed/i);
   }
 
   // Happy path: card title extracted, story trimmed at おしまい, stored.
@@ -429,6 +486,24 @@ test('hukumusume preview lists month stories and imports a pasted link', async (
   assert.ok(storedText, 'story body stored');
   assert.ok(!storedText.includes('隠しキャラ'), 'post-ending bonus content trimmed');
   assert.ok(!storedText.includes('福娘童話集 >'), 'header chrome trimmed');
+});
+
+test('source heartbeat: malformed markup and dead hosts degrade honestly', async () => {
+  // Garbage listing HTML parses to zero works (never throws, never invents).
+  const garbage = async () => ({ ok: true, headers: { get: () => '9' }, text: async () => '<html><body>no stories here</body></html>' });
+  const aozoraEmpty = await gradedReader.loadAozoraSources(garbage, { index: 'a' });
+  assert.equal(aozoraEmpty.status, 'ok');
+  assert.deepEqual(aozoraEmpty.items, []);
+  const hukuEmpty = await gradedReader.loadHukuSources(garbage, { index: '01' });
+  assert.equal(hukuEmpty.status, 'ok');
+  assert.deepEqual(hukuEmpty.items, []);
+  // Dead hosts and non-OK responses collapse to unavailable with a reason.
+  const dead = async () => { throw new Error('socket hang up'); };
+  assert.deepEqual(await gradedReader.loadAozoraSources(dead), { status: 'unavailable', reason: 'Source request failed.' });
+  assert.deepEqual(await gradedReader.loadHukuSources(dead), { status: 'unavailable', reason: 'Source request failed.' });
+  const badStatus = async () => ({ ok: false, status: 403, headers: { get: () => '0' }, text: async () => '' });
+  assert.deepEqual(await gradedReader.previewAozoraSources(badStatus), { status: 'unavailable', reason: 'Source request failed.' });
+  assert.deepEqual(await gradedReader.previewHukuSources(badStatus), { status: 'unavailable', reason: 'Source request failed.' });
 });
 
 test('pasted-link import validates shape and stores the extracted work', async () => {
@@ -480,12 +555,10 @@ test('pasted-link import validates shape and stores the extracted work', async (
   });
   assert.equal(noTitle.status, 'unavailable');
 
-  const accepted = mockRes();
-  await controller.importFromUrl({ body: { url: cardUrl }, user: { id: USER_ID }, app: { locals: { readingFetch: async () => { throw new Error('offline'); } } } }, accepted.res);
-  assert.equal(accepted.status(), 202);
-  assert.deepEqual(accepted.body(), { status: 'accepted', sourceType: 'aozora' });
-  await new Promise((resolve) => setImmediate(resolve));
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  const offline = mockRes();
+  await controller.importFromUrl({ body: { url: cardUrl }, user: { id: USER_ID }, app: { locals: { readingFetch: async () => { throw new Error('offline'); } } } }, offline.res);
+  assert.equal(offline.status(), 502);
+  assert.match(offline.body().error, /Source request failed/i);
 });
 
 test('selective import analyzes and stores only the requested urls', async () => {

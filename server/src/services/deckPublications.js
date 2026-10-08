@@ -50,19 +50,31 @@ async function publishDeck(executor, ownerId, { entityType, ids, title, descript
 }
 
 async function getDeckPublication(executor, deckId, viewerId) {
+  // Phase 2b (F4/F5): the alternate content path carries the same gates as
+  // community posts — public deck from a public, unblocked owner, unless the
+  // viewer is the owner. WHERE enforces it on live data; the JS re-checks
+  // below re-assert it for executors that do not evaluate the predicate.
   const [rows] = await executor.execute(
     `SELECT d.id_deck_publication AS id, d.owner_id, d.title, d.description, d.entity_type, d.is_public, d.created_at,
-       p.username AS owner_username, p.display_name AS owner_display,
+       p.username AS owner_username, p.display_name AS owner_display, p.is_public AS owner_is_public,
        (SELECT COUNT(*) FROM deck_follows f WHERE f.id_deck_publication = d.id_deck_publication) AS followers,
-       CASE WHEN ?::uuid IS NULL THEN NULL ELSE EXISTS (SELECT 1 FROM deck_follows f WHERE f.id_deck_publication = d.id_deck_publication AND f.follower_id = ?) END AS viewer_following
+       CASE WHEN ?::uuid IS NULL THEN NULL ELSE EXISTS (SELECT 1 FROM deck_follows f WHERE f.id_deck_publication = d.id_deck_publication AND f.follower_id = ?) END AS viewer_following,
+       CASE WHEN ?::uuid IS NULL THEN NULL ELSE EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = d.owner_id) OR (b.blocker_id = d.owner_id AND b.blocked_id = ?)) END AS viewer_blocked
      FROM deck_publications d
      LEFT JOIN user_profile p ON p.user_id = d.owner_id
-     WHERE d.id_deck_publication = ?`,
-    [viewerId || null, viewerId || null, deckId]
+     WHERE d.id_deck_publication = ?
+       AND (d.owner_id = ? OR (d.is_public AND p.is_public
+         AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = d.owner_id) OR (b.blocker_id = d.owner_id AND b.blocked_id = ?))))`,
+    [viewerId || null, viewerId || null, viewerId || null, viewerId || null, viewerId || null, deckId, viewerId || null, viewerId || null, viewerId || null]
   );
   const deck = Array.isArray(rows) ? rows[0] : null;
   if (!deck) return null;
-  if ((!deck.is_public && deck.is_public !== 1) && String(deck.owner_id) !== String(viewerId)) return null;
+  // Blocked/private resolve to the same 404-shape null as missing (no oracle).
+  if (String(deck.owner_id) !== String(viewerId)) {
+    if ((!deck.is_public && deck.is_public !== 1)) return null;
+    if (deck.owner_is_public !== true && deck.owner_is_public !== 1) return null;
+    if (deck.viewer_blocked === true || deck.viewer_blocked === 1) return null;
+  }
   const [items] = await executor.execute(
     'SELECT position, item_json FROM deck_publication_items WHERE id_deck_publication = ? ORDER BY position ASC',
     [deckId]
@@ -88,11 +100,22 @@ async function listPublicDecks(executor, { entityType = null, limit = 20, offset
   const safeOffset = Math.max(0, Number(offset) || 0);
   const where = [];
   const params = [];
+  // Phase 2b (F4/F5): every non-self scope requires a public deck from a
+  // public, unblocked owner. The self scope (ownerId == viewer) keeps the
+  // owner's own private rows and needs no block filter.
+  const isSelfScope = ownerId !== null && ownerId !== undefined && String(ownerId) === String(viewerId);
   if (ownerId) {
     where.push('d.owner_id = ?');
     params.push(ownerId);
+    if (!isSelfScope) where.push('d.is_public = TRUE');
   } else {
     where.push('d.is_public = TRUE');
+  }
+  if (!isSelfScope) {
+    where.push('(d.owner_id = ? OR p.is_public)');
+    params.push(viewerId || null);
+    where.push('NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = d.owner_id) OR (b.blocker_id = d.owner_id AND b.blocked_id = ?))');
+    params.push(viewerId || null, viewerId || null);
   }
   if (entityType) {
     if (!ENTITY[entityType]) throw new ValidationError('entityType must be vocabulary, kanji or grammar');
@@ -138,12 +161,22 @@ async function deleteDeckPublication(executor, deckId, viewerId) {
 }
 
 async function setDeckFollow(executor, deckId, followerId, follow) {
+  // Phase 2b (F4/F5): follows gate on the same visibility as reads — a public
+  // deck from a public, unblocked owner, unless the follower is the owner.
+  // Projected in the same row (no extra round trip, no TOCTOU).
   const [rows] = await executor.execute(
-    'SELECT id_deck_publication AS id, is_public FROM deck_publications WHERE id_deck_publication = ?',
-    [deckId]
+    `SELECT id_deck_publication AS id, owner_id, is_public,
+       (SELECT p.is_public FROM user_profile p WHERE p.user_id = deck_publications.owner_id) AS owner_is_public,
+       EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = deck_publications.owner_id) OR (b.blocker_id = deck_publications.owner_id AND b.blocked_id = ?)) AS viewer_blocked
+     FROM deck_publications WHERE id_deck_publication = ?`,
+    [followerId, followerId, deckId]
   );
   const deck = Array.isArray(rows) ? rows[0] : null;
   if (!deck || (!deck.is_public && deck.is_public !== 1)) return null;
+  if (String(deck.owner_id) !== String(followerId)) {
+    if (deck.owner_is_public !== true && deck.owner_is_public !== 1) return null;
+    if (deck.viewer_blocked === true || deck.viewer_blocked === 1) return null;
+  }
   if (follow) {
     await executor.execute(
       'INSERT INTO deck_follows (id_deck_publication, follower_id) VALUES (?, ?) ON CONFLICT DO NOTHING',
@@ -213,15 +246,30 @@ async function getDeckAnalytics(executor, deckId, viewerId, { period = '30d' } =
 
 const USERNAME_PATTERN = /^[a-z0-9][a-z0-9-]{1,29}$/;
 
-async function getPublicProfile(executor, username) {
+async function getPublicProfile(executor, username, viewerId = null) {
   const name = String(username || '').toLowerCase();
   if (!USERNAME_PATTERN.test(name)) return null;
   const [rows] = await executor.execute(
-    'SELECT user_id, display_name, bio, avatar_url FROM user_profile WHERE username = ? AND is_public = TRUE',
+    'SELECT user_id, display_name, bio, avatar_url, is_public FROM user_profile WHERE username = ?',
     [name]
   );
   const profile = Array.isArray(rows) ? rows[0] : null;
   if (!profile) return null;
+  // Phase 2b (F4/F5): private profiles are visible to themselves only;
+  // blocked pairs resolve to the same null the missing profile returns
+  // (404 upstream, no oracle). A null viewer (no identity to filter on) gets
+  // public-only without the block check; all authed routes thread req.user.id.
+  const isSelf = viewerId !== null && viewerId !== undefined && String(profile.user_id) === String(viewerId);
+  if (!isSelf) {
+    if (profile.is_public !== true && profile.is_public !== 1) return null;
+    if (viewerId !== null && viewerId !== undefined) {
+      const [blocked] = await executor.execute(
+        'SELECT 1 FROM user_blocks WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)',
+        [viewerId, profile.user_id, profile.user_id, viewerId]
+      );
+      if (Array.isArray(blocked) && blocked[0]) return null;
+    }
+  }
   const [[decks]] = await executor.execute(
     'SELECT COUNT(*) AS total FROM deck_publications WHERE owner_id = ? AND is_public = TRUE',
     [profile.user_id]

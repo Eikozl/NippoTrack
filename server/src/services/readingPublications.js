@@ -10,15 +10,43 @@ const MAX_PUBLICATION_TITLE = 200;
 const MAX_PUBLICATION_DESCRIPTION = 500;
 const MAX_LIST_LIMIT = 50;
 
+// Provenance marker written by importReadingPublication into the copy's
+// reading_sources.metadata. Copies carrying it can never be re-published:
+// without this, A publishes → B imports → B publishes the copy → C imports
+// → …, amplifying one text into unbounded new publications (server load).
+// Tolerant of driver shapes (jsonb object vs serialized string) and of
+// legacy rows without metadata (treated as own-created, publishable).
+function readSourceMetadata(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+    } catch { /* fall through to empty */ }
+  }
+  return {};
+}
+
+function isCommunityImport(metadata) {
+  const marker = readSourceMetadata(metadata).importedFromPublication;
+  return (typeof marker === 'number' && Number.isSafeInteger(marker) && marker > 0) || (typeof marker === 'string' && marker.trim() !== '');
+}
+
 async function publishReading(executor, ownerId, { textId, title, description, isPublic = true }) {
   const id = Number(textId);
   if (!Number.isSafeInteger(id) || id <= 0) throw new ValidationError('textId must be a positive integer.');
   const [rows] = await executor.execute(
-    'SELECT id_reading_text, title, level, text, sentence_translations_json FROM reading_texts WHERE id_reading_text = ? AND user_id = ?',
+    `SELECT rt.id_reading_text, rt.title, rt.level, rt.text, rt.sentence_translations_json,
+       rs.type AS source_type, rs.metadata AS source_metadata
+      FROM reading_texts rt LEFT JOIN reading_sources rs ON rs.id_reading_source = rt.source_id
+      WHERE rt.id_reading_text = ? AND rt.user_id = ?`,
     [id, ownerId]
   );
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row) return null;
+  if (isCommunityImport(row.source_metadata)) {
+    throw new ValidationError('Only texts you created in Reading can be published. Copies imported from Community cannot be republished.');
+  }
   const cleanTitle = String(title ?? row.title ?? '').trim().slice(0, MAX_PUBLICATION_TITLE);
   if (!cleanTitle) throw new ValidationError('title must be a non-empty string.');
   const cleanDescription = String(description ?? '').trim().slice(0, MAX_PUBLICATION_DESCRIPTION);
@@ -52,11 +80,23 @@ async function listReadingPublications(executor, { limit = 20, offset = 0, owner
   const safeOffset = Math.max(0, Number(offset) || 0);
   const where = [];
   const params = [];
+  // Phase 2b (F4/F5): mirrors listPublicDecks — non-self scopes require a
+  // public text from a public, unblocked owner; the self scope keeps the
+  // owner's own private rows. (The controller only ever sets ownerId to the
+  // caller's own id, so the owner branch below is the self branch in practice.)
+  const isSelfScope = ownerId !== null && ownerId !== undefined && String(ownerId) === String(viewerId);
   if (ownerId) {
     where.push('r.owner_id = ?');
     params.push(ownerId);
+    if (!isSelfScope) where.push('r.is_public = TRUE');
   } else {
     where.push('r.is_public = TRUE');
+  }
+  if (!isSelfScope) {
+    where.push('(r.owner_id = ? OR p.is_public)');
+    params.push(viewerId || null);
+    where.push('NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = r.owner_id) OR (b.blocker_id = r.owner_id AND b.blocked_id = ?))');
+    params.push(viewerId || null, viewerId || null);
   }
   const [rows] = await executor.execute(
     `SELECT r.id_reading_publication AS id, r.owner_id, r.title, r.description, r.level, r.is_public, r.created_at,
@@ -75,18 +115,29 @@ async function listReadingPublications(executor, { limit = 20, offset = 0, owner
 async function getReadingPublication(executor, publicationId, viewerId) {
   const id = Number(publicationId);
   if (!Number.isSafeInteger(id) || id <= 0) throw new ValidationError('publication id must be a positive integer.');
+  // Phase 2b (F4/F5): same gates as deck reads — public text from a public,
+  // unblocked owner unless the viewer is the owner. WHERE enforces it on live
+  // data; the JS re-checks below re-assert it for other executors.
   const [rows] = await executor.execute(
     `SELECT r.id_reading_publication AS id, r.owner_id, r.title, r.description, r.level, r.text,
        r.translations_json, r.is_public, r.created_at,
-       p.username AS owner_username, p.display_name AS owner_display
+       p.username AS owner_username, p.display_name AS owner_display, p.is_public AS owner_is_public,
+        CASE WHEN ?::uuid IS NULL THEN NULL ELSE EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = r.owner_id) OR (b.blocker_id = r.owner_id AND b.blocked_id = ?)) END AS viewer_blocked
       FROM reading_publications r
       LEFT JOIN user_profile p ON p.user_id = r.owner_id
-      WHERE r.id_reading_publication = ?`,
-    [id]
+      WHERE r.id_reading_publication = ?
+        AND (r.owner_id = ? OR (r.is_public AND p.is_public
+          AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ? AND b.blocked_id = r.owner_id) OR (b.blocker_id = r.owner_id AND b.blocked_id = ?))))`,
+    [viewerId || null, viewerId || null, viewerId || null, id, viewerId || null, viewerId || null, viewerId || null]
   );
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row) return null;
-  if (row.is_public !== true && row.is_public !== 1 && String(row.owner_id) !== String(viewerId)) return null;
+  // Blocked/private resolve to the same 404-shape null as missing (no oracle).
+  if (String(row.owner_id) !== String(viewerId)) {
+    if (row.is_public !== true && row.is_public !== 1) return null;
+    if (row.owner_is_public !== true && row.owner_is_public !== 1) return null;
+    if (row.viewer_blocked === true || row.viewer_blocked === 1) return null;
+  }
   return {
     id: Number(row.id),
     ownerId: row.owner_id,
@@ -119,7 +170,26 @@ async function deleteReadingPublication(executor, publicationId, viewerId) {
 async function importReadingPublication(executor, userId, publicationId) {
   const publication = await getReadingPublication(executor, publicationId, userId);
   if (!publication) return null;
-  const created = await createUserReadingText(executor, userId, { text: publication.text, title: publication.title });
+  // Idempotent import: the same publication imported twice must not create
+  // two library copies. The provenance marker makes the previous copy
+  // findable (grandfathered marker-less duplicates cannot be matched and
+  // stay as they are — documented, not silently merged).
+  const [existing] = await executor.execute(
+    `SELECT rt.id_reading_text AS id, rt.title FROM reading_texts rt
+     JOIN reading_sources rs ON rs.id_reading_source = rt.source_id
+     WHERE rt.user_id = ? AND rs.metadata->>'importedFromPublication' = ? LIMIT 1`,
+    [userId, String(Number(publication.id))]
+  );
+  const hit = Array.isArray(existing) ? existing[0] : null;
+  if (hit) return { id: Number(hit.id), title: hit.title, duplicate: true };
+  // Stamp provenance on the copy's source row (same transaction as the
+  // create): publishReading refuses anything carrying this marker, which
+  // breaks the import → publish → import amplification loop.
+  const created = await createUserReadingText(executor, userId, {
+    text: publication.text,
+    title: publication.title,
+    sourceMetadata: { importedFromPublication: Number(publication.id) }
+  });
   const translations = publication.translations && Object.keys(publication.translations).length
     ? publication.translations
     : null;

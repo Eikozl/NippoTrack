@@ -21,14 +21,20 @@ export function element(tagName, { className, text, attrs, dataset } = {}, child
   return node;
 }
 
-export function pageHeader({ eyebrow, title, description, action }) {
+// v6.1: decorative section eyebrows retired — the small-caps descriptor above
+// the title restated the section and read as AI-generated. The `eyebrow`
+// param stays accepted so existing call sites keep working, but it is
+// intentionally never rendered. Functional labels (onboarding steps,
+// landing copy, kanji ownership) live outside this helper and are untouched.
+// @deprecated The `eyebrow` param is deprecated (accepted but never rendered);
+// tests pin this shape, so it stays instead of being removed.
+export function pageHeader({ eyebrow: _eyebrow, title, description, action }) {
   const headerIcon = iconForTitle(title);
   const heading = element('div', { className: 'flex items-center gap-3' }, [
     ...(headerIcon ? [iconTile(headerIcon, { className: 'page-header-icon' })] : []),
     element('h1', { className: 'font-display text-2xl font-semibold tracking-tight text-ink sm:text-3xl', text: title })
   ]);
   const copy = element('div', {}, [
-    element('p', { className: 'eyebrow', text: eyebrow }),
     element('div', { className: 'mt-2' }, [heading]),
     element('p', { className: 'mt-2 max-w-2xl text-sm leading-6 text-muted', text: description })
   ]);
@@ -41,6 +47,68 @@ export function loadingState(label = 'Loading data…') {
       element('span', { className: 'spinner', attrs: { 'aria-hidden': 'true' } }),
       element('p', { className: 'text-sm', text: label })
     ])
+  ]);
+}
+
+// Community skeletons (additive, loadingState untouched): pulsing placeholder
+// blocks shaped like the upcoming rows/cards. Visual blocks are aria-hidden;
+// AT hears role=status "Loading…" via the visually-hidden line. Pulse uses
+// .skeleton-block (nt-skeleton shimmer), which the stylesheet already stills
+// under prefers-reduced-motion (animation: none). Callers set aria-busy on
+// the loading container while the skeleton is shown.
+export function skeleton({ rows = 3, variant = 'cards', label = 'Loading…' } = {}) {
+  const count = Math.max(1, Math.min(6, Number(rows) || 3));
+  const visualChildren = [];
+  if (variant === 'grid') {
+    for (let index = 0; index < count; index += 1) {
+      visualChildren.push(element('div', { className: 'rounded-xl border border-stone bg-paper px-3 py-2' }, [
+        element('div', { className: 'skeleton-block h-4 w-3/4' }),
+        element('div', { className: 'skeleton-block mt-2 h-3 w-1/2' })
+      ]));
+    }
+    const visual = element('div', { className: 'grid min-w-0 grid-cols-2 gap-2 xl:grid-cols-3', attrs: { 'aria-hidden': 'true' } }, visualChildren);
+    return element('div', { className: 'grid gap-2', attrs: { role: 'status', 'aria-live': 'polite', 'aria-label': label } }, [
+      visual,
+      element('p', { className: 'visually-hidden', text: label })
+    ]);
+  }
+  if (variant === 'rows') {
+    for (let index = 0; index < count; index += 1) {
+      visualChildren.push(element('div', { className: 'surface flex items-center gap-3 p-3' }, [
+        element('span', { className: 'skeleton-block size-10 shrink-0 rounded-full' }),
+        element('div', { className: 'grid min-w-0 flex-1 gap-2' }, [
+          element('div', { className: 'skeleton-block h-4 w-1/3' }),
+          element('div', { className: 'skeleton-block h-3 w-2/3' })
+        ])
+      ]));
+    }
+    const visual = element('div', { className: 'grid gap-3', attrs: { 'aria-hidden': 'true' } }, visualChildren);
+    return element('div', { className: 'grid gap-2', attrs: { role: 'status', 'aria-live': 'polite', 'aria-label': label } }, [
+      visual,
+      element('p', { className: 'visually-hidden', text: label })
+    ]);
+  }
+  // Default 'cards' (also used for 'preview' text shapes): post-card shaped
+  // placeholders with a header row + text lines, like feed/discover/profile
+  // cards and the reading excerpt.
+  for (let index = 0; index < count; index += 1) {
+    visualChildren.push(element('div', { className: 'surface p-4 sm:p-5' }, [
+      element('div', { className: 'flex items-center gap-3' }, [
+        element('span', { className: 'skeleton-block size-10 shrink-0 rounded-full' }),
+        element('div', { className: 'grid flex-1 gap-2' }, [
+          element('div', { className: 'skeleton-block h-4 w-1/3' }),
+          element('div', { className: 'skeleton-block h-3 w-1/4' })
+        ])
+      ]),
+      element('div', { className: 'skeleton-block mt-3 h-4 w-5/6' }),
+      element('div', { className: 'skeleton-block mt-2 h-4 w-full' }),
+      element('div', { className: 'skeleton-block mt-2 h-4 w-2/3' })
+    ]));
+  }
+  const visual = element('div', { className: 'grid gap-3', attrs: { 'aria-hidden': 'true' } }, visualChildren);
+  return element('div', { className: 'grid gap-2', attrs: { role: 'status', 'aria-live': 'polite', 'aria-label': label } }, [
+    visual,
+    element('p', { className: 'visually-hidden', text: label })
   ]);
 }
 
@@ -279,7 +347,26 @@ export function searchableMultiSelect({
   });
 
   renderOptions(options);
-  return element('div', { className: 'field' }, [header, search, chips, optionsList, hiddenSelect]);
+  const wrapper = element('div', { className: 'field' }, [header, search, chips, optionsList, hiddenSelect]);
+  // Day-link merge slot (sessions "Link what I studied that day"): appends
+  // externally-fetched options without wiping manual picks. Selected ids
+  // persist in selectedValues so the hidden select (submit source) and chips
+  // stay correct even when the new rows are not in the current filtered view.
+  // Never removes existing selections; callers skip duplicates before calling.
+  wrapper.appendLinkedOptions = (linkedOptions = [], idsToSelect = []) => {
+    for (const option of Array.isArray(linkedOptions) ? linkedOptions : []) {
+      if (!option || option.value === undefined || option.value === null) continue;
+      const key = String(option.value);
+      if (!optionLabels.has(key)) optionLabels.set(key, option.chipLabel || option.label || key);
+      if (!options.some((entry) => String(entry.value) === key)) options.push(option);
+    }
+    for (const id of Array.isArray(idsToSelect) ? idsToSelect : []) {
+      if (id === undefined || id === null || id === '') continue;
+      selectedValues.add(String(id));
+    }
+    syncSelection();
+  };
+  return wrapper;
 }
 
 export function paginationControls(pagination, onPageChange) {
@@ -406,6 +493,8 @@ export function openDialog({ title, content, submitLabel = 'Save', submitClassNa
 // drawers never host a second form stack. Single-instance like dialogs:
 // opening a drawer replaces any open dialog/drawer overlay.
 // Focus trap + Escape + overlay-click + focus return mirror openDialog.
+// @deprecated openDrawer stays exported (tests pin its shape) but is no longer
+// the entity-detail path; new detail UI uses openDetailModal instead.
 export function openDrawer({ title, subtitle = null, content = [], actions = [], onClose = null }) {
   const root = document.getElementById('modal-root');
   const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -531,14 +620,14 @@ export function openDetailModal({ title, subtitle = null, content = [], actions 
   return close;
 }
 
-export function confirmDialog({ title = 'Confirm deletion', description, confirmLabel = 'Delete', onConfirm }) {
+export function confirmDialog({ title = 'Confirm deletion', description, confirmLabel = 'Delete', confirmClassName = 'button-danger', pendingLabel = 'Deleting…', onConfirm }) {
   return openDialog({
     title,
     description,
     content: [],
     submitLabel: confirmLabel,
-    submitClassName: 'button-danger',
-    pendingLabel: 'Deleting…',
+    submitClassName: confirmClassName,
+    pendingLabel,
     onSubmit: async (form, close) => {
       await onConfirm();
       close();

@@ -2,7 +2,7 @@
 // import them into the reader library. Mirrors deckPublicationsController.
 const pool = require('../config/db');
 const { ValidationError, sendRouteError } = require('../errors/http');
-const { parseIdParam } = require('../validation');
+const { parseIdParam, rejectUnknownFields } = require('../validation');
 const {
   deleteReadingPublication,
   getReadingPublication,
@@ -16,11 +16,6 @@ function bodyObject(body) {
     throw new ValidationError('Request body must be an object.');
   }
   return body;
-}
-
-function rejectUnknownFields(body, allowed) {
-  const unknown = Object.keys(body).filter((key) => !allowed.includes(key));
-  if (unknown.length) throw new ValidationError(`Unexpected field(s): ${unknown.join(', ')}.`);
 }
 
 async function postPublish(req, res) {
@@ -43,10 +38,15 @@ async function postPublish(req, res) {
 async function listPublications(req, res) {
   try {
     const query = req.query || {};
+    // Security: an arbitrary ?ownerId= would list another learner's private
+    // texts (the service drops the is_public gate when ownerId is set). Only
+    // the caller's own id unlocks the own scope; anything else is ignored
+    // and falls back to the public feed.
+    const requestedOwner = typeof query.ownerId === 'string' ? query.ownerId : null;
     const result = await listReadingPublications(pool, {
       limit: query.limit !== undefined ? Number(query.limit) : 20,
       offset: query.offset !== undefined ? Number(query.offset) : 0,
-      ownerId: query.ownerId || null,
+      ownerId: requestedOwner && requestedOwner === req.user.id ? req.user.id : null,
       viewerId: req.user.id
     });
     return res.json(result);
@@ -82,7 +82,9 @@ async function postImport(req, res) {
     const id = parseIdParam(req, 'publication');
     const result = await importReadingPublication(pool, req.user.id, id);
     if (!result) return res.status(404).json({ error: 'Publication not found.' });
-    return res.status(201).json({ success: true, ...result });
+    // Re-import of an already-imported publication returns the existing
+    // copy (200) instead of creating a duplicate (201).
+    return res.status(result.duplicate === true ? 200 : 201).json({ success: true, ...result });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to import the text.' });
   }

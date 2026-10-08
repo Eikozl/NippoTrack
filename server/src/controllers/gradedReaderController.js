@@ -1,6 +1,6 @@
 const pool = require('../config/db');
 const { ValidationError, sendRouteError } = require('../errors/http');
-const { parseIdParam } = require('../validation');
+const { parseIdParam, rejectUnknownFields, validateTodayField } = require('../validation');
 const {
   MAX_LIBRARY_LIMIT,
   MAX_READING_ENROLL_ITEMS,
@@ -27,11 +27,6 @@ function bodyObject(body) {
     throw new ValidationError('Request body must be an object.');
   }
   return body;
-}
-
-function rejectUnknownFields(body, allowed) {
-  const unknown = Object.keys(body).filter((key) => !allowed.includes(key));
-  if (unknown.length) throw new ValidationError(`Unexpected field(s): ${unknown.join(', ')}.`);
 }
 
 function parseQueryInteger(value, name, fallback, maximum = Number.MAX_SAFE_INTEGER) {
@@ -121,7 +116,7 @@ async function updateProgress(req, res) {
   try {
     const id = parseIdParam(req, 'reading text');
     const body = bodyObject(req.body);
-    rejectUnknownFields(body, ['position', 'timeSpentSeconds', 'completed']);
+    rejectUnknownFields(body, ['position', 'timeSpentSeconds', 'completed', 'today']);
     if (!Number.isSafeInteger(body.position) || body.position < 1 || body.position > MAX_READING_TEXT_LENGTH) {
       throw new ValidationError(`position must be a positive integer no greater than ${MAX_READING_TEXT_LENGTH}.`);
     }
@@ -130,6 +125,9 @@ async function updateProgress(req, res) {
     }
     if (body.completed !== undefined && typeof body.completed !== 'boolean') {
       throw new ValidationError('completed must be a boolean.');
+    }
+    if (body.today !== undefined && body.today !== null) {
+      validateTodayField(body.today);
     }
     const progress = await upsertReadingProgress(pool, req.user.id, id, body);
     if (!progress) return res.status(404).json({ error: 'Reading text not found.' });
@@ -257,8 +255,10 @@ async function importFromUrl(req, res) {
       throw new ValidationError('url must be an Aozora work page or Hukumusume story page URL.');
     }
     // Shape-checked synchronously so malformed input 400s immediately; the
-    // service re-checks before fetching. Analysis takes ~a minute, so like
-    // bulk import this enqueues and answers 202 while the client polls.
+    // service re-checks before fetching. The single text is imported within
+    // this request (awaited, never detached): on serverless runtimes nothing
+    // survives the response, so fire-and-forget background work silently
+    // never completes there. Failures return honest errors, never silence.
     const raw = String(body.url.trim());
     let sourceType = null;
     let url = null;
@@ -272,12 +272,11 @@ async function importFromUrl(req, res) {
     const userId = req.user.id;
     const fetchImpl = req.app?.locals?.readingFetch || globalThis.fetch;
     const importSingle = sourceType === 'hukumusume' ? importHukuUrl : importAozoraUrl;
-    setImmediate(() => {
-      importSingle(pool, userId, url, { fetch: fetchImpl }).catch((error) => {
-        console.error('[reading-import] background pasted-link import failed:', error?.message || error);
-      });
-    });
-    return res.status(202).json({ status: 'accepted', sourceType });
+    const result = await importSingle(pool, userId, url, { fetch: fetchImpl });
+    if (!result || result.status !== 'ok') {
+      return res.status(502).json({ error: result?.reason || 'Source request failed.' });
+    }
+    return res.status(201).json({ status: 'ok', sourceType, imported: result.imported || 0, textsImported: result.textsImported || 0 });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to import reading link.' });
   }
@@ -328,21 +327,19 @@ async function importSources(req, res) {
     // re-validated below (https + source host + story path) and then
     // intersected with the live listing, so only listed works can be pulled.
     const urls = assertImportUrls(body.sourceType, body.urls);
-    // A real import fetches up to ten articles and runs the full classifier
-    // per text — minutes of pooler round-trips, far beyond any HTTP header
-    // timeout. So the request only validates and enqueues: the work runs
-    // detached right after the 202, and texts land in the library as they
-    // finish (syncReadingSources commits per item and is retry-safe via
-    // its advisory lock + existing-row checks). Failures go to the server log;
-    // the client polls the library until new rows arrive.
+    // Awaited within the request (never detached): serverless runtimes kill
+    // anything scheduled after the response, which is exactly how bulk
+    // imports silently never landed. Items commit one by one inside the
+    // service, so even a function timeout keeps partial progress and a
+    // retry resumes idempotently via the advisory lock + existing-row
+    // checks. The response carries honest counts, never blind optimism.
     const userId = req.user.id;
     const fetchImpl = req.app?.locals?.readingFetch || globalThis.fetch;
-    setImmediate(() => {
-      syncReadingSources(pool, userId, body.sourceType, { fetch: fetchImpl, urls, index: body.index || null }).catch((error) => {
-        console.error(`[reading-import] background ${body.sourceType} import failed:`, error?.message || error);
-      });
-    });
-    return res.status(202).json({ status: 'accepted', sourceType: body.sourceType });
+    const result = await syncReadingSources(pool, userId, body.sourceType, { fetch: fetchImpl, urls, index: body.index || null });
+    if (!result || result.status !== 'ok') {
+      return res.status(502).json({ error: result?.reason || 'Source request failed.' });
+    }
+    return res.status(200).json({ status: 'ok', sourceType: body.sourceType, imported: result.imported || 0, textsImported: result.textsImported || 0 });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to import reading sources.' });
   }

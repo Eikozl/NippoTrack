@@ -1,8 +1,9 @@
 const pool = require('../config/db');
 const { ValidationError, sendRouteError } = require('../errors/http');
-const { parseIdParam, isValidDateString, validateAllowedValues } = require('../validation');
+const { parseIdParam, isValidDateString, rejectUnknownFields, validateAllowedValues } = require('../validation');
 const { parsePagination, paginationPayload } = require('../pagination');
 const { getReviewCandidates, toIsoDate } = require('../services/reviewCandidates');
+const { getReviewItemContext, hasMeaningfulContext } = require('../services/reviewItemContext');
 const {
   CARD_TYPES,
   ENTITY_CARD_TYPES,
@@ -158,23 +159,24 @@ async function getSessionSummary(executor, sessionId, userId) {
 // (user_id, id) index instead of scanning every due row three times.
 // Inert = auto-enrolled but never actually reviewed; new items enroll lazily on first grade.
 const DUE_REVIEWS_SQL = `SELECT ri.id_review_item, ri.due_on, ri.interval_days, ri.last_reviewed_at, ri.last_result,
-  'Vocabulary' AS item_type, v.word AS title, v.meaning AS meaning, v.reading
+  'Vocabulary' AS item_type, v.id_vocabulary AS entity_id, v.word AS title, v.meaning AS meaning, v.reading
   FROM review_items ri
   JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary
   WHERE ri.due_on <= CURRENT_DATE AND ri.id_vocabulary IS NOT NULL AND ri.id_kanji IS NULL AND ri.id_grammar IS NULL AND v.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)
   UNION ALL
   SELECT ri.id_review_item, ri.due_on, ri.interval_days, ri.last_reviewed_at, ri.last_result,
-  'Kanji' AS item_type, k.character_kanji AS title, k.meaning AS meaning, NULL AS reading
+  'Kanji' AS item_type, k.id_kanji AS entity_id, k.character_kanji AS title, k.meaning AS meaning, NULL AS reading
   FROM review_items ri
   JOIN kanji k ON k.id_kanji = ri.id_kanji
   WHERE ri.due_on <= CURRENT_DATE AND ri.id_kanji IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_grammar IS NULL AND k.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)
   UNION ALL
   SELECT ri.id_review_item, ri.due_on, ri.interval_days, ri.last_reviewed_at, ri.last_result,
-  'Grammar' AS item_type, g.grammar_point AS title, g.meaning AS meaning, NULL AS reading
+  'Grammar' AS item_type, g.id_grammar AS entity_id, g.grammar_point AS title, g.meaning AS meaning, NULL AS reading
   FROM review_items ri
   JOIN grammar_points g ON g.id_grammar = ri.id_grammar
-  WHERE ri.due_on <= CURRENT_DATE AND ri.id_grammar IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_kanji IS NULL AND g.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)
-  ORDER BY due_on ASC, id_review_item ASC`;
+  WHERE ri.due_on <= CURRENT_DATE AND ri.id_grammar IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_kanji IS NULL   AND g.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)
+  ORDER BY due_on ASC, id_review_item ASC
+  LIMIT 1001`;
 
 async function listDueReviews(req, res) {
   try {
@@ -208,10 +210,16 @@ async function listDueReviewCards(req, res) {
         const entityType = String(row.item_type || '').toLowerCase() === 'vocabulary'
           ? 'vocabulary'
           : String(row.item_type || '').toLowerCase() === 'kanji' ? 'kanji' : 'grammar';
-        return { ...row, entityType, cardTypes: [...(ENTITY_CARD_TYPES[entityType] || ['recognition'])] };
+        // entity_id is additive (V5.6 Study Now auto-session needs it to
+        // build the queue client-side); absent/legacy rows stay null-safe.
+        const entityId = Number(row.entity_id);
+        return { ...row, entityType, entityId: Number.isInteger(entityId) && entityId > 0 ? entityId : null, cardTypes: [...(ENTITY_CARD_TYPES[entityType] || ['recognition'])] };
       })
       .filter((row) => !requestedTypes || row.cardTypes.some((type) => requestedTypes.includes(type)));
-    return res.json({ items });
+    // V5.6 Completion Pass: bounded due listing (oldest-first preserved).
+    // The exact backlog size stays available via study-now signals.dueCount.
+    const truncated = items.length > 1000;
+    return res.json({ items: truncated ? items.slice(0, 1000) : items, truncated });
   } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load review cards.' }); }
 }
 
@@ -233,8 +241,7 @@ async function putReviewPreferences(req, res) {
   try {
     const body = req.body || {};
     const allowed = ['cardTypes', 'weights', 'engineMode', 'autoPick', 'speechRate'];
-    const unknown = Object.keys(body).filter((key) => !allowed.includes(key));
-    if (unknown.length) throw new ValidationError(`Unexpected field(s): ${unknown.join(', ')}.`);
+    rejectUnknownFields(body, allowed);
     if (!Array.isArray(body.cardTypes)) throw new ValidationError('cardTypes is required and must be an array.');
     const saved = await upsertUserReviewPreferences(pool, req.user.id, {
       cardTypes: body.cardTypes,
@@ -356,7 +363,21 @@ async function createReviewSession(req, res) {
       await connection.commit();
       connection.release();
       connection = null;
-      return res.status(201).json({ id, sourceFrom, sourceTo, completedAt: null, itemCount: queueItems.length });
+      // V5.6 Completion Pass: embed batched per-item context (last failed,
+      // example sentence, encounter counts) so review cards never fetch
+      // context one-by-one. Fail-open: enrichment trouble never blocks the
+      // session — the queue without context still reviews fine.
+      let contextItems = null;
+      try {
+        const context = await getReviewItemContext(pool, req.user.id, queueItems);
+        contextItems = queueItems.map((entry) => {
+          const itemContext = context.get(`${entry.entityType}:${entry.entityId}`);
+          return hasMeaningfulContext(itemContext)
+            ? { entityType: entry.entityType, entityId: entry.entityId, context: itemContext }
+            : { entityType: entry.entityType, entityId: entry.entityId };
+        });
+      } catch { contextItems = null; }
+      return res.status(201).json({ id, sourceFrom, sourceTo, completedAt: null, itemCount: queueItems.length, ...(contextItems ? { items: contextItems } : {}) });
     } catch (error) {
       if (connection) { await connection.rollback().catch(() => {}); connection.release(); connection = null; }
       throw error;
@@ -674,7 +695,7 @@ async function buildReconstructedSessionItems(executor, sessionId, userId, sourc
     }
     if (ordered.length >= RECONSTRUCTED_QUEUE_LIMIT) break;
   }
-  return ordered.map((entry, position) => ({
+  const queue = ordered.map((entry, position) => ({
     position,
     entityType: entry.entityType,
     entityId: entry.entityId,
@@ -683,6 +704,16 @@ async function buildReconstructedSessionItems(executor, sessionId, userId, sourc
     meaning: entry.meaning || null,
     lastResult: null
   }));
+  // Same batched context as persisted queues (fail-open): reconstructed
+  // resume carries identical Context blocks.
+  try {
+    const context = await getReviewItemContext(executor, userId, queue);
+    for (const item of queue) {
+      const itemContext = context.get(`${item.entityType}:${item.entityId}`);
+      if (hasMeaningfulContext(itemContext)) item.context = itemContext;
+    }
+  } catch { /* context stays absent; queue still resumes */ }
+  return queue;
 }
 
 async function getReviewSessionItems(req, res) {
@@ -735,6 +766,15 @@ async function getReviewSessionItems(req, res) {
       lastResult: row.lastResult || null
     }));
     if (persisted.length) {
+      // Same batched context as session creation (fail-open): resume/retake
+      // queues carry identical Context blocks without per-card requests.
+      try {
+        const context = await getReviewItemContext(pool, req.user.id, persisted);
+        for (const item of persisted) {
+          const itemContext = context.get(`${item.entityType}:${item.entityId}`);
+          if (hasMeaningfulContext(itemContext)) item.context = itemContext;
+        }
+      } catch { /* context stays absent; queue still resumes */ }
       return res.json({ id, reconstructed: false, items: persisted });
     }
     // Empty persisted queue on an OPEN session: legacy (pre-026), no-items,

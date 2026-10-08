@@ -11,6 +11,7 @@ import { openAuthModal } from './authModal.js';
 import { createLevelEstimateControl } from './levelEstimateControl';
 import { authConfigured, localAuthBypass, localAuthBypassEmail, supabase } from './authClient';
 import { profileStore } from './accountProfile.js';
+import { isSafeAvatarUrl } from './avatarPolicy.js';
 import { getLocale, setLocale, t, translateDocument } from './i18n';
 import { authViewFromSearch } from './landing/routing';
 
@@ -211,6 +212,16 @@ async function bootstrapApp() {
           onComplete: () => { firstExperienceSession?.finish(); navigate('dashboard'); },
           onEnterPlacement: () => { firstExperienceSession?.finish(); module.enterPlacement({ navigate }); }
         });
+        // First-login tutorial: fullscreen takeover over the setup shell
+        // (rendered above, so a video failure still leaves setup usable).
+        // Once-only per browser via the seen flag; setup itself untouched.
+        // Dynamic import (like firstExperience above): first-login-only code
+        // stays out of the initial chunk. Fail-open: import failure skips
+        // the takeover silently.
+        try {
+          const tutorial = await import('./tutorialVideo.js');
+          if (!tutorial.hasSeenTutorialVideo()) tutorial.mountTutorialVideo(document.body);
+        } catch { /* tutorial unavailable: setup proceeds without it */ }
         return;
       }
     } catch {
@@ -246,6 +257,17 @@ const userMenus = [];
 
 function rawAccountText(node, value) {
   node.textContent = value == null ? '' : String(value);
+}
+
+// Photo overlay for the initials mark: the initials (or user icon) stay
+// underneath so a broken URL falls back gracefully on img error.
+function avatarOverlayImg(url, size) {
+  const img = element('img', {
+    className: 'absolute inset-0 h-full w-full object-cover',
+    attrs: { src: String(url).trim(), alt: '', loading: 'lazy', decoding: 'async', width: String(size), height: String(size), 'aria-hidden': 'true' }
+  });
+  img.addEventListener('error', () => { try { img.remove(); } catch { /* fallback underneath remains */ } });
+  return img;
 }
 
 function createUserMenu(trigger, index) {
@@ -308,21 +330,56 @@ function createUserMenu(trigger, index) {
     const next = event.key === 'ArrowDown' ? (at + 1) % items.length : event.key === 'ArrowUp' ? (at - 1 + items.length) % items.length : event.key === 'Home' ? 0 : items.length - 1;
     items[next]?.focus();
   });
-  menu.addEventListener('focusout', (event) => { if (!menu.contains(event.relatedTarget)) close(); });
+  menu.addEventListener('focusout', () => {
+    // Deferred one frame: on touch, focus can hop mid-tap with an
+    // unreliable (often null) relatedTarget; closing synchronously would
+    // hide the menu under the finger and swallow the tap. Re-check once
+    // the tap completes: a real focus-out still closes a frame later.
+    requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (!active || !menu.contains(active)) close();
+    });
+  });
   languageButton.addEventListener('click', () => {
     const open = languagePanel.hidden;
     languagePanel.hidden = !open;
     languageButton.setAttribute('aria-expanded', String(open));
-    if (open) languagePanel.querySelector('button')?.focus();
+    if (open) languagePanel.querySelector('button')?.focus({ preventScroll: true });
   });
   settingsButton.addEventListener('click', () => { close(); navigate('settings'); });
   signOutButton.addEventListener('click', () => { close(); confirmSignOut(); });
+  // Trigger photo: the avatar replaces the trigger icon while set; the exact
+  // boot-time trigger content is snapshotted once and restored verbatim when
+  // no photo is served (fallback path untouched). The photo is absolutely
+  // positioned inside a clipped round box (see .account-trigger--photo):
+  // an in-flow img would size from its intrinsic pixels and overflow the
+  // 40px trigger on tall/wide photos.
+  let triggerPhotoSnapshot = null;
+  function syncTriggerPhoto(safe) {
+    if (safe) {
+      if (!triggerPhotoSnapshot) triggerPhotoSnapshot = Array.from(trigger.childNodes);
+      const photo = element('img', {
+        className: 'absolute inset-0 h-full w-full rounded-full object-cover',
+        attrs: { src: safe, alt: '', loading: 'lazy', decoding: 'async', width: '40', height: '40', 'aria-hidden': 'true' }
+      });
+      photo.addEventListener('error', () => syncTriggerPhoto(null));
+      trigger.replaceChildren(photo);
+      trigger.classList.add('account-trigger--photo');
+    } else if (triggerPhotoSnapshot) {
+      trigger.replaceChildren(...triggerPhotoSnapshot);
+      triggerPhotoSnapshot = null;
+      trigger.classList.remove('account-trigger--photo');
+    }
+  }
   const update = () => {
     const profile = profileStore.get();
     const initials = profile?.initials || '';
     mark.replaceChildren();
     if (initials) rawAccountText(mark, initials);
     else mark.appendChild(icon('user', { size: 18 }));
+    const safe = isSafeAvatarUrl(profile?.avatarUrl) ? String(profile.avatarUrl).trim() : null;
+    if (safe) mark.appendChild(avatarOverlayImg(safe, 32));
+    syncTriggerPhoto(safe);
     rawAccountText(name, profile?.displayName || t('Account'));
     rawAccountText(email, profile?.email || currentAuthEmail || '');
     rawAccountText(languageButton.firstElementChild, t('Language'));
@@ -343,6 +400,9 @@ function closeUserMenu(refocus = false) { openUserMenu?.close(refocus); }
 
 accountButtons.forEach((button, index) => createUserMenu(button, index));
 document.addEventListener('click', () => closeUserMenu());
+// Avatar changes from Settings refresh the cached store and announce here;
+// the existing update()/syncUserMenus flow repaints marks and triggers.
+window.addEventListener('jlt-profile-change', () => syncUserMenus());
 
 // Phase 9 refinement — single header level-estimate control. One controller
 // manages both the desktop and mobile header morphs (only one header is
@@ -362,56 +422,6 @@ const levelEstimateControl = createLevelEstimateControl({
 if (themeToggle?.parentElement) levelEstimateControl.mount(themeToggle.parentElement);
 if (mobileThemeToggle?.parentElement) levelEstimateControl.mount(mobileThemeToggle.parentElement);
 
-// Header language control (desktop header only — it mounts into the desktop
-// controls group, which is hidden below lg, so the compact mobile header
-// gains no permanent button). Same locale mechanism as the auth gate and
-// Settings: setLocale persists to localStorage and dispatches
-// jlt-locale-change; switching language never touches the session.
-/* Legacy standalone header language control removed in v5.1-C.
-const localeWrap = element('span', { className: 'header-locale-wrap' });
-const localeButton = element('button', { className: 'icon-button header-locale-button', text: 'EN', attrs: { type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': t('Language'), title: t('Language') } });
-const localeOptions = [['en', 'English'], ['es', 'Spanish']].map(([value, label]) => {
-  const option = element('button', { className: 'header-locale-option', text: label, attrs: { type: 'button', role: 'menuitemradio', 'aria-checked': 'false', 'data-locale': value } });
-  option.addEventListener('click', () => { setLocale(value); syncLocaleControl(); closeLocaleMenu(); });
-  return option;
-});
-const localeMenu = element('div', { className: 'header-locale-menu', attrs: { role: 'menu', hidden: '' } }, localeOptions);
-localeWrap.append(localeButton, localeMenu);
-function syncLocaleControl() {
-  const current = getLocale();
-  localeButton.textContent = current === 'es' ? 'ES' : 'EN';
-  localeButton.setAttribute('aria-label', t('Language'));
-  localeButton.setAttribute('title', t('Language'));
-  localeOptions.forEach((option) => {
-    const active = option.dataset.locale === current;
-    option.setAttribute('aria-checked', String(active));
-    option.textContent = t(option.dataset.locale === 'en' ? 'English' : 'Spanish');
-  });
-}
-function closeLocaleMenu(refocus = false) {
-  localeMenu.setAttribute('hidden', '');
-  localeButton.setAttribute('aria-expanded', 'false');
-  if (refocus) localeButton.focus();
-}
-localeButton.addEventListener('click', (event) => {
-  event.stopPropagation();
-  if (localeMenu.hasAttribute('hidden')) {
-    localeMenu.removeAttribute('hidden');
-    localeButton.setAttribute('aria-expanded', 'true');
-  } else closeLocaleMenu();
-});
-localeWrap.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && !localeMenu.hasAttribute('hidden')) { event.stopPropagation(); closeLocaleMenu(true); }
-});
-document.addEventListener('click', (event) => {
-  if (!localeMenu.hasAttribute('hidden') && !localeWrap.contains(event.target)) closeLocaleMenu();
-});
-// Mount between the estimate control and the theme toggle:
-// [ Estimate ] [ Language ] … [ Theme ] [ User ].
-themeToggle?.before(localeWrap);
-syncLocaleControl();
-window.addEventListener('jlt-locale-change', () => syncLocaleControl());
-*/
 window.addEventListener('jlt-review-complete', () => levelEstimateControl.refresh());
 window.addEventListener('jlt-locale-change', () => {
   translateDocument();

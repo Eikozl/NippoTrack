@@ -12,7 +12,6 @@ export async function renderStatistics(container) {
   const progressSlot = element('div', { className: 'mt-5' });
   container.replaceChildren(element('section', {}, [
     pageHeader({
-      eyebrow: 'Measure',
       title: 'Statistics',
       description: 'Small, useful signals from your recorded study time—without invented progress scores.'
     }),

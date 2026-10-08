@@ -261,11 +261,53 @@ Object.assign(translations.es, {
   'Could not save the target level. Please try again.': 'No se pudo guardar el objetivo de nivel. Inténtalo de nuevo.',
   'Choose the existing light or dark surface for NippoTrack.': 'Elige la superficie clara u oscura existente de NippoTrack.',
   'Account identity and existing data actions.': 'Identidad de la cuenta y acciones de datos existentes.',
-  'Email unavailable': 'Correo no disponible'
+  'Email unavailable': 'Correo no disponible',
+  'Choose photo': 'Elegir foto',
+  'Upload photo': 'Subir foto',
+  'Remove photo': 'Quitar foto',
+  'Uploading…': 'Subiendo…',
+  'Removing…': 'Quitando…',
+  'Photo selected — Upload to save it.': 'Foto seleccionada: súbela para guardarla.',
+  'Profile photo updated.': 'Foto de perfil actualizada.',
+  'Profile photo removed.': 'Foto de perfil eliminada.',
+  'Could not upload your photo. Please try again.': 'No se pudo subir tu foto. Inténtalo de nuevo.',
+  'Could not remove your photo. Please try again.': 'No se pudo quitar tu foto. Inténtalo de nuevo.',
+  'Please choose an image file (JPEG, PNG, or WebP).': 'Elige un archivo de imagen (JPEG, PNG o WebP).',
+  'That photo is too large. Please choose an image under 10 MB.': 'Esa foto es demasiado grande. Elige una imagen de menos de 10 MB.',
+  'Could not read that image. Please try another photo.': 'No se pudo leer esa imagen. Prueba con otra foto.',
+  'Could not process that image on this device. Please try again.': 'No se pudo procesar esa imagen en este dispositivo. Inténtalo de nuevo.',
+  'JPEG, PNG, or WebP up to 10 MB. Compressed to a small photo before upload.': 'JPEG, PNG o WebP de hasta 10 MB. Se comprime a una foto pequeña antes de subirla.',
+  Settings: 'Ajustes',
+  'Settings sections': 'Secciones de ajustes',
+  'Loading your starting point…': 'Cargando tu punto de partida…',
+  'Answer 10 short Japanese questions to establish a starting reference.': 'Responde 10 preguntas cortas de japonés para establecer una referencia inicial.',
+  'This is a starting estimate, not an official JLPT assessment.': 'Es una estimación inicial, no una evaluación oficial del JLPT.',
+  'Take quick placement': 'Hacer la prueba de nivel rápida',
+  'Starting point is unavailable right now.': 'El punto de partida no está disponible ahora.',
+  'Target JLPT level': 'Nivel JLPT objetivo',
+  'Export backup': 'Exportar copia de seguridad',
+  Skip: 'Omitir',
+  'Hold for 1.5 seconds to skip the tutorial': 'Mantén presionado 1.5 segundos para omitir el tutorial',
+  'Mute tutorial video': 'Silenciar el video tutorial',
+  'Unmute tutorial video': 'Activar el sonido del video tutorial',
+  'Tutorial video': 'Video tutorial',
+  Repeat: 'Repetir',
+  Continue: 'Continuar',
+  'Video finished': 'Video terminado'
 });
 
+// In-memory last-writer-wins locale: localStorage can throw (private mode,
+// blocked third-party storage) or be absent (DOM-free contexts). Memory
+// keeps the toggle functional for the session in those cases.
+let memoryLocale = null;
+
 export function getLocale() {
-  return localStorage.getItem('jlt-locale') === 'es' ? 'es' : 'en';
+  try {
+    const store = typeof localStorage !== 'undefined' ? localStorage : null;
+    const stored = store?.getItem('jlt-locale');
+    if (stored === 'es' || stored === 'en') return stored;
+  } catch { /* blocked storage: fall through to memory */ }
+  return memoryLocale || 'en';
 }
 
 export function t(value) {
@@ -275,9 +317,13 @@ export function t(value) {
 
 export function setLocale(locale) {
   const next = locale === 'es' ? 'es' : 'en';
-  localStorage.setItem('jlt-locale', next);
-  document.documentElement.lang = next;
-  window.dispatchEvent(new CustomEvent('jlt-locale-change', { detail: next }));
+  memoryLocale = next;
+  try { localStorage.setItem('jlt-locale', next); } catch { /* private mode: memory holds for the session */ }
+  try { document.documentElement.lang = next; } catch { /* DOM-free contexts */ }
+  try {
+    const target = typeof window !== 'undefined' ? window : null;
+    target?.dispatchEvent?.(new CustomEvent('jlt-locale-change', { detail: next }));
+  } catch { /* no event bus available */ }
 }
 
 export function translateDocument(root = document) {

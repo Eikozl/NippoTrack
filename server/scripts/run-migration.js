@@ -1,3 +1,4 @@
+// FROZEN (MariaDB legacy): docs-only marker, zero behavior change — do not extend; use postgres:migrate for Postgres.
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const pool = require('../src/config/mariadbSource');

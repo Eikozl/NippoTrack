@@ -12,6 +12,12 @@ const {
 const { fetchEntityById, rollbackAndRelease } = require('./helpers');
 const { ENCOUNTER_SOURCE_TYPES, recordKanjiEncounters } = require('../services/kanjiEncounters');
 const { buildSessionKanjiDiscovery, extractDiscoveryCharacters } = require('../services/sessionKanjiDiscovery');
+const { getReviewCandidates } = require('../services/reviewCandidates');
+
+// Day-items aggregation cap: one bounded list per kind for the
+// one-click "link what I studied that day" picker. 50 keeps the session
+// form payload small while covering a full day of study.
+const DAY_ITEMS_LIMIT = 50;
 
 async function listSessions(req, res) {
   try {
@@ -23,28 +29,28 @@ async function listSessions(req, res) {
 
     if (req.query.category) {
       const category = normalizeText(req.query.category, 20, 'category');
-      if (!STUDY_CATEGORIES.includes(category)) return res.status(400).json({ error: 'Invalid category' });
+      if (!STUDY_CATEGORIES.includes(category)) throw new ValidationError('Invalid category');
       whereSql += ' AND s.category = ?';
       params.push(category);
     }
 
     if (req.query.date) {
       if (!isValidDateString(req.query.date)) {
-        return res.status(400).json({ error: 'Invalid date format (YYYY-MM-DD)' });
+        throw new ValidationError('Invalid date format (YYYY-MM-DD)');
       }
       whereSql += ' AND s.session_date = ?';
       params.push(req.query.date);
     } else {
       if (req.query.from) {
         if (!isValidDateString(req.query.from)) {
-          return res.status(400).json({ error: 'Invalid from date (YYYY-MM-DD)' });
+          throw new ValidationError('Invalid from date (YYYY-MM-DD)');
         }
         whereSql += ' AND s.session_date >= ?';
         params.push(req.query.from);
       }
       if (req.query.to) {
         if (!isValidDateString(req.query.to)) {
-          return res.status(400).json({ error: 'Invalid to date (YYYY-MM-DD)' });
+          throw new ValidationError('Invalid to date (YYYY-MM-DD)');
         }
         whereSql += ' AND s.session_date <= ?';
         params.push(req.query.to);
@@ -271,4 +277,75 @@ async function deleteSession(req, res) {
   }
 }
 
-module.exports = { createSession, deleteSession, getSession, listSessions, updateSession };
+// GET /api/sessions/day-items?date=YYYY-MM-DD — one-click "link what I
+// studied that day" evidence for the study-session form. Read-only, own
+// data only (req.user.id), never invents records: vocabulary/kanji/grammar
+// reuse the review-candidates evidence union for the single-day window
+// (review_events.reviewed_at + session junctions via study_sessions.
+// session_date + kanji_encounters.encountered_at (kanji-only) +
+// created_at), content-log reads content_entries.content_date. All five
+// statements are bounded set queries; no N+1, no writes.
+//
+// Shapes match the client picker labels so the form can auto-fill without
+// new mapping logic: vocabulary {id:id_vocabulary,label:word},
+// kanji {id:id_kanji,label:character_kanji}, grammar
+// {id:id_grammar,label:grammar_point}, content
+// {id:id_content_entry,label:title} (v2 Content Log card title).
+//
+// Ordering (documented): vocabulary/kanji/grammar inherit the
+// review-candidates merged order — evidence strength first
+// (review/session strong, then encounter moderate, then added weak),
+// then latest date DESC, then entity id — sliced to DAY_ITEMS_LIMIT.
+// For a single-day window every date is equal, so this is deterministic
+// strength-then-id order. Content is newest-first
+// (content_date DESC, id_content_entry DESC) sliced to DAY_ITEMS_LIMIT.
+// Empty days return empty arrays, never 404/500. Invalid date → 400.
+function toDayItemPair(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  const id = Number(entry.entityId);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  const label = typeof entry.display === 'string' ? entry.display : null;
+  if (!label) return null;
+  return { id, label };
+}
+
+async function getDayItems(req, res) {
+  try {
+    const date = req.query?.date;
+    if (!isValidDateString(date)) {
+      throw new ValidationError('Invalid date format (YYYY-MM-DD)');
+    }
+    const groupsPromise = getReviewCandidates(pool, req.user.id, {
+      from: date,
+      to: date,
+      jlpt: 'all',
+      types: ['kanji', 'vocabulary', 'grammar']
+    });
+    const contentPromise = pool.execute(
+      'SELECT id_content_entry, title FROM content_entries WHERE user_id = ? AND content_date = ? ORDER BY content_date DESC, id_content_entry DESC LIMIT 50',
+      [req.user.id, date]
+    );
+    const [groups, [contentRows]] = await Promise.all([groupsPromise, contentPromise]);
+    const vocabulary = ((groups && groups.vocabulary && groups.vocabulary.items) || [])
+      .map(toDayItemPair)
+      .filter(Boolean)
+      .slice(0, DAY_ITEMS_LIMIT);
+    const kanji = ((groups && groups.kanji && groups.kanji.items) || [])
+      .map(toDayItemPair)
+      .filter(Boolean)
+      .slice(0, DAY_ITEMS_LIMIT);
+    const grammar = ((groups && groups.grammar && groups.grammar.items) || [])
+      .map(toDayItemPair)
+      .filter(Boolean)
+      .slice(0, DAY_ITEMS_LIMIT);
+    const content = (contentRows || [])
+      .filter((row) => row && Number.isInteger(Number(row.id_content_entry)) && Number(row.id_content_entry) > 0 && typeof row.title === 'string' && row.title)
+      .slice(0, DAY_ITEMS_LIMIT)
+      .map((row) => ({ id: Number(row.id_content_entry), label: row.title }));
+    return res.json({ date, vocabulary, kanji, grammar, content });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load day items.' });
+  }
+}
+
+module.exports = { createSession, deleteSession, getDayItems, getSession, listSessions, updateSession };

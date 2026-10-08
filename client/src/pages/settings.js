@@ -1,8 +1,10 @@
 import { apiRequest } from '../api';
+import { accessToken } from '../authClient.js';
+import { compressAvatarImage } from '../avatarImage.js';
 import { icon } from '../icons';
 import { profileStore, MAX_DISPLAY_NAME_LENGTH, normalizeDisplayName } from '../accountProfile.js';
 import { element, loadingState, pageHeader, showToast, withPendingAction } from '../ui';
-import { applyAppThemeAttributes, isAllowedAppTheme, persistAppTheme } from '../appTheme';
+import { isSafeAvatarUrl } from '../avatarPolicy.js';
 import { smartGoalsSettingsSection } from '../smartGoals.js';
 import { enterPlacement, placementResultFromState, placementResultNode, selfReportResultNode } from '../firstExperience.js';
 import { targetLevelOptions } from '../jlptTarget.js';
@@ -10,9 +12,13 @@ import { targetLevelOptions } from '../jlptTarget.js';
 const SETTINGS_SECTIONS = [
   { key: 'profile', label: 'Profile' },
   { key: 'learning', label: 'Learning' },
-  { key: 'appearance', label: 'Appearance' },
   { key: 'account', label: 'Account' }
 ];
+
+// Single live locale subscription for the mounted settings page (aborted on
+// remount). Section labels render via t() at mount; without this, switching
+// language while settings is open would leave the whole page stale.
+let settingsLocaleController = null;
 
 function rawText(tag, className, value) {
   const node = element(tag, { className });
@@ -34,6 +40,17 @@ function identityPreview(profile) {
   const mark = element('span', { className: 'account-initials account-initials--large', attrs: { 'aria-hidden': 'true' } });
   if (initials) mark.textContent = initials;
   else mark.appendChild(icon('user', { size: 21 }));
+  const safe = isSafeAvatarUrl(profile?.avatarUrl) ? String(profile.avatarUrl).trim() : null;
+  if (safe) {
+    // Photo overlays the initials mark (same 2.75rem box, round, cover);
+    // the initials stay underneath so a broken URL falls back gracefully.
+    const img = element('img', {
+      className: 'absolute inset-0 h-full w-full object-cover',
+      attrs: { src: safe, alt: '', loading: 'lazy', decoding: 'async', width: '44', height: '44', 'aria-hidden': 'true' }
+    });
+    img.addEventListener('error', () => { try { img.remove(); } catch { /* initials remain */ } });
+    mark.appendChild(img);
+  }
   const copy = element('div', { className: 'min-w-0' }, [
     rawText('p', 'truncate text-sm font-semibold text-ink', profile?.displayName || 'Account'),
     rawText('p', 'truncate text-sm text-muted', profile?.email || 'Email unavailable')
@@ -86,11 +103,144 @@ function startingPointBlock(firstExperiencePromise = null) {
   return block;
 }
 
+// Multipart avatar upload (apiRequest only speaks JSON, so this thin fetch
+// mirrors its auth behavior: bearer token when available, same-origin
+// credentials, and the shared jlt-auth-required dispatch on 401/403).
+async function uploadAvatarBlob(blob) {
+  const base = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) || '';
+  let token = null;
+  try { token = await accessToken(); } catch { token = null; }
+  const form = new FormData();
+  form.append('avatar', blob, 'avatar.jpg');
+  let response;
+  try {
+    response = await fetch(`${base}/api/users/me/avatar`, {
+      method: 'POST',
+      credentials: 'include',
+      ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+      body: form
+    });
+  } catch {
+    throw new Error('Could not upload your photo. Please try again.');
+  }
+  if (response.status === 401 || response.status === 403) {
+    window.dispatchEvent(new CustomEvent('jlt-auth-required', { detail: { status: response.status } }));
+  }
+  let data = null;
+  try { data = await response.json(); } catch { data = null; }
+  if (!response.ok) throw new Error(data?.error || 'Could not upload your photo. Please try again.');
+  const avatarUrl = typeof data?.avatarUrl === 'string' && data.avatarUrl.trim() ? data.avatarUrl : null;
+  if (!avatarUrl) throw new Error('Could not upload your photo. Please try again.');
+  return avatarUrl;
+}
+
 async function renderProfileSection(slot) {
   slot.replaceChildren(loadingState('Loading profile…'));
   let profile;
   let loadError = null;
   try { profile = await profileStore.load(); } catch (error) { loadError = error; profile = profileStore.get() || { displayName: null, initials: '', email: null }; }
+
+  function refreshIdentity(nextProfile) {
+    const host = slot.querySelector('.account-identity-preview');
+    if (host) host.replaceChildren(identityPreview(nextProfile));
+  }
+
+  // Avatar upload controls: pick (keyboard-operable button driving a
+  // visually-hidden file input) → live preview in the identity mark →
+  // Upload (compress → POST → persist → refresh) / Remove (DELETE → persist
+  // null → refresh). Failures toast, never silent.
+  const fileInput = element('input', {
+    className: 'visually-hidden',
+    attrs: { id: 'profile-avatar-file', type: 'file', accept: 'image/jpeg,image/png,image/webp', tabindex: '-1', 'aria-hidden': 'true' }
+  });
+  const chooseButton = element('button', { className: 'button-secondary', text: 'Choose photo', attrs: { type: 'button' } });
+  const uploadButton = element('button', { className: 'button-primary', text: 'Upload photo', attrs: { type: 'button', disabled: '' } });
+  const removeButton = element('button', { className: 'button-secondary', text: 'Remove photo', attrs: { type: 'button' } });
+  if (!isSafeAvatarUrl(profile?.avatarUrl)) removeButton.hidden = true;
+  const selectionNote = element('p', { className: 'min-h-5 text-sm text-muted', attrs: { 'aria-live': 'polite' } });
+  const avatarControls = element('div', { className: 'mt-4 grid max-w-2xl gap-3' }, [
+    fileInput,
+    element('div', { className: 'flex flex-wrap gap-2' }, [chooseButton, uploadButton, removeButton]),
+    selectionNote,
+    element('p', { className: 'text-xs leading-5 text-muted', text: 'JPEG, PNG, or WebP up to 10 MB. Compressed to a small photo before upload.' })
+  ]);
+  let pendingFile = null;
+  let pendingPreviewUrl = null;
+  function revokePendingPreview() {
+    if (!pendingPreviewUrl) return;
+    try { URL.revokeObjectURL(pendingPreviewUrl); } catch { /* revoke is best-effort */ }
+    pendingPreviewUrl = null;
+  }
+  function clearSelection() {
+    revokePendingPreview();
+    pendingFile = null;
+    try { fileInput.value = ''; } catch { /* reset is best-effort */ }
+    uploadButton.disabled = true;
+    selectionNote.textContent = '';
+  }
+  function paintLivePreview(url) {
+    const mark = slot.querySelector('.account-identity-preview .account-initials');
+    if (!mark) return;
+    mark.querySelector('[data-avatar-preview]')?.remove();
+    const img = element('img', {
+      className: 'absolute inset-0 h-full w-full object-cover',
+      attrs: { src: url, alt: '', decoding: 'async', width: '44', height: '44', 'aria-hidden': 'true', 'data-avatar-preview': 'true' }
+    });
+    mark.appendChild(img);
+  }
+  chooseButton.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) return;
+    if (!String(file.type || '').startsWith('image/')) {
+      fileInput.value = '';
+      showToast('Please choose an image file (JPEG, PNG, or WebP).', 'error');
+      return;
+    }
+    revokePendingPreview();
+    pendingFile = file;
+    pendingPreviewUrl = URL.createObjectURL(file);
+    paintLivePreview(pendingPreviewUrl);
+    uploadButton.disabled = false;
+    selectionNote.textContent = 'Photo selected — Upload to save it.';
+  });
+  uploadButton.addEventListener('click', () => {
+    if (!pendingFile) return;
+    withPendingAction(uploadButton, async () => {
+      const compressed = await compressAvatarImage(pendingFile);
+      try {
+        const avatarUrl = await uploadAvatarBlob(compressed.blob);
+        await apiRequest('/api/users/me', { method: 'PUT', body: { avatar_url: avatarUrl } });
+        const refreshed = await profileStore.load({ force: true });
+        clearSelection();
+        fileInput.value = '';
+        refreshIdentity(refreshed);
+        removeButton.hidden = !isSafeAvatarUrl(refreshed?.avatarUrl);
+        window.dispatchEvent(new CustomEvent('jlt-profile-change'));
+        showToast('Profile photo updated.');
+      } finally {
+        try { URL.revokeObjectURL(compressed.previewUrl); } catch { /* revoke is best-effort */ }
+      }
+    }, { pendingLabel: 'Uploading…' }).catch((error) => {
+      showToast(error?.message || 'Could not upload your photo. Please try again.', 'error');
+      if (pendingFile) uploadButton.disabled = false;
+    });
+  });
+  removeButton.addEventListener('click', () => {
+    withPendingAction(removeButton, async () => {
+      await apiRequest('/api/users/me/avatar', { method: 'DELETE' });
+      await apiRequest('/api/users/me', { method: 'PUT', body: { avatar_url: null } });
+      const refreshed = await profileStore.load({ force: true });
+      clearSelection();
+      fileInput.value = '';
+      refreshIdentity(refreshed);
+      removeButton.hidden = !isSafeAvatarUrl(refreshed?.avatarUrl);
+      window.dispatchEvent(new CustomEvent('jlt-profile-change'));
+      showToast('Profile photo removed.');
+    }, { pendingLabel: 'Removing…' }).catch((error) => {
+      showToast(error?.message || 'Could not remove your photo. Please try again.', 'error');
+    });
+  });
 
   const input = element('input', {
     className: 'field-control',
@@ -134,6 +284,9 @@ async function renderProfileSection(slot) {
         status.textContent = '✓ Saved';
         const preview = form.parentElement?.querySelector('.account-identity-preview');
         if (preview) preview.replaceChildren(identityPreview(saved));
+        // A picked-but-not-yet-uploaded photo survives the display-name
+        // refresh so the pending Upload state is never silently discarded.
+        if (pendingPreviewUrl) paintLivePreview(pendingPreviewUrl);
       } catch (error) {
         status.textContent = '';
         errorText.textContent = error?.status === 400 ? error.message : 'Could not save your display name. Please try again.';
@@ -144,59 +297,10 @@ async function renderProfileSection(slot) {
   });
   slot.replaceChildren(sectionSurface('Profile', 'How you appear inside NippoTrack.', [
     element('div', { className: 'account-identity-preview mt-6' }, [identityPreview(profile)]),
+    avatarControls,
     form,
-    publicProfileBlock(),
     ...(loadError ? [element('p', { className: 'mt-4 text-sm text-muted', text: 'Profile could not be loaded. You can still try saving a display name.' })] : [])
   ]));
-}
-
-// Community handle + visibility for Decks. Separate save from the
-// display-name form; fail-open with toasts.
-function publicProfileBlock() {
-  const usernameInput = element('input', {
-    className: 'field-control', attrs: { id: 'profile-username', name: 'username', type: 'text', maxlength: '30', autocomplete: 'username', placeholder: 'username', 'aria-describedby': 'profile-username-hint' }
-  });
-  const bioInput = element('textarea', {
-    className: 'field-control', attrs: { id: 'profile-bio', name: 'bio', maxlength: '500', placeholder: 'A short bio (optional)' }
-  });
-  const publicBox = element('input', { attrs: { id: 'profile-public', name: 'is_public', type: 'checkbox' } });
-  const saveButton = element('button', { className: 'button-secondary', text: 'Save public profile', attrs: { type: 'button' } });
-  const status = element('p', { className: 'min-h-5 text-sm text-muted', attrs: { 'aria-live': 'polite' } });
-  const block = element('div', { className: 'mt-8 grid max-w-2xl gap-4 border-t border-stone pt-6' }, [
-    element('h3', { className: 'text-base font-semibold text-ink', text: 'Public profile' }),
-    element('p', { className: 'text-sm text-muted', attrs: { id: 'profile-username-hint' }, text: 'Claim a username to be followable in Decks. Only what you publish is public.' }),
-    element('label', { className: 'field', attrs: { for: 'profile-username' } }, [element('span', { text: 'Username (2–30, lowercase, hyphens)' }), usernameInput]),
-    element('label', { className: 'field', attrs: { for: 'profile-bio' } }, [element('span', { text: 'Bio' }), bioInput]),
-    element('label', { className: 'flex items-center gap-2 text-sm text-ink', attrs: { for: 'profile-public' } }, [publicBox, element('span', { text: 'Public profile' })]),
-    status,
-    element('div', { className: 'flex justify-end' }, [saveButton])
-  ]);
-  apiRequest('/api/users/me').then((saved) => {
-    usernameInput.value = saved.username || '';
-    bioInput.value = saved.bio || '';
-    publicBox.checked = Boolean(saved.isPublic);
-  }).catch(() => {});
-  saveButton.addEventListener('click', () => {
-    withPendingAction(saveButton, async () => {
-      status.textContent = 'Saving…';
-      const saved = await apiRequest('/api/users/me', {
-        method: 'PUT',
-        body: {
-          username: String(usernameInput.value || '').trim(),
-          bio: bioInput.value,
-          is_public: publicBox.checked
-        }
-      });
-      usernameInput.value = saved.username || '';
-      bioInput.value = saved.bio || '';
-      publicBox.checked = Boolean(saved.isPublic);
-      status.textContent = saved.username ? `Public profile: ${saved.username}.` : 'Profile saved (private).';
-    }, { pendingLabel: 'Saving…' }).catch((error) => {
-      status.textContent = '';
-      showToast(error?.message || 'Unable to save the public profile.', 'error');
-    });
-  });
-  return block;
 }
 
 async function renderLearningSection(slot) {
@@ -233,16 +337,6 @@ async function renderLearningSection(slot) {
   const targetSection = sectionSurface('Learning', 'Keep your study target and historical Japanese starting point together.', targetChildren);
   const placement = startingPointBlock(firstExperiencePromise.catch(() => null));
   slot.replaceChildren(element('div', { className: 'grid gap-5' }, [targetSection, smartGoalsSettingsSection(), placement]));
-}
-
-function renderAppearanceSection(slot) {
-  const current = document.documentElement.dataset.theme || 'light';
-  const light = element('button', { className: `theme-option ${current === 'light' ? 'button-primary' : 'button-secondary'}`, text: 'Light mode', attrs: { type: 'button', 'aria-pressed': String(current === 'light') } });
-  const dark = element('button', { className: `theme-option ${current === 'dark' ? 'button-primary' : 'button-secondary'}`, text: 'Dark mode', attrs: { type: 'button', 'aria-pressed': String(current === 'dark') } });
-  const setTheme = (theme) => { if (!isAllowedAppTheme(theme)) return; persistAppTheme(theme, localStorage); applyAppThemeAttributes(theme); window.dispatchEvent(new CustomEvent('jlt-theme-change', { detail: theme })); showToast(`${theme === 'dark' ? 'Dark' : 'Light'} theme selected.`); renderAppearanceSection(slot); };
-  light.addEventListener('click', () => setTheme('light'));
-  dark.addEventListener('click', () => setTheme('dark'));
-  slot.replaceChildren(sectionSurface('Appearance', 'Choose the existing light or dark surface for NippoTrack.', [element('div', { className: 'mt-5 flex flex-wrap gap-3' }, [light, dark])]));
 }
 
 function renderAccountSection(slot) {
@@ -291,15 +385,22 @@ export async function renderSettings(container) {
     return button;
   }));
   container.replaceChildren(element('section', {}, [
-    pageHeader({ eyebrow: 'Preferences', title: 'Settings', description: 'Your profile, learning preferences, appearance, and account actions.' }),
+    pageHeader({ title: 'Settings', description: 'Your profile, learning preferences, and account actions.' }),
     element('div', { className: 'settings-layout max-w-6xl' }, [sectionNav, panel])
   ]));
 
   async function renderActive() {
     if (active === 'profile') return renderProfileSection(panel);
     if (active === 'learning') return renderLearningSection(panel);
-    if (active === 'appearance') return renderAppearanceSection(panel);
     return renderAccountSection(panel);
   }
+  settingsLocaleController?.abort();
+  settingsLocaleController = new AbortController();
+  window.addEventListener('jlt-locale-change', () => {
+    if (!container.isConnected) return;
+    // Never drop a picked-but-not-uploaded avatar photo for a re-render.
+    if (container.querySelector('#profile-avatar-file')?.files?.length) return;
+    renderActive().catch(() => undefined);
+  }, { signal: settingsLocaleController.signal });
   await renderActive();
 }

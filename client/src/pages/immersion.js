@@ -9,7 +9,17 @@
 // History rows are deliberately read-only: the history payload carries no
 // reviewSessionId, so a "repeat" action would have to silently create a
 // duplicate session instead of resuming the original one. Source-text
-// previews are likewise absent from the API and are never fabricated here.
+// previews are likewise absent from the API and are never fabricated here —
+/// the per-item preview below presents ONLY the listed payload (date, level,
+// counts), never invented source text.
+//
+// BATCH 2(b/c) parity note (v6.1, client-side only): Review history has
+// preview + clear-all + reload + per-session trash. Immersion brings preview
+// (details) + reload (text buttons) to parity. Delete history (clear-all)
+// and per-session trash have NO backend endpoint (GET /api/immersion/history
+// is the only history route — server/src/routes/immersion.js serves
+// POST /analyze, POST /create-session, GET /history only) so they are
+// MISSING by design here, never faked — see report.
 //
 // Keep imports to exactly one statement per module ('../api' and '../ui')
 // and mirror review.js's export shape — client/tests/immersion.test.mjs
@@ -87,7 +97,6 @@ export async function renderImmersion(container) {
 
   container.replaceChildren(element('section', {}, [
     pageHeader({
-      eyebrow: 'Study tools',
       title: 'Immersion',
       description: 'Paste a text you are reading, pick the words, kanji, and grammar you want to study, and turn them into a review session.'
     }),
@@ -116,7 +125,7 @@ export async function renderImmersion(container) {
 
     const footer = element('div', { className: 'surface review-sticky-footer flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between' });
     const countNote = element('p', { className: 'text-sm text-muted', text: '0 selected', attrs: { 'aria-live': 'polite' } });
-    const createButton = element('button', { className: 'button-primary', text: 'Create study session', attrs: { type: 'button', disabled: '' } });
+    const createButton = element('button', { className: 'button-primary', text: 'Create review session', attrs: { type: 'button', disabled: '' } });
     footer.append(countNote, createButton);
 
     function selectedTotal() {
@@ -244,6 +253,24 @@ export async function renderImmersion(container) {
   });
 
   async function loadHistory() {
+    // BATCH 2(b) parity: header owns a borderless Reload text button (same
+    // minimalism as community Reply/Report); each row owns a <details>
+    // preview presenting ONLY the listed payload (no invented source text).
+    // Delete history + per-session trash are MISSING (no DELETE endpoint) —
+    // never faked.
+    const reloadHistoryButton = element('button', {
+      className: 'min-h-9 rounded px-1 text-xs font-medium text-muted transition hover:text-ink hover:underline focus-visible:underline',
+      text: 'Reload',
+      attrs: { type: 'button', 'aria-label': 'Reload immersion history' }
+    });
+    reloadHistoryButton.addEventListener('click', () => {
+      showToast('Refreshing…');
+      loadHistory();
+    });
+    const headerRow = element('div', { className: 'flex items-center justify-between gap-3' }, [
+      element('h2', { className: 'font-semibold text-ink', text: 'Immersion history' }),
+      reloadHistoryButton
+    ]);
     try {
       const data = await listImmersionHistory({ limit: 10 });
       const items = Array.isArray(data?.items) ? data.items : [];
@@ -253,7 +280,7 @@ export async function renderImmersion(container) {
         return;
       }
       historyBlock.replaceChildren(
-        element('h2', { className: 'font-semibold text-ink', text: 'Immersion history' }),
+        headerRow,
         element('p', { className: 'mt-1 text-sm text-muted', text: 'Texts you turned into study sessions, newest first.' }),
         element('ul', { className: 'mt-4 grid gap-2' }, items.map((item) => {
           const date = String(item.createdAt || '').slice(0, 10);
@@ -261,10 +288,16 @@ export async function renderImmersion(container) {
           const levelText = item.estimatedLevel
             ? `Estimated level: ${item.estimatedLevel}${item.confidence != null ? ` · ${Math.round(Number(item.confidence) * 100)}%` : ''}`
             : 'No level estimate';
+          const summaryText = `${Number(counts.total || 0)} items · ${Number(counts.vocabulary || 0)} vocabulary · ${Number(counts.kanji || 0)} kanji · ${Number(counts.grammar || 0)} grammar`;
+          // Item preview: <details> discloses the same payload inline (date,
+          // level, counts). No source_text exists in the payload, so none is
+          // shown — never fabricated.
           return element('li', { className: 'rounded-xl border border-stone bg-paper px-3 py-2.5 text-sm' }, [
-            element('p', { className: 'font-semibold text-ink', text: date || 'Session' }),
-            element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: levelText }),
-            element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: `${Number(counts.total || 0)} items · ${Number(counts.vocabulary || 0)} vocabulary · ${Number(counts.kanji || 0)} kanji · ${Number(counts.grammar || 0)} grammar` })
+            element('details', { className: 'min-w-0' }, [
+              element('summary', { className: 'cursor-pointer break-words font-semibold text-ink', text: `${date || 'Session'} · ${summaryText}`, attrs: { 'aria-label': `Preview immersion session ${date || item.id || ''}` } }),
+              element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: levelText }),
+              element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: summaryText })
+            ])
           ]);
         }))
       );

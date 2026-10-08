@@ -115,10 +115,38 @@ function getFirstUseActionStates(dashboard = null) {
   }));
 }
 
+const DURABLE_COUNT_KEYS = ['vocabularyCount', 'kanjiCount', 'grammarCount'];
+
+// Any durable datum sends the learner to the normal dashboard. The
+// checklist above stays as the zero-data starting state (rendered by
+// renderFirstUseDashboard) until every action completes — it is never
+// removed, only shown at zero data.
+function hasDashboardShape(dashboard) {
+  return DURABLE_COUNT_KEYS.some((key) => dashboard[key] !== undefined);
+}
+
+function dashboardShapeIsSound(dashboard) {
+  const countsOk = DURABLE_COUNT_KEYS.every(
+    (key) => dashboard[key] === undefined || Number.isFinite(Number(dashboard[key]))
+  );
+  const sessionsOk = !('recentSessions' in dashboard) || Array.isArray(dashboard.recentSessions);
+  return countsOk && sessionsOk;
+}
+
+function hasAnyDurableData(dashboard) {
+  const counts = DURABLE_COUNT_KEYS.some((key) => Number(dashboard[key]) > 0);
+  const sessions = Array.isArray(dashboard.recentSessions) && dashboard.recentSessions.length > 0;
+  return counts || sessions;
+}
+
 function shouldShowFirstUseDashboard({ firstExperience = null, dashboard = null } = {}) {
   if (firstExperience?.onboarding?.completed !== true) return false;
   if (!dashboard || typeof dashboard !== 'object') return false;
-  return getFirstUseActionStates(dashboard).some((action) => !action.completed);
+  // Missing-shape or garbage payloads fail open to the normal dashboard
+  // (never invent first-use from malformed data).
+  if (!hasDashboardShape(dashboard) || !dashboardShapeIsSound(dashboard)) return false;
+  if (hasAnyDurableData(dashboard)) return false;
+  return true;
 }
 
 // Stored study target, verbatim: a valid stored level renders as-is, any

@@ -1,3 +1,4 @@
+// FROZEN (MariaDB legacy): docs-only marker, zero behavior change — read-only audit, do not extend.
 const fs = require('node:fs/promises');
 const pool = require('../src/config/mariadbSource');
 const TABLES = ['vocabulary','kanji','grammar_points','study_sessions','goals','content_entries','notes','tags','kanji_vocabulary','session_vocabulary','session_kanji','session_grammar','session_writings','usage_examples','content_entry_sessions','note_study_sessions','note_vocabulary','note_kanji','note_grammar','tag_study_sessions','tag_vocabulary','tag_kanji','tag_grammar','review_items','review_events'];

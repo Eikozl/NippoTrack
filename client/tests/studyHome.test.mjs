@@ -1,0 +1,181 @@
+// V5.6 Study Home — Study Now section. Static source assertions; no DOM needed.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const readSource = (path) => readFileSync(join(root, path), 'utf8');
+
+test('dashboard fetches Study Now fail-open alongside existing signals', () => {
+  const source = readSource('src/pages/dashboard.js');
+  assert.ok(source.includes('/api/dashboard/study-now'), 'new aggregation endpoint used');
+  assert.ok(source.includes('.catch(() => null)'), 'fail-open preserved');
+  assert.ok(source.includes('/api/dashboard?today='), 'existing dashboard still fetched');
+  assert.ok(!source.includes("apiRequest('/api/review')"), 'dashboard never pulls the full due list; dues load on demand');
+  assert.ok(!source.includes("metric('review', 'Due reviews'"), 'no duplicated due tile; Study Now owns dues');
+  assert.ok(!source.includes("metric('today', 'Today'"), 'no duplicated today tile; Today’s Progress owns minutes');
+});
+
+test('Study Now renders explainable next action with CTA', () => {
+  const source = readSource('src/pages/dashboard.js');
+  assert.ok(source.includes('function studyNowSection'), 'dedicated section');
+  assert.ok(!source.includes("text: 'Study now'"), 'decorative eyebrow removed from the recommendation');
+  assert.ok(source.includes('Study now recommendation'), 'section keeps its accessible name, not a decorative eyebrow');
+  assert.ok(source.includes('aria-label'), 'accessible section label');
+  assert.ok(source.includes('button-primary'), 'primary CTA reuses existing style');
+  assert.ok(source.includes('min-h-11'), 'touch target meets mobile minimum');
+});
+
+test('Study Now auto-starts due sessions instead of linking to setup', () => {
+  const source = readSource('src/pages/dashboard.js');
+  assert.ok(source.includes("primary.auto === 'due'"), 'review kind builds the queue itself');
+  assert.ok(source.includes('Start now'), 'CTA names the action, not the module');
+  assert.ok(source.includes('/api/review/due'), 'oldest-first due listing reused');
+  assert.ok(source.includes('/api/review/sessions'), 'existing session endpoint reused — no new writes path');
+  assert.ok(source.includes('jlt-study-now-queue'), 'same sessionStorage hand-off as Immersion');
+  assert.ok(source.includes('from=study-now'), 'review knows the origin');
+  assert.ok(source.includes('STUDY_NOW_SESSION_MAX'), 'bounded auto queue');
+});
+
+test('Study Now never blocks dashboard when payload is missing', () => {
+  const source = readSource('src/pages/dashboard.js');
+  assert.ok(source.includes('studyNowSection(studyNow) ? [studyNowSection(studyNow)] : []'), 'null renders nothing');
+});
+
+test('dashboard header frames Study Home without breaking routes', () => {
+  const source = readSource('src/pages/dashboard.js');
+  assert.ok(!source.includes('Study home'), 'decorative study-home eyebrow removed');
+  assert.ok(source.includes("title: 'Dashboard'"), 'stable title for existing tests/routes');
+});
+
+test('review shows collapsed why without disrupting speed', () => {
+  const source = readSource('src/pages/review.js');
+  assert.ok(source.includes('Why am I reviewing this?'), 'explainable reason present');
+  assert.ok(source.includes('<details') || source.includes("'details'"), 'collapsed by default');
+  assert.ok(source.includes('provenanceLine(item)'), 'uses true provenance, never fabricated');
+});
+
+test('review completion closes the loop to sessions', () => {
+  const source = readSource('src/pages/review.js');
+  assert.ok(source.includes('Log study session'), 'RETURN loop CTA');
+  assert.ok(source.includes("href: '#sessions?new=1'"), 'opens the creation dialog, not just the list');
+});
+
+test('sessions auto-opens creation for log-now links', () => {
+  const source = readSource('src/pages/sessions.js');
+  assert.ok(source.includes("get('new') === '1'"), 'new=1 param detected');
+  assert.ok(source.includes('openSessionDialog()'), 'creation dialog opens on arrival');
+  assert.ok(source.includes("replaceState(null, '', '#sessions')"), 'param consumed so refresh lands on the list');
+});
+
+test('review resumes Study Now hand-offs straight into cards', () => {
+  const source = readSource('src/pages/review.js');
+  assert.ok(source.includes('jlt-study-now-queue'), 'study-now queue key consumed');
+  assert.ok(source.includes('jlt-immersion-review-queue'), 'immersion hand-off still works');
+  assert.ok(source.includes('Your due items are queued'), 'origin-aware banner copy');
+});
+
+test('reading empty state links to analyzer (cohesion)', () => {
+  const source = readSource('src/pages/reading.js');
+  assert.ok(source.includes('Open Analyzer'), 'guided next step from empty library');
+  assert.ok(source.includes("href: '#analyzer'"), 'reuses existing analyzer route');
+});
+
+test('reading imports answer honestly, never fire-and-forget', () => {
+  const source = readSource('src/pages/reading.js');
+  assert.ok(!source.includes('pollLibraryForImports'), 'no blind library polling');
+  assert.ok(!source.includes('setImmediate'), 'no detached client work');
+  assert.ok(source.includes('textsImported'), 'bulk result carries honest counts');
+  assert.ok(source.includes('Import finished'), 'success toast states completion');
+  assert.ok(source.includes('texts yet'), 'filter-aware empty state names the active source');
+});
+
+test('reading progress measures minutes with the reader back-link style', () => {
+  const source = readSource('src/pages/reading.js');
+  assert.ok(!source.includes("statCard('Characters read'"), 'no character-count cards remain');
+  assert.ok(source.includes("statCard('Time today'"), 'today minutes card exists');
+  assert.ok(source.includes("statCard('Time · last 30 days'"), '30-day minutes card exists');
+  assert.ok(source.includes('data?.daily'), 'daily series feeds accurate attribution');
+  const progressLinks = source.match(/← Back to library/g) || [];
+  assert.ok(progressLinks.length >= 2, 'progress views share the reader arrow link');
+});
+
+test('dashboard shows a community pulse only with unread activity', () => {
+  const source = readSource('src/pages/dashboard.js');
+  assert.ok(source.includes('function communityPulseSection'), 'pulse section exists');
+  assert.ok(source.includes('/api/community/notifications/summary'), 'summary endpoint used');
+  assert.ok(source.includes('Open community'), 'pulse links out, never traps');
+});
+
+test('community publish is limited to own reading texts', () => {
+  const source = readSource('src/pages/reading.js');
+  assert.ok(source.includes('importedFromPublication'), 'import provenance read from text metadata');
+  assert.ok(source.includes('Imported copies can’t be republished to Community.'), 'imported copies explain why publish is gone');
+});
+
+test('community re-import opens the existing copy', () => {
+  const source = readSource('src/pages/community.js');
+  assert.ok(source.includes('Already in your library'), 'duplicate import says so instead of silently duplicating');
+});
+
+test('encounter label uses learner wording', () => {
+  const source = readSource('src/pages/entityPage.js');
+  assert.ok(source.includes('Where you'), 'learner-friendly encounter header');
+  assert.ok(!source.includes("text: 'Encounter Intelligence'"), 'jargon header removed');
+  assert.ok(source.includes("text: 'Review schedule'"), 'schedule header without SRS jargon');
+});
+
+test('session and review verbs are consistent', () => {
+  const sessions = readSource('src/pages/sessions.js');
+  assert.ok(sessions.includes('Log a study session or adjust the current filters.'), 'sessions empty state uses Log');
+  const immersion = readSource('src/pages/immersion.js');
+  assert.ok(immersion.includes('Create review session'), 'immersion builds a review queue, not study time');
+  assert.ok(!immersion.includes('Create study session'), 'old ambiguous label gone');
+  const community = readSource('src/pages/community.js');
+  assert.ok(!community.includes('`Ver más'), 'no mixed-language feed button');
+});
+
+test('v6.1: Study Home loads with a shaped skeleton, not a bare placeholder', () => {
+  const source = readSource('src/pages/dashboard.js');
+  assert.ok(!source.includes("loadingState('Loading your study overview"), 'bare overview placeholder removed');
+  assert.ok(!source.includes('Loading your study overview…') || source.includes('dashboardStudyHomeSkeleton'), 'overview text only inside the skeleton AT label');
+  assert.ok(source.includes('function dashboardStudyHomeSkeleton'), 'dedicated skeleton mirrors the Study Home layout');
+  assert.ok(source.includes('skeleton-block'), 'shaped skeleton uses the same shimmer primitive');
+  assert.ok(source.includes("role: 'status'"), 'skeleton announces via role=status');
+  assert.ok(source.includes('visually-hidden'), 'AT hears a hidden Loading… line, visuals stay aria-hidden');
+  assert.ok(source.includes("aria-hidden"), 'visual placeholder blocks hidden from AT');
+  assert.ok(source.includes('aria-busy'), 'container exposes aria-busy while loading');
+  assert.ok(source.includes("content.setAttribute('aria-busy', 'true')"), 'busy on skeleton mount');
+  assert.ok(source.includes("content.setAttribute('aria-busy', 'false')"), 'busy cleared when real content swaps in');
+  assert.ok(source.includes('errorState(error, load)'), 'error semantics untouched');
+});
+
+test('v6.1: dashboard skeleton covers Study Now, today, continue, snapshot/goals', () => {
+  const source = readSource('src/pages/dashboard.js');
+  assert.ok(source.includes('surface study-now p-5 sm:p-6'), 'Study Now card shape with matching surface/padding');
+  assert.ok(source.includes('skeleton-block h-6 w-1/3'), 'Study Now title bar shape');
+  assert.ok(source.includes('skeleton-block h-4 w-5/6'), 'Study Now reason text lines');
+  assert.ok(source.includes('skeleton-block h-11 w-28'), 'Study Now CTA button shape');
+  assert.ok(source.includes('flex items-baseline justify-between gap-3 py-2'), 'Today rows mirror label/counter layout');
+  assert.ok(source.includes('dashboard-metrics mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3'), 'snapshot grid matches real metrics spacing (two full rows of three, no half-empty row)');
+  assert.ok(source.includes('metric-card p-5'), 'metric tile shape with counter lines');
+  assert.ok(source.includes('mt-3 grid gap-4 sm:grid-cols-2'), 'Continue/goals cards match real grid spacing');
+  assert.ok(source.includes('skeleton-block h-8 w-20'), 'Continue card button shape');
+  const ui = readSource('src/ui.js');
+  assert.ok(ui.includes('export function skeleton'), 'shared skeleton helper still exists');
+  const css = readSource('src/styles.css');
+  assert.ok(css.includes('.skeleton-block'), 'shimmer style shared');
+  assert.ok(css.includes('prefers-reduced-motion'), 'reduced-motion still stills the shimmer');
+});
+
+test('dashboard snapshot fills whole rows on desktop: 6 tiles in 3 columns', () => {
+  const source = readSource('src/pages/dashboard.js');
+  assert.ok(source.includes('dashboard-metrics reveal-group grid gap-4 sm:grid-cols-2 xl:grid-cols-3'), 'real metrics grid uses 3 desktop columns (3+3, no 4+2 void)');
+  assert.ok(!source.includes('dashboard-metrics reveal-group grid gap-4 sm:grid-cols-2 xl:grid-cols-4'), 'old 4-column void layout gone');
+  for (const label of ['This week', 'Current streak', 'Longest streak', 'Vocabulary', 'Kanji', 'Grammar']) {
+    assert.ok(source.includes(`'${label}'`), `tile "${label}" kept (design untouched)`);
+  }
+  assert.ok(source.includes('metricCard(), metricCard(), metricCard(), metricCard(), metricCard(), metricCard()'), 'skeleton mirrors all six tiles');
+});

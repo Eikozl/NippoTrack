@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   buildSessionSubmitPayload,
@@ -7,6 +10,9 @@ import {
   sessionCardModel,
   submitPayloadOmitsHiddenFields
 } from '../src/sessionHistory.js';
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const readSource = (path) => readFileSync(join(root, path), 'utf8');
 
 test('Session UX: card with writing title/content shows a useful preview', () => {
   const model = sessionCardModel({
@@ -98,21 +104,23 @@ test('Session UX: malformed sessions degrade without crashing', () => {
   assert.equal(sessionCardModel(undefined).badge, 'Session');
 });
 
-test('Session UX: simplified form order is Basic → Resource → Writing → Notes', () => {
+test('Session UX: compact form order is Basic → Linked material → Writing → Notes', () => {
   assert.deepEqual(SESSION_FORM_FIELD_ORDER, [
     'category',
     'session_date',
     'duration_minutes',
     'resource',
+    'vocabulary_ids',
+    'kanji_ids',
+    'grammar_ids',
     'writing_title',
     'writing_content',
     'notes'
   ]);
   assert.ok(!SESSION_FORM_FIELD_ORDER.includes('writing_notes'));
-  assert.ok(!SESSION_FORM_FIELD_ORDER.some((name) => name.endsWith('_ids')));
 });
 
-test('Session UX: submit payload hides linking IDs and writing notes (edit-safe)', () => {
+test('Session UX: payload without linking values omits linking IDs and writing notes (preserve on edit)', () => {
   const payload = buildSessionSubmitPayload({
     category: 'Writing',
     session_date: '2026-09-01',
@@ -126,7 +134,7 @@ test('Session UX: submit payload hides linking IDs and writing notes (edit-safe)
   assert.equal(payload.writing_content, '今日は学校に行く');
   assert.equal(payload.notes, 'Good session.');
   assert.equal(submitPayloadOmitsHiddenFields(payload), true);
-  for (const hidden of ['vocabulary_ids', 'kanji_ids', 'grammar_ids', 'writing_notes']) {
+  for (const hidden of ['writing_notes']) {
     assert.ok(!(hidden in payload), `${hidden} must never be submitted`);
   }
 });
@@ -146,10 +154,10 @@ test('Session UX: empty writing travels nothing, notes still save', () => {
   assert.equal(submitPayloadOmitsHiddenFields(payload), true);
 });
 
-test('Session UX: legacy records with hidden data keep it out of the payload by construction', () => {
-  // A record may carry vocabulary/kanji/grammar links and writing notes;
-  // the simplified form only forwards visible values, so a PUT built from
-  // it cannot clear what it never names.
+test('Session UX: records without linking values keep links out of the payload (preserve on edit)', () => {
+  // A record may carry vocabulary/kanji/grammar links and writing notes; a
+  // payload built without linking values names no linking arrays, so the
+  // backend preserves whatever is stored. Writing notes are never forwarded.
   const record = {
     vocabulary: [{ id_vocabulary: 1 }],
     kanji: [{ id_kanji: 2 }],
@@ -167,4 +175,87 @@ test('Session UX: legacy records with hidden data keep it out of the payload by 
   });
   assert.equal(submitPayloadOmitsHiddenFields(payload), true);
   assert.equal(payload.writing_content, 'C');
+});
+
+test('Session UX: supplied linking IDs pass through sanitized (replace on edit)', () => {
+  const payload = buildSessionSubmitPayload({
+    category: 'Vocabulary',
+    session_date: '2026-09-01',
+    duration_minutes: 30,
+    resource: '',
+    vocabulary_ids: [3, 1, 3, 0, -2],
+    kanji_ids: [7],
+    grammar_ids: [],
+    notes: ''
+  });
+  assert.deepEqual(payload.vocabulary_ids, [3, 1]);
+  assert.deepEqual(payload.kanji_ids, [7]);
+  // Empty arrays travel explicitly: clearing every picker clears the links.
+  assert.deepEqual(payload.grammar_ids, []);
+  assert.equal(submitPayloadOmitsHiddenFields(payload), false);
+  assert.ok(!('writing_notes' in payload), 'writing notes are never submitted');
+});
+
+test('Session UX: edit round-trips the record links instead of dropping them', () => {
+  const record = {
+    vocabulary: [{ id_vocabulary: 4 }, { id_vocabulary: 9 }],
+    kanji: [{ id_kanji: 2 }],
+    grammar: []
+  };
+  const payload = buildSessionSubmitPayload({
+    category: 'Vocabulary',
+    session_date: '2026-09-01',
+    duration_minutes: 30,
+    resource: '',
+    vocabulary_ids: record.vocabulary.map((item) => item.id_vocabulary),
+    kanji_ids: record.kanji.map((item) => item.id_kanji),
+    grammar_ids: record.grammar.map((item) => item.id_grammar),
+    notes: ''
+  });
+  assert.deepEqual(payload.vocabulary_ids, [4, 9]);
+  assert.deepEqual(payload.kanji_ids, [2]);
+  assert.deepEqual(payload.grammar_ids, []);
+});
+
+test('Session UX: form restores the compact optional linking section', () => {
+  const source = readSource('src/pages/sessions.js');
+  assert.ok(source.includes('Link studied items (optional)'), 'honest optional label, never auto-link claims');
+  assert.ok(source.includes('Nothing is linked automatically'), 'no magical linking promised');
+  assert.ok(source.includes('searchableMultiSelect'), 'compact pickers reuse the shared primitive');
+  for (const name of ['vocabulary_ids', 'kanji_ids', 'grammar_ids']) {
+    assert.ok(source.includes(`name: '${name}'`), `picker submits ${name}`);
+  }
+  assert.ok(source.includes('loadRelationshipOptions'), 'edit pre-selects current links for the round trip');
+  assert.ok(source.includes('/api/vocabulary/options') && source.includes('/api/kanji/options') && source.includes('/api/grammar/options'), 'pickers reuse the existing options endpoints');
+  assert.ok(source.includes('selectedNumbers(form.elements.vocabulary_ids)'), 'submit reads the picker selections');
+});
+
+test('Session UX: day-link button merges studied items without wiping manual picks', () => {
+  const source = readSource('src/pages/sessions.js');
+  assert.ok(source.includes('Link what I studied that day'), 'day-link entry point labeled');
+  assert.ok(source.includes('/api/sessions/day-items?date='), 'day-items fetched for the current session_date');
+  assert.ok(source.includes('Pick a date first'), 'honest message when no valid date is set');
+  assert.ok(source.includes('mergeOptions(options.vocabulary') || source.includes('mergeOptions('), 'merge reuses mergeOptions, never replaces');
+  assert.ok(source.includes('vocabularyOption') && source.includes('kanjiOption') && source.includes('grammarOption'), 'day {id,label} maps through the shared option shapes');
+  assert.ok(source.includes('appendLinkedOptions'), 'merge lands in the existing pickers via the multiselect slot');
+  assert.ok(source.includes('!currentVocab.has') && source.includes('!currentKanji.has') && source.includes('!currentGrammar.has'), 'duplicates skipped per kind');
+  assert.ok(source.includes('items linked from ${dateValue}'), 'honest linked-count toast');
+  assert.ok(source.includes('Nothing studied that day'), 'honest empty-day toast guiding to manual picks');
+  assert.ok(source.includes('Already linked'), 'honest already-linked outcome when only duplicates remain');
+  assert.ok(source.includes('Unable to load day items.'), 'fetch failure toasts with pickers untouched');
+  assert.ok(source.includes('Linking'), 'pending/disabled state while loading');
+  assert.ok(!source.includes('content_ids'), 'content ids never submitted with the session');
+});
+
+test('Session UX: day content stays a read-only note for the Content Log side', () => {
+  const source = readSource('src/pages/sessions.js');
+  assert.ok(source.includes('link them from Content Log'), 'subtle read-only content note with count');
+  assert.ok(source.includes('No content entries that day.'), 'zero-content day stays honest');
+  assert.ok(source.includes("aria-live"), 'content note announces politely');
+});
+
+test('Session UX: multiselect exposes a merge slot that preserves selections', () => {
+  const source = readSource('src/ui.js');
+  assert.ok(source.includes('appendLinkedOptions'), 'searchableMultiSelect exposes a day-link merge slot');
+  assert.ok(source.includes('selectedValues.add'), 'merge adds without removing manual picks');
 });

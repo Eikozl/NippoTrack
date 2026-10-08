@@ -2,6 +2,7 @@
 // demand from the user's own review evidence. Regeneration overwrites.
 const pool = require('../config/db');
 const { ValidationError, sendRouteError } = require('../errors/http');
+const { validateTodayField } = require('../validation');
 const {
   currentWeekKey,
   generateWeeklyInsights,
@@ -17,13 +18,7 @@ const {
 // UTC week applies. Sessions carry LOCAL dates, so the UTC week showed 0
 // minutes from Sunday 20:00 local onward.
 function resolveTodayLocal(query) {
-  const raw = query?.today;
-  if (raw === undefined || raw === null || raw === '') return null;
-  const value = String(raw);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) {
-    throw new ValidationError('today must be a YYYY-MM-DD date.');
-  }
-  return value;
+  return validateTodayField(query?.today);
 }
 
 function resolveTzOffset(query) {

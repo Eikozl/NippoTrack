@@ -1,12 +1,13 @@
 # Dependencies
 node_modules/
 
-# Environment variables
+# Environment variables: every real credential file stays ignored; only
+# *.example templates (plus the legacy tracked server/.env.test harness)
+# are whitelisted. Never add a new `!` exception without a security review.
 .env
 .env.*
 !.env.example
-!.env.postgres.example
-!.env.development.example
+!.env.*.example
 !.env.test
 
 # IDE
@@ -40,6 +41,13 @@ supabase/.temp/
 
 # Vercel CLI local build/link state
 .vercel/
-.env*
-# Tracked environment documentation (real credentials stay ignored above)
-!.env.development.example
+
+# Disposable test credentials (tracked TEST_ACCOUNTS.txt is removed at the
+# end of testing; this rule prevents recurrence — it cannot untrack it)
+TEST_ACCOUNTS.txt
+
+# Builder/test-run artifacts (never committed)
+brag-output-*/
+*test-output.txt
+*test-results.txt
+*.docx

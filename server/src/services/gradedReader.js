@@ -27,7 +27,7 @@ const { adaptTokens, classifyCandidate } = require('./lexicalTokenAdapter');
 const { buildLexicalCandidates, candidateIdentity, matchOwnedVocabulary, reconstructObservedSurface } = require('./lexicalCandidates');
 const { detectGrammar } = require('./grammarDetector');
 const { hydrateGrammarMatches } = require('./grammarReferenceStore');
-const { isValidDateString } = require('../validation');
+const { isValidDateString, validateTodayField } = require('../validation');
 
 const MAX_READING_TEXT_LENGTH = 100000;
 const MAX_READING_TITLE_LENGTH = 200;
@@ -641,7 +641,11 @@ async function listReadingLibrary(executor, userId, {
        (rt.user_id = ?) AS mine
       FROM reading_texts rt LEFT JOIN reading_sources rs ON rs.id_reading_source = rt.source_id
       WHERE ${whereSql} ORDER BY rt.created_at DESC, rt.id_reading_text DESC LIMIT ? OFFSET ?`,
-    [...params, userId, limit, offset]
+    // The SELECT-list mine placeholder comes first in the SQL text, so its
+    // user_id must lead the params (a previous [...params, userId, ...]
+    // order bound the source filter value to rt.user_id and broke every
+    // filtered listing with "invalid input syntax for type uuid").
+    [userId, ...params, limit, offset]
   );
   const itemRows = rows || [];
   const characterSets = itemRows.map((row) => new Set(extractHanOccurrences(row.text || '').map(({ character }) => character)));
@@ -955,16 +959,28 @@ async function getReadingText(executor, userId, id) {
   };
 }
 
-async function createUserReadingText(executor, userId, { text: rawText, title: rawTitle } = {}) {
+async function createUserReadingText(executor, userId, { text: rawText, title: rawTitle, sourceMetadata } = {}) {
   const text = normalizeReadingText(rawText);
   const title = normalizeTitle(rawTitle);
+  // Provenance stamp for the source row (existing metadata jsonb, no
+  // migration). Community imports pass { importedFromPublication: id } so
+  // publishReading can refuse re-publication; anything else stays '{}'.
+  // Plain object only, capped — never trust caller payloads verbatim.
+  let metadataJson = '{}';
+  if (sourceMetadata !== undefined && sourceMetadata !== null) {
+    if (!sourceMetadata || typeof sourceMetadata !== 'object' || Array.isArray(sourceMetadata)) {
+      throw new ValidationError('sourceMetadata must be a plain object.');
+    }
+    metadataJson = JSON.stringify(sourceMetadata).slice(0, 500);
+    if (metadataJson.length >= 500) throw new ValidationError('sourceMetadata is too large.');
+  }
   const analysis = await analyzeReading(executor, userId, text);
   const connection = await executor.getConnection();
   try {
     await connection.beginTransaction();
     const [sourceResult] = await connection.execute(
-      "INSERT INTO reading_sources (type, url, title, metadata, fetched_at) VALUES ('user', NULL, ?, '{}'::jsonb, CURRENT_TIMESTAMP) RETURNING id_reading_source AS insertId",
-      [title]
+      "INSERT INTO reading_sources (type, url, title, metadata, fetched_at) VALUES ('user', NULL, ?, ?::jsonb, CURRENT_TIMESTAMP) RETURNING id_reading_source AS insertId",
+      [title, metadataJson]
     );
     const sourceId = extractInsertId(sourceResult);
     if (!sourceId) throw new Error('Failed to create reading source.');
@@ -1026,7 +1042,8 @@ async function deleteUserReadingText(executor, userId, textId) {
 async function upsertReadingProgress(executor, userId, textId, {
   position,
   timeSpentSeconds,
-  completed
+  completed,
+  today
 } = {}) {
   const [textRows] = await executor.execute(
     'SELECT id_reading_text, text FROM reading_texts WHERE id_reading_text = ? AND (user_id IS NULL OR user_id = ?)',
@@ -1041,11 +1058,31 @@ async function upsertReadingProgress(executor, userId, textId, {
     throw new ValidationError('timeSpentSeconds must be a positive integer no greater than 86400.');
   }
   if (completed !== undefined && typeof completed !== 'boolean') throw new ValidationError('completed must be a boolean.');
+  // Credit day: the browser's LOCAL date anchors attribution. The DB clock
+  // is UTC, so evening sessions (UTC-4) would otherwise land on tomorrow's
+  // row and "today" stats would read 0 — same class already fixed on the
+  // dashboard via ?today=. Absent/invalid falls back to CURRENT_DATE.
+  let creditDay = null;
+  if (today !== undefined && today !== null) {
+    creditDay = validateTodayField(today);
+  }
   // PUT replaces the progress state: omitted optional values reset to their
   // schema defaults, making retries deterministic rather than additive.
   // Position is the one exception: it only ever advances (GREATEST), so a
   // stale or out-of-order save — second tab, re-render before first autosave,
   // retried request — can never move the reader backwards.
+  // Daily study credit: the delta between the submitted accumulated total
+  // and the stored total is credited to today's reading_study_days row, so
+  // reading time counts toward dashboard minutes and streaks. Retries are
+  // delta-safe (same total → delta 0); backwards totals clamp to 0.
+  let previousSeconds = 0;
+  if (timeSpentSeconds !== undefined && timeSpentSeconds > 0) {
+    const [previousRows] = await executor.execute(
+      'SELECT time_spent_seconds FROM user_reading_progress WHERE user_id = ? AND text_id = ?',
+      [userId, textId]
+    );
+    previousSeconds = Number(previousRows?.[0]?.time_spent_seconds || 0);
+  }
   const [result] = await executor.execute(
     `INSERT INTO user_reading_progress (user_id, text_id, position, time_spent_seconds, completed_at)
      SELECT ?, rt.id_reading_text, ?, ?, CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END
@@ -1067,6 +1104,14 @@ async function upsertReadingProgress(executor, userId, textId, {
     [userId, textId]
   );
   const storedPosition = Number(storedRows?.[0]?.position);
+  const credited = Math.max(0, (timeSpentSeconds ?? 0) - previousSeconds);
+  if (credited > 0) {
+    await executor.execute(
+      `INSERT INTO reading_study_days (user_id, day, seconds) VALUES (?, COALESCE(?::date, CURRENT_DATE), ?)
+       ON CONFLICT (user_id, day) DO UPDATE SET seconds = reading_study_days.seconds + EXCLUDED.seconds`,
+      [userId, creditDay, credited]
+    );
+  }
   return {
     position: Number.isSafeInteger(storedPosition) ? storedPosition : position,
     timeSpentSeconds: timeSpentSeconds ?? 0,
@@ -1317,7 +1362,21 @@ async function listReadingProgress(executor, userId, { page, limit, offset } = {
     timeSpentSeconds: Number(row.timeSpentSeconds || 0),
     updatedAt: row.updatedAt || null
   }));
-  return { items, total, page, limit, totalPages: total ? Math.ceil(total / limit) : 0 };
+  // Daily reading seconds (last 56 days) for time-based stats: accurate
+  // per-day attribution that cumulative progress totals cannot provide.
+  // Best-effort on legacy schemas (fail open to []).
+  let daily = [];
+  try {
+    const [dailyRows] = await executor.execute(
+      `SELECT to_char(day, 'YYYY-MM-DD') AS date, seconds FROM reading_study_days
+       WHERE user_id = ? AND day > CURRENT_DATE - 56 ORDER BY day ASC`,
+      [userId]
+    );
+    daily = (dailyRows || []).map((row) => ({ date: String(row.date).slice(0, 10), seconds: Number(row.seconds || 0) }));
+  } catch {
+    daily = [];
+  }
+  return { items, daily, total, page, limit, totalPages: total ? Math.ceil(total / limit) : 0 };
 }
 
 function decodeEntities(value) {

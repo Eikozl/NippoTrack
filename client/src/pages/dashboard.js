@@ -1,12 +1,13 @@
 import { apiRequest } from '../api';
 import { destroyCharts } from '../chartRegistry';
 import { iconTile } from '../icons';
-import { element, errorState, formatDate, loadingState, pageHeader } from '../ui';
+import { element, errorState, formatDate, pageHeader, showToast, withPendingAction } from '../ui';
 import { profileStore } from '../accountProfile.js';
 import { dashboardWelcomeModel, localDayKey, readVisitRecord, recordDashboardVisit } from '../dashboardWelcome.js';
 import { smartGoalsWidget } from '../smartGoals.js';
 import { weeklyInsightsWidget } from '../weeklyInsightsWidget.js';
 import { CONFIGS } from './v2Pages';
+import { applySessionContext } from '../sessionContext.js';
 
 function metric(iconName, label, value, note, page = null, featured = false) {
   const body = [
@@ -25,6 +26,219 @@ function welcomeHeader(model) {
   return element('div', { className: 'dashboard-welcome' }, [
     element('h2', { className: 'font-display text-xl font-semibold tracking-tight text-ink sm:text-2xl', text: model.title }),
     element('p', { className: 'mt-1 text-sm leading-6 text-muted', text: model.subtitle })
+  ]);
+}
+
+function studyNowSection(studyNow) {
+  // V5.6 Study Home: deterministic next action from existing signals.
+  // Fail-open: null payload renders nothing, dashboard stays byte-identical.
+  // Review actions AUTO-START: one click builds the due queue (oldest first)
+  // via the existing /due + /sessions endpoints and hands it to #review —
+  // the learner never touches setup. Other kinds link straight to the
+  // activity itself.
+  const primary = studyNow?.primary;
+  if (!primary || typeof primary !== 'object') return null;
+  const autoDue = primary.auto === 'due';
+  const cta = autoDue
+    ? element('button', {
+      className: 'button-primary inline-flex min-h-11 items-center justify-center px-5 py-2.5 text-sm font-semibold',
+      text: primary.cta || 'Start now',
+      attrs: { type: 'button' }
+    })
+    : element('a', {
+      className: 'button-primary inline-flex min-h-11 items-center justify-center px-5 py-2.5 text-sm font-semibold',
+      text: primary.cta || 'Start',
+      attrs: { href: primary.href || '#review' }
+    });
+  if (autoDue) cta.addEventListener('click', () => startDueSession(cta));
+  return element('section', { className: 'surface study-now p-5 sm:p-6', attrs: { 'aria-label': 'Study now recommendation' } }, [
+    element('div', { className: 'flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between' }, [
+      element('div', { className: 'min-w-0' }, [
+        element('h2', { className: 'mt-1 font-display text-lg font-semibold tracking-tight text-ink', text: primary.title || 'Keep studying' }),
+        element('p', { className: 'mt-1 max-w-2xl text-sm leading-6 text-muted', text: primary.reason || '' }),
+        ...(primary.estimate ? [element('p', { className: 'mt-2 text-xs font-semibold uppercase tracking-[0.13em] text-muted', text: primary.estimate })] : [])
+      ]),
+      element('div', { className: 'flex shrink-0 items-center gap-3' }, [cta])
+    ])
+  ]);
+}
+
+// One-click due session: oldest-first queue from the existing due listing,
+// persisted through the existing review-sessions endpoint, handed to #review
+// via sessionStorage exactly like the Immersion hand-off (per-tab, once).
+// Falls back to plain navigation when anything is missing.
+const STUDY_NOW_QUEUE_KEY = 'jlt-study-now-queue';
+const STUDY_NOW_SESSION_MAX = 100;
+
+function shiftDaysISO(iso, days) {
+  const next = new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86400000);
+  return Number.isNaN(next.getTime()) ? iso : next.toISOString().slice(0, 10);
+}
+
+function dueEntityType(row) {
+  const raw = String(row?.item_type || row?.entityType || '').toLowerCase();
+  if (raw === 'vocabulary') return 'vocabulary';
+  if (raw === 'kanji') return 'kanji';
+  return 'grammar';
+}
+
+async function startDueSession(button) {
+  await withPendingAction(button, async () => {
+    const today = localDayKey();
+    const data = await apiRequest('/api/review/due');
+    const seen = new Set();
+    const picked = [];
+    for (const row of Array.isArray(data?.items) ? data.items : []) {
+      const entityType = dueEntityType(row);
+      const entityId = Number(row?.entityId);
+      if (!Number.isInteger(entityId) || entityId <= 0) continue;
+      const key = `${entityType}:${entityId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      picked.push({
+        entityType,
+        entityId,
+        display: row.title ?? row.display ?? '',
+        reading: row.reading ?? null,
+        meaning: row.meaning ?? null,
+        ...(row.last_result ? { lastResult: row.last_result } : {}),
+        dueOn: String(row.due_on || '').slice(0, 10) || null
+      });
+      if (picked.length >= STUDY_NOW_SESSION_MAX) break;
+    }
+    if (!picked.length) {
+      window.location.hash = '#review';
+      return;
+    }
+    const oldest = picked.map((item) => item.dueOn).filter(Boolean).sort()[0] || today;
+    const earliest = oldest < shiftDaysISO(today, -366) ? shiftDaysISO(today, -366) : oldest;
+    const session = await apiRequest('/api/review/sessions', {
+      method: 'POST',
+      body: {
+        sourceFrom: earliest <= today ? earliest : today,
+        sourceTo: today,
+        items: picked.map(({ entityType, entityId }) => ({ entityType, entityId }))
+      }
+    });
+    const queueItems = applySessionContext(picked.map(({ dueOn, ...rest }) => rest), session);
+    try {
+      if (window.sessionStorage) {
+        window.sessionStorage.setItem(STUDY_NOW_QUEUE_KEY, JSON.stringify({
+          reviewSessionId: Number(session?.id),
+          items: queueItems
+        }));
+      }
+    } catch { /* storage blocked: review falls back to its banner */ }
+    window.location.hash = `#review?reviewSessionId=${encodeURIComponent(session?.id)}&from=study-now`;
+  }, { pendingLabel: 'Starting…' }).catch((error) => {
+    showToast(error?.message || 'Unable to start the session.', 'error');
+  });
+}
+
+function todayProgressSection(studyNow) {
+  // V5.6 Completion Pass: "What have I actually done today?" — real daily
+  // numbers only (graded reviews, logged minutes, new items). Fail-open:
+  // without the payload the section renders nothing, never placeholder 0s.
+  const progress = studyNow?.todayProgress;
+  if (!progress || typeof progress !== 'object') return null;
+  const done = Number(progress.reviewsDone || 0);
+  const due = Number(progress.reviewsDue || 0);
+  const minutes = Number(progress.readingMinutes || 0);
+  const fresh = Number(progress.newItems || 0);
+  const row = (label, value) => element('div', { className: 'flex items-baseline justify-between gap-3 py-2' }, [
+    element('p', { className: 'text-sm text-muted', text: label }),
+    element('p', { className: 'text-sm font-semibold tabular-nums text-ink', text: value })
+  ]);
+  // Reviews line: with pending reviews show done-of-expected ("7 of 10");
+  // with none pending show only what was done ("52 reviews done") — never
+  // a self-referential "52 of 52". done/due are disjoint server-side.
+  const reviewsLine = due > 0
+    ? `${done} of ${done + due} reviews done`
+    : (done > 0 ? `${done} review${done === 1 ? '' : 's'} done` : 'No reviews due');
+  return element('section', { className: 'surface mt-5 p-5 sm:p-6', attrs: { 'aria-label': "Today's progress" } }, [
+    element('div', { className: 'flex items-center gap-3' }, [iconTile('today', { className: 'panel-icon' }), element('h2', { className: 'font-semibold text-ink', text: 'Today’s progress' })]),
+    element('div', { className: 'mt-2 divide-y divide-stone' }, [
+      row('Reviews', reviewsLine),
+      row('Study time', minutes > 0 ? `${minutes} min today` : 'Nothing logged yet'),
+      row('New items', fresh > 0 ? `${fresh} new item${fresh === 1 ? '' : 's'} today` : 'Nothing added yet')
+    ])
+  ]);
+}
+
+// V6.0 community pulse: unread interactions only (likes, new followers,
+// comments), Study-Now-styled. Zero unread → renders nothing at all, like
+// the goals preview (never an empty "0 notifications" card). Fail-open.
+async function communityPulseSection() {
+  let summary = null;
+  try {
+    summary = await apiRequest('/api/community/notifications/summary');
+  } catch {
+    return null;
+  }
+  if (!summary || Number(summary.unread || 0) <= 0) return null;
+  const lines = [];
+  const likeTitles = (Array.isArray(summary.likes?.posts) ? summary.likes.posts : []).map((post) => post.title).filter(Boolean);
+  if (Number(summary.likes?.count || 0) > 0) {
+    lines.push(`You have ${summary.likes.count} like${summary.likes.count === 1 ? '' : 's'}${likeTitles.length ? ` in the post “${likeTitles[0]}”` : ''}`);
+  }
+  if (Number(summary.follows?.count || 0) > 0) {
+    const actors = (Array.isArray(summary.follows?.actors) ? summary.follows.actors : []).filter(Boolean);
+    lines.push(`${summary.follows.count} new follower${summary.follows.count === 1 ? '' : 's'}${actors.length ? ` (${actors.join(', ')})` : ''}`);
+  }
+  const commentTitles = (Array.isArray(summary.comments?.posts) ? summary.comments.posts : []).map((post) => post.title).filter(Boolean);
+  if (Number(summary.comments?.count || 0) > 0) {
+    lines.push(`${summary.comments.count} new comment${summary.comments.count === 1 ? '' : 's'}${commentTitles.length ? ` in your post “${commentTitles[0]}”` : ''}`);
+  }
+  if (!lines.length) return null;
+  return element('section', { className: 'surface mt-5 p-5 sm:p-6', attrs: { 'aria-label': 'Community activity' } }, [
+    element('div', { className: 'flex items-center justify-between gap-3' }, [
+      element('div', { className: 'flex items-center gap-3' }, [iconTile('community', { className: 'panel-icon' }), element('h2', { className: 'font-semibold text-ink', text: 'Community' })]),
+      element('a', { className: 'text-sm font-semibold text-vermilion hover:underline', text: 'Open community', attrs: { href: '#community' } })
+    ]),
+    element('div', { className: 'mt-2 divide-y divide-stone' }, lines.map((line) => element('div', { className: 'py-2' }, [
+      element('p', { className: 'text-sm leading-6 text-ink', text: line })
+    ])))
+  ]);
+}
+
+function continueSection(studyNow) {
+  // V5.6 Completion Pass: "Continue where you left off" — genuinely
+  // resumable state only (unfinished reading with position, open review
+  // session with remaining cards). Nothing resumable → no section at all;
+  // Study Now above already offers the next action, so no dead CTA here.
+  const cont = studyNow?.continueStudying;
+  if (!cont || typeof cont !== 'object') return null;
+  const cards = [];
+  if (cont.reading && cont.reading.id !== undefined && cont.reading.id !== null) {
+    cards.push(element('a', {
+      className: 'surface metric-link flex items-center justify-between gap-4 p-4',
+      attrs: { href: `#reading?id=${encodeURIComponent(cont.reading.id)}`, 'aria-label': `Continue reading ${cont.reading.title || 'your text'}` }
+    }, [
+      element('div', { className: 'min-w-0' }, [
+        element('p', { className: 'mt-1 break-words font-semibold text-ink', text: cont.reading.title || 'Untitled text' }),
+        element('p', { className: 'mt-1 text-xs text-muted', text: 'Pick up where you left off' })
+      ]),
+      element('span', { className: 'button-secondary shrink-0 px-3 py-1.5 text-xs', text: 'Continue', attrs: { 'aria-hidden': 'true' } })
+    ]));
+  }
+  if (cont.reviewSession && Number(cont.reviewSession.id) > 0 && Number(cont.reviewSession.remaining) > 0) {
+    const remaining = Number(cont.reviewSession.remaining);
+    const total = Number(cont.reviewSession.total || remaining);
+    cards.push(element('a', {
+      className: 'surface metric-link flex items-center justify-between gap-4 p-4',
+      attrs: { href: `#review?retake=${encodeURIComponent(cont.reviewSession.id)}`, 'aria-label': `Resume review session with ${remaining} cards left` }
+    }, [
+      element('div', { className: 'min-w-0' }, [
+        element('p', { className: 'mt-1 break-words font-semibold text-ink', text: `Unfinished review — ${remaining} of ${total} left` }),
+        element('p', { className: 'mt-1 text-xs text-muted', text: 'Resume where you left off' })
+      ]),
+      element('span', { className: 'button-secondary shrink-0 px-3 py-1.5 text-xs', text: 'Resume', attrs: { 'aria-hidden': 'true' } })
+    ]));
+  }
+  if (!cards.length) return null;
+  return element('section', { className: 'mt-5', attrs: { 'aria-label': 'Continue studying' } }, [
+    element('h2', { className: 'font-semibold text-ink', text: 'Continue where you left off' }),
+    element('div', { className: 'mt-3 grid gap-4 sm:grid-cols-2' }, cards)
   ]);
 }
 
@@ -79,25 +293,87 @@ function goalsPreview(items, showAll) {
 }
 
 function isEmptyDashboardSnapshot(data) {
-  // Despite the legacy name, this is NOT an "empty dashboard" check: it
-  // answers "is the post-onboarding checklist incomplete?" (mirrors
-  // getFirstUseActionStates' durable-data half). One cheap decision so a
-  // learner with a FULLY completed checklist never pays for the extra
-  // first-experience fetch below. Partial progress (any action incomplete)
-  // still fetches so the checklist can render with per-action states.
+  // Cheap pre-check mirroring shouldShowFirstUseDashboard's durable-data
+  // half (see firstUseDashboard.js): true only when zero durable data, so
+  // ANY datum skips the extra first-experience fetch below and falls
+  // through to the normal dashboard. Malformed payloads fetch anyway; the
+  // strict rule then fails open to the normal dashboard.
   if (!data || typeof data !== 'object') return false;
-  const hasVocabulary = Number(data.vocabularyCount) > 0;
-  const hasCollection = hasVocabulary || Number(data.kanjiCount) > 0 || Number(data.grammarCount) > 0;
-  const hasSession = Array.isArray(data.recentSessions) && data.recentSessions.length > 0;
-  if (hasVocabulary && hasCollection && hasSession) return false;
-  return true;
+  const counts = ['vocabularyCount', 'kanjiCount', 'grammarCount'].some((key) => Number(data[key]) > 0);
+  const sessions = Array.isArray(data.recentSessions) && data.recentSessions.length > 0;
+  return !(counts || sessions);
+}
+
+function dashboardStudyHomeSkeleton() {
+  // Study Home loading skeleton: shaped placeholders mirroring the real
+  // render order (Study Now → Today's Progress → Continue → snapshot/goals).
+  // Same .skeleton-block shimmer primitive as ui.js skeleton() (still under
+  // prefers-reduced-motion via styles.css), visual blocks aria-hidden with a
+  // single visually-hidden status line for AT. Matching surface/padding/margin
+  // classes keep spacing identical so real content swaps in with no shift.
+  const studyNow = element('section', { className: 'surface study-now p-5 sm:p-6', attrs: { 'aria-hidden': 'true' } }, [
+    element('div', { className: 'flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between' }, [
+      element('div', { className: 'grid min-w-0 flex-1 gap-2' }, [
+        element('div', { className: 'skeleton-block h-6 w-1/3' }),
+        element('div', { className: 'skeleton-block h-4 w-5/6' }),
+        element('div', { className: 'skeleton-block h-4 w-2/3' }),
+        element('div', { className: 'skeleton-block mt-1 h-3 w-1/4' })
+      ]),
+      element('div', { className: 'skeleton-block h-11 w-28 shrink-0 rounded-xl' })
+    ])
+  ]);
+  const todayRow = () => element('div', { className: 'flex items-baseline justify-between gap-3 py-2' }, [
+    element('div', { className: 'skeleton-block h-4 w-24' }),
+    element('div', { className: 'skeleton-block h-4 w-32' })
+  ]);
+  const today = element('section', { className: 'surface mt-5 p-5 sm:p-6', attrs: { 'aria-hidden': 'true' } }, [
+    element('div', { className: 'flex items-center gap-3' }, [
+      element('span', { className: 'skeleton-block size-10 shrink-0 rounded-full' }),
+      element('div', { className: 'skeleton-block h-5 w-36' })
+    ]),
+    element('div', { className: 'mt-2 divide-y divide-stone' }, [todayRow(), todayRow(), todayRow()])
+  ]);
+  const continueCard = () => element('div', { className: 'surface flex items-center justify-between gap-4 p-4' }, [
+    element('div', { className: 'grid min-w-0 flex-1 gap-2' }, [
+      element('div', { className: 'skeleton-block h-4 w-3/4' }),
+      element('div', { className: 'skeleton-block h-3 w-1/2' })
+    ]),
+    element('div', { className: 'skeleton-block h-8 w-20 shrink-0 rounded-lg' })
+  ]);
+  const cont = element('section', { className: 'mt-5', attrs: { 'aria-hidden': 'true' } }, [
+    element('div', { className: 'skeleton-block h-5 w-48' }),
+    element('div', { className: 'mt-3 grid gap-4 sm:grid-cols-2' }, [continueCard(), continueCard()])
+  ]);
+  const metricCard = () => element('div', { className: 'surface metric-card p-5' }, [
+    element('div', { className: 'skeleton-block h-3 w-1/2' }),
+    element('div', { className: 'skeleton-block mt-3 h-8 w-1/3' }),
+    element('div', { className: 'skeleton-block mt-2 h-3 w-2/3' })
+  ]);
+  // Six snapshot tiles fill two full rows of three on desktop
+  // (sm 2 cols = three full rows, mobile single column). xl:grid-cols-4 left
+  // a 4+2 split with a half-empty void row at 1280-1920px.
+  const snapshot = element('div', { className: 'dashboard-metrics mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3', attrs: { 'aria-hidden': 'true' } }, [
+    metricCard(), metricCard(), metricCard(), metricCard(), metricCard(), metricCard()
+  ]);
+  // Goals preview + community pulse share the compact card shape above; one
+  // representative row covers that area without reserving full page height.
+  const goals = element('section', { className: 'mt-5', attrs: { 'aria-hidden': 'true' } }, [
+    element('div', { className: 'skeleton-block h-5 w-32' }),
+    element('div', { className: 'mt-3 grid gap-4 sm:grid-cols-2' }, [continueCard(), continueCard()])
+  ]);
+  const visual = element('div', { className: 'grid', attrs: { 'aria-hidden': 'true' } }, [studyNow, today, cont, snapshot, goals]);
+  return element('div', { className: 'grid gap-2', attrs: { role: 'status', 'aria-live': 'polite', 'aria-label': 'Loading your study overview…' } }, [
+    visual,
+    element('p', { className: 'visually-hidden', text: 'Loading your study overview…' })
+  ]);
 }
 
 export async function renderDashboard(container) {
   destroyCharts();
   const content = element('div', { className: 'dashboard-frame' });
-  container.replaceChildren(element('section', {}, [pageHeader({ eyebrow: 'Overview', title: 'Dashboard', description: 'A calm snapshot of your current Japanese study activity.' }), content]));
-  content.replaceChildren(loadingState('Loading your study overview…'));
+  container.replaceChildren(element('section', {}, [pageHeader({ title: 'Dashboard', description: 'Your learning home — what to do now, and what you’ve done.' }), content]));
+  content.setAttribute('aria-busy', 'true');
+  content.replaceChildren(dashboardStudyHomeSkeleton());
   async function load() {
     try {
       // Phase 9 refinement: the study-level estimate lives in the header
@@ -106,15 +382,17 @@ export async function renderDashboard(container) {
       // Detailed charts live in Statistics (the canonical analytics page);
       // the dashboard stays a calm snapshot: metrics, recent sessions,
       // activity calendar, and quiet links outward.
-      const [data, activity, review, goalsData] = await Promise.all([
+      const [data, activity, goalsData, studyNow] = await Promise.all([
         // `today` anchors server windows on the browser's local date: DB
         // CURRENT_DATE is UTC and dropped evening sessions (0 minutes).
         apiRequest(`/api/dashboard?today=${localDayKey()}`),
         apiRequest(`/api/dashboard/activity?today=${localDayKey()}`),
-        apiRequest('/api/review'),
         // One bounded request on the existing Goals endpoint; a failure
         // here skips the preview without failing the dashboard.
-        apiRequest('/api/goals?active=1&limit=10').catch(() => null)
+        apiRequest('/api/goals?active=1&limit=10').catch(() => null),
+        // V5.6 Study Now: deterministic next action. Fail-open — a failure
+        // skips the section without failing the dashboard.
+        apiRequest(`/api/dashboard/study-now?today=${localDayKey()}`).catch(() => null)
       ]);
       // v5.1-E welcome personalization (presentation only): display_name
       // first-name + local-calendar-day visit state. The cached profile
@@ -153,6 +431,7 @@ export async function renderDashboard(container) {
               firstExperience,
               dashboard: data
             });
+            content.setAttribute('aria-busy', 'false');
             return;
           }
         } catch {
@@ -166,9 +445,19 @@ export async function renderDashboard(container) {
       // existing Goals ordering: earliest deadline first, then newest.
       const eligibleGoals = goalItems.filter((item) => item.is_active && !item.isComplete);
       const previewGoals = eligibleGoals.slice(0, 3);
+      const pulse = await communityPulseSection();
       content.replaceChildren(
         ...(welcome ? [welcomeHeader(welcome)] : []),
-        element('div', { className: 'dashboard-metrics reveal-group grid gap-4 sm:grid-cols-2 xl:grid-cols-4' }, [metric('today', 'Today', data.minutesToday, 'minutes studied'), metric('week', 'This week', data.minutesThisWeek, 'minutes studied'), metric('streak', 'Current streak', activity.currentStreak, 'consecutive active days'), metric('streak', 'Longest streak', activity.longestStreak, 'best run of active days'), metric('review', 'Due reviews', review.items.length, 'items ready to recall', 'review', true), metric('vocabulary', 'Vocabulary', data.vocabularyCount, 'saved words', 'vocabulary'), metric('kanji', 'Kanji', data.kanjiCount, 'tracked characters', 'kanji'), metric('grammar', 'Grammar', data.grammarCount, 'saved patterns', 'grammar')]),
+        ...(studyNowSection(studyNow) ? [studyNowSection(studyNow)] : []),
+        // V5.6 Completion Pass hierarchy: action → today → continue →
+        // snapshot. Progress/continue render nothing when data is absent.
+        ...(todayProgressSection(studyNow) ? [todayProgressSection(studyNow)] : []),
+        ...(continueSection(studyNow) ? [continueSection(studyNow)] : []),
+        ...(pulse ? [pulse] : []),
+        // V5.6 Completion Pass: the metrics grid no longer duplicates what
+        // Study Now (due reviews → action) and Today's Progress (today's
+        // minutes → done) already answer. It keeps week/streaks/collection.
+        element('div', { className: 'dashboard-metrics reveal-group grid gap-4 sm:grid-cols-2 xl:grid-cols-3' }, [metric('week', 'This week', data.minutesThisWeek, 'minutes studied'), metric('streak', 'Current streak', activity.currentStreak, 'consecutive active days'), metric('streak', 'Longest streak', activity.longestStreak, 'best run of active days'), metric('vocabulary', 'Vocabulary', data.vocabularyCount, 'saved words', 'vocabulary'), metric('kanji', 'Kanji', data.kanjiCount, 'tracked characters', 'kanji'), metric('grammar', 'Grammar', data.grammarCount, 'saved patterns', 'grammar')]),
         // Zero eligible goals: this section never renders — no empty card,
         // no placeholder, no reserved space.
         ...(previewGoals.length ? [goalsPreview(previewGoals, eligibleGoals.length > 3)] : []),
@@ -177,7 +466,8 @@ export async function renderDashboard(container) {
         weeklyInsightsWidget(),
         element('p', { className: 'dashboard-footnote mt-5 text-center text-sm' }, [element('a', { className: 'font-semibold text-vermilion hover:underline', text: 'View detailed analytics in Statistics', attrs: { href: '#statistics' } })])
       );
-    } catch (error) { content.replaceChildren(errorState(error, load)); }
+      content.setAttribute('aria-busy', 'false');
+    } catch (error) { content.setAttribute('aria-busy', 'false'); content.replaceChildren(errorState(error, load)); }
   }
   await load();
 }

@@ -510,7 +510,7 @@ test('Dashboard: estimate metric, estimate section, and Quick Add are gone', () 
   assert.doesNotMatch(source, /quickAddPanel|Quick add session|quick-add-card/);
   assert.doesNotMatch(source, /\/api\/level\/estimate/);
   assert.doesNotMatch(source, /\/api\/sessions.*POST|POST.*\/api\/sessions/);
-  assert.match(source, /metric\('review', 'Due reviews'/);
+  assert.doesNotMatch(source, /metric\('review', 'Due reviews'/);
 });
 
 test('Sessions page: dedicated Add Session flow remains fully functional', () => {

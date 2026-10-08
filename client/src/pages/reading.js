@@ -29,6 +29,7 @@
 // the annotation path below renders exactly as before — both orders work.
 
 import { apiRequest, listReadingLibrary, getReadingText, createUserReadingText, deleteReadingText, updateReadingProgress, importReadingSources, importReadingUrl, previewReadingImport, listReadingProgress, publishReadingText } from '../api';
+import { localDayKey } from '../dashboardWelcome.js';
 import { icon } from '../icons';
 import { speakJapanese } from '../speech.js';
 import { element, pageHeader, showToast, withPendingAction, paginationControls, openDetailModal, openDialog, confirmDialog, emptyState, errorState, loadingState } from '../ui';
@@ -65,6 +66,129 @@ function selectControl({ name, label, value, options }) {
 function levelPill(level) {
   if (!level) return null;
   return element('span', { className: 'status-pill', text: level, attrs: { 'aria-label': `Estimated level ${level}` } });
+}
+
+// Reading level confirmation (user-created texts only, not imports or
+// community copies). The backend owns detection (POST /api/reading/user-text
+// returns { level } from the existing analyzer estimate); this flow never
+// invents a level — it only presents created.level for confirmation.
+// Language: surrounding copy on this page is English ("Add your own text",
+// "Graded Reading"), so the confirm uses English ("We detected level X…,
+// do you agree?") with Yes/No, not the Spanish literal.
+// No server-side level-edit endpoint exists (gradedReader routes offer only
+// POST user-text + PUT progress/translations), so a changed choice is saved
+// as a local presentation override into the existing level field display
+// (localStorage, no schema change, no server change). Library + reader below
+// read through effectiveReadingLevel().
+const READING_LEVEL_OVERRIDE_PREFIX = 'jlt-reading-level-override-';
+
+function normalizeDetectedReadingLevel(value) {
+  const level = String(value || '').trim().toUpperCase();
+  return LEVELS.includes(level) ? level : null;
+}
+
+function readingOverrideKey(id) {
+  return `${READING_LEVEL_OVERRIDE_PREFIX}${Number(id)}`;
+}
+
+function effectiveReadingLevel(id, serverLevel) {
+  try {
+    if (id === undefined || id === null) return normalizeDetectedReadingLevel(serverLevel);
+    const stored = window.localStorage.getItem(readingOverrideKey(id));
+    if (stored === null) return normalizeDetectedReadingLevel(serverLevel);
+    if (stored === '') return null;
+    return normalizeDetectedReadingLevel(stored) || normalizeDetectedReadingLevel(serverLevel);
+  } catch {
+    return normalizeDetectedReadingLevel(serverLevel);
+  }
+}
+
+function saveReadingLevelOverride(id, chosen) {
+  // chosen: 'N5'..'N1' or '' for no level / not sure (model supports null
+  // for short/grammar-only texts). Stored locally; the server row is untouched.
+  try {
+    if (id === undefined || id === null) return;
+    window.localStorage.setItem(readingOverrideKey(id), String(chosen || ''));
+  } catch { /* override is best-effort */ }
+}
+
+function openReadingLevelSelector({ detected, textId, onSaved }) {
+  const select = element('select', {
+    className: 'field-control sm:col-span-2',
+    attrs: { 'aria-label': 'Choose the reading level' }
+  }, [
+    ...LEVELS.map((level) => element('option', {
+      text: level,
+      attrs: { value: level, ...(level === detected ? { selected: '' } : {}) }
+    })),
+    element('option', {
+      text: 'No level / Not sure',
+      attrs: { value: '', ...(detected ? {} : { selected: '' }) }
+    })
+  ]);
+  openDialog({
+    title: 'Choose the reading level',
+    description: detected
+      ? `You disagreed with the detected level ${detected}. Pick the level to show for this text (N5–N1, or no level if unsure).`
+      : 'Pick the level to show for this text (N5–N1, or no level if unsure).',
+    content: [
+      element('label', { className: 'grid gap-1.5 sm:col-span-2' }, [
+        element('span', { className: 'text-sm font-semibold text-ink', text: 'Reading level' }),
+        select
+      ])
+    ],
+    submitLabel: 'Save chosen level',
+    pendingLabel: 'Saving…',
+    onSubmit: async (form, close) => {
+      const chosen = String(select.value || '').trim().toUpperCase();
+      const normalized = LEVELS.includes(chosen) ? chosen : '';
+      saveReadingLevelOverride(textId, normalized);
+      showToast(normalized ? `Level saved: ${normalized}.` : 'Saved without a level.');
+      close();
+      if (typeof onSaved === 'function') onSaved(normalized || null);
+    }
+  });
+}
+
+function askReadingLevelConfirm(created, { onDone } = {}) {
+  const textId = Number(created?.id);
+  const detected = normalizeDetectedReadingLevel(created?.level);
+  const finish = (effective) => {
+    if (typeof onDone === 'function') onDone(effective);
+  };
+  // Confirmation dialog with Yes/No (progressive disclosure: compact Yes/No
+  // first, selector only when the learner disagrees). Existing UI primitives
+  // only (openDialog + real buttons), responsive + focus-trapped by ui.js.
+  const yesButton = element('button', {
+    className: 'button-primary min-h-11 px-5 py-2.5 text-sm font-semibold',
+    text: detected ? `Yes, keep ${detected}` : 'Yes, keep without a level',
+    attrs: { type: 'button', 'aria-label': detected ? `Yes, keep detected level ${detected}` : 'Yes, keep without a level' }
+  });
+  const noButton = element('button', {
+    className: 'button-secondary min-h-11 px-5 py-2.5 text-sm font-semibold',
+    text: 'No, choose another',
+    attrs: { type: 'button', 'aria-label': 'No, choose a different level' }
+  });
+  const closeConfirm = openDialog({
+    title: detected ? `We detected level ${detected} in this text. Do you agree?` : 'We could not determine a level for this text. Do you agree?',
+    description: detected
+      ? 'The level comes from automatic analysis and is often strict. Yes keeps it. No lets you choose N5–N1 or no level.'
+      : 'Short or grammar-only texts carry no level instead of a misleading badge. Yes keeps it without a level. No lets you choose N5–N1.',
+    content: [
+      element('div', { className: 'flex flex-col gap-2 sm:col-span-2 sm:flex-row' }, [yesButton, noButton])
+    ],
+    showFooter: false,
+    submitLabel: null
+  });
+  yesButton.addEventListener('click', () => {
+    try { closeConfirm(); } catch { /* close is best-effort */ }
+    finish(detected);
+  });
+  noButton.addEventListener('click', () => {
+    try { closeConfirm(); } catch { /* close is best-effort */ }
+    openReadingLevelSelector({ detected, textId, onSaved: (chosen) => finish(chosen) });
+  });
+  return closeConfirm;
 }
 
 // ---------------------------------------------------------------- library
@@ -107,9 +231,15 @@ async function renderLibraryView(container) {
   function renderGrid(data, currentPage) {
     const items = Array.isArray(data?.items) ? data.items : [];
     if (!items.length) {
+      // Filter-aware empty state: an active source/level filter that matches
+      // nothing is a different situation from an empty library — say which.
+      const sourceLabel = sourceSelectNode.value ? (SOURCES.find((entry) => entry.value === sourceSelectNode.value)?.label || sourceSelectNode.value) : null;
       gridWrap.replaceChildren(emptyState({
-        title: 'No reading texts yet',
-        description: 'Import from Aozora, or paste your own text to start reading.'
+        title: sourceLabel ? `No ${sourceLabel} texts yet` : 'No reading texts yet',
+        description: sourceLabel
+          ? `Nothing from ${sourceLabel} in your library yet. Use Import texts or paste a link above.`
+          : 'Import from Aozora, or paste your own text to start reading.',
+        action: element('a', { className: 'button-primary inline-flex min-h-11 items-center justify-center px-5 py-2.5 text-sm font-semibold', text: 'Open Analyzer', attrs: { href: '#analyzer' } })
       }));
       return;
     }
@@ -126,7 +256,7 @@ async function renderLibraryView(container) {
       }, [
         element('div', { className: 'flex items-center justify-between gap-2' }, [
           element('span', { className: 'text-xs uppercase tracking-wide text-muted', text: item.sourceType || 'user' }),
-          levelPill(item.level) || element('span', { className: 'text-xs text-muted', text: '—' })
+          levelPill(effectiveReadingLevel(item.id, item.level)) || element('span', { className: 'text-xs text-muted', text: '—' })
         ]),
         element('p', { className: 'font-semibold text-ink', text: item.title }),
         element('p', { className: 'text-xs leading-5 text-muted', text: `${Number(item.characterCount || 0).toLocaleString()} characters · you know ${known}% of its kanji` })
@@ -169,27 +299,9 @@ async function renderLibraryView(container) {
 
   // NHK Easy import was retired: NHK discontinued its public feed, so only
   // Aozora remains as an importable source (plus pasting your own text).
-  // Imports run in the background (a full import classifies every text and
-  // takes minutes), so this polls the library until the new rows land.
-  let importPollTimer = null;
-  async function pollLibraryForImports(sourceType, baseline, attempt = 0) {
-    if (importPollTimer) window.clearTimeout(importPollTimer);
-    importPollTimer = null;
-    if (attempt >= 24) {
-      showToast('Import is taking longer than expected — check back in a bit.');
-      return;
-    }
-    try {
-      const data = await listReadingLibrary({ source: sourceType, page: 1, limit: 1 });
-      if (Number(data?.total || 0) > baseline) {
-        refresh(1);
-        showToast('Import finished — new texts are in your library.');
-        return;
-      }
-    } catch { /* transient failures must not stop the poll */ }
-    importPollTimer = window.setTimeout(() => { pollLibraryForImports(sourceType, baseline, attempt + 1); }, 15000);
-  }
-
+  // Imports run inside the request and answer with honest counts (the old
+  // fire-and-forget background jobs silently never finished on serverless),
+  // so the library refreshes straight from the response — no blind polling.
   const importTexts = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Import texts', attrs: { type: 'button' } });
   importTexts.addEventListener('click', () => withPendingAction(importTexts, async () => {
     let preview = null;
@@ -209,8 +321,9 @@ async function renderLibraryView(container) {
 
   // Pasted-link import: the user brings their own work page (Aozora card or
   // Hukumusume story). The link is shape-checked here for instant feedback
-  // and re-checked server-side; analysis still takes ~a minute, so this
-  // enqueues like bulk import.
+  // and re-checked server-side; the import completes inside the request and
+  // answers with the result, so failures surface honestly instead of
+  // vanishing into a background job.
   const linkInput = element('input', {
     className: 'field-control',
     attrs: { type: 'url', inputmode: 'url', placeholder: 'Paste a work link…', 'aria-label': 'Work page link' }
@@ -224,21 +337,23 @@ async function renderLibraryView(container) {
       showToast('Paste an Aozora card link or a Hukumusume story link.', 'error');
       return;
     }
-    const sourceType = aozoraMatch ? 'aozora' : 'hukumusume';
     try {
-      const before = await listReadingLibrary({ source: sourceType, page: 1, limit: 1 }).catch(() => null);
       const result = await importReadingUrl((aozoraMatch || hukuMatch)[0]);
-      if (result?.status !== 'accepted') {
-        showToast('Import did not start. Please try again.', 'error');
+      if (result?.status !== 'ok' || !Number(result?.textsImported || 0)) {
+        showToast('Import finished with no new text — it may already be in your library.', 'warning');
+        await refresh(1);
         return;
       }
       linkInput.value = '';
-      showToast('Import started — the text will appear below when ready.');
-      pollLibraryForImports(sourceType, Number(before?.total || 0));
+      showToast('Import finished — the text is in your library.');
+      await refresh(1);
     } catch (error) {
-      showToast(error?.message || 'Could not reach the API. Check your connection.', 'error');
+      // A function timeout can still leave a committed partial import
+      // behind: refresh first so landed rows show, then explain the retry.
+      await refresh(1).catch(() => {});
+      showToast(error?.message || 'Import failed. Check the library — retry for anything missing.', 'error');
     }
-  }, { pendingLabel: 'Adding…' }));
+  }, { pendingLabel: 'Importing…' }));
 
   // Picker: choose WHAT to import, from either source. Group selects switch
   // the work index (kana groups for Aozora, months for Hukumusume) so
@@ -356,7 +471,7 @@ async function renderLibraryView(container) {
     clear.addEventListener('click', () => { boxes.forEach(({ checkbox }) => { checkbox.checked = false; }); });
     openDialog({
       title: 'Import texts',
-      description: 'Pick a source and group, then choose the works to import. Each one is classified and added to your library in the background.',
+      description: 'Pick a source and group, then choose the works to import. Each one is classified and added before the request finishes.',
       content: [
         sourceSelect,
         groupSelect,
@@ -366,22 +481,27 @@ async function renderLibraryView(container) {
         countNote
       ],
       submitLabel: 'Import selected',
-      pendingLabel: 'Starting…',
+      pendingLabel: 'Importing…',
       onSubmit: async (form, close) => {
         const selected = [...form.querySelectorAll('input[type="checkbox"]:checked')].map((node) => node.value).filter(Boolean);
         if (!selected.length) {
           showToast('Select at least one work.', 'error');
           return;
         }
-        const before = await listReadingLibrary({ source: currentSource, page: 1, limit: 1 }).catch(() => null);
-        const result = await importReadingSources(currentSource, { urls: selected, index: currentIndex });
-        if (result?.status !== 'accepted') {
-          showToast('Import did not start. Please try again.', 'error');
-          return;
+        try {
+          const result = await importReadingSources(currentSource, { urls: selected, index: currentIndex });
+          close();
+          const added = Number(result?.textsImported || 0);
+          const checked = Number(result?.imported || selected.length);
+          await refresh(1);
+          showToast(added > 0 ? `Import finished — ${added} new text${added === 1 ? '' : 's'} in your library.` : `Checked ${checked} work${checked === 1 ? '' : 's'} — nothing new (already imported or unreadable).`, added > 0 ? 'success' : 'warning');
+        } catch (error) {
+          // Partial imports commit per item server-side: refresh so landed
+          // rows show, then explain that retrying resumes the rest.
+          close();
+          await refresh(1).catch(() => {});
+          showToast(error?.message || 'Import failed partway. Check the library — retry for anything missing.', 'error');
         }
-        close();
-        showToast('Import started — new texts will appear below as they arrive.');
-        pollLibraryForImports(currentSource, Number(before?.total || 0));
       }
     });
     renderGroupOptions();
@@ -436,8 +556,26 @@ async function renderLibraryView(container) {
       window.clearTimeout(progressTimer);
       progressFill.style.width = '100%';
       progressLabel.textContent = '100%';
-      showToast('Text saved. Opening the reader.');
-      window.location.hash = `#reading?id=${Number(created?.id)}`;
+      // Level confirmation for user-created texts only (this paste flow —
+      // never imports or community copies): present the existing estimate
+      // (created.level) with Yes/No; Yes keeps it, No opens the N5–N1 +
+      // no-level selector and saves the chosen value locally into the
+      // existing level field display. The text is already saved server-side,
+      // so dismissing still opens the reader (no data loss).
+      const openReader = () => {
+        window.location.hash = `#reading?id=${Number(created?.id)}`;
+      };
+      try {
+        askReadingLevelConfirm(created, {
+          onDone: () => {
+            showToast('Text saved. Opening the reader.');
+            openReader();
+          }
+        });
+      } catch {
+        showToast('Text saved. Opening the reader.');
+        openReader();
+      }
     }).catch((error) => {
       window.clearTimeout(progressTimer);
       showToast(error?.message || 'Unable to save the text.', 'error');
@@ -452,7 +590,6 @@ async function renderLibraryView(container) {
 
   container.replaceChildren(element('section', { className: 'mx-auto w-full max-w-6xl' }, [
     pageHeader({
-      eyebrow: 'Library',
       title: 'Graded Reading',
       description: 'Read real Japanese matched to your level. Tap annotated words to study them.'
     }),
@@ -1200,10 +1337,17 @@ async function renderReader(container, textId) {
   });
   fontSlider.addEventListener('input', () => { storyBlocks.style.fontSize = `${fontSlider.value}px`; });
 
-  // Community publish (owners only): snapshots text + translations to the
-  // Texts feed. Shared library rows hide it (data.mine false, server 404s).
+  // Community publish (owners only, own-created texts only): snapshots text
+  // + translations to the Texts feed. Shared library rows hide it
+  // (data.mine false, server 404s), and so do copies imported from
+  // Community (server 400s): re-publishing imports would amplify one text
+  // into unbounded new publications.
+  const importedCopy = data?.metadata?.importedFromPublication !== undefined
+    && data?.metadata?.importedFromPublication !== null;
   const publishButton = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Publish', attrs: { type: 'button', 'aria-label': `Publish ${data.title} to Community` } });
-  publishButton.hidden = data.mine !== true;
+  publishButton.hidden = !(data.mine === true || data.mine === 1) || importedCopy;
+  const importNote = element('p', { className: 'text-xs text-muted', text: 'Imported copies can’t be republished to Community.' });
+  importNote.hidden = !importedCopy;
   publishButton.addEventListener('click', () => {
     const titleInput = element('input', { className: 'field-control', attrs: { value: data.title || '', maxlength: '200', 'aria-label': 'Publication title' } });
     const descriptionInput = element('textarea', { className: 'field-control min-h-16 w-full', attrs: { rows: '2', maxlength: '500', placeholder: 'Short description', 'aria-label': 'Publication description' } });
@@ -1286,7 +1430,8 @@ async function renderReader(container, textId) {
         element('span', { className: 'text-sm font-semibold', text: 'A', attrs: { 'aria-hidden': 'true' } })
       ]),
       translateButton,
-      publishButton
+      publishButton,
+      importNote
     ])
   ]);
 
@@ -1352,7 +1497,7 @@ async function renderReader(container, textId) {
   ]);
   finishButton.addEventListener('click', () => withPendingAction(finishButton, async () => {
     try {
-      await updateReadingProgress(textId, { position: Math.max(1, total), completed: true, timeSpentSeconds: accumulatedSeconds() });
+      await updateReadingProgress(textId, { position: Math.max(1, total), completed: true, timeSpentSeconds: accumulatedSeconds(), today: localDayKey() });
       completed = true;
       finishButton.querySelector('span').textContent = 'Finished';
       finishButton.disabled = true;
@@ -1413,7 +1558,7 @@ async function renderReader(container, textId) {
     let furthest = -1;
     seen.forEach((index) => { if (index > furthest) furthest = index; });
     const position = furthest >= 0 ? Math.max(1, Math.min(total, paragraphs[furthest].end)) : 1;
-    updateReadingProgress(textId, { position, timeSpentSeconds: accumulatedSeconds(), completed: false }).catch(() => { /* best-effort autosave */ });
+    updateReadingProgress(textId, { position, timeSpentSeconds: accumulatedSeconds(), completed: false, today: localDayKey() }).catch(() => { /* best-effort autosave */ });
   }
 
   const onScroll = () => {
@@ -1428,7 +1573,7 @@ async function renderReader(container, textId) {
     element('a', { className: 'text-sm font-medium text-muted underline-offset-4 hover:text-ink hover:underline', text: '← Back to library', attrs: { href: '#reading' } }),
     element('header', { className: 'mt-2 flex flex-wrap items-center gap-x-3 gap-y-2' }, [
       element('h1', { className: 'min-w-0 flex-1 break-words text-xl font-semibold text-ink', text: data.title }),
-      levelPill(data.level) || element('span', { className: 'text-xs text-muted', text: data.sourceType || 'user' })
+      levelPill(effectiveReadingLevel(textId, data.level)) || element('span', { className: 'text-xs text-muted', text: data.sourceType || 'user' })
     ]),
     headerCard,
     translationsNote,
@@ -1463,7 +1608,7 @@ async function renderProgressView(container) {
     data = await listReadingProgress({ limit: 50 });
   } catch (error) {
     container.replaceChildren(element('section', { className: 'mx-auto w-full max-w-3xl' }, [
-      element('a', { className: 'button-secondary inline-flex min-h-9 items-center px-3 py-1.5 text-xs', text: 'Back to library', attrs: { href: '#reading' } }),
+      element('a', { className: 'text-sm font-medium text-muted underline-offset-4 hover:text-ink hover:underline', text: '← Back to library', attrs: { href: '#reading' } }),
       errorState(error, () => renderProgressView(container))
     ]));
     return;
@@ -1471,20 +1616,48 @@ async function renderProgressView(container) {
 
   const items = Array.isArray(data?.items) ? data.items : [];
   const completedItems = items.filter((item) => item.completedAt);
-  const now = Date.now();
-  const thirtyDaysAgo = now - 30 * 86400000;
-  const charsAllTime = completedItems.reduce((sum, item) => sum + Number(item.characters || 0), 0);
-  const chars30Days = completedItems
-    .filter((item) => new Date(item.completedAt).getTime() >= thirtyDaysAgo)
-    .reduce((sum, item) => sum + Number(item.characters || 0), 0);
+  const dayKey = (value) => {
+    try {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return null;
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    } catch {
+      return null;
+    }
+  };
+  // Time-based stats (V6.0): reading measures minutes, not characters.
+  // Daily attribution comes from the server's per-day series (accurate);
+  // the all-time total falls back to cumulative progress seconds.
+  const daily = Array.isArray(data?.daily) ? data.daily : [];
+  const secondsByDate = new Map(daily.map((entry) => [String(entry.date).slice(0, 10), Number(entry.seconds || 0)]));
+  const todayKey = dayKey(Date.now());
   const minutesTotal = Math.round(items.reduce((sum, item) => sum + Number(item.timeSpentSeconds || 0), 0) / 60);
+  const minutesToday = Math.round((secondsByDate.get(todayKey) || 0) / 60);
+  const thirtyDaysAgoKey = (() => {
+    const date = new Date();
+    date.setDate(date.getDate() - 30);
+    return dayKey(date.getTime());
+  })();
+  const minutes30Days = Math.round([...secondsByDate.entries()]
+    .filter(([date]) => !thirtyDaysAgoKey || date >= thirtyDaysAgoKey)
+    .reduce((sum, [, seconds]) => sum + seconds, 0) / 60);
 
-  const weekly = Array.from({ length: 8 }, (_, index) => ({ weeksAgo: index, chars: 0 }));
-  for (const item of completedItems) {
-    const weeksAgo = Math.floor((now - new Date(item.completedAt).getTime()) / (7 * 86400000));
-    if (weeksAgo >= 0 && weeksAgo < 8) weekly[weeksAgo].chars += Number(item.characters || 0);
+  const weekly = Array.from({ length: 8 }, (_, index) => ({ weeksAgo: index, minutes: 0 }));
+  if (secondsByDate.size) {
+    for (const [date, seconds] of secondsByDate) {
+      const weeksAgo = Math.floor((Date.now() - new Date(`${date}T00:00:00`).getTime()) / (7 * 86400000));
+      if (weeksAgo >= 0 && weeksAgo < 8) weekly[weeksAgo].minutes += seconds / 60;
+    }
+  } else {
+    // Legacy data without a daily series: attribute cumulative minutes to
+    // completion weeks so old progress still paints something honest.
+    for (const item of completedItems) {
+      if (!item.completedAt) continue;
+      const weeksAgo = Math.floor((Date.now() - new Date(item.completedAt).getTime()) / (7 * 86400000));
+      if (weeksAgo >= 0 && weeksAgo < 8) weekly[weeksAgo].minutes += Number(item.timeSpentSeconds || 0) / 60;
+    }
   }
-  const maxChars = Math.max(1, ...weekly.map((week) => week.chars));
+  const maxMinutes = Math.max(1, ...weekly.map((week) => week.minutes));
 
   const statCard = (label, value) => element('div', { className: 'surface p-4' }, [
     element('p', { className: 'text-xs uppercase tracking-wide text-muted', text: label }),
@@ -1492,27 +1665,26 @@ async function renderProgressView(container) {
   ]);
 
   container.replaceChildren(element('section', { className: 'mx-auto w-full max-w-4xl' }, [
-    element('a', { className: 'button-secondary inline-flex min-h-9 items-center px-3 py-1.5 text-xs', text: 'Back to library', attrs: { href: '#reading' } }),
+    element('a', { className: 'text-sm font-medium text-muted underline-offset-4 hover:text-ink hover:underline', text: '← Back to library', attrs: { href: '#reading' } }),
     pageHeader({
-      eyebrow: 'Statistics',
       title: 'Reading progress',
-      description: 'Your reading activity. Kanji coverage lives on the Statistics page.'
+      description: 'Your reading activity in minutes. Kanji coverage lives on the Statistics page.'
     }),
     element('div', { className: 'mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4' }, [
       statCard('Texts completed', String(completedItems.length)),
-      statCard('Characters read', charsAllTime.toLocaleString()),
-      statCard('Characters · last 30 days', chars30Days.toLocaleString()),
-      statCard('Time reading', `${minutesTotal} min`)
+      statCard('Time today', `${minutesToday} min`),
+      statCard('Time · last 30 days', `${minutes30Days} min`),
+      statCard('Time reading · total', `${minutesTotal} min`)
     ]),
     element('div', { className: 'surface mt-4 p-5' }, [
       element('h2', { className: 'font-semibold text-ink', text: 'Last 8 weeks' }),
-      element('p', { className: 'mt-1 text-xs text-muted', text: 'Characters completed per week (newest first).' }),
+      element('p', { className: 'mt-1 text-xs text-muted', text: 'Minutes read per week (newest first).' }),
       element('ul', { className: 'mt-4 grid gap-2' }, weekly.map((week) => element('li', { className: 'flex items-center gap-3 text-xs text-muted' }, [
         element('span', { className: 'w-14 shrink-0', text: week.weeksAgo === 0 ? 'This week' : `${week.weeksAgo}w ago` }),
         element('div', { className: 'h-2.5 flex-1 overflow-hidden rounded-full bg-ink/10' }, [
-          element('div', { className: 'h-full rounded-full bg-ink', attrs: { style: `width:${Math.round((week.chars / maxChars) * 100)}%` } })
+          element('div', { className: 'h-full rounded-full bg-ink', attrs: { style: `width:${Math.round((week.minutes / maxMinutes) * 100)}%` } })
         ]),
-        element('span', { className: 'w-16 shrink-0 text-right', text: week.chars.toLocaleString() })
+        element('span', { className: 'w-16 shrink-0 text-right', text: `${Math.round(week.minutes)} min` })
       ])))
     ]),
     element('p', { className: 'mt-4 text-xs text-muted' }, [

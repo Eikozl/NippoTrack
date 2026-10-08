@@ -1,5 +1,5 @@
 const pool = require('../config/db');
-const { sendRouteError } = require('../errors/http');
+const { ValidationError, sendRouteError } = require('../errors/http');
 const { getProfile, setProfile } = require('../services/profile');
 
 async function getProfileState(req, res) {
@@ -13,7 +13,7 @@ async function getProfileState(req, res) {
 async function putProfile(req, res) {
   try {
     if (!req.body || !Object.prototype.hasOwnProperty.call(req.body, 'display_name')) {
-      return res.status(400).json({ error: 'display_name is required (text or null).' });
+      throw new ValidationError('display_name is required (text or null).');
     }
     return res.json(await setProfile(pool, req.user.id, req.user.email, req.body.display_name));
   } catch (error) {

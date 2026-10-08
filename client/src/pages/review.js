@@ -3,6 +3,7 @@ import { kanjiReferenceRoute } from '../kanjiReference';
 import { icon } from '../icons';
 import { element, emptyState, errorState, loadingState, openDetailModal, openDialog, confirmDialog, pageHeader, setActionPending, showToast, withPendingAction } from '../ui';
 import { mountKanjiWriting } from '../kanjiWriting.js';
+import { applySessionContext } from '../sessionContext.js';
 
 const TYPE_ORDER = ['kanji', 'vocabulary', 'grammar'];
 const TYPE_LABEL = { kanji: 'Kanji', vocabulary: 'Vocabulary', grammar: 'Grammar' };
@@ -46,10 +47,15 @@ let detachReviewKeys = null;
 // - Warm the voice list (getVoices is empty until voiceschanged fires).
 // - Defer speak after cancel so the utterance is not dropped.
 // - Surface a missing Japanese voice with guidance instead of silence.
+// - Rapid-press cooldown: overlapping speak presses within the window are
+//   ignored silently (no red toast). The "Audio playback unavailable" toast
+//   below fires only on genuine playback problems, never on cooldown.
 let activeUtterance = null;
 let cachedVoices = null;
 let voicesWarmAttached = false;
 let pendingSpeakTimer = null;
+let lastSpeakAt = 0;
+const SPEAK_COOLDOWN_MS = 600;
 
 function warmCachedVoices() {
   try {
@@ -228,6 +234,89 @@ function isWeak(item) {
   return item.evidenceStrength === 'weak';
 }
 
+// V5.7 multiple-choice recognition (no AI, zero queries). Distractors come
+// from the in-memory session queue only (same entity type, same JLPT band
+// when both sides carry one): same-user wording, plausible by construction,
+// never cross-user. Both the distractor subset and the final order are drawn
+// fresh per card, so faces and positions change every time and memorizing
+// patterns can never reveal the answer.
+function shuffleInPlace(entries) {
+  for (let i = entries.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [entries[i], entries[j]] = [entries[j], entries[i]];
+  }
+  return entries;
+}
+
+function normOptionText(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+// V5.7 gloss sanity: multiple-choice needs complete glosses. User data can
+// hold fragments ("Sino-"), links, or symbol-only strings (e.g. a saved
+// "…" or "～") — quizzing on those (or offering them as options) is
+// meaningless, so they are excluded. Tight rules only: edge dashes (the
+// "Sino-" case), URLs, multiline breaks, and strings with no letter,
+// number, or CJK character at all. Short real words ("I", "of") stay valid.
+function isUsableMeaning(value) {
+  const text = String(value || '').trim();
+  if (!text) return false;
+  if (/[-–—―]$/.test(text) || /^[-–—―]/.test(text)) return false;
+  if (/https?:\/\/|www\./i.test(text)) return false;
+  if (/[\r\n]/.test(text)) return false;
+  if (!/[\p{L}\p{N}]/u.test(text)) return false;
+  return true;
+}
+
+function buildRecognitionOptions(item, queue) {
+  const wantMeaning = String(item?.meaning || '').trim();
+  const wantDisplay = String(item?.display || '').trim();
+  if (!wantMeaning || !isUsableMeaning(wantMeaning) || !item?.entityType) return null;
+  const seen = new Set([normOptionText(wantMeaning)]);
+  const pool = [];
+  const banded = [];
+  for (const entry of Array.isArray(queue) ? queue : []) {
+    if (!entry || entry.entityType !== item.entityType) continue;
+    if (Number(entry.entityId) === Number(item.entityId)) continue;
+    const meaning = String(entry.meaning || '').trim();
+    if (!meaning || !isUsableMeaning(meaning) || seen.has(normOptionText(meaning))) continue;
+    if (wantDisplay && normOptionText(entry.display) === normOptionText(wantDisplay)) continue;
+    seen.add(normOptionText(meaning));
+    pool.push({ meaning });
+    if (item.jlpt && entry.jlpt && entry.jlpt === item.jlpt) banded.push({ meaning });
+  }
+  // Same JLPT band only when it yields a full set; otherwise same-type pool.
+  // Fewer than 3 usable distractors → null and the card keeps its reveal flow.
+  const source = banded.length >= 3 ? banded : pool;
+  if (source.length < 3) return null;
+  const picked = shuffleInPlace(source.slice()).slice(0, 3);
+  const options = shuffleInPlace([{ meaning: wantMeaning, answer: true }, ...picked.map((entry) => ({ meaning: entry.meaning, answer: false }))]);
+  return { options };
+}
+
+// V5.7 performance classification: mistakes feed the existing suggested
+// grade only — scheduling stays with Again/Hard/Good via the normal handler.
+function suggestedGradeForMistakes(mistakes) {
+  if (mistakes <= 1) return 'Good';
+  if (mistakes === 2) return 'Hard';
+  return 'Again';
+}
+
+// Relative day label for honest history ("Last failed 4 days ago").
+// Unparseable input yields null and the line is hidden — never "NaN days".
+function daysAgoText(iso) {
+  try {
+    const then = Date.parse(String(iso).slice(0, 10) + 'T00:00:00Z');
+    if (Number.isNaN(then)) return null;
+    const now = new Date();
+    const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const days = Math.round((Date.parse(todayKey + 'T00:00:00Z') - then) / 86400000);
+    if (days <= 0) return 'today';
+    if (days === 1) return 'yesterday';
+    return `${days} days ago`;
+  } catch { return null; }
+}
+
 // Immersion hand-off: create-session redirects to `#review?reviewSessionId=…`.
 function reviewSessionIdFromHash() {
   try {
@@ -264,6 +353,7 @@ export async function renderReview(container) {
   let revealed = false;
   let sessionId = null;
   let gradeButtons = [];
+  let recognitionOptionButtons = [];
   let graded = [];
   let localDetach = null;
 
@@ -271,18 +361,24 @@ export async function renderReview(container) {
   // the freshly created OPEN review session (freshly enrolled items carry no
   // review_events, so date-range discovery cannot surface them yet). Consumed
   // exactly once; any mismatch falls back to the informational banner below.
+  // V5.6: the Study Now dashboard uses the same mechanism with its own key
+  // ('jlt-study-now-queue', due items oldest-first). Either key resumes
+  // straight into REVIEWING — no setup step.
   function tryResumeImmersionQueue() {
     const handoffSessionId = reviewSessionIdFromHash();
     if (!handoffSessionId) return false;
     try {
-      const raw = typeof window !== 'undefined' && window.sessionStorage
-        ? window.sessionStorage.getItem('jlt-immersion-review-queue')
-        : null;
+      const store = typeof window !== 'undefined' && window.sessionStorage ? window.sessionStorage : null;
+      if (!store) return false;
+      const raw = store.getItem('jlt-study-now-queue') || store.getItem('jlt-immersion-review-queue');
       if (!raw) return false;
       const parsed = JSON.parse(raw);
       const items = Array.isArray(parsed?.items) ? parsed.items : [];
       if (Number(parsed?.reviewSessionId) !== Number(handoffSessionId) || !items.length) return false;
-      window.sessionStorage.removeItem('jlt-immersion-review-queue');
+      try {
+        store.removeItem('jlt-study-now-queue');
+        store.removeItem('jlt-immersion-review-queue');
+      } catch { /* removal is best-effort */ }
       sessionId = Number(handoffSessionId);
       queue = items;
       currentIndex = 0;
@@ -312,9 +408,8 @@ export async function renderReview(container) {
   const heroSurface = element('div', { className: 'surface p-5 sm:p-8' });
 
   const introBlock = element('div', {}, [
-    element('p', { className: 'eyebrow', text: 'Review' }),
     element('h2', { className: 'mt-2 text-2xl font-semibold tracking-tight text-ink sm:text-3xl', text: 'Want to review your JLPT study?', attrs: { tabindex: '-1' } }),
-    element('p', { className: 'mt-3 max-w-2xl text-sm leading-6 text-muted', text: 'Revisit recent study activity with focused recall, one item at a time. Use self-assessment to note how each item felt and decide what to look at again.' })
+    element('p', { className: 'mt-3 max-w-2xl text-sm leading-6 text-muted', text: 'Short recall now saves re-study later. Again, Hard and Good only set timing — pick how each item felt and keep going.' })
   ]);
   // Immersion hand-off banner: when mounted via a create-session redirect,
   // announce the enrollment and let the normal flow take over. This page
@@ -323,9 +418,19 @@ export async function renderReview(container) {
   // the freshly enrolled items, so nothing extra is routed anywhere.
   const fromImmersionId = reviewSessionIdFromHash();
   if (fromImmersionId) {
+    // V5.6: Study Now hand-offs carry &from=study-now — same auto-resume,
+    // different origin copy. Unknown values keep the immersion wording.
+    let fromParam = null;
+    try {
+      const hash = typeof window !== 'undefined' && window.location ? window.location.hash || '' : '';
+      const queryIndex = hash.indexOf('?');
+      if (queryIndex !== -1) fromParam = new URLSearchParams(hash.slice(queryIndex + 1)).get('from');
+    } catch { fromParam = null; }
     introBlock.appendChild(element('p', {
       className: 'mt-4 rounded-xl border border-stone bg-paper px-3 py-2 text-sm leading-6 text-ink',
-      text: 'Session created from your text — its items are enrolled for today. Start a review for Today to study them.',
+      text: fromParam === 'study-now'
+        ? 'Your due items are queued — starting your session now.'
+        : 'Session created from your text — its items are enrolled for today. Start a review for Today to study them.',
       attrs: { role: 'status' }
     }));
   }
@@ -592,6 +697,13 @@ export async function renderReview(container) {
   }
 
   let historyHasContent = false;
+  // V5.7: history/difficult/patterns belong to the Review entry (INTRO)
+  // only — never below an active session. Async loaders can resolve after
+  // the learner already entered REVIEWING (instant with auto-handoff), so
+  // every reveal is gated on the live stage instead of trusting call order.
+  function revealIntroSection(block) {
+    block.hidden = stage !== 'INTRO';
+  }
   function clearHistoryButton() {
     const button = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: 'Clear history', attrs: { type: 'button', 'aria-label': 'Clear all review history' } });
     button.addEventListener('click', () => {
@@ -612,7 +724,7 @@ export async function renderReview(container) {
   async function loadHistory() {
     if (!historyHasContent) {
       historyBlock.replaceChildren(loadingState('Loading…'));
-      historyBlock.hidden = false;
+      revealIntroSection(historyBlock);
     }
     try {
       const data = await apiRequest('/api/review/sessions?limit=10');
@@ -630,7 +742,7 @@ export async function renderReview(container) {
           element('p', { className: 'mt-1 text-sm text-muted', text: 'When you studied, how much you reviewed, and how it felt.' }),
           element('p', { className: 'mt-2 text-sm text-muted', text: 'No review sessions yet. Finish a review to see it here.' })
         );
-        historyBlock.hidden = false;
+        revealIntroSection(historyBlock);
         historyHasContent = true;
         return;
       }
@@ -677,7 +789,7 @@ export async function renderReview(container) {
           return row;
         }))
       );
-      historyBlock.hidden = false;
+      revealIntroSection(historyBlock);
       historyHasContent = true;
     } catch (error) {
       if (historyHasContent) {
@@ -685,7 +797,7 @@ export async function renderReview(container) {
         return;
       }
       historyBlock.replaceChildren(errorState(error, loadHistory));
-      historyBlock.hidden = false;
+      revealIntroSection(historyBlock);
     }
   }
 
@@ -699,7 +811,7 @@ export async function renderReview(container) {
   patternsBlock.hidden = true;
 
   container.replaceChildren(element('section', {}, [
-    pageHeader({ eyebrow: 'Recall', title: 'Review', description: 'Choose recent activity and review it at a steady pace.' }),
+    pageHeader({ title: 'Review', description: 'Choose recent activity and review it at a steady pace.' }),
     heroSurface,
     summaryBar,
     candidatesBlock,
@@ -725,7 +837,7 @@ export async function renderReview(container) {
   async function loadDifficult() {
     if (!difficultHasContent) {
       difficultBlock.replaceChildren(loadingState('Loading…'));
-      difficultBlock.hidden = false;
+      revealIntroSection(difficultBlock);
     }
     try {
       const data = await apiRequest('/api/review/difficult');
@@ -741,7 +853,7 @@ export async function renderReview(container) {
           description,
           element('p', { className: 'mt-2 text-sm text-muted', text: 'No frequently difficult items yet. Keep reviewing to populate this section.' })
         );
-        difficultBlock.hidden = false;
+        revealIntroSection(difficultBlock);
         difficultHasContent = true;
         return;
       }
@@ -763,7 +875,7 @@ export async function renderReview(container) {
           ]);
         }))
       );
-      difficultBlock.hidden = false;
+      revealIntroSection(difficultBlock);
       difficultHasContent = true;
     } catch (error) {
       if (difficultHasContent) {
@@ -771,7 +883,7 @@ export async function renderReview(container) {
         return;
       }
       difficultBlock.replaceChildren(errorState(error, loadDifficult));
-      difficultBlock.hidden = false;
+      revealIntroSection(difficultBlock);
     }
   }
 
@@ -1072,6 +1184,17 @@ const CARD_TYPE_DESCRIPTIONS = {
   // voice when one is listed, slows the rate slightly for learners, and says
   // so out loud via toast when the platform cannot speak at all.
   function speakDisplay(text) {
+    // Cooldown tracking (no early return — speaks still coalesce via the
+    // pendingSpeakTimer + cancel path so rapid double-play keeps one live
+    // utterance and Kun/On switching replays immediately; only error toasts
+    // are gated). Overlapping/superseded utterances stay silent; genuine
+    // no-voice guidance is preserved.
+    let isRapidPress = false;
+    try {
+      const now = Date.now();
+      isRapidPress = Boolean(lastSpeakAt) && (now - lastSpeakAt < SPEAK_COOLDOWN_MS);
+      lastSpeakAt = now;
+    } catch { /* cooldown tracking is best-effort */ }
     try {
       if (typeof window === 'undefined' || !window.speechSynthesis) {
         showToast('Audio is not supported in this browser.', 'error');
@@ -1089,15 +1212,20 @@ const CARD_TYPE_DESCRIPTIONS = {
       } catch { /* handler attach is best-effort */ }
       try {
         utterance.onerror = () => {
+          const wasCurrent = activeUtterance === utterance;
           clearIfCurrent();
+          if (!wasCurrent) return;
           try {
             const voices = readVoices(synthesis);
             if (voices.length && !hasJapaneseVoice(voices)) {
               showToast(japaneseVoiceGuidance(), 'error');
+            } else if (isRapidPress) {
+              return;
             } else {
               showToast('Audio playback is unavailable on this device right now.', 'error');
             }
           } catch {
+            if (isRapidPress) return;
             showToast('Audio playback is unavailable on this device right now.', 'error');
           }
         };
@@ -1138,6 +1266,7 @@ const CARD_TYPE_DESCRIPTIONS = {
             synthesis.speak(utterance);
           } catch {
             clearIfCurrent();
+            if (isRapidPress) return;
             showToast('Audio playback is unavailable on this device right now.', 'error');
           }
         }, 80);
@@ -1159,6 +1288,7 @@ const CARD_TYPE_DESCRIPTIONS = {
         beginSpeaking(true);
       });
     } catch {
+      if (isRapidPress) return;
       showToast('Audio playback is unavailable on this device right now.', 'error');
     }
   }
@@ -1212,7 +1342,7 @@ const CARD_TYPE_DESCRIPTIONS = {
           ]);
         }))
       );
-      patternsBlock.hidden = false;
+      revealIntroSection(patternsBlock);
     } catch {
       patternsBlock.hidden = true;
     }
@@ -1525,7 +1655,8 @@ const CARD_TYPE_DESCRIPTIONS = {
               reading: item.reading,
               meaning: item.meaning,
               ...(item.evidenceStrength ? { evidenceStrength: item.evidenceStrength } : {}),
-              ...(item.lastResult ? { lastResult: item.lastResult } : {})
+              ...(item.lastResult ? { lastResult: item.lastResult } : {}),
+              ...(Array.isArray(item.sources) ? { sources: item.sources.slice(0, 5) } : {})
             });
           }
         });
@@ -1541,7 +1672,7 @@ const CARD_TYPE_DESCRIPTIONS = {
           }
         });
         sessionId = session.id;
-        queue = picked;
+        queue = applySessionContext(picked, session);
         currentIndex = 0;
         revealed = false;
         graded = [];
@@ -1562,10 +1693,21 @@ const CARD_TYPE_DESCRIPTIONS = {
 
   function attachGradeKeys() {
     const handler = (event) => {
-      if (!['1', '2', '3'].includes(event.key)) return;
       const tag = document.activeElement?.tagName;
       if (tag && /INPUT|TEXTAREA|SELECT/.test(tag)) return;
-      if (stage !== 'REVIEWING' || !revealed) return;
+      if (stage !== 'REVIEWING') return;
+      // V5.7: 1-4 picks a recognition option while the answer is hidden;
+      // 1-3 grades once revealed. Mutually exclusive by the revealed flag.
+      if (!revealed && ['1', '2', '3', '4'].includes(event.key) && recognitionOptionButtons.length) {
+        const target = recognitionOptionButtons[Number(event.key) - 1];
+        if (target && !target.disabled) {
+          event.preventDefault();
+          target.click();
+        }
+        return;
+      }
+      if (!['1', '2', '3'].includes(event.key)) return;
+      if (!revealed) return;
       const target = gradeButtons[Number(event.key) - 1];
       if (target && !target.disabled) {
         event.preventDefault();
@@ -1577,11 +1719,52 @@ const CARD_TYPE_DESCRIPTIONS = {
     detachReviewKeys = localDetach;
   }
 
+  // V5.7 kanji readings: the speaker defaults to kun'yomi for single kanji
+  // (device TTS otherwise guesses, usually on'yomi) with an in-session
+  // toggle for on'yomi. Readings come from the existing kanji detail
+  // endpoint, cached per session mount; failures keep legacy behavior.
+  // Session-level preference, default kun.
+  let kanjiReadingChoice = 'kun';
+  const kanjiReadingsCache = new Map();
+
+  async function getKanjiReadings(entityId) {
+    const id = Number(entityId);
+    if (!Number.isInteger(id) || id <= 0) return null;
+    if (kanjiReadingsCache.has(id)) return kanjiReadingsCache.get(id);
+    try {
+      const detail = await apiRequest(`/api/kanji/${id}`);
+      const readings = {
+        onyomi: String(detail?.onyomi || '').trim() || null,
+        kunyomi: String(detail?.kunyomi || '').trim() || null
+      };
+      kanjiReadingsCache.set(id, readings.onyomi || readings.kunyomi ? readings : null);
+    } catch {
+      kanjiReadingsCache.set(id, null);
+    }
+    return kanjiReadingsCache.get(id);
+  }
+
+  // Stored readings list variants ("カン、ケン") or okurigana dots
+  // ("た.べる"): speak the first clean reading only.
+  function cleanKanjiReading(value) {
+    const first = String(value || '').split(/[、,・\s]/)[0] || '';
+    return first.replace(/\./g, '').trim() || null;
+  }
+
+  function pickKanjiReading(item, readings) {
+    const wantKun = kanjiReadingChoice !== 'on';
+    const primary = cleanKanjiReading(wantKun ? readings?.kunyomi : readings?.onyomi);
+    if (primary) return primary;
+    const fallback = cleanKanjiReading(wantKun ? readings?.onyomi : readings?.kunyomi);
+    return fallback || item.reading || item.display;
+  }
+
   function renderCard() {
     detachKeys();
     attachGradeKeys();
     revealed = false;
     gradeButtons = [];
+    recognitionOptionButtons = [];
     const total = queue.length;
     const item = queue[currentIndex];
     reviewingBlock.replaceChildren();
@@ -1615,7 +1798,18 @@ const CARD_TYPE_DESCRIPTIONS = {
     // would hand out the answer the listening exercise is asking for.
     const speakerLabel = cardType === 'audio' ? 'Play audio' : `Play ${item.display}`;
     const speakerButton = element('button', { className: 'icon-button shrink-0', attrs: { type: 'button', 'aria-label': speakerLabel } }, [icon('volume', { size: 20 })]);
-    speakerButton.addEventListener('click', () => { speakDisplay(item.display); });
+    // Single kanji are spoken with their recorded reading when known
+    // (preferring the kana reading over TTS-guessed kanji); the toggle
+    // below can switch it per session. Otherwise the recorded kana
+    // reading, else the display text.
+    const isSingleKanjiItem = item.entityType === 'kanji' && typeof item.display === 'string' && /^\p{Script=Han}$/u.test(item.display);
+    speakerButton.addEventListener('click', () => {
+      if (isSingleKanjiItem) {
+        const cached = kanjiReadingsCache.get(Number(item.entityId));
+        if (cached) { speakDisplay(pickKanjiReading(item, cached)); return; }
+      }
+      speakDisplay(item.reading || item.display);
+    });
     const speedSelect = element('select', {
       className: 'rounded-lg border border-stone bg-paper px-1.5 py-1 text-xs font-semibold text-muted',
       attrs: { 'aria-label': 'Voice speed', 'data-speech-rate': '' }
@@ -1625,12 +1819,93 @@ const CARD_TYPE_DESCRIPTIONS = {
     })));
     speedSelect.addEventListener('change', () => { applySpeechRate(speedSelect); });
     speechRateSelects.push(speedSelect);
-    const titleRow = element('div', { className: 'mt-2 flex items-center gap-2' }, [title, speakerButton, speedSelect]);
+    const titleRow = element('div', { className: 'mt-2 flex flex-wrap items-center gap-2' }, [title, speakerButton, speedSelect]);
+    // Kun/on toggle for single kanji: filled once the detail endpoint
+    // answers (cached per session); absent readings keep legacy behavior
+    // with no toggle rendered at all.
+    if (isSingleKanjiItem) {
+      const myIndex = currentIndex;
+      const myItem = item;
+      const readingSlot = element('div', { className: 'flex items-center gap-1', attrs: { role: 'group', 'aria-label': 'Kanji reading' } });
+      titleRow.appendChild(readingSlot);
+      getKanjiReadings(item.entityId).then((readings) => {
+        if (revealed || currentIndex !== myIndex || queue[myIndex] !== myItem) return;
+        if (!readings || (!readings.onyomi && !readings.kunyomi)) return;
+        if (!readings.onyomi || !readings.kunyomi) return;
+        const syncToggle = () => {
+          kunButton.setAttribute('aria-pressed', String(kanjiReadingChoice !== 'on'));
+          onButton.setAttribute('aria-pressed', String(kanjiReadingChoice === 'on'));
+          kunButton.textContent = kanjiReadingChoice !== 'on' ? 'Kun ✓' : 'Kun';
+          onButton.textContent = kanjiReadingChoice === 'on' ? 'On ✓' : 'On';
+        };
+        const kunButton = element('button', {
+          className: 'rounded-lg border border-stone bg-paper px-2 py-1 text-xs font-semibold text-muted',
+          text: 'Kun',
+          attrs: { type: 'button', 'aria-pressed': 'true', 'aria-label': `Kunyomi: ${readings.kunyomi}` }
+        });
+        const onButton = element('button', {
+          className: 'rounded-lg border border-stone bg-paper px-2 py-1 text-xs font-semibold text-muted',
+          text: 'On',
+          attrs: { type: 'button', 'aria-pressed': 'false', 'aria-label': `Onyomi: ${readings.onyomi}` }
+        });
+        kunButton.addEventListener('click', () => {
+          kanjiReadingChoice = 'kun';
+          syncToggle();
+          speakDisplay(pickKanjiReading(myItem, readings));
+        });
+        onButton.addEventListener('click', () => {
+          kanjiReadingChoice = 'on';
+          syncToggle();
+          speakDisplay(pickKanjiReading(myItem, readings));
+        });
+        syncToggle();
+        readingSlot.append(kunButton, onButton);
+      }).catch(() => {});
+    }
+    // V5.6 context-rich review: collapsed "why" never disrupts recall speed.
+    // Only true signals are shown — due date is implicit, lastResult and
+    // provenanceLine come from the candidate payload, never fabricated.
+    // Why = reason + honest history (with dates when the batch knows them).
+    const context = item.context && typeof item.context === 'object' ? item.context : null;
+    const whyLines = [];
+    if (item.lastResult === 'Again' || item.lastResult === 'Hard') {
+      const failedAgo = context?.lastFailedAt ? daysAgoText(context.lastFailedAt) : null;
+      whyLines.push(`Last marked ${item.lastResult === 'Again' ? 'Again — worth another look' : 'Hard — recalled with difficulty'}${failedAgo ? ` (${failedAgo})` : ''}.`);
+    } else if (Number(context?.againCount) > 0) {
+      whyLines.push(`Marked Again ${context.againCount} time${context.againCount === 1 ? '' : 's'} before.`);
+    }
+    const provenance = provenanceLine(item);
+    if (provenance) whyLines.push(`Seen in: ${provenance}.`);
+    const whyDetails = whyLines.length ? element('details', { className: 'mt-3 rounded-xl border border-stone bg-paper/60 px-3 py-2' }, [
+      element('summary', { className: 'cursor-pointer text-xs font-semibold text-muted', text: 'Why am I reviewing this?' }),
+      element('p', { className: 'mt-1.5 text-xs leading-5 text-muted', text: whyLines.join(' ') })
+    ]) : null;
+    // V5.6 Completion Pass: real learning content, collapsed by default so
+    // the recall hot path stays fast (and recall/audio fronts never leak the
+    // answer — the learner opens this deliberately). History lives in Why
+    // above; this block renders ONLY when there is actual content (an owned
+    // example sentence or recorded encounters), so it can never merely
+    // repeat Why.
+    const contextLines = [];
+    if (context?.example?.sentence) {
+      contextLines.push(`You saw this in: ${context.example.sentence}`);
+      if (context.example.translation) contextLines.push(`Translation: ${context.example.translation}`);
+    }
+    if (Number(context?.encounters?.count) > 0) {
+      const seenAgo = context.encounters.lastAt ? daysAgoText(context.encounters.lastAt) : null;
+      contextLines.push(`Seen ${context.encounters.count} time${context.encounters.count === 1 ? '' : 's'} in your words and writings${seenAgo ? ` — last ${seenAgo}` : ''}.`);
+    }
+    const contextDetails = contextLines.length ? element('details', { className: 'mt-2 rounded-xl border border-stone bg-paper/60 px-3 py-2' }, [
+      element('summary', { className: 'cursor-pointer text-xs font-semibold text-muted', text: 'Context' }),
+      ...contextLines.map((line) => element('p', { className: 'mt-1.5 break-words text-xs leading-5 text-muted', text: line }))
+    ]) : null;
     const card = element('article', { className: 'surface review-card p-5 sm:p-8' }, [
       element('div', { className: 'flex items-start justify-between gap-3' }, [progress, counter]),
       track,
       typePill,
-      titleRow
+      titleRow,
+      ...(whyDetails ? [whyDetails] : []),
+      ...(contextDetails ? [contextDetails] : [])
     ]);
 
     const body = element('div', { className: 'mt-5 border-t border-stone pt-5' });
@@ -1642,6 +1917,21 @@ const CARD_TYPE_DESCRIPTIONS = {
 
     // Practice-only typed-answer state (grading stays with Again/Hard/Good).
     let checkState = null;
+    // V5.7 recognition practice state: option picks feed the automatic
+    // grade (0-1 mistakes Good, 2 Hard, 3+ Again). No self-grade question
+    // follows — the performance IS the grade, posted exactly once.
+    let recognitionPicks = 0;
+    let recognitionMistakes = 0;
+    let recognitionResolved = false;
+    let recognitionOptions = null;
+    let autoGradePosted = false;
+    let nextButton = null;
+    // Concealed (audio) cards lock Reveal until the heard word is typed —
+    // but this is memory practice, not an exam. After MAX_CONCEALED_TRIES
+    // failed tries the lock opens so nobody gets stuck without a voice
+    // reading the words correctly (device TTS misreads happen).
+    const MAX_CONCEALED_TRIES = 4;
+    let concealedTries = 0;
     let clozeBlank = null;
     let clozeFilled = null;
     let filledLine = null;
@@ -1703,11 +1993,20 @@ const CARD_TYPE_DESCRIPTIONS = {
           confirmMatch();
         } else if (concealMismatch) {
           // Listening exercise: never disclose the word here; the locked
-          // Reveal stays shut until the heard word is typed.
+          // Reveal stays shut until the heard word is typed — or until the
+          // tries run out, so a misheard word can never trap the learner.
+          concealedTries += 1;
+          const triesLeft = MAX_CONCEALED_TRIES - concealedTries;
           frontResult.hidden = false;
-          frontResult.textContent = 'Not quite — listen again.';
           answerResult.hidden = false;
-          answerResult.textContent = 'Not quite — listen again.';
+          if (triesLeft <= 0) {
+            revealButton.removeAttribute('disabled');
+            frontResult.textContent = 'Not quite — after 4 tries, reveal the answer and grade yourself honestly.';
+            answerResult.textContent = 'Not quite — after 4 tries, reveal the answer and grade yourself honestly.';
+          } else {
+            frontResult.textContent = `Not quite — listen again (${triesLeft} ${triesLeft === 1 ? 'try' : 'tries'} left before reveal).`;
+            answerResult.textContent = `Not quite — listen again (${triesLeft} ${triesLeft === 1 ? 'try' : 'tries'} left before reveal).`;
+          }
         } else {
           showCheck({ matched: false, typed: String(typed).trim() });
         }
@@ -1760,12 +2059,7 @@ const CARD_TYPE_DESCRIPTIONS = {
               body: { entityType: item.entityType, entityId: item.entityId, result, reviewSessionId: sessionId }
             });
             graded.push({ ...item, result });
-            if (currentIndex + 1 < total) {
-              currentIndex += 1;
-              renderCard();
-            } else {
-              await finishReview();
-            }
+            await proceedToNextCard();
           }, { pendingLabel: 'Saving…' }).catch((error) => {
             showToast(error?.message || 'Unable to save this response.', 'error');
           });
@@ -1896,7 +2190,116 @@ const CARD_TYPE_DESCRIPTIONS = {
       }
     } else {
       appendStrokePractice();
-      frontWrap.appendChild(revealButton);
+      // V5.7 multiple-choice recognition: deterministic options from the
+      // in-memory queue (zero queries). Fewer than 3 usable distractors →
+      // the card keeps its plain reveal flow, never padded with nonsense.
+      recognitionOptions = buildRecognitionOptions(item, queue);
+      if (recognitionOptions) {
+        // V5.7: options ARE the answer path — with four choices the learner
+        // always resolves by picking, so no Reveal button is offered here.
+        // (Audio keeps its locked Reveal; the no-options fallback below
+        // keeps the plain reveal flow.)
+        frontWrap.appendChild(element('p', { className: 'mt-4 text-sm font-semibold leading-6 text-ink', text: `Which meaning fits “${item.display}”? Pick one.` }));
+        const optionList = element('div', { className: 'mt-2 grid gap-2', attrs: { role: 'group', 'aria-label': 'Meaning options' } });
+        recognitionOptions.options.forEach((option, optionIndex) => {
+          const optionButton = element('button', {
+            className: 'button-secondary min-h-11 justify-start break-words px-4 py-2.5 text-left text-sm',
+            text: option.meaning,
+            attrs: { type: 'button', 'aria-keyshortcuts': String(optionIndex + 1) }
+          });
+          optionButton.addEventListener('click', () => pickRecognitionOption(optionIndex));
+          recognitionOptionButtons.push(optionButton);
+          optionList.appendChild(optionButton);
+        });
+        frontWrap.appendChild(optionList);
+        frontWrap.appendChild(frontResult);
+      } else {
+        frontWrap.appendChild(revealButton);
+      }
+    }
+
+    function pickRecognitionOption(optionIndex) {
+      if (revealed || recognitionResolved || !recognitionOptions) return;
+      const option = recognitionOptions.options[optionIndex];
+      const button = recognitionOptionButtons[optionIndex];
+      if (!option || !button || button.disabled) return;
+      recognitionPicks += 1;
+      frontResult.hidden = false;
+      answerResult.hidden = false;
+      if (option.answer) {
+        recognitionResolved = true;
+        recognitionOptionButtons.forEach((entry) => { entry.disabled = true; });
+        button.setAttribute('aria-pressed', 'true');
+        frontResult.textContent = `That's right — “${item.display}” means “${item.meaning}.”`;
+        answerResult.textContent = `That's right — “${item.display}” means “${item.meaning}.”`;
+        finalizeRecognitionGrade();
+      } else {
+        recognitionMistakes += 1;
+        button.disabled = true;
+        button.setAttribute('aria-pressed', 'false');
+        frontResult.textContent = `Not quite — that means “${option.meaning}.” Try again.`;
+        answerResult.textContent = `Not quite — that means “${option.meaning}.” Try again.`;
+      }
+    }
+
+    // V5.7 automatic grading: the classified performance posts through the
+    // SAME grade endpoint and advances like a manual grade — one event,
+    // existing scheduling, no second question. The Next button paces the
+    // flow and guarantees the POST completed before advancing (retrying on
+    // failure), so a flaky network can neither lose nor duplicate a grade.
+    async function postAutoGrade() {
+      if (autoGradePosted) return true;
+      const result = suggestedGradeForMistakes(recognitionMistakes);
+      try {
+        await apiRequest('/api/review/grade', {
+          method: 'POST',
+          body: { entityType: item.entityType, entityId: item.entityId, result, reviewSessionId: sessionId }
+        });
+      } catch (error) {
+        showToast(error?.message || 'Unable to save this response.', 'error');
+        return false;
+      }
+      autoGradePosted = true;
+      graded.push({ ...item, result });
+      frontResult.textContent += ` Graded: ${result}.`;
+      return true;
+    }
+
+    function showNextButton() {
+      if (nextButton) return;
+      revealed = true;
+      recognitionOptionButtons.forEach((entry) => { entry.disabled = true; });
+      nextButton = element('button', {
+        className: 'button-primary mt-3 inline-flex min-h-11 items-center justify-center px-5 py-2.5 text-sm font-semibold',
+        text: currentIndex + 1 < total ? 'Next' : 'Finish review',
+        attrs: { type: 'button' }
+      });
+      nextButton.addEventListener('click', async () => {
+        if (!autoGradePosted) {
+          nextButton.disabled = true;
+          const ok = await postAutoGrade();
+          nextButton.disabled = false;
+          if (!ok) return;
+        }
+        await proceedToNextCard();
+      });
+      if (revealButton.isConnected) revealButton.replaceWith(nextButton);
+      else frontWrap.appendChild(nextButton);
+      nextButton.focus({ preventScroll: true });
+    }
+
+    async function finalizeRecognitionGrade() {
+      showNextButton();
+      await postAutoGrade();
+    }
+
+    async function proceedToNextCard() {
+      if (currentIndex + 1 < total) {
+        currentIndex += 1;
+        renderCard();
+      } else {
+        await finishReview();
+      }
     }
 
     reviewingBlock.appendChild(card);
@@ -1947,7 +2350,8 @@ const CARD_TYPE_DESCRIPTIONS = {
       element('div', { className: 'mt-6 flex flex-col gap-2 sm:flex-row' }, [
         element('button', { className: 'button-primary', text: 'Back to Review', attrs: { type: 'button' } }),
         ...(failed.length ? [element('button', { className: 'button-secondary', text: `Repeat failed (${failed.length})`, attrs: { type: 'button' } })] : []),
-        element('a', { className: 'button-secondary', text: 'Go to Dashboard', attrs: { href: '#dashboard' } })
+        element('a', { className: 'button-secondary', text: 'Go to Dashboard', attrs: { href: '#dashboard' } }),
+        element('a', { className: 'button-secondary', text: 'Log study session', attrs: { href: '#sessions?new=1' } })
       ])
     ]);
     const buttons = card.querySelectorAll('button');
@@ -2016,5 +2420,46 @@ const CARD_TYPE_DESCRIPTIONS = {
   loadDifficult();
   loadCardTypePreferences();
   loadPatterns();
-  tryResumeImmersionQueue();
+  if (!tryResumeImmersionQueue()) tryResumeRetake();
+
+  // V5.6 Completion Pass: deep-link resume for genuinely unfinished
+  // sessions (Continue Studying → #review?retake=<id>). Same semantics as
+  // the history Retake button — persisted queue minus graded items on the
+  // SAME open session — without needing the history modal first.
+  async function tryResumeRetake() {
+    let retakeId = null;
+    try {
+      const hash = typeof window !== 'undefined' && window.location ? window.location.hash || '' : '';
+      const queryIndex = hash.indexOf('?');
+      if (queryIndex === -1) return;
+      retakeId = new URLSearchParams(hash.slice(queryIndex + 1)).get('retake');
+      if (!retakeId || !/^[1-9]\d*$/.test(retakeId)) return;
+    } catch { return; }
+    const id = Number(retakeId);
+    let data = null;
+    try {
+      data = await apiRequest(`/api/review/sessions/${id}/items`);
+    } catch (error) {
+      showToast(error?.message || 'Could not resume the session.', 'error');
+      return;
+    }
+    const stored = Array.isArray(data?.items) ? data.items : [];
+    const remaining = stored.filter((entry) => !entry.lastResult);
+    if (!remaining.length) {
+      showToast('Nothing left to resume in this session.', 'info');
+      return;
+    }
+    sessionId = id;
+    queue = remaining.map(({ lastResult, position, ...rest }) => rest);
+    currentIndex = 0;
+    revealed = false;
+    graded = stored
+      .filter((entry) => entry.lastResult === 'Again' || entry.lastResult === 'Hard')
+      .map(({ lastResult, position, ...rest }) => ({ ...rest, result: lastResult }));
+    lastPickedByKey.clear();
+    activeReview = { sessionId, selected: queue };
+    setStage('REVIEWING');
+    renderCard();
+    showToast(`Resumed with ${remaining.length} remaining item${remaining.length === 1 ? '' : 's'}.`);
+  }
 }

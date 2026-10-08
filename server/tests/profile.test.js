@@ -69,7 +69,8 @@ test('GET /api/profile returns a neutral empty profile and the authenticated ema
     await withServer(async (base) => {
       const result = await requestJson(base, '/api/profile');
       assert.equal(result.status, 200);
-      assert.deepEqual(result.body, { displayName: null, updatedAt: null, email: 'test@jlt.local' });
+      // avatarUrl is part of the shape (nav/settings read the photo here).
+      assert.deepEqual(result.body, { displayName: null, avatarUrl: null, updatedAt: null, email: 'test@jlt.local' });
     });
   } finally {
     stub.restore();

@@ -25,6 +25,7 @@ const decksRoutes = require('./routes/decks');
 const usersRoutes = require('./routes/users');
 const storiesRoutes = require('./routes/stories');
 const collectionsRoutes = require('./routes/collections');
+const communityRoutes = require('./routes/community');
 const authRoutes = require('./routes/auth');
 const { requireAuthentication } = require('./middleware/authentication');
 const { createRateLimiter } = require('./middleware/rateLimit');
@@ -60,14 +61,18 @@ app.get('/api', (req, res) => {
     endpoints: [
       'GET /api/health',
       'GET /api/dashboard',
+      'GET /api/dashboard/study-now',
       'GET /api/sessions',
       'POST /api/sessions',
+      'GET /api/sessions/day-items',
       'GET /api/vocabulary',
       'POST /api/vocabulary',
+      'GET /api/vocabulary/:id/encounters',
       'GET /api/kanji',
       'POST /api/kanji',
       'GET /api/grammar',
       'POST /api/grammar',
+      'GET /api/grammar/:id/encounters',
       'GET /api/export',
       'GET /api/goals',
       'GET /api/content',
@@ -97,6 +102,8 @@ app.get('/api', (req, res) => {
       'GET /api/users/:username/decks',
       'GET /api/users/me',
       'PUT /api/users/me',
+      'POST /api/users/me/avatar',
+      'DELETE /api/users/me/avatar',
       'POST /api/decks',
       'GET /api/decks',
       'GET /api/decks/:id',
@@ -172,6 +179,7 @@ app.use('/api/decks', decksRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/stories', storiesRoutes);
 app.use('/api/collections', collectionsRoutes);
+app.use('/api/community', communityRoutes);
 app.use('/api/level', levelRoutes);
 app.use('/api/first-experience', firstExperienceRoutes);
 app.use('/api/profile', profileRoutes);

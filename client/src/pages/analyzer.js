@@ -58,7 +58,6 @@ function statePill(formatted) {
 export async function renderAnalyzer(container) {
   container.replaceChildren();
   container.append(pageHeader({
-    eyebrow: 'Study tools',
     title: 'Text Analyzer',
     description: 'Paste Japanese text to see the kanji it contains, which ones are already in your collection, and which reference-backed kanji you can add. Does not estimate your level or prove knowledge.'
   }));

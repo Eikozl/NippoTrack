@@ -12,6 +12,7 @@ const {
   validateWriteFields
 } = require('../validation');
 const { fetchEntityById } = require('./helpers');
+const { getWhereSeen } = require('../services/whereSeen');
 const { executePaginatedList } = require('./listHelpers');
 const { findGrammarReferenceId, getGrammarReferenceById, searchGrammarReferences } = require('../services/grammarReferenceStore');
 const { analyzeVocabularyInGrammarExample } = require('../services/grammarExampleContext');
@@ -51,13 +52,13 @@ async function listGrammar(req, res) {
     }
     if (req.query.jlpt) {
       const jlpt = normalizeText(req.query.jlpt, 2, 'jlpt').toUpperCase();
-      if (!JLPT_LEVELS.includes(jlpt)) return res.status(400).json({ error: 'Invalid JLPT level' });
+      if (!JLPT_LEVELS.includes(jlpt)) throw new ValidationError('Invalid JLPT level');
       whereSql += ' AND jlpt_level = ?';
       params.push(jlpt);
     }
     if (req.query.status) {
       const status = normalizeText(req.query.status, 20, 'status');
-      if (!STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+      if (!STATUSES.includes(status)) throw new ValidationError('Invalid status');
       whereSql += ' AND status = ?';
       params.push(status);
     }
@@ -119,7 +120,7 @@ async function listGrammarOptions(req, res) {
     const jlpt = normalizeText(req.query.jlpt, 2, 'jlpt');
     if (jlpt) {
       const level = jlpt.toUpperCase();
-      if (!JLPT_LEVELS.includes(level)) return res.status(400).json({ error: 'Invalid JLPT level' });
+      if (!JLPT_LEVELS.includes(level)) throw new ValidationError('Invalid JLPT level');
       query = query.replace(' ORDER BY', ' AND jlpt_level = ? ORDER BY');
       params.splice(params.length - 1, 0, level);
     }
@@ -278,6 +279,20 @@ async function getGrammarVocabularyContext(req, res) {
   } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to analyze vocabulary in grammar example.' }); }
 }
 
+// V5.6 Completion Pass: learner-facing encounter history from existing
+// relations only (managed examples, linked study sessions, immersion items).
+// Same ownership contract as the vocabulary twin: 404 for foreign ids,
+// every query user-scoped in-statement, empty arrays when nothing exists.
+async function getGrammarEncounters(req, res) {
+  try {
+    const id = parseIdParam(req, 'grammar point');
+    if (!await fetchEntityById('grammar', id, req.user.id)) {
+      return res.status(404).json({ error: 'grammar point not found' });
+    }
+    return res.json(await getWhereSeen(pool, req.user.id, 'grammar', id));
+  } catch (error) { return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load encounters.' }); }
+}
+
 function grammarExampleValues(body, { partial = false } = {}) {
   const allowed = ['sentence', 'translation', 'notes'];
   validateWriteFields(body, allowed);
@@ -338,4 +353,4 @@ async function deleteGrammar(req, res) {
   }
 }
 
-module.exports = { createGrammar, createGrammarExample, deleteGrammar, deleteGrammarExample, getGrammar, getGrammarVocabularyContext, listGrammar, listGrammarOptions, listGrammarReferences, updateGrammar, updateGrammarExample };
+module.exports = { createGrammar, createGrammarExample, deleteGrammar, deleteGrammarExample, getGrammar, getGrammarEncounters, getGrammarVocabularyContext, listGrammar, listGrammarOptions, listGrammarReferences, updateGrammar, updateGrammarExample };

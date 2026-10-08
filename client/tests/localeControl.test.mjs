@@ -39,9 +39,27 @@ test('account menu keeps only the frozen quick actions', () => {
   const source = readSource('src/main.js');
   const menuBlock = source.slice(source.indexOf('function createUserMenu'), source.indexOf('function syncUserMenus'));
   for (const marker of ['Language', 'Settings', 'Sign out']) assert.ok(menuBlock.includes(marker), `${marker} action present`);
-  for (const forbidden of ['Theme', 'JLPT target', 'Starting Point', 'Export backup', 'avatar', 'OAuth']) {
+  for (const forbidden of ['Theme', 'JLPT target', 'Starting Point', 'Export backup', 'OAuth']) {
     assert.doesNotMatch(menuBlock, new RegExp(forbidden, 'i'), `${forbidden} stays out of menu`);
   }
+  // Approved exception: the identity mark may overlay the user's photo when
+  // set (photo display only — no menu action or destination is added).
+  assert.ok(menuBlock.includes('avatarOverlayImg'), 'avatar photo overlay helper present');
+  assert.ok(!/role:\s*['"]menuitem[^}]*avatar/i.test(menuBlock), 'no avatar menu action');
+});
+
+test('menu focus-out never closes synchronously mid-tap (touch)', () => {
+  const source = readSource('src/main.js');
+  const menuBlock = source.slice(source.indexOf('function createUserMenu'), source.indexOf('function syncUserMenus'));
+  assert.ok(menuBlock.includes('requestAnimationFrame'), 'focus-out close deferred past tap completion');
+  assert.ok(menuBlock.includes('document.activeElement'), 'close decision re-checked against real focus');
+  assert.ok(!menuBlock.includes('.contains(event.relatedTarget)'), 'no sync relatedTarget close (null on touch, swallows taps)');
+  assert.ok(menuBlock.includes('focus({ preventScroll: true })'), 'panel focus never scroll-jumps');
+});
+
+test('language panel honors the hidden attribute (unlayered display beats preflight)', () => {
+  const css = readSource('src/styles.css');
+  assert.ok(css.includes('.user-menu-language-panel[hidden]'), 'explicit hidden guard on the language panel');
 });
 
 test('account trigger remains the existing accessible icon control', () => {

@@ -12,6 +12,17 @@ class PlacementAlreadyCompletedError extends Error {
   }
 }
 
+// Phase 2b: application-level conflict (duplicate report). A dedicated class
+// so controllers map it to 409 without parsing messages; the code travels in
+// the JSON body so clients can branch on it.
+class ConflictError extends Error {
+  constructor(message = 'Record already exists.', code = 'ALREADY_EXISTS') {
+    super(message);
+    this.name = 'ConflictError';
+    this.code = code;
+  }
+}
+
 function sendRouteError(res, error, {
   defaultStatus = 500,
   defaultMessage = 'Unable to complete the request.',
@@ -28,6 +39,13 @@ function sendRouteError(res, error, {
     });
   }
 
+  if (error instanceof ConflictError) {
+    return res.status(409).json({
+      error: error.message || 'Record already exists.',
+      code: error.code || 'ALREADY_EXISTS'
+    });
+  }
+
   if (error?.code === 'ER_DUP_ENTRY' || error?.code === '23505') {
     return res.status(409).json({ error: conflictMessage });
   }
@@ -38,6 +56,12 @@ function sendRouteError(res, error, {
 
   if (error?.code === 'ER_ROW_IS_REFERENCED_2') {
     return res.status(409).json({ error: 'Record is still in use.' });
+  }
+
+  // Multipart/body-parser size rejections (e.g. avatar uploads past the
+  // in-route raw limit) carry status 413, not a 500: report them honestly.
+  if (error?.type === 'entity.too.large' || error?.status === 413) {
+    return res.status(413).json({ error: 'Request body is too large.' });
   }
 
   console.error('API operation failed:', error);
@@ -60,6 +84,7 @@ function errorHandler(error, req, res, next) {
 }
 
 module.exports = {
+  ConflictError,
   PlacementAlreadyCompletedError,
   ValidationError,
   sendRouteError,

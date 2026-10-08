@@ -445,9 +445,12 @@ test('settings starting-point block branches per source with no re-entry', () =>
   assert.ok(source.includes("stored.source === 'self_reported'"), 'source branch presented from stored state');
   assert.ok(source.includes('placementResultNode'), 'quiz diagram reused for quiz rows');
   assert.ok(source.includes('Take quick placement'), 'take CTA for uncompleted learners');
-  assert.ok(!source.match(/retake/i), 'no re-entry wording');
-  assert.ok(!source.match(/reset/i), 'no reset wording');
-  assert.ok(!source.match(/repeat/i), 'no repeat wording');
+  // Copy guards scan user-facing labels only (text:/aria-label literals),
+  // never code comments or identifiers (e.g. a "reset is best-effort" note).
+  const userFacing = [...source.matchAll(/(?:\btext|'aria-label')\s*:\s*['"]((?:[^'"\\]|\\.)*)['"]/g)].map((m) => m[1]).join('\n');
+  assert.ok(!userFacing.match(/retake/i), 'no re-entry wording');
+  assert.ok(!userFacing.match(/reset/i), 'no reset wording');
+  assert.ok(!userFacing.match(/repeat/i), 'no repeat wording');
 });
 
 // --- header fallback ---------------------------------------------------------

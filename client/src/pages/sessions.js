@@ -25,6 +25,7 @@ import {
   openDialog,
   pageHeader,
   paginationControls,
+  searchableMultiSelect,
   setActionPending,
   showToast,
   withGlobalLoading,
@@ -155,19 +156,24 @@ function sessionOverflowMenu(onDelete) {
 }
 
 // Visible Session form field order is defined in ../sessionHistory.js
-// (SESSION_FORM_FIELD_ORDER: Basic → Resource → Writing → Notes).
-// Manual linking controls (vocabulary/kanji/grammar) and Writing notes are
-// intentionally hidden from the form and never submitted, so the backend
-// preserves existing relationships and writing notes on edit.
+// (SESSION_FORM_FIELD_ORDER: Basic → Linked material → Writing → Notes).
+// Manual linking is a single compact collapsible section ("Link studied
+// items (optional)") with three small multi-pickers reusing the loaders
+// below. There is no automatic linking: the backend stores exactly what the
+// learner picks (omitted arrays preserve on edit, supplied arrays replace).
+// Writing notes stay hidden and are never submitted, so the backend keeps
+// existing writing notes on edit.
 
 function selectedNumbers(select) {
+  if (!select || typeof select.selectedOptions === 'undefined') return [];
   return Array.from(select.selectedOptions, (option) => Number(option.value));
 }
 
-// Preserved for compatibility: manual session-linking helpers. The linking
-// UI is intentionally hidden from the Session form, but these loaders stay
-// available (backend contracts, junction tables, and stored relationships
-// are untouched).
+// Manual session-linking helpers. The pickers submit vocabulary_ids /
+// kanji_ids / grammar_ids through buildSessionSubmitPayload; the backend
+// (validateStudySessionPayload + junction tables, verified against
+// server/src/controllers/sessionsController.js) inserts on create and
+// replaces-when-supplied / preserves-when-omitted on update.
 
 function mergeOptions(loadedOptions, selectedRecords, mapRecord) {
   const merged = new Map(loadedOptions.map((option) => [String(option.value), option]));
@@ -247,7 +253,6 @@ export function renderSessions(container) {
 
   container.replaceChildren(element('section', {}, [
     pageHeader({
-      eyebrow: 'Record',
       title: 'Study sessions',
       description: 'Record focused time and connect it to the material you studied.',
       action: addButton
@@ -293,7 +298,7 @@ export function renderSessions(container) {
         return;
       }
       if (!items.length) {
-        results.replaceChildren(emptyState({ title: 'No sessions found', description: 'Record a study session or adjust the current filters.' }));
+        results.replaceChildren(emptyState({ title: 'No sessions found', description: 'Log a study session or adjust the current filters.' }));
         return;
       }
       const pager = paginationControls(pagination, (pageNumber) => {
@@ -340,10 +345,133 @@ export function renderSessions(container) {
   async function openSessionDialog(record = {}) {
     if (!setActionPending(addButton, true, { pendingLabel: 'Loading…' })) return;
     try {
-      // Visible order: Basic → Resource → Writing → Notes.
-      // Manual linking controls and Writing notes are intentionally hidden
-      // from this form (see buildSessionSubmitPayload), but the underlying
-      // linking system, API contracts, and stored data are fully preserved.
+      // Visible order: Basic → Linked material → Writing → Notes. Linking is
+      // one compact collapsible with three small multi-pickers, honestly
+      // labeled optional — nothing auto-links. Edit pre-selects the
+      // record's current links so saving round-trips them; omitted arrays
+      // would preserve, supplied arrays replace (backend partial-update
+      // semantics). Writing notes stay hidden (backend keeps them on edit).
+      const options = await loadRelationshipOptions(record);
+      let closeDialog;
+      const goToLibrary = (page) => {
+        closeDialog?.();
+        window.location.hash = `#${page}`;
+      };
+      const linkedCount = (record.vocabulary || []).length + (record.kanji || []).length + (record.grammar || []).length;
+      // Day-link: one-click "link what I studied that day" merges
+      // GET /api/sessions/day-items?date=YYYY-MM-DD ({id,label} per kind,
+      // cap 50/kind) into the three pickers below. Manual picks are never
+      // wiped (duplicates skipped); content[] is read-only note only, never
+      // submitted (content links live on the Content Log side; POST/PUT
+      // accepts vocabulary_ids/kanji_ids/grammar_ids ONLY).
+      const dayLinkButton = element('button', {
+        className: 'button-secondary min-h-9 justify-self-start px-3 py-1.5 text-xs',
+        text: 'Link what I studied that day',
+        attrs: { type: 'button', 'aria-label': 'Link what I studied that day' }
+      });
+      const dayContentNote = element('p', {
+        className: 'text-xs leading-5 text-muted',
+        text: 'Content links live on the Content Log side — day content is never submitted here.',
+        attrs: { 'aria-live': 'polite' }
+      });
+      const vocabPicker = searchableMultiSelect({
+        name: 'vocabulary_ids',
+        label: 'Related vocabulary',
+        options: options.vocabulary,
+        value: (record.vocabulary || []).map((item) => item.id_vocabulary),
+        placeholder: 'Search vocabulary…',
+        emptyMessage: 'No vocabulary records yet. Add vocabulary before linking it to this session.',
+        createLabel: 'Add vocabulary',
+        onCreate: () => goToLibrary('vocabulary'),
+        loadOptions: loadVocabularyOptions
+      });
+      const kanjiPicker = searchableMultiSelect({
+        name: 'kanji_ids',
+        label: 'Related kanji',
+        options: options.kanji,
+        value: (record.kanji || []).map((item) => item.id_kanji),
+        placeholder: 'Search kanji…',
+        emptyMessage: 'No kanji records yet. Add kanji before linking it to this session.',
+        createLabel: 'Add kanji',
+        onCreate: () => goToLibrary('kanji'),
+        loadOptions: loadKanjiOptions
+      });
+      const grammarPicker = searchableMultiSelect({
+        name: 'grammar_ids',
+        label: 'Related grammar',
+        options: options.grammar,
+        value: (record.grammar || []).map((item) => item.id_grammar),
+        placeholder: 'Search grammar…',
+        emptyMessage: 'No grammar records yet. Add grammar before linking it to this session.',
+        createLabel: 'Add grammar',
+        onCreate: () => goToLibrary('grammar'),
+        loadOptions: loadGrammarOptions
+      });
+      dayLinkButton.addEventListener('click', () => {
+        const form = dayLinkButton.closest('form');
+        const dateValue = String(form?.elements?.session_date?.value || '').slice(0, 10).trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue) || Number.isNaN(new Date(`${dateValue}T00:00:00`).getTime())) {
+          showToast('Pick a date first — day-link needs the session date.', 'error');
+          return;
+        }
+        withPendingAction(dayLinkButton, async () => {
+          let dayItems;
+          try {
+            dayItems = await apiRequest(`/api/sessions/day-items?date=${encodeURIComponent(dateValue)}`);
+          } catch (error) {
+            showToast(error?.message || 'Unable to load day items.', 'error');
+            return;
+          }
+          const cleanPairs = (list) => (Array.isArray(list) ? list : [])
+            .filter((entry) => entry && Number.isInteger(Number(entry.id)) && Number(entry.id) > 0 && typeof entry.label === 'string' && entry.label.trim())
+            .map((entry) => ({ id: Number(entry.id), label: String(entry.label) }));
+          const vocabPairs = cleanPairs(dayItems?.vocabulary);
+          const kanjiPairs = cleanPairs(dayItems?.kanji);
+          const grammarPairs = cleanPairs(dayItems?.grammar);
+          const contentPairs = cleanPairs(dayItems?.content);
+          // {id,label} maps directly onto picker shapes via the shared
+          // option builders (label-only records: no reading/meaning invented).
+          const vocabRecords = vocabPairs.map(({ id, label }) => ({ id_vocabulary: id, word: label }));
+          const kanjiRecords = kanjiPairs.map(({ id, label }) => ({ id_kanji: id, character_kanji: label }));
+          const grammarRecords = grammarPairs.map(({ id, label }) => ({ id_grammar: id, grammar_point: label }));
+          const mergedVocabOptions = mergeOptions(options.vocabulary, vocabRecords, vocabularyOption);
+          const mergedKanjiOptions = mergeOptions(options.kanji, kanjiRecords, kanjiOption);
+          const mergedGrammarOptions = mergeOptions(options.grammar, grammarRecords, grammarOption);
+          const currentVocab = new Set(selectedNumbers(form.elements.vocabulary_ids).map(String));
+          const currentKanji = new Set(selectedNumbers(form.elements.kanji_ids).map(String));
+          const currentGrammar = new Set(selectedNumbers(form.elements.grammar_ids).map(String));
+          const newVocabIds = vocabPairs.map(({ id }) => id).filter((id) => !currentVocab.has(String(id)));
+          const newKanjiIds = kanjiPairs.map(({ id }) => id).filter((id) => !currentKanji.has(String(id)));
+          const newGrammarIds = grammarPairs.map(({ id }) => id).filter((id) => !currentGrammar.has(String(id)));
+          vocabPicker.appendLinkedOptions(mergedVocabOptions, newVocabIds);
+          kanjiPicker.appendLinkedOptions(mergedKanjiOptions, newKanjiIds);
+          grammarPicker.appendLinkedOptions(mergedGrammarOptions, newGrammarIds);
+          options.vocabulary = mergedVocabOptions;
+          options.kanji = mergedKanjiOptions;
+          options.grammar = mergedGrammarOptions;
+          if (contentPairs.length) {
+            dayContentNote.textContent = `${contentPairs.length} content ${contentPairs.length === 1 ? 'entry' : 'entries'} that day — link them from Content Log`;
+          } else {
+            dayContentNote.textContent = 'No content entries that day.';
+          }
+          const linked = newVocabIds.length + newKanjiIds.length + newGrammarIds.length;
+          const available = vocabPairs.length + kanjiPairs.length + grammarPairs.length;
+          if (linked > 0) showToast(`${linked} items linked from ${dateValue}.`);
+          else if (available === 0) showToast('Nothing studied that day — pick manually.');
+          else showToast(`Already linked — nothing new from ${dateValue}.`);
+        }, { pendingLabel: 'Linking…' }).catch((error) => showToast(error?.message || 'Unable to link day items.', 'error'));
+      });
+      const linkedSection = element('details', { className: 'rounded-lg border border-stone bg-paper/40 px-4 py-3 sm:col-span-2' }, [
+        element('summary', { className: 'cursor-pointer font-semibold text-ink', text: `Link studied items (optional)${linkedCount ? ` (${linkedCount} linked)` : ''}` }),
+        element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: 'Pick what you actually studied. Nothing is linked automatically.' }),
+        element('div', { className: 'mt-3 grid gap-3' }, [
+          dayLinkButton,
+          dayContentNote,
+          vocabPicker,
+          kanjiPicker,
+          grammarPicker
+        ])
+      ]);
       const notesField = field({ name: 'notes', label: 'Notes', type: 'textarea', maxLength: 1500, value: record.notes || '', description: 'Reflections, observations, reminders.' });
       notesField.classList.add('sm:col-span-2');
       const formFields = [
@@ -351,6 +479,7 @@ export function renderSessions(container) {
         field({ name: 'session_date', label: 'Date', type: 'date', required: true, value: String(record.session_date || '').slice(0, 10) }),
         field({ name: 'duration_minutes', label: 'Duration (minutes)', type: 'number', required: true, value: record.duration_minutes || 30 }),
         field({ name: 'resource', label: 'Resource', maxLength: 255, value: record.resource || '', placeholder: 'Genki, NHK, conversation…', description: 'What you studied with. For a media diary, use Content Log.' }),
+        linkedSection,
         element('section', { className: 'rounded-lg border border-stone bg-paper/40 p-4 sm:col-span-2' }, [
           element('h3', { className: 'font-semibold text-ink', text: 'Writing' }),
           element('p', { className: 'mt-1 text-xs leading-5 text-muted', text: 'Your study output — the content you created.' }),
@@ -362,7 +491,7 @@ export function renderSessions(container) {
         notesField
       ];
 
-      openDialog({
+      closeDialog = openDialog({
         title: record.id_session ? 'Edit study session' : 'Add study session',
         content: formFields,
         submitLabel: record.id_session ? 'Save changes' : 'Create session',
@@ -373,6 +502,9 @@ export function renderSessions(container) {
             session_date: formData.get('session_date'),
             duration_minutes: formData.get('duration_minutes'),
             resource: formData.get('resource'),
+            vocabulary_ids: selectedNumbers(form.elements.vocabulary_ids),
+            kanji_ids: selectedNumbers(form.elements.kanji_ids),
+            grammar_ids: selectedNumbers(form.elements.grammar_ids),
             writing_title: formData.get('writing_title'),
             writing_content: formData.get('writing_content'),
             notes: formData.get('notes')
@@ -535,7 +667,10 @@ export function renderSessions(container) {
         ]),
         ...((record.stories || []).length ? [relatedList('Stories', record.stories, (item) => item.title, (item) => item.content_type)] : [])
       ]);
-      openDialog({ title: 'Study session detail', content: [details], submitLabel: 'Close', onSubmit: async (form, close) => close() });
+      // View-only detail: the header X (openDialog showCloseButton) is the
+      // sole dismiss — the footer held only Cancel/Close with no submit, so
+      // it is hidden at this call site (ui.js defaults untouched).
+      openDialog({ title: 'Study session detail', content: [details], showFooter: false, submitLabel: 'Close', onSubmit: async (form, close) => close() });
     } catch (error) {
       showToast(error.message, 'error');
     }
@@ -579,4 +714,15 @@ export function renderSessions(container) {
   });
   updateCustomRangeVisibility();
   load();
+  // V5.6 guided flow: links that mean "log now" (Review completion, Study
+  // Now) arrive as #sessions?new=1. Open the creation dialog immediately and
+  // consume the param so refresh/back lands on the plain list, not a reopen.
+  try {
+    const hash = typeof window !== 'undefined' && window.location ? window.location.hash || '' : '';
+    const queryIndex = hash.indexOf('?');
+    if (queryIndex !== -1 && new URLSearchParams(hash.slice(queryIndex + 1)).get('new') === '1') {
+      window.history.replaceState(null, '', '#sessions');
+      openSessionDialog();
+    }
+  } catch { /* fail open to the plain list */ }
 }

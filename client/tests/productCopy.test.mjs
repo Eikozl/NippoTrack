@@ -148,7 +148,7 @@ test('Statistics collapses the long explanation but keeps the honesty line', () 
 test('Settings uses the desktop canvas without stretching edge to edge', () => {
   const source = readSource('src/pages/settings.js');
   assert.ok(source.includes('max-w-5xl'), 'cards widen to ~1024px');
-  assert.ok(source.includes('settings-layout'), 'four-section layout owns the canvas');
+  assert.ok(source.includes('settings-layout'), 'three-section layout owns the canvas');
 });
 
 test('Analyzer containers shrink instead of overflowing narrow screens', () => {

@@ -2,11 +2,12 @@
 // sharing, importing, browsing and collections live here — entity tabs carry
 // no deck actions. Public identity lives in Settings → Profile.
 import { apiRequest } from '../api';
-import { element, emptyState, openDialog, confirmDialog, pageHeader, showToast, withPendingAction } from '../ui';
+import { element, emptyState, errorState, loadingState, openDialog, confirmDialog, pageHeader, showToast, withPendingAction } from '../ui';
 import { icon } from '../icons';
 import { speakJapanese } from '../speech.js';
 import { loadStrokePaths, STROKE_SVG_NS, STROKE_SVG_VIEWBOX } from '../strokeOrder.js';
 import { mountKanjiWriting } from '../kanjiWriting.js';
+import { deckItemDisplay, deckItemSaveable, ensureDeckOwnedId, findOwnedEntityId, isUsableMeaning, ownedIdFromSaveResponse, saveDeckItemReturningId, SINGLE_HAN, speechPieces, todayISODate } from '../deckSaveGate.js';
 
 function smallButton(label, ariaLabel) {
   return element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: label, attrs: { type: 'button', 'aria-label': ariaLabel || label } });
@@ -20,17 +21,15 @@ function dialogStack(nodes) {
   return element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-3 sm:col-span-2' }, nodes);
 }
 
-function speechPieces() {
-  const hasWindow = typeof window !== 'undefined';
-  return {
-    synthesis: hasWindow ? window.speechSynthesis : null,
-    Utterance: hasWindow ? window.SpeechSynthesisUtterance : null
-  };
-}
-
 // Sequential TTS queue with a stop flag: each utterance ends into the next.
 // A fresh play flushes the previous queue first (no overlaps).
+// Rapid-press cooldown: overlapping play presses still restart the queue
+// (last wins); only duplicate error toasts are suppressed silently.
+// Stop stays explicit via stopQueue.
+// Play affordances use the speaker/bocina glyph (icons.js volume, no emoji).
 const player = { stopped: true, playing: false };
+let lastDecksPlayAt = 0;
+const DECKS_PLAY_COOLDOWN_MS = 600;
 function stopQueue() {
   player.stopped = true;
   player.playing = false;
@@ -39,6 +38,12 @@ function stopQueue() {
   } catch { /* stop is best-effort */ }
 }
 function playQueue(texts, onProgress) {
+  let isRapidQueue = false;
+  try {
+    const now = Date.now();
+    isRapidQueue = Boolean(lastDecksPlayAt) && (now - lastDecksPlayAt < DECKS_PLAY_COOLDOWN_MS);
+    lastDecksPlayAt = now;
+  } catch { /* cooldown tracking is best-effort */ }
   stopQueue();
   const queue = (Array.isArray(texts) ? texts : []).map((text) => String(text || '').trim()).filter(Boolean);
   if (!queue.length) { showToast('Nothing to play.', 'error'); return; }
@@ -58,6 +63,7 @@ function playQueue(texts, onProgress) {
     if (!verdict.ok) {
       player.playing = false;
       if (typeof onProgress === 'function') onProgress(-1);
+      if (isRapidQueue) return;
       showToast(verdict.message || 'Audio playback is unavailable.', 'error');
     }
   };
@@ -137,8 +143,11 @@ function itemDetailView(entry, entityType) {
 // Type pill renders FROM DATA: whatever entityType the backend sent
 // (vocabulary, kanji or grammar today; unknown values such as 'reading'
 // render as-is). No list of known types lives here.
+// V6.1.2: Map backend lowercase to Title Case for display.
 function typePill(value) {
-  const label = String(value || '').trim() || 'deck';
+  const raw = String(value || '').trim().toLowerCase();
+  const labelMap = { vocabulary: 'Vocabulary', kanji: 'Kanji', grammar: 'Grammar', reading: 'Reading' };
+  const label = labelMap[raw] || (raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : 'Deck');
   return element('span', { className: 'status-pill max-w-full shrink-0 wrap-anywhere break-words text-xs', text: label });
 }
 
@@ -176,6 +185,7 @@ function deckRowButton(deck, onOpen) {
 // drill-down, examples and strokes. Unknown entity types render the pill
 // as-is and the items section stays fail-open through the existing
 // toast-on-error path (no per-type detail backend is built here).
+// V6.1.2: Add "Start Review" button for decks with items (save-then-queue → review session).
 function itemsDialog(deckId, title, entityType, deckRef = null) {
   apiRequest(`/api/decks/${deckId}`)
     .then((detail) => {
@@ -201,20 +211,221 @@ function itemsDialog(deckId, title, entityType, deckRef = null) {
         followers: detail.followers ?? deckRef?.followers ?? 0,
         viewerFollowing: detail.viewerFollowing ?? deckRef?.viewerFollowing ?? false
       })]);
-      const view = element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-2' });
-      const renderList = () => {
-        view.replaceChildren(
-          element('ul', { className: 'grid max-h-56 w-full min-w-0 max-w-full grid-cols-1 gap-1 overflow-x-hidden overflow-y-auto text-sm text-ink', attrs: { role: 'list' } }, items.map((entry) => {
-            const open = smallButton(displayOf(entry), `Details for ${displayOf(entry)}`);
-            open.classList.add('max-w-full', 'wrap-anywhere', 'break-words');
-            open.addEventListener('click', () => {
-              const back = smallButton('Back to items', 'Back to items');
-              back.addEventListener('click', renderList);
-              view.replaceChildren(back, itemDetailView(entry, effectiveType));
+
+      // V6.1.2: Start Review button — save-then-queue → POST /api/review/sessions.
+      // The label travels via the `text` option: element() appends children
+      // verbatim, so a raw string child here threw "Argument 1 ('node') to
+      // Node.appendChild" when opening any deck with items.
+      const startReview = items.length > 0 ? element('button', {
+        className: 'button-primary min-h-10 px-4 py-2 text-sm font-semibold shrink-0',
+        text: 'Start Review',
+        attrs: { type: 'button', 'aria-label': 'Save deck items and start a review session' }
+      }) : null;
+      if (startReview) {
+        startReview.addEventListener('click', () => withPendingAction(startReview, async () => {
+          // Save-then-queue: resolve OWNED ids first (search-first reuse to avoid duplicates, then POST missing)
+          let savedCount = 0;
+          let alreadyCount = 0;
+          let skippedCount = 0;
+          const owned = [];
+          const seen = new Set();
+          for (const entry of items) {
+            const kind = entry.entityType || effectiveType || 'vocabulary';
+            const display = deckItemDisplay(kind, entry);
+            if (!display || !deckItemSaveable(kind, entry)) {
+              skippedCount += 1;
+              continue;
+            }
+            // eslint-disable-next-line no-await-in-loop
+            const resolved = await ensureDeckOwnedId(kind, entry);
+            if (!resolved) {
+              skippedCount += 1;
+              continue;
+            }
+            if (resolved.already) alreadyCount += 1;
+            else savedCount += 1;
+            const key = `${kind}:${resolved.entityId}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            owned.push({
+              entityType: kind,
+              entityId: resolved.entityId,
+              display,
+              ...(entry.reading ? { reading: entry.reading } : {}),
+              ...(entry.meaning ? { meaning: entry.meaning } : {})
             });
-            return element('li', { className: 'min-w-0 max-w-full' }, [open]);
-          }))
-        );
+          }
+          if (!owned.length) {
+            showToast('Nothing reviewable — items need a dictionary meaning first.', 'error');
+            return;
+          }
+          const capped = owned.slice(0, 500);
+          const cappedSkipped = owned.length - capped.length;
+          if (cappedSkipped > 0) skippedCount += cappedSkipped;
+          const today = todayISODate();
+          let session = null;
+          try {
+            session = await apiRequest('/api/review/sessions', {
+              method: 'POST',
+              body: {
+                sourceFrom: today,
+                sourceTo: today,
+                items: capped.map(({ entityType, entityId }) => ({ entityType, entityId }))
+              }
+            });
+          } catch (error) {
+            showToast(error?.message || 'Unable to start the review.', 'error');
+            return;
+          }
+          const sessionId = Number(session?.id);
+          if (!Number.isInteger(sessionId) || sessionId <= 0) {
+            showToast('Unable to start the review.', 'error');
+            return;
+          }
+          // Immersion hand-off pattern: stash queue for the freshly created OPEN session, then navigate
+          const contextByKey = new Map((Array.isArray(session?.items) ? session.items : []).map((entry) => [`${entry.entityType}:${entry.entityId}`, entry.context]));
+          const queueItems = capped.map((item) => {
+            const context = contextByKey.get(`${item.entityType}:${item.entityId}`);
+            return context ? { ...item, context } : item;
+          });
+          try {
+            if (window.sessionStorage) {
+              window.sessionStorage.setItem('jlt-immersion-review-queue', JSON.stringify({
+                reviewSessionId: sessionId,
+                items: queueItems
+              }));
+            }
+          } catch { /* storage blocked: review falls back to its banner */ }
+          const parts = [];
+          if (savedCount) parts.push(`Saved ${savedCount}`);
+          if (alreadyCount) parts.push(`${alreadyCount} already in library`);
+          const prefix = parts.length ? `${parts.join(', ')} — ` : '';
+          const skippedNote = skippedCount ? ` (${skippedCount} skipped)` : '';
+          showToast(`${prefix}starting review with ${capped.length}${skippedNote}.`);
+          // Close the dialog silently and navigate
+          try { stopQueue(); } catch { /* ignore */ }
+          window.location.hash = `#review?reviewSessionId=${sessionId}`;
+        }, { pendingLabel: 'Starting…' }).catch((error) => showToast(error?.message || 'Unable to start the review.', 'error')));
+      }
+
+      const view = element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-2' });
+      // Deck preview items: strict chunking of max 4 per column, column-major
+      // (first 4 fill column 1 top-to-bottom, next 4 column 2…). ≤4 items stay
+      // a single full-width column with no dividers (unchanged look).
+      // Beyond one column, fixed-width (w-36) columns wrap NATURALLY in one
+      // flex-wrap row — the browser alone decides where columns wrap (a column
+      // wraps IF AND ONLY IF it hit the right edge, so columns can never be
+      // cut in half). Dividers come from REALITY: after layout, columns that
+      // share the same top are one visual row; an <hr> (a 100%-basis flex item
+      // on its own line) is inserted immediately before every column that
+      // starts a new row. First row never gets an hr; a single row gets zero
+      // hrs — AN <hr> EXISTS ⟺ A WRAP REALLY HAPPENED AT THE RIGHT MARGIN.
+      // Single list semantics via role=list/listitem; column divs stay generic
+      // so AT hears one list. ResizeObserver re-places dividers from fresh
+      // measurement; signature compare-then-mutate keeps it loop-safe;
+      // isConnected guard releases the observer once the dialog removes it.
+      let listObserver = null;
+      let lastDividerKey = null;
+      const renderList = () => {
+        if (listObserver) { try { listObserver.disconnect(); } catch { /* cleanup is best-effort */ } listObserver = null; }
+        lastDividerKey = null;
+        const makeItemNode = (entry) => {
+          const open = smallButton(displayOf(entry), `Details for ${displayOf(entry)}`);
+          open.classList.add('max-w-full', 'wrap-anywhere', 'break-words');
+          open.addEventListener('click', () => {
+            const back = smallButton('Back to items', 'Back to items');
+            back.addEventListener('click', renderList);
+            view.replaceChildren(back, itemDetailView(entry, effectiveType));
+          });
+          return element('div', { className: 'min-w-0 max-w-full', attrs: { role: 'listitem' } }, [open]);
+        };
+        const columnSlices = [];
+        for (let index = 0; index < items.length; index += 4) {
+          columnSlices.push(items.slice(index, index + 4));
+        }
+        if (columnSlices.length <= 1) {
+          const columns = [];
+          for (let index = 0; index < items.length; index += 4) {
+            columns.push(element('div', { className: 'grid min-w-[9rem] max-w-full flex-1 basis-36 grid-cols-1 content-start gap-1' }, items.slice(index, index + 4).map(makeItemNode)));
+          }
+          view.replaceChildren(
+            element('div', { className: 'flex max-h-56 w-full min-w-0 max-w-full flex-row flex-wrap items-start gap-3 overflow-x-hidden overflow-y-auto text-sm text-ink', attrs: { role: 'list' } }, columns)
+          );
+          return;
+        }
+        const listEl = element('div', { className: 'flex max-h-56 w-full min-w-0 max-w-full flex-row flex-wrap items-start gap-3 overflow-y-auto text-sm text-ink', attrs: { role: 'list' } });
+        const colNodes = columnSlices.map((slice) => element('div', { className: 'grid w-36 flex-none shrink-0 grid-cols-1 content-start gap-1' }, slice.map(makeItemNode)));
+        listEl.append(...colNodes);
+        view.replaceChildren(listEl);
+        const placeDividers = () => {
+          if (!listEl.isConnected) {
+            try { if (listObserver) listObserver.disconnect(); } catch { /* cleanup is best-effort */ }
+            listObserver = null;
+            return;
+          }
+          // Reveal the natural wrap: detach previous divider hrs so measurement
+          // sees columns only (the browser's real wrap points, not our marks).
+          const previousHrs = Array.from(listEl.querySelectorAll('hr'));
+          previousHrs.forEach((hr) => hr.remove());
+          const connectedCols = colNodes.filter((col) => col.isConnected);
+          if (!connectedCols.length) { lastDividerKey = JSON.stringify([]); return; }
+          let containerTop = 0;
+          try { containerTop = listEl.getBoundingClientRect().top; } catch { /* measurement is best-effort */ }
+          const tops = connectedCols.map((col) => {
+            try { return col.getBoundingClientRect().top - containerTop; }
+            catch { return 0; }
+          });
+          const breaks = [];
+          let rowTop = tops[0];
+          for (let colIndex = 1; colIndex < tops.length; colIndex += 1) {
+            if (Math.abs(tops[colIndex] - rowTop) > 2) {
+              breaks.push(colIndex);
+              rowTop = tops[colIndex];
+            }
+          }
+          const key = JSON.stringify(breaks);
+          const applyDividers = () => {
+            breaks.forEach((colIndex) => {
+              const divider = element('hr', { className: 'my-2 w-full border-t border-white/10' });
+              divider.style.cssText = 'flex:0 0 100%';
+              listEl.insertBefore(divider, connectedCols[colIndex]);
+            });
+          };
+          if (!breaks.length) {
+            // Single visual row: zero hrs (already detached above). This is the
+            // core guarantee — no wrap, no divider.
+            lastDividerKey = key;
+            return;
+          }
+          if (key === lastDividerKey) {
+            // Same wrap as last run (e.g. a height-only callback from our own
+            // insertion): restore identical dividers so the synchronous
+            // remove + re-add nets to no observable change and converges.
+            applyDividers();
+            return;
+          }
+          lastDividerKey = key;
+          applyDividers();
+        };
+        const schedulePlace = () => {
+          if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+            window.requestAnimationFrame(() => placeDividers());
+          } else {
+            placeDividers();
+          }
+        };
+        schedulePlace();
+        if (typeof ResizeObserver !== 'undefined') {
+          listObserver = new ResizeObserver(() => {
+            if (!listEl.isConnected) {
+              try { listObserver.disconnect(); } catch { /* cleanup is best-effort */ }
+              listObserver = null;
+              return;
+            }
+            placeDividers();
+          });
+          try { listObserver.observe(listEl); } catch { /* observer is best-effort */ }
+        }
       };
       renderList();
       const header = element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-2' }, [
@@ -230,7 +441,7 @@ function itemsDialog(deckId, title, entityType, deckRef = null) {
         description: `${items.length} items. Select one for details, examples and strokes.`,
         content: [dialogStack([
           header,
-          element('div', { className: 'flex min-w-0 max-w-full flex-row flex-nowrap items-center gap-2' }, [playAll, stop, starEnd]),
+          element('div', { className: 'flex min-w-0 max-w-full flex-row flex-wrap items-center gap-2' }, [playAll, stop, ...(startReview ? [startReview] : []), starEnd]),
           progress,
           view
         ])],
@@ -251,25 +462,162 @@ function section(title, description) {
   return { wrap, body };
 }
 
+// Collapsible hub sections (Publish / Share & import / Collections only):
+// same outer <section aria-label> + byte-identical h2/p copy, but the
+// header becomes a native <details>/<summary> (default CLOSED) so the hub
+// stays decluttered. <summary> wraps the real <h2> (heading semantics, no
+// div-role-button). Nodes stay in the DOM when closed, so querySelector
+// wiring (picker tabs, title input, refreshCollections) keeps working.
+// My Decks / Feed / Texts keep using section() untouched.
+function collapsibleSection(title, description) {
+  const body = element('div', { className: 'grid gap-3' });
+  const summary = element('summary', { className: 'cursor-pointer' }, [
+    element('h2', { className: 'font-semibold text-ink', text: title })
+  ]);
+  const disclosure = element('details', { className: 'grid gap-3' }, [
+    summary,
+    element('p', { className: 'mt-1 text-sm text-muted', text: description }),
+    body
+  ]);
+  const wrap = element('section', { className: 'surface mt-4 p-5 sm:p-6', attrs: { 'aria-label': title } }, [
+    disclosure
+  ]);
+  return { wrap, body };
+}
+
 // Full card stays for owner-managed contexts (My decks, Collections) where
 // selection, analytics, suggestions and member controls need the room.
 // Feed and Ver-más lists use deckRowButton instead.
-function deckCard(deck, actions = []) {
+// V6.1.2: Redesigned as study objects — prioritize Study action, hide analytics/suggestions.
+function deckCard(deck, options = {}) {
+  const { showStudyAction = false, onStudy, showOverflow = false, onOverflowActions, isImported = false } = options;
   const pill = typePill(deck.entityType);
   const creatorName = authorNameOf(deck);
   const creator = creatorName
     ? element('p', { className: 'mt-1 min-w-0 wrap-anywhere break-words text-xs text-muted', text: `by ${creatorName}` })
     : null;
-  return element('article', { className: 'relative min-w-0 w-full max-w-full overflow-hidden wrap-anywhere rounded-xl border border-stone bg-paper p-4' }, [
-    element('div', { className: 'flex min-w-0 max-w-full items-start justify-between gap-3' }, [
-      element('h3', { className: 'min-w-0 flex-1 wrap-anywhere break-words text-lg font-semibold text-ink', text: deck.title }),
-      pill
+
+  // Study signal: prefer reviews due from analytics if available, else item count.
+  // The gate below coerces via Number() so a missing/string count can never
+  // hide (or wrongly show) the Study action; the meta line keeps the raw
+  // value untouched.
+  const itemCount = deck.itemCount ?? 0;
+  const studyCount = Number(itemCount);
+  const reviewsDue = deck.reviewsDue ?? null;
+  const studySignal = reviewsDue !== null && reviewsDue > 0
+    ? `${reviewsDue} review${reviewsDue === 1 ? '' : 's'} due`
+    : `${itemCount} item${itemCount === 1 ? '' : 's'}`;
+
+  // Visibility pill (public/private)
+  const visibilityPill = element('span', {
+    className: `status-pill text-xs ${deck.isPublic ? 'status-pill--success' : 'status-pill--warning'}`,
+    text: deck.isPublic ? 'Public' : 'Private'
+  });
+
+  const header = element('div', { className: 'flex min-w-0 max-w-full items-start justify-between gap-3' }, [
+    element('div', { className: 'min-w-0 flex-1' }, [
+      element('h3', { className: 'min-w-0 wrap-anywhere break-words text-lg font-semibold text-ink', text: deck.title }),
+      element('div', { className: 'mt-1 flex flex-wrap items-center gap-2' }, [pill, visibilityPill])
     ]),
-    ...(creator ? [creator] : []),
-    ...(deck.description ? [element('p', { className: 'mt-1 min-w-0 wrap-anywhere break-words text-sm leading-6 text-muted', text: deck.description })] : []),
-    element('p', { className: 'mt-2 min-w-0 wrap-anywhere break-words text-xs font-medium text-muted', text: `${deck.itemCount ?? '?'} items` }),
-    ...(actions.length ? [element('div', { className: 'mt-3 flex min-w-0 max-w-full flex-row flex-wrap items-center gap-2' }, actions)] : [])
+    ...(isImported ? [element('span', { className: 'status-pill text-xs shrink-0', text: 'Shared from Community' })] : [])
   ]);
+
+  const description = deck.description
+    ? element('p', { className: 'mt-2 min-w-0 wrap-anywhere break-words text-sm leading-6 text-muted', text: deck.description })
+    : null;
+
+  const meta = element('p', { className: 'mt-2 min-w-0 wrap-anywhere break-words text-xs font-medium text-muted', text: studySignal });
+
+  // Primary Study action (when deck has items). The label travels via
+  // the `text` option — element() appends children verbatim, so a raw
+  // string child here threw "Argument 1 ('node') to Node.appendChild".
+  let primaryAction = null;
+  if (showStudyAction && Number.isFinite(studyCount) && studyCount > 0 && typeof onStudy === 'function') {
+    primaryAction = element('button', {
+      className: 'button-primary min-h-10 px-4 py-2 text-sm font-semibold flex-1 sm:flex-none',
+      text: 'Study',
+      attrs: { type: 'button', 'aria-label': `Study ${deck.title}` }
+    });
+    primaryAction.addEventListener('click', (event) => {
+      event.stopPropagation();
+      onStudy(deck);
+    });
+  }
+
+  // Overflow menu for admin actions. The menu is absolutely positioned so it
+  // overlays content below without moving siblings; the card itself must not
+  // clip it (no overflow-hidden on the article — long text is already
+  // contained per-node via min-w-0 + wrap-anywhere/break-words).
+  let overflowMenu = null;
+  if (showOverflow && typeof onOverflowActions === 'function') {
+    const wrap = element('div', { className: 'relative shrink-0' });
+    const toggle = element('button', {
+      className: 'icon-button shrink-0',
+      attrs: { type: 'button', 'aria-label': `Deck actions for ${deck.title}`, 'aria-haspopup': 'menu', 'aria-expanded': 'false' }
+    }, [icon('dots', { size: 18 })]);
+    const menu = element('div', {
+      className: 'absolute right-0 top-full z-20 hidden min-w-40 max-w-[calc(100vw-2rem)] rounded-lg border border-stone bg-paper p-1 shadow-lg mt-1',
+      attrs: { role: 'menu' }
+    });
+    // Outside-click listener lives only while the menu is open (registered in
+    // openMenu, removed in closeMenu) so remounted cards never pile up global
+    // listeners over detached DOM.
+    const onDocClick = (event) => {
+      if (!wrap.contains(event.target)) closeMenu(false);
+    };
+    const closeMenu = (refocus = false) => {
+      menu.classList.add('hidden');
+      toggle.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('click', onDocClick);
+      if (refocus) toggle.focus();
+    };
+    const openMenu = () => {
+      menu.classList.remove('hidden');
+      toggle.setAttribute('aria-expanded', 'true');
+      document.addEventListener('click', onDocClick);
+      // preventScroll: the menu overlays below the toggle — focusing the
+      // first item must not yank the page scroll position.
+      menu.querySelector('button')?.focus({ preventScroll: true });
+    };
+    toggle.addEventListener('click', (event) => {
+      event.stopPropagation();
+      menu.classList.contains('hidden') ? openMenu() : closeMenu(false);
+    });
+    toggle.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { event.stopPropagation(); closeMenu(true); }
+    });
+    menu.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { event.stopPropagation(); closeMenu(true); }
+    });
+    const addMenuItem = (label, handler, isDestructive = false) => {
+      const item = element('button', {
+        className: `flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium ${isDestructive ? 'text-red-700' : 'text-ink'} transition hover:bg-paper`,
+        attrs: { type: 'button', role: 'menuitem' }
+      }, [element('span', { text: label })]);
+      item.addEventListener('click', (event) => {
+        event.stopPropagation();
+        closeMenu(false);
+        handler();
+      });
+      menu.appendChild(item);
+    };
+    onOverflowActions({ addMenuItem, closeMenu });
+    wrap.append(toggle, menu);
+    overflowMenu = wrap;
+  }
+
+  const actionsRow = element('div', { className: 'mt-3 flex min-w-0 max-w-full flex-wrap items-center gap-2' }, [
+    ...(primaryAction ? [primaryAction] : []),
+    ...(overflowMenu ? [overflowMenu] : [])
+  ]);
+
+  // No overflow-hidden here: the open overflow menu is absolutely positioned
+  // and must overlay past the card's bottom edge; text containment is handled
+  // per-node (min-w-0 + wrap-anywhere/break-words) and grid blowout by min-w-0.
+  return element('article', {
+    className: 'relative min-w-0 w-full max-w-full wrap-anywhere rounded-xl border border-stone bg-paper p-4',
+    attrs: { role: 'button', tabindex: '0', 'aria-label': `Open ${deck.title}` }
+  }, [header, ...(creator ? [creator] : []), ...(description ? [description] : []), meta, actionsRow]);
 }
 
 // Inline like control. It renders only inside the deck detail dialog, so it
@@ -315,27 +663,143 @@ const PICKER_TYPES = [
   { key: 'grammar', label: 'Grammar', endpoint: '/api/grammar/options', idKey: 'id_grammar', titleOf: (row) => row.grammar_point, subOf: (row) => [row.meaning].filter(Boolean).join(' · ') }
 ];
 
-export async function renderCommunity(container) {
-  container.replaceChildren(pageHeader({
-    eyebrow: 'Social',
-    title: 'Decks',
-    description: 'Discover, publish, share and collect decks and reading texts. Everything social lives here.'
-  }));
+export async function renderDecksHub(container) {
+  // Decks hub home (legacy V5.x surface, preserved verbatim for V6.0):
+  // publishing, sharing, importing, browsing and collections. Mounted as
+  // the Decks tab of the Community shell — no header of its own. Clears
+  // the shell loader first (appending under it left it spinning forever).
+  container.replaceChildren();
   const feed = section('Feed', 'Public decks. Filter, listen, open details, follow.');
-  const publish = section('Publish', 'Pick items from your collection and publish a deck — or pick a text tab to publish reading texts.');
-  const share = section('Share & import', 'Signed codes: share your own items, import codes as new rows.');
-  const mine = section('My decks', 'Your publications with suggestions and analytics.');
-  const collections = section('Collections', 'Group decks into playlists and share them as one code.');
+  const publish = collapsibleSection('Publish', 'Pick items from your collection and publish a deck — or pick a text tab to publish reading texts.');
+  const share = collapsibleSection('Share & import', 'Signed codes: share your own items, import codes as new rows.');
+  
+  // My Decks — V6.1.2: modern header with primary Create action.
+  // The label travels via the `text` option: element() appends children
+  // verbatim, so a string child here threw "Argument 1 ('node') to
+  // Node.appendChild" and aborted the whole hub mount.
+  const mineHeader = pageHeader({
+    title: 'My Decks',
+    description: 'Organize your learning material into studyable decks.',
+    action: element('button', {
+      className: 'button-primary min-h-10 px-4 py-2 text-sm font-semibold shrink-0',
+      text: '+ Create deck',
+      attrs: { type: 'button', 'aria-label': 'Create a new deck' }
+    })
+  });
+  const mineBody = element('div', { className: 'grid gap-4' });
+  const mine = { wrap: element('section', { className: 'surface mt-4 p-5 sm:p-6', attrs: { 'aria-label': 'My Decks' } }, [mineHeader, mineBody]), body: mineBody };
+  
+  const collections = collapsibleSection('Collections', 'Group decks into playlists and share them as one code.');
   container.append(feed.wrap, publish.wrap, share.wrap, mine.wrap, collections.wrap);
 
+  // Wire Create deck button to switch to Publish tab and focus title
+  mineHeader.querySelector('button').addEventListener('click', () => {
+    // Publish lives inside a closed <details>: open it first so the tab and
+    // title input are visible before focusing (nodes stay in the DOM, so
+    // querySelector works either way — this only affects visibility).
+    const publishDisclosure = publish.wrap.querySelector('details');
+    if (publishDisclosure) publishDisclosure.open = true;
+    // Find and click the first picker tab (Vocabulary) to ensure we're in deck mode
+    const vocabTab = publish.wrap.querySelector('[data-picker-key="vocabulary"]');
+    if (vocabTab) vocabTab.click();
+    // Focus the title input
+    const titleInput = publish.wrap.querySelector('input[aria-label="Deck title"]');
+    if (titleInput) { titleInput.focus(); titleInput.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  });
+
   // ---- Feed
+  // V6.1.2: YouTube-style filter selector button (reuse communityFeed.js pattern)
+  const FEED_FILTERS = [
+    { value: '', label: 'All types' },
+    { value: 'vocabulary', label: 'Vocabulary' },
+    { value: 'kanji', label: 'Kanji' },
+    { value: 'grammar', label: 'Grammar' },
+    { value: 'reading', label: 'Reading' }
+  ];
+  let feedFilterType = '';
   const filterRow = element('div', { className: 'flex flex-col gap-2 sm:flex-row sm:items-center' });
-  const typeFilter = element('select', { className: 'field-control sm:max-w-44', attrs: { 'aria-label': 'Filter by type' } }, [
-    element('option', { text: 'All types', attrs: { value: '' } }),
-    ...PICKER_TYPES.map((type) => element('option', { text: type.label, attrs: { value: type.key } }))
-  ]);
+  const filterWrap = element('div', { className: 'relative inline-flex max-w-full' });
+  const filterLabel = element('span', { className: 'truncate', text: `Filter: ${FEED_FILTERS.find(f => f.value === feedFilterType)?.label || 'All types'}` });
+  const filterButton = element('button', {
+    className: 'button-secondary inline-flex min-h-9 max-w-full items-center gap-2 px-3 py-1.5 text-xs shrink-0',
+    attrs: { type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': `Feed filter, current: ${FEED_FILTERS.find(f => f.value === feedFilterType)?.label || 'All types'}` }
+  }, [icon('filter', { size: 16 }), filterLabel]);
+  const filterMenu = element('div', {
+    className: 'absolute left-0 top-full z-20 hidden min-w-40 max-w-[70vw] rounded-lg border border-stone bg-paper p-1 shadow-lg mt-1',
+    attrs: { role: 'menu', 'aria-label': 'Feed filter by type' }
+  });
+  filterWrap.append(filterButton, filterMenu);
+  const filterItems = new Map();
+  const paintFeedFilter = () => {
+    const current = FEED_FILTERS.find(f => f.value === feedFilterType)?.label || 'All types';
+    filterLabel.textContent = `Filter: ${current}`;
+    filterButton.setAttribute('aria-label', `Feed filter, current: ${current}`);
+    for (const [value, item] of filterItems) {
+      const active = value === feedFilterType;
+      item.classList.toggle('is-active', active);
+      if (active) item.setAttribute('aria-current', 'true');
+      else item.removeAttribute('aria-current');
+    }
+  };
+  let feedFilterOpen = false;
+  const closeFeedFilter = (refocus = false) => {
+    if (!feedFilterOpen) return;
+    feedFilterOpen = false;
+    filterMenu.classList.add('hidden');
+    filterButton.setAttribute('aria-expanded', 'false');
+    if (refocus) filterButton.focus();
+  };
+  const openFeedFilter = () => {
+    feedFilterOpen = true;
+    filterMenu.classList.remove('hidden');
+    filterButton.setAttribute('aria-expanded', 'true');
+    (filterItems.get(feedFilterType) || [...filterItems.values()][0])?.focus();
+  };
+  for (const entry of FEED_FILTERS) {
+    const item = element('button', {
+      className: 'flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm font-medium text-ink transition hover:bg-paper',
+      attrs: { type: 'button', role: 'menuitem', 'aria-label': `Filter by ${entry.label}` }
+    }, [element('span', { text: entry.label })]);
+    if (entry.value === feedFilterType) item.setAttribute('aria-current', 'true');
+    item.addEventListener('click', () => {
+      feedFilterType = entry.value;
+      paintFeedFilter();
+      closeFeedFilter(true);
+      renderFeed();
+    });
+    filterItems.set(entry.value, item);
+    filterMenu.appendChild(item);
+  }
+  paintFeedFilter();
+  filterButton.addEventListener('click', (event) => {
+    event.stopPropagation();
+    feedFilterOpen ? closeFeedFilter(false) : openFeedFilter();
+  });
+  filterButton.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') { event.stopPropagation(); closeFeedFilter(true); }
+    if (event.key === 'ArrowDown' && !feedFilterOpen) { event.preventDefault(); openFeedFilter(); }
+  });
+  filterMenu.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') { event.stopPropagation(); closeFeedFilter(true); return; }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    const items = [...filterItems.values()];
+    const currentIndex = items.indexOf(document.activeElement);
+    const next = event.key === 'ArrowDown'
+      ? items[(currentIndex + 1 + items.length) % items.length]
+      : items[(currentIndex - 1 + items.length) % items.length];
+    next?.focus();
+  });
+  document.addEventListener('click', (event) => {
+    if (!feedFilterOpen) return;
+    if (filterWrap.contains(event.target)) return;
+    closeFeedFilter(false);
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && feedFilterOpen) closeFeedFilter(true);
+  });
   const textFilter = element('input', { className: 'field-control', attrs: { type: 'search', 'aria-label': 'Filter decks by text', placeholder: 'Filter by title…' } });
-  filterRow.append(typeFilter, textFilter);
+  filterRow.append(filterWrap, textFilter);
   const feedList = element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-4' });
   feed.body.append(filterRow, feedList);
   let feedDecks = [];
@@ -346,16 +810,16 @@ export async function renderCommunity(container) {
   const buildFeedRow = (deck) => deckRowButton(deck, () => itemsDialog(deck.id, deck.title, deck.entityType, deck));
   const renderFeed = () => {
     const query = String(textFilter.value || '').trim().toLowerCase();
-    const visible = filterFeedDecks(typeFilter.value, query);
+    const visible = filterFeedDecks(feedFilterType, query);
     if (!visible.length) {
-      feedList.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'No decks match. Publish the first one below.' }));
+      feedList.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Nothing matches. Try another filter.' }));
       return;
     }
     const shown = visible.slice(0, FEED_VISIBLE);
     feedList.replaceChildren(element('div', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-2 overflow-x-hidden' }, shown.map((deck) => buildFeedRow(deck))));
     if (visible.length > FEED_VISIBLE) {
-      const more = smallButton(`Ver más (${visible.length - FEED_VISIBLE} more)`, 'View all matching decks');
-      more.addEventListener('click', () => openAllDecksDialog(typeFilter.value, query));
+      const more = smallButton(`See more (${visible.length - FEED_VISIBLE} more)`, 'View all matching decks');
+      more.addEventListener('click', () => openAllDecksDialog(feedFilterType, query));
       feedList.append(element('div', { className: 'mt-1 flex justify-center' }, [more]));
     }
   };
@@ -372,7 +836,7 @@ export async function renderCommunity(container) {
       const visible = filterFeedDecks(dialogType.value, query);
       dialogList.replaceChildren(...(visible.length
         ? visible.map((deck) => deckRowButton(deck, () => itemsDialog(deck.id, deck.title, deck.entityType, deck)))
-        : [element('p', { className: 'text-sm text-muted', text: 'No decks match.' })]));
+        : [element('p', { className: 'text-sm text-muted', text: 'Nothing matches. Try another filter.' })]));
     };
     dialogType.addEventListener('change', renderDialogList);
     dialogSearch.addEventListener('input', renderDialogList);
@@ -387,8 +851,7 @@ export async function renderCommunity(container) {
       submitLabel: 'Close',
       onSubmit: async (form, close) => { close(); }
     });
-  };
-  typeFilter.addEventListener('change', renderFeed);
+  }
   textFilter.addEventListener('input', renderFeed);
   feedList.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Loading public decks…' }));
   try {
@@ -434,6 +897,7 @@ export async function renderCommunity(container) {
             return result;
           }).then((result) => {
             if (result && result.id) {
+              if (result.duplicate === true) showToast('Already in your library — opened your copy.');
               closeDetail();
               window.location.hash = `#reading?id=${result.id}`;
             }
@@ -587,7 +1051,7 @@ export async function renderCommunity(container) {
   let selectedTextId = null;
   const renderTextsPicker = () => {
     const query = String(search.value || '').trim().toLowerCase();
-    const own = libraryTexts.filter((item) => item.mine === true);
+    const own = libraryTexts.filter((item) => item.mine === true || item.mine === 1);
     const visible = own.filter((item) => !query || String(item.title || '').toLowerCase().includes(query));
     if (!visible.length) {
       results.replaceChildren(element('p', { className: 'text-sm text-muted', text: libraryLoaded ? 'No own texts match. Create one from the reader.' : 'Loading your texts…' }));
@@ -736,106 +1200,164 @@ export async function renderCommunity(container) {
     codeInput, previewImport, importPreview
   );
 
-  // ---- My decks: click a card to open it; trash deletes. When two or more
-  // cards are checked, any single trash deletes the whole selection.
-  const selectedDecks = new Set();
+  // ---- My decks: V6.1.2 — study-focused cards with Study primary action, overflow menu for admin
   const loadMine = async () => {
-    selectedDecks.clear();
-    mine.body.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Loading your decks…' }));
+    mine.body.replaceChildren(loadingState('Loading your decks…'));
     try {
       const data = await apiRequest('/api/decks?mine=true&limit=50');
       const decks = Array.isArray(data?.items) ? data.items : [];
+      
       if (!decks.length) {
-        mine.body.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Nothing published yet — use the composer above.' }));
+        mine.body.replaceChildren(emptyState({
+          title: 'Your study library is empty',
+          description: 'Create your first deck or explore shared content from Community.',
+          action: element('div', { className: 'flex flex-col gap-2 sm:flex-row' }, [
+            element('button', {
+              className: 'button-primary min-h-10 px-4 py-2 text-sm font-semibold',
+              attrs: { type: 'button' },
+              text: 'Create deck'
+            }),
+            element('button', {
+              className: 'button-secondary min-h-10 px-4 py-2 text-sm font-semibold',
+              attrs: { type: 'button' },
+              text: 'Explore Community'
+            })
+          ])
+        }));
+        // Wire empty state buttons
+        const createBtn = mine.body.querySelector('button:first-of-type');
+        const exploreBtn = mine.body.querySelector('button:last-of-type');
+        if (createBtn) createBtn.addEventListener('click', () => {
+          const publishDisclosure = publish.wrap.querySelector('details');
+          if (publishDisclosure) publishDisclosure.open = true;
+          const vocabTab = publish.wrap.querySelector('[data-picker-key="vocabulary"]');
+          if (vocabTab) vocabTab.click();
+          const titleInput = publish.wrap.querySelector('input[aria-label="Deck title"]');
+          if (titleInput) { titleInput.focus(); titleInput.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+        });
+        if (exploreBtn) exploreBtn.addEventListener('click', () => {
+          const feedTab = feed.wrap.querySelector('h2');
+          if (feedTab) feedTab.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
         return;
       }
+
+      // Fetch analytics for reviews due signal (parallel, best-effort)
+      const analyticsMap = new Map();
+      await Promise.all(decks.map(async (deck) => {
+        try {
+          const analytics = await apiRequest(`/api/decks/${deck.id}/analytics?period=30d`);
+          analyticsMap.set(deck.id, analytics.overview);
+        } catch { /* analytics optional */ }
+      }));
+
       const cards = [];
       for (const deck of decks) {
-        const suggestionsBox = element('div', { className: 'grid gap-2' });
-        const analyticsLine = element('p', { className: 'mt-1 text-xs text-muted', text: 'Loading analytics…' });
-        const selectBox = element('input', { attrs: { type: 'checkbox', 'aria-label': `Select ${deck.title} for deletion` } });
-        selectBox.addEventListener('click', (event) => {
-          if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-        });
-        selectBox.addEventListener('change', () => {
-          if (selectBox.checked) selectedDecks.add(deck.id);
-          else selectedDecks.delete(deck.id);
-        });
-        const remove = element('button', { className: 'icon-button icon-button--danger shrink-0', attrs: { type: 'button', 'aria-label': `Delete ${deck.title}` } }, [icon('trash', { size: 18 })]);
-        remove.addEventListener('click', (event) => {
-          if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-          const ids = selectedDecks.size > 0 ? [...selectedDecks] : [deck.id];
-          confirmDialog({
-            title: ids.length > 1 ? `Delete ${ids.length} decks?` : `Delete ${deck.title}?`,
-            description: 'This permanently deletes the deck(s), their items, follows and suggestions. This cannot be undone.',
-            onConfirm: async () => {
-              for (const id of ids) {
-                await apiRequest(`/api/decks/${id}`, { method: 'DELETE' });
+        const overview = analyticsMap.get(deck.id) || {};
+        const reviewsDue = overview.reviewsDue ?? 0;
+        const isImported = deck.source === 'community' || deck.importedFromCommunity === true;
+
+        const card = deckCard(deck, {
+          showStudyAction: true,
+          // Study entry: openDeckViewer() is closure-private inside
+          // communityFeed.js:mountSocialFeed (not exported/importable), so
+          // this module routes Study to its own deck viewer — the same
+          // itemsDialog a card click opens, with the identical Start Review
+          // save-then-queue flow. Previously this called the undefined
+          // openDeckViewer() and every Study click threw a ReferenceError.
+          onStudy: (target) => itemsDialog(target.id, target.title, target.entityType, target),
+          showOverflow: true,
+          onOverflowActions: ({ addMenuItem, closeMenu }) => {
+            // Rename
+            addMenuItem('Rename', () => {
+              openDialog({
+                title: 'Rename deck',
+                description: 'Give this deck a new title.',
+                content: [element('input', {
+                  className: 'field-control',
+                  attrs: { type: 'text', maxLength: '120', 'aria-label': 'New deck title', value: deck.title }
+                })],
+                submitLabel: 'Save',
+                onSubmit: async (form, close) => {
+                  const newTitle = String(form.querySelector('input').value || '').trim();
+                  if (!newTitle) { showToast('Title cannot be empty.', 'error'); return; }
+                  try {
+                    await withPendingAction(form.querySelector('button[type="submit"]'), async () => {
+                      await apiRequest(`/api/decks/${deck.id}`, { method: 'PUT', body: { title: newTitle } });
+                    });
+                    showToast('Deck renamed.');
+                    close();
+                    await loadMine();
+                  } catch (error) {
+                    showToast(error?.message || 'Unable to rename.', 'error');
+                  }
+                }
+              });
+            });
+            // Duplicate
+            addMenuItem('Duplicate', async () => {
+              try {
+                const duplicated = await apiRequest(`/api/decks/${deck.id}/duplicate`, { method: 'POST' });
+                showToast('Deck duplicated.');
+                await loadMine();
+              } catch {
+                // If duplicate endpoint doesn't exist, fall back to manual recreation
+                try {
+                  const detail = await apiRequest(`/api/decks/${deck.id}`);
+                  const items = Array.isArray(detail.items) ? detail.items.map((entry) => entry.id) : [];
+                  if (items.length) {
+                    await apiRequest('/api/decks', { method: 'POST', body: { entityType: deck.entityType, ids: items, title: `${deck.title} (copy)`, description: deck.description } });
+                    showToast('Deck duplicated.');
+                    await loadMine();
+                  } else {
+                    showToast('Cannot duplicate empty deck.', 'error');
+                  }
+                } catch (error) {
+                  showToast(error?.message || 'Unable to duplicate.', 'error');
+                }
               }
-              showToast(ids.length > 1 ? 'Selected decks deleted.' : 'Deck deleted.');
-              await loadMine();
-            }
-          });
+            });
+            // Delete (destructive)
+            addMenuItem('Delete', () => {
+              confirmDialog({
+                title: `Delete ${deck.title}?`,
+                description: 'This permanently deletes the deck, its items, follows and suggestions. This cannot be undone.',
+                confirmLabel: 'Delete',
+                onConfirm: async () => {
+                  try {
+                    await apiRequest(`/api/decks/${deck.id}`, { method: 'DELETE' });
+                    showToast('Deck deleted.');
+                    await loadMine();
+                  } catch (error) {
+                    showToast(error?.message || 'Unable to delete.', 'error');
+                  }
+                }
+              });
+            }, true);
+          },
+          isImported
         });
-        const card = deckCard(deck, []);
-        card.setAttribute('role', 'button');
-        card.setAttribute('tabindex', '0');
-        card.setAttribute('aria-label', `Open ${deck.title}`);
-        card.classList.add('cursor-pointer');
-        card.addEventListener('click', () => itemsDialog(deck.id, deck.title, deck.entityType, deck));
+
+        // Make card clickable to open detail dialog (but not when clicking actions)
+        card.addEventListener('click', (event) => {
+          if (event.target.closest('button, [role="menuitem"]')) return;
+          itemsDialog(deck.id, deck.title, deck.entityType, deck);
+        });
         card.addEventListener('keydown', (event) => {
-          try {
-            if (event.target && event.target !== card && typeof event.target.closest === 'function' && event.target.closest('button,input')) return;
-          } catch { /* target guard is best-effort */ }
-          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); itemsDialog(deck.id, deck.title, deck.entityType, deck); }
+          if (event.key === 'Enter' || event.key === ' ') {
+            if (event.target.closest('button, [role="menuitem"]')) return;
+            event.preventDefault();
+            itemsDialog(deck.id, deck.title, deck.entityType, deck);
+          }
         });
-        card.append(
-          element('div', { className: 'mt-2 flex items-center gap-2' }, [selectBox, remove]),
-          analyticsLine,
-          suggestionsBox
-        );
+
         cards.push(card);
-        apiRequest(`/api/decks/${deck.id}/analytics?period=30d`)
-          .then((analytics) => {
-            analyticsLine.textContent = `${analytics.overview.followers} followers · ${analytics.overview.items} items · suggestions ${analytics.overview.suggestions.pending} pending`;
-          })
-          .catch(() => { analyticsLine.textContent = 'Analytics unavailable.'; });
-        apiRequest(`/api/decks/${deck.id}/suggestions`)
-          .then((incoming) => {
-            const items = Array.isArray(incoming?.items) ? incoming.items.filter((entry) => entry.status === 'pending') : [];
-            if (!items.length) return;
-            suggestionsBox.append(element('p', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: `Suggestions (${items.length})` }));
-            for (const suggestion of items) {
-              const changes = (Array.isArray(suggestion.changes) ? suggestion.changes : [])
-                .map((change) => `${change.field}: ${change.oldValue} → ${change.newValue} (${change.reason})`).join(' · ');
-              const accept = smallButton('Accept', `Accept suggestion ${suggestion.id}`);
-              const reject = smallButton('Reject', `Reject suggestion ${suggestion.id}`);
-              const decide = (decision) => {
-                withPendingAction(accept, async () => {
-                  await apiRequest(`/api/decks/suggestions/${suggestion.id}/decision`, { method: 'POST', body: { decision } });
-                  showToast(`Suggestion ${decision}ed.`);
-                  suggestionsBox.replaceChildren();
-                }).catch((error) => showToast(error?.message || 'Unable to decide.', 'error'));
-              };
-              accept.addEventListener('click', (event) => {
-                if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-                decide('accept');
-              });
-              reject.addEventListener('click', (event) => {
-                if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-                decide('reject');
-              });
-              suggestionsBox.append(element('div', { className: 'rounded-md border border-stone p-2' }, [
-                element('p', { className: 'text-sm text-ink', text: changes || 'No changes listed.' }),
-                element('div', { className: 'mt-2 flex gap-2' }, [accept, reject])
-              ]));
-            }
-          })
-          .catch(() => {});
       }
-      mine.body.replaceChildren(element('div', { className: 'grid gap-4 md:grid-cols-2' }, cards));
-    } catch {
-      mine.body.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Your decks are unavailable.' }));
+
+      // Responsive grid: xl:3, md:2, mobile:1
+      mine.body.replaceChildren(element('div', { className: 'grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3' }, cards));
+    } catch (error) {
+      mine.body.replaceChildren(errorState(error, loadMine));
     }
   };
   await loadMine();
@@ -951,4 +1473,21 @@ export async function renderCommunity(container) {
     }
   };
   await refreshCollections();
+}
+
+// V6.0 Community shell: social tabs own the page; the legacy decks hub
+// mounts untouched as the Decks tab (zero regression surface).
+export async function renderCommunity(container) {
+  const { mountSocialFeed } = await import('./communityFeed.js');
+  container.replaceChildren(element('section', {}, [
+    pageHeader({
+      title: 'Community',
+      description: 'Learn Japanese with other learners: follow people, share what you study, save what inspires you.'
+    })
+  ]));
+  const shell = container.firstChild;
+  const tabs = element('div', { className: 'flex flex-wrap items-center gap-2', attrs: { role: 'tablist', 'aria-label': 'Community sections' } });
+  const body = element('div', { className: 'mt-5' });
+  shell.append(tabs, body);
+  await mountSocialFeed({ tabs, body, renderDecksHub });
 }

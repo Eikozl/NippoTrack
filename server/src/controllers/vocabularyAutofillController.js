@@ -50,7 +50,6 @@ async function postAutofillEntry(req, res) {
     }
     return res.json(result);
   } catch (error) {
-    if (error instanceof ValidationError) return res.status(400).json({ error: error.message });
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load JMdict entry.' });
   }
 }

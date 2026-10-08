@@ -554,10 +554,13 @@ test('settings starting-point block: restrained take-vs-result states, no re-ent
   assert.ok(source.includes('placementResultNode'), 'shared diagram, no copied scoring or rows');
   assert.ok(source.includes('placementResultFromState'), 'stored state presented, never derived');
   assert.ok(source.includes('enterPlacement'), 'same placement flow for existing accounts');
-  assert.ok(!source.match(/retake/i), 'no re-entry wording');
-  assert.ok(!source.match(/reset/i), 'no reset wording');
-  assert.ok(!source.match(/repeat/i), 'no repeat wording');
-  for (const marker of ['Profile', 'Learning', 'Appearance', 'Account']) {
+  // Copy guards scan user-facing labels only (text:/aria-label literals),
+  // never code comments or identifiers (e.g. a "reset is best-effort" note).
+  const userFacing = [...source.matchAll(/(?:\btext|'aria-label')\s*:\s*['"]((?:[^'"\\]|\\.)*)['"]/g)].map((m) => m[1]).join('\n');
+  assert.ok(!userFacing.match(/retake/i), 'no re-entry wording');
+  assert.ok(!userFacing.match(/reset/i), 'no reset wording');
+  assert.ok(!userFacing.match(/repeat/i), 'no repeat wording');
+  for (const marker of ['Profile', 'Learning', 'Account']) {
     assert.ok(source.includes(marker), `Settings section present: ${marker}`);
   }
   assert.ok(source.includes('notifyAuth: false'), 'stored read without auth side effects');

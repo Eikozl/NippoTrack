@@ -85,6 +85,13 @@
   /* Selected state: restrained accent-soft wash + subtle border + emphasis
      text. No giant filled blocks; the icon carries the accent. */
   .nav-item.is-active { color:var(--jlt-ink); background:var(--jlt-primary-soft); border:1px solid color-mix(in srgb,var(--jlt-border) 70%,transparent); box-shadow:var(--shadow-raised-sm); }
+  /* Community bottom floating glass nav: icon-only entries share the
+     nav-item selected language (accent-soft wash + subtle border + raised
+     shadow) so the active tab reads as a pill highlight, never color alone.
+     The bar itself carries its Tailwind pill classes in communityFeed.js;
+     only the selected state lives here with the other .is-active rules. */
+  .community-bottom-nav [role="tab"].is-active { color:var(--jlt-ink); background:var(--jlt-primary-soft); border:1px solid color-mix(in srgb,var(--jlt-border) 70%,transparent); box-shadow:var(--shadow-raised-sm); }
+  .community-bottom-nav [role="tab"]:not(.is-active) { border:1px solid transparent; }
   .icon-button { @apply grid size-10 place-items-center rounded-[12px] text-lg text-ink transition disabled:cursor-not-allowed disabled:opacity-55; background:var(--jlt-surface); border:1px solid var(--jlt-border); box-shadow:var(--nt-shadow-sm); }
   .icon-button:hover { color:var(--jlt-primary); border-color:color-mix(in srgb,var(--jlt-border) 55%,var(--jlt-primary)); }
   .icon-button:active { box-shadow:var(--shadow-inset-sm); }
@@ -565,19 +572,33 @@ nav .nav-group-label:first-child { margin-top: 0; }
 .jlpt-progress-details { margin-top: 1rem; }
 .jlpt-progress-details > summary { cursor: pointer; font-size: 0.875rem; font-weight: 600; color: var(--jlt-ink); }
 /* v5.1-C account surface: the existing app user icon anchors this one
-   responsive menu. Identity is text/initials only; no avatar media surface. */
+   responsive menu. Identity is initials by default; a served profile photo
+   overlays the mark (same box, round, cover) and falls back to initials. */
 .account-menu-anchor { position: relative; display: inline-flex; flex: none; }
 .user-menu { position: absolute; top: calc(100% + .55rem); right: 0; z-index: 60; display: grid; width: min(19rem, calc(100vw - 2rem)); gap: .2rem; padding: .45rem; border: 1px solid var(--nt-border-subtle); border-radius: 16px; background: var(--jlt-surface); box-shadow: var(--shadow-raised-md); opacity: 0; transform: translateY(-.35rem); transition: opacity 170ms ease, transform 170ms ease; }
 .user-menu[hidden] { display: none; }
 .user-menu.is-open { opacity: 1; transform: translateY(0); }
 .user-menu-identity { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: .7rem; padding: .7rem; }
-.account-initials { display: inline-grid; flex: none; width: 2rem; height: 2rem; place-items: center; border-radius: 999px; background: var(--jlt-primary-soft); color: var(--jlt-primary-strong); font-size: .75rem; font-weight: 700; letter-spacing: .03em; }
+.account-initials { display: inline-grid; position: relative; overflow: hidden; flex: none; width: 2rem; height: 2rem; place-items: center; border-radius: 999px; background: var(--jlt-primary-soft); color: var(--jlt-primary-strong); font-size: .75rem; font-weight: 700; letter-spacing: .03em; }
 .account-initials--large { width: 2.75rem; height: 2.75rem; font-size: .85rem; }
+/* Nav account trigger while showing a photo: fixed round clipping box so
+   any source aspect fills (never exceeds) the icon bounds. Applied only
+   while the photo is set (see syncTriggerPhoto); without photo the trigger
+   keeps its default icon-button styling byte-identical. */
+.icon-button.account-trigger--photo { position: relative; overflow: hidden; border-radius: 999px; }
+/* Tutorial takeover: slight zoom on the handset cut so the baked-in framing
+   fills small screens edge to edge. Desktop/tablet cut untouched. */
+.tutorial-video--zoom { transform: scale(1.12); transform-origin: center; }
 .user-menu-divider { height: 1px; margin: .35rem .4rem; background: var(--nt-border-subtle); }
 .user-menu-item { display: flex; min-height: 2.65rem; width: 100%; align-items: center; justify-content: space-between; gap: .7rem; border-radius: 11px; padding: .55rem .7rem; color: var(--jlt-ink); font-size: .875rem; text-align: left; transition: background-color 160ms ease, color 160ms ease; }
 .user-menu-item:hover, .user-menu-item:focus-visible { background: var(--jlt-primary-soft); color: var(--jlt-primary-strong); }
 .user-menu-language { display: grid; gap: .2rem; }
 .user-menu-language-panel { display: grid; gap: .15rem; padding: 0 .3rem .25rem 1rem; }
+/* Unlayered author display beats Tailwind's layered [hidden] rule, so the
+   hidden attribute needs its own guard (same precedent as
+   .user-menu[hidden] above) — otherwise the language panel never collapses
+   and its toggle looks dead. */
+.user-menu-language-panel[hidden] { display: none; }
 .user-menu-language-panel[hidden] { display: none; }
 .user-menu-option { display: flex; min-height: 2.35rem; width: 100%; align-items: center; gap: .45rem; border-radius: 9px; padding: .45rem .6rem; color: var(--jlt-muted); font-size: .8rem; text-align: left; }
 .user-menu-option:hover, .user-menu-option[aria-checked="true"] { background: var(--jlt-primary-soft); color: var(--jlt-primary-strong); }

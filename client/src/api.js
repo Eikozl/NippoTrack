@@ -78,10 +78,10 @@ export function deleteReadingText(id) {
   return apiRequest(`/api/reading/text/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
-export function updateReadingProgress(id, { position, timeSpentSeconds, completed } = {}) {
+export function updateReadingProgress(id, { position, timeSpentSeconds, completed, today } = {}) {
   return apiRequest(`/api/reading/text/${encodeURIComponent(id)}/progress`, {
     method: 'PUT',
-    body: { position, ...(timeSpentSeconds !== undefined ? { timeSpentSeconds } : {}), ...(completed !== undefined ? { completed } : {}) }
+    body: { position, ...(timeSpentSeconds !== undefined ? { timeSpentSeconds } : {}), ...(completed !== undefined ? { completed } : {}), ...(today !== undefined && today !== null ? { today } : {}) }
   });
 }
 
