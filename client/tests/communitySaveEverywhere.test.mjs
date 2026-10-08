@@ -48,15 +48,18 @@ test('item1: deck viewer per-item Save and Save-all confirm with counts', () => 
 
 test('item1: Decks hub saves are explicit, disclosed, and counted (audit)', () => {
   const hub = readSource('src/pages/community.js');
+  const gate = readSource('src/deckSaveGate.js');
   assert.ok(hub.includes('function itemsDialog'), 'Decks hub dialog exists');
   // Hub saves exist by product decision (Start Review save-then-queue):
   // they fire only behind the explicit Start Review action whose label
   // discloses saving, with per-outcome counts surfaced afterwards.
-  assert.ok(hub.includes("'/api/vocabulary', { method: 'POST'"), 'hub save path present (save-then-queue)');
+  // Save endpoints live in the shared gate; the hub reuses them via import.
+  assert.ok(gate.includes("'/api/vocabulary', { method: 'POST'"), 'shared save path present (save-then-queue)');
+  assert.ok(hub.includes('deckSaveGate') && hub.includes('ensureDeckOwnedId'), 'hub reuses the shared save path');
   assert.ok(hub.includes('Save deck items and start a review session'), 'Start Review discloses saving');
   assert.ok(hub.includes('savedCount') && hub.includes('alreadyCount') && hub.includes('skippedCount'), 'save/already/skipped counts tracked');
   assert.ok(hub.includes('already in library') && hub.includes('starting review with'), 'counts surfaced to the user');
-  assert.ok(hub.includes('/api/vocabulary/options'), 'hub picker search stays read-only (not a save)');
+  assert.ok(gate.includes('/api/vocabulary/options'), 'picker search stays read-only (not a save)');
   assert.ok(hub.includes("icon('volume'"), 'hub play uses the speaker glyph');
 });
 
