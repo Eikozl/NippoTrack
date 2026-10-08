@@ -28,7 +28,13 @@ test('global search options stay out of tab order (F K1)', () => {
 test('account menu closes on focus-out and supports arrow keys (F K2)', () => {
   const source = readSource('src/main.js');
   assert.ok(source.includes("menu.addEventListener('focusout'"), 'tab-away closes the menu');
-  assert.ok(source.includes("!menu.contains(event.relatedTarget)"), 'focus inside the menu does not close it');
+  // Deferred close: sync relatedTarget is unreliable (often null) on touch
+  // taps and would hide the menu mid-tap, swallowing it. The check re-runs
+  // after the tap completes against the live focused element.
+  assert.ok(source.includes('requestAnimationFrame'), 'focus-out close deferred past tap completion');
+  assert.ok(source.includes('document.activeElement'), 'close decision re-checked against real focus');
+  assert.ok(source.includes('menu.contains(active)'), 'focus inside the menu does not close it');
+  assert.ok(!source.includes('.contains(event.relatedTarget)'), 'no sync relatedTarget close');
   assert.ok(source.includes("event.key === 'ArrowUp'"), 'ArrowUp moves through menu items');
   assert.ok(source.includes("event.key === 'Home'"), 'Home/End supported in menu');
 });

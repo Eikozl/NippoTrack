@@ -46,14 +46,17 @@ test('item1: deck viewer per-item Save and Save-all confirm with counts', () => 
   assert.ok(source.includes('Save "${label}" to your library?'), 'per-item confirm names the item');
 });
 
-test('item1: Decks hub itemsDialog carries no direct vocab save (audit)', () => {
+test('item1: Decks hub saves are explicit, disclosed, and counted (audit)', () => {
   const hub = readSource('src/pages/community.js');
   assert.ok(hub.includes('function itemsDialog'), 'Decks hub dialog exists');
-  // The hub only READS (/options search + detail GET); it never POSTs a
-  // vocabulary/kanji/grammar save itself (saves live in the feed viewer).
-  assert.ok(!hub.includes("'/api/vocabulary', { method: 'POST'"), 'hub has no direct vocabulary save POST');
-  assert.ok(!hub.includes('"/api/vocabulary", { method'), 'hub has no direct vocabulary save POST (double-quote)');
-  assert.ok(hub.includes('/api/vocabulary/options'), 'hub picker search is read-only (not a save)');
+  // Hub saves exist by product decision (Start Review save-then-queue):
+  // they fire only behind the explicit Start Review action whose label
+  // discloses saving, with per-outcome counts surfaced afterwards.
+  assert.ok(hub.includes("'/api/vocabulary', { method: 'POST'"), 'hub save path present (save-then-queue)');
+  assert.ok(hub.includes('Save deck items and start a review session'), 'Start Review discloses saving');
+  assert.ok(hub.includes('savedCount') && hub.includes('alreadyCount') && hub.includes('skippedCount'), 'save/already/skipped counts tracked');
+  assert.ok(hub.includes('already in library') && hub.includes('starting review with'), 'counts surfaced to the user');
+  assert.ok(hub.includes('/api/vocabulary/options'), 'hub picker search stays read-only (not a save)');
   assert.ok(hub.includes("icon('volume'"), 'hub play uses the speaker glyph');
 });
 
