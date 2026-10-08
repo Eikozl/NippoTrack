@@ -2,7 +2,7 @@
 // import them into the reader library. Mirrors deckPublicationsController.
 const pool = require('../config/db');
 const { ValidationError, sendRouteError } = require('../errors/http');
-const { parseIdParam } = require('../validation');
+const { parseIdParam, rejectUnknownFields } = require('../validation');
 const {
   deleteReadingPublication,
   getReadingPublication,
@@ -16,11 +16,6 @@ function bodyObject(body) {
     throw new ValidationError('Request body must be an object.');
   }
   return body;
-}
-
-function rejectUnknownFields(body, allowed) {
-  const unknown = Object.keys(body).filter((key) => !allowed.includes(key));
-  if (unknown.length) throw new ValidationError(`Unexpected field(s): ${unknown.join(', ')}.`);
 }
 
 async function postPublish(req, res) {

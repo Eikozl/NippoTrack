@@ -10,6 +10,7 @@
 // - Feeds never return emails or private study data — only the public
 //   profile columns (username, display_name, avatar_url, bio).
 const { ConflictError, ValidationError } = require('../errors/http');
+const { rejectUnknownFields, validateTodayField } = require('../validation');
 
 const POST_TYPES = ['text', 'example', 'question', 'progress', 'share_deck', 'share_reading', 'share_vocab', 'share_kanji', 'share_grammar'];
 const ENTITY_TYPES = ['vocabulary', 'kanji', 'grammar'];
@@ -447,12 +448,7 @@ function shareShiftDays(iso, days) {
 }
 
 function resolveShareToday(raw) {
-  if (raw === undefined || raw === null || raw === '') return null;
-  const value = String(raw);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) {
-    throw new ValidationError('today must be a YYYY-MM-DD date.');
-  }
-  return value;
+  return validateTodayField(raw);
 }
 
 async function getShareStats(executor, userId, { today = null } = {}) {
@@ -637,8 +633,7 @@ async function listFeed(executor, viewerId, { tab = 'latest', page = 1, limit = 
 async function updatePost(executor, authorId, postId, payload) {
   const id = cleanId(postId, 'post');
   const allowed = ['title', 'body', 'translation'];
-  const unknown = Object.keys(payload || {}).filter((key) => !allowed.includes(key));
-  if (unknown.length) throw new ValidationError(`Unexpected field(s): ${unknown.join(', ')}.`);
+  rejectUnknownFields(payload || {}, allowed);
   if (payload.title === undefined && payload.body === undefined && payload.translation === undefined) {
     throw new ValidationError('Nothing to update.');
   }

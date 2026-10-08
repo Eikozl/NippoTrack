@@ -1,6 +1,6 @@
 const pool = require('../config/db');
 const { ValidationError, sendRouteError } = require('../errors/http');
-const { parseIdParam } = require('../validation');
+const { parseIdParam, rejectUnknownFields, validateTodayField } = require('../validation');
 const {
   MAX_LIBRARY_LIMIT,
   MAX_READING_ENROLL_ITEMS,
@@ -27,11 +27,6 @@ function bodyObject(body) {
     throw new ValidationError('Request body must be an object.');
   }
   return body;
-}
-
-function rejectUnknownFields(body, allowed) {
-  const unknown = Object.keys(body).filter((key) => !allowed.includes(key));
-  if (unknown.length) throw new ValidationError(`Unexpected field(s): ${unknown.join(', ')}.`);
 }
 
 function parseQueryInteger(value, name, fallback, maximum = Number.MAX_SAFE_INTEGER) {
@@ -132,10 +127,7 @@ async function updateProgress(req, res) {
       throw new ValidationError('completed must be a boolean.');
     }
     if (body.today !== undefined && body.today !== null) {
-      const dayValue = String(body.today);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(dayValue) || Number.isNaN(Date.parse(`${dayValue}T00:00:00Z`))) {
-        throw new ValidationError('today must be a YYYY-MM-DD date.');
-      }
+      validateTodayField(body.today);
     }
     const progress = await upsertReadingProgress(pool, req.user.id, id, body);
     if (!progress) return res.status(404).json({ error: 'Reading text not found.' });

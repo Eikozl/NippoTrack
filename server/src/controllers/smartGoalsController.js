@@ -6,6 +6,7 @@
 
 const pool = require('../config/db');
 const { ValidationError, sendRouteError } = require('../errors/http');
+const { rejectUnknownFields } = require('../validation');
 const {
   adjustWeeklyGoal,
   checkStreak,
@@ -42,8 +43,7 @@ async function putPreferences(req, res) {
   try {
     const body = req.body || {};
     const allowed = ['autoAdjust', 'graceDays', 'targetJlpt'];
-    const unknown = Object.keys(body).filter((key) => !allowed.includes(key));
-    if (unknown.length) throw new ValidationError(`Unexpected field(s): ${unknown.join(', ')}.`);
+    rejectUnknownFields(body, allowed);
     const saved = await upsertSmartGoalRow(pool, req.user.id, body);
     return res.json({
       preferences: { autoAdjust: saved.autoAdjust, graceDays: saved.graceDays, targetJlpt: saved.targetJlpt }

@@ -27,7 +27,7 @@ const { adaptTokens, classifyCandidate } = require('./lexicalTokenAdapter');
 const { buildLexicalCandidates, candidateIdentity, matchOwnedVocabulary, reconstructObservedSurface } = require('./lexicalCandidates');
 const { detectGrammar } = require('./grammarDetector');
 const { hydrateGrammarMatches } = require('./grammarReferenceStore');
-const { isValidDateString } = require('../validation');
+const { isValidDateString, validateTodayField } = require('../validation');
 
 const MAX_READING_TEXT_LENGTH = 100000;
 const MAX_READING_TITLE_LENGTH = 200;
@@ -1064,11 +1064,7 @@ async function upsertReadingProgress(executor, userId, textId, {
   // dashboard via ?today=. Absent/invalid falls back to CURRENT_DATE.
   let creditDay = null;
   if (today !== undefined && today !== null) {
-    const dayValue = String(today);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dayValue) || Number.isNaN(Date.parse(`${dayValue}T00:00:00Z`))) {
-      throw new ValidationError('today must be a YYYY-MM-DD date.');
-    }
-    creditDay = dayValue;
+    creditDay = validateTodayField(today);
   }
   // PUT replaces the progress state: omitted optional values reset to their
   // schema defaults, making retries deterministic rather than additive.

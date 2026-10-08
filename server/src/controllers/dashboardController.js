@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const { ValidationError, sendRouteError } = require('../errors/http');
+const { validateTodayField } = require('../validation');
 
 // Sessions are stored with the browser's LOCAL date (native date inputs),
 // while the DB clock is UTC: after ~20:00 local in UTC-4 the dashboard's
@@ -7,13 +8,7 @@ const { ValidationError, sendRouteError } = require('../errors/http');
 // `?today=` anchors every window on the client's local date; absent param
 // keeps the previous UTC behavior for API consumers.
 function resolveToday(query) {
-  const raw = query?.today;
-  if (raw === undefined || raw === null || raw === '') return null;
-  const value = String(raw);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) {
-    throw new ValidationError('today must be a YYYY-MM-DD date.');
-  }
-  return value;
+  return validateTodayField(query?.today);
 }
 
 async function getDashboard(req, res) {

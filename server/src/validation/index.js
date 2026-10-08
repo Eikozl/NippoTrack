@@ -13,6 +13,20 @@ function validateWriteFields(body, allowedFields) {
   }
 }
 
+function validateTodayField(value, name = 'today') {
+  if (value === undefined || value === null || value === '') return null;
+  const str = String(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(str) || Number.isNaN(Date.parse(`${str}T00:00:00Z`))) {
+    throw new ValidationError(`${name} must be a YYYY-MM-DD date.`);
+  }
+  return str;
+}
+
+function rejectUnknownFields(body, allowed) {
+  const unknown = Object.keys(body).filter((key) => !allowed.includes(key));
+  if (unknown.length) throw new ValidationError(`Unexpected field(s): ${unknown.join(', ')}.`);
+}
+
 function isValidDateString(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     return false;
@@ -202,9 +216,11 @@ module.exports = {
   isValidDateString,
   normalizeText,
   parseIdParam,
+  rejectUnknownFields,
   validateAllowedValues,
   validateStandardRecordPayload,
   validateStudySessionPayload,
+  validateTodayField,
   validateWriteFields,
   validateAutofillPayload,
   validateAutofillEntryPayload

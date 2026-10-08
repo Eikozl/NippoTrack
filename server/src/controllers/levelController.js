@@ -1,5 +1,5 @@
 const pool = require('../config/db');
-const { sendRouteError } = require('../errors/http');
+const { ValidationError, sendRouteError } = require('../errors/http');
 const { estimateStudyLevel, getLevelEstimateData } = require('../services/levelEstimate');
 const { buildJlptProgress, getJlptProgressData } = require('../services/jlptProgress');
 const { getJlptTarget, setJlptTarget } = require('../services/jlptTarget');
@@ -39,7 +39,7 @@ async function getJlptTargetLevel(req, res) {
 async function putJlptTargetLevel(req, res) {
   try {
     if (!req.body || !Object.prototype.hasOwnProperty.call(req.body, 'target_level')) {
-      return res.status(400).json({ error: 'target_level is required (N5..N1, or null to clear).' });
+      throw new ValidationError('target_level is required (N5..N1, or null to clear).');
     }
     const targetLevel = await setJlptTarget(pool, req.user.id, req.body.target_level);
     return res.json({ targetLevel });

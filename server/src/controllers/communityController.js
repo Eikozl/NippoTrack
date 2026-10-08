@@ -2,7 +2,7 @@
 // req.user.id; no endpoint accepts a userId/ownerId from the caller.
 const pool = require('../config/db');
 const { ValidationError, sendRouteError } = require('../errors/http');
-const { parseIdParam } = require('../validation');
+const { parseIdParam, rejectUnknownFields } = require('../validation');
 const { parsePagination, paginationPayload } = require('../pagination');
 const community = require('../services/community');
 
@@ -11,11 +11,6 @@ function postBody(body) {
     throw new ValidationError('Request body must be an object.');
   }
   return body;
-}
-
-function rejectUnknownFields(body, allowed) {
-  const unknown = Object.keys(body).filter((key) => !allowed.includes(key));
-  if (unknown.length) throw new ValidationError(`Unexpected field(s): ${unknown.join(', ')}.`);
 }
 
 async function createPost(req, res) {

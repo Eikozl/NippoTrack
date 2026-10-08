@@ -52,13 +52,13 @@ async function listGrammar(req, res) {
     }
     if (req.query.jlpt) {
       const jlpt = normalizeText(req.query.jlpt, 2, 'jlpt').toUpperCase();
-      if (!JLPT_LEVELS.includes(jlpt)) return res.status(400).json({ error: 'Invalid JLPT level' });
+      if (!JLPT_LEVELS.includes(jlpt)) throw new ValidationError('Invalid JLPT level');
       whereSql += ' AND jlpt_level = ?';
       params.push(jlpt);
     }
     if (req.query.status) {
       const status = normalizeText(req.query.status, 20, 'status');
-      if (!STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+      if (!STATUSES.includes(status)) throw new ValidationError('Invalid status');
       whereSql += ' AND status = ?';
       params.push(status);
     }
@@ -120,7 +120,7 @@ async function listGrammarOptions(req, res) {
     const jlpt = normalizeText(req.query.jlpt, 2, 'jlpt');
     if (jlpt) {
       const level = jlpt.toUpperCase();
-      if (!JLPT_LEVELS.includes(level)) return res.status(400).json({ error: 'Invalid JLPT level' });
+      if (!JLPT_LEVELS.includes(level)) throw new ValidationError('Invalid JLPT level');
       query = query.replace(' ORDER BY', ' AND jlpt_level = ? ORDER BY');
       params.splice(params.length - 1, 0, level);
     }

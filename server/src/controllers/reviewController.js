@@ -1,6 +1,6 @@
 const pool = require('../config/db');
 const { ValidationError, sendRouteError } = require('../errors/http');
-const { parseIdParam, isValidDateString, validateAllowedValues } = require('../validation');
+const { parseIdParam, isValidDateString, rejectUnknownFields, validateAllowedValues } = require('../validation');
 const { parsePagination, paginationPayload } = require('../pagination');
 const { getReviewCandidates, toIsoDate } = require('../services/reviewCandidates');
 const { getReviewItemContext, hasMeaningfulContext } = require('../services/reviewItemContext');
@@ -241,8 +241,7 @@ async function putReviewPreferences(req, res) {
   try {
     const body = req.body || {};
     const allowed = ['cardTypes', 'weights', 'engineMode', 'autoPick', 'speechRate'];
-    const unknown = Object.keys(body).filter((key) => !allowed.includes(key));
-    if (unknown.length) throw new ValidationError(`Unexpected field(s): ${unknown.join(', ')}.`);
+    rejectUnknownFields(body, allowed);
     if (!Array.isArray(body.cardTypes)) throw new ValidationError('cardTypes is required and must be an array.');
     const saved = await upsertUserReviewPreferences(pool, req.user.id, {
       cardTypes: body.cardTypes,

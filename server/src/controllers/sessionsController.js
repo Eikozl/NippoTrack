@@ -29,28 +29,28 @@ async function listSessions(req, res) {
 
     if (req.query.category) {
       const category = normalizeText(req.query.category, 20, 'category');
-      if (!STUDY_CATEGORIES.includes(category)) return res.status(400).json({ error: 'Invalid category' });
+      if (!STUDY_CATEGORIES.includes(category)) throw new ValidationError('Invalid category');
       whereSql += ' AND s.category = ?';
       params.push(category);
     }
 
     if (req.query.date) {
       if (!isValidDateString(req.query.date)) {
-        return res.status(400).json({ error: 'Invalid date format (YYYY-MM-DD)' });
+        throw new ValidationError('Invalid date format (YYYY-MM-DD)');
       }
       whereSql += ' AND s.session_date = ?';
       params.push(req.query.date);
     } else {
       if (req.query.from) {
         if (!isValidDateString(req.query.from)) {
-          return res.status(400).json({ error: 'Invalid from date (YYYY-MM-DD)' });
+          throw new ValidationError('Invalid from date (YYYY-MM-DD)');
         }
         whereSql += ' AND s.session_date >= ?';
         params.push(req.query.from);
       }
       if (req.query.to) {
         if (!isValidDateString(req.query.to)) {
-          return res.status(400).json({ error: 'Invalid to date (YYYY-MM-DD)' });
+          throw new ValidationError('Invalid to date (YYYY-MM-DD)');
         }
         whereSql += ' AND s.session_date <= ?';
         params.push(req.query.to);
