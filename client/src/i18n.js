@@ -290,11 +290,24 @@ Object.assign(translations.es, {
   'Hold for 1.5 seconds to skip the tutorial': 'Mantén presionado 1.5 segundos para omitir el tutorial',
   'Mute tutorial video': 'Silenciar el video tutorial',
   'Unmute tutorial video': 'Activar el sonido del video tutorial',
-  'Tutorial video': 'Video tutorial'
+  'Tutorial video': 'Video tutorial',
+  Repeat: 'Repetir',
+  Continue: 'Continuar',
+  'Video finished': 'Video terminado'
 });
 
+// In-memory last-writer-wins locale: localStorage can throw (private mode,
+// blocked third-party storage) or be absent (DOM-free contexts). Memory
+// keeps the toggle functional for the session in those cases.
+let memoryLocale = null;
+
 export function getLocale() {
-  return localStorage.getItem('jlt-locale') === 'es' ? 'es' : 'en';
+  try {
+    const store = typeof localStorage !== 'undefined' ? localStorage : null;
+    const stored = store?.getItem('jlt-locale');
+    if (stored === 'es' || stored === 'en') return stored;
+  } catch { /* blocked storage: fall through to memory */ }
+  return memoryLocale || 'en';
 }
 
 export function t(value) {
@@ -304,9 +317,13 @@ export function t(value) {
 
 export function setLocale(locale) {
   const next = locale === 'es' ? 'es' : 'en';
-  localStorage.setItem('jlt-locale', next);
-  document.documentElement.lang = next;
-  window.dispatchEvent(new CustomEvent('jlt-locale-change', { detail: next }));
+  memoryLocale = next;
+  try { localStorage.setItem('jlt-locale', next); } catch { /* private mode: memory holds for the session */ }
+  try { document.documentElement.lang = next; } catch { /* DOM-free contexts */ }
+  try {
+    const target = typeof window !== 'undefined' ? window : null;
+    target?.dispatchEvent?.(new CustomEvent('jlt-locale-change', { detail: next }));
+  } catch { /* no event bus available */ }
 }
 
 export function translateDocument(root = document) {
