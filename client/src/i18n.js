@@ -285,7 +285,10 @@ Object.assign(translations.es, {
   'Take quick placement': 'Hacer la prueba de nivel rápida',
   'Starting point is unavailable right now.': 'El punto de partida no está disponible ahora.',
   'Target JLPT level': 'Nivel JLPT objetivo',
-  'Export backup': 'Exportar copia de seguridad'
+  'Export backup': 'Exportar copia de seguridad',
+  Skip: 'Omitir',
+  'Hold for 3 seconds to skip the tutorial': 'Mantén presionado 3 segundos para omitir el tutorial',
+  'Tutorial video': 'Video tutorial'
 });
 
 export function getLocale() {

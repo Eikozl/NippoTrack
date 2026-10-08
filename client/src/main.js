@@ -11,6 +11,7 @@ import { openAuthModal } from './authModal.js';
 import { createLevelEstimateControl } from './levelEstimateControl';
 import { authConfigured, localAuthBypass, localAuthBypassEmail, supabase } from './authClient';
 import { profileStore } from './accountProfile.js';
+import { hasSeenTutorialVideo, mountTutorialVideo } from './tutorialVideo.js';
 import { getLocale, setLocale, t, translateDocument } from './i18n';
 import { authViewFromSearch } from './landing/routing';
 
@@ -211,6 +212,10 @@ async function bootstrapApp() {
           onComplete: () => { firstExperienceSession?.finish(); navigate('dashboard'); },
           onEnterPlacement: () => { firstExperienceSession?.finish(); module.enterPlacement({ navigate }); }
         });
+        // First-login tutorial: fullscreen takeover over the setup shell
+        // (rendered above, so a video failure still leaves setup usable).
+        // Once-only per browser via the seen flag; setup itself untouched.
+        if (!hasSeenTutorialVideo()) mountTutorialVideo(document.body);
         return;
       }
     } catch {
