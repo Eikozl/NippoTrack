@@ -596,8 +596,12 @@ function deckCard(deck, options = {}) {
     ? element('p', { className: 'mt-1 min-w-0 wrap-anywhere break-words text-xs text-muted', text: `by ${creatorName}` })
     : null;
 
-  // Study signal: prefer reviews due from analytics if available, else item count
+  // Study signal: prefer reviews due from analytics if available, else item count.
+  // The gate below coerces via Number() so a missing/string count can never
+  // hide (or wrongly show) the Study action; the meta line keeps the raw
+  // value untouched.
   const itemCount = deck.itemCount ?? 0;
+  const studyCount = Number(itemCount);
   const reviewsDue = deck.reviewsDue ?? null;
   const studySignal = reviewsDue !== null && reviewsDue > 0
     ? `${reviewsDue} review${reviewsDue === 1 ? '' : 's'} due`
@@ -627,7 +631,7 @@ function deckCard(deck, options = {}) {
   // the `text` option — element() appends children verbatim, so a raw
   // string child here threw "Argument 1 ('node') to Node.appendChild".
   let primaryAction = null;
-  if (showStudyAction && itemCount > 0 && typeof onStudy === 'function') {
+  if (showStudyAction && Number.isFinite(studyCount) && studyCount > 0 && typeof onStudy === 'function') {
     primaryAction = element('button', {
       className: 'button-primary min-h-10 px-4 py-2 text-sm font-semibold flex-1 sm:flex-none',
       text: 'Study',
@@ -639,27 +643,40 @@ function deckCard(deck, options = {}) {
     });
   }
 
-  // Overflow menu for admin actions
+  // Overflow menu for admin actions. The menu is absolutely positioned so it
+  // overlays content below without moving siblings; the card itself must not
+  // clip it (no overflow-hidden on the article — long text is already
+  // contained per-node via min-w-0 + wrap-anywhere/break-words).
   let overflowMenu = null;
   if (showOverflow && typeof onOverflowActions === 'function') {
-    const wrap = element('div', { className: 'relative' });
+    const wrap = element('div', { className: 'relative shrink-0' });
     const toggle = element('button', {
       className: 'icon-button shrink-0',
       attrs: { type: 'button', 'aria-label': `Deck actions for ${deck.title}`, 'aria-haspopup': 'menu', 'aria-expanded': 'false' }
     }, [icon('dots', { size: 18 })]);
     const menu = element('div', {
-      className: 'absolute right-0 top-full z-20 hidden min-w-40 rounded-lg border border-stone bg-paper p-1 shadow-lg mt-1',
+      className: 'absolute right-0 top-full z-20 hidden min-w-40 max-w-[calc(100vw-2rem)] rounded-lg border border-stone bg-paper p-1 shadow-lg mt-1',
       attrs: { role: 'menu' }
     });
+    // Outside-click listener lives only while the menu is open (registered in
+    // openMenu, removed in closeMenu) so remounted cards never pile up global
+    // listeners over detached DOM.
+    const onDocClick = (event) => {
+      if (!wrap.contains(event.target)) closeMenu(false);
+    };
     const closeMenu = (refocus = false) => {
       menu.classList.add('hidden');
       toggle.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('click', onDocClick);
       if (refocus) toggle.focus();
     };
     const openMenu = () => {
       menu.classList.remove('hidden');
       toggle.setAttribute('aria-expanded', 'true');
-      menu.querySelector('button')?.focus();
+      document.addEventListener('click', onDocClick);
+      // preventScroll: the menu overlays below the toggle — focusing the
+      // first item must not yank the page scroll position.
+      menu.querySelector('button')?.focus({ preventScroll: true });
     };
     toggle.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -671,12 +688,9 @@ function deckCard(deck, options = {}) {
     menu.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') { event.stopPropagation(); closeMenu(true); }
     });
-    document.addEventListener('click', (event) => {
-      if (!wrap.contains(event.target)) closeMenu(false);
-    });
     const addMenuItem = (label, handler, isDestructive = false) => {
       const item = element('button', {
-        className: `flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium ${isDestructive ? 'text-red-700' : 'text-ink'} transition hover:bg-paper`,
+        className: `flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium ${isDestructive ? 'text-red-700' : 'text-ink'} transition hover:bg-paper`,
         attrs: { type: 'button', role: 'menuitem' }
       }, [element('span', { text: label })]);
       item.addEventListener('click', (event) => {
@@ -696,8 +710,11 @@ function deckCard(deck, options = {}) {
     ...(overflowMenu ? [overflowMenu] : [])
   ]);
 
+  // No overflow-hidden here: the open overflow menu is absolutely positioned
+  // and must overlay past the card's bottom edge; text containment is handled
+  // per-node (min-w-0 + wrap-anywhere/break-words) and grid blowout by min-w-0.
   return element('article', {
-    className: 'relative min-w-0 w-full max-w-full overflow-hidden wrap-anywhere rounded-xl border border-stone bg-paper p-4',
+    className: 'relative min-w-0 w-full max-w-full wrap-anywhere rounded-xl border border-stone bg-paper p-4',
     attrs: { role: 'button', tabindex: '0', 'aria-label': `Open ${deck.title}` }
   }, [header, ...(creator ? [creator] : []), ...(description ? [description] : []), meta, actionsRow]);
 }
@@ -1334,7 +1351,13 @@ export async function renderDecksHub(container) {
 
         const card = deckCard(deck, {
           showStudyAction: true,
-          onStudy: (d) => openDeckViewer(d.id, d.title),
+          // Study entry: openDeckViewer() is closure-private inside
+          // communityFeed.js:mountSocialFeed (not exported/importable), so
+          // this module routes Study to its own deck viewer — the same
+          // itemsDialog a card click opens, with the identical Start Review
+          // save-then-queue flow. Previously this called the undefined
+          // openDeckViewer() and every Study click threw a ReferenceError.
+          onStudy: (target) => itemsDialog(target.id, target.title, target.entityType, target),
           showOverflow: true,
           onOverflowActions: ({ addMenuItem, closeMenu }) => {
             // Rename
@@ -1344,7 +1367,7 @@ export async function renderDecksHub(container) {
                 description: 'Give this deck a new title.',
                 content: [element('input', {
                   className: 'field-control',
-                  attrs: { type: 'text', maxLength: '120', 'aria-label': 'New deck title', value: d.title }
+                  attrs: { type: 'text', maxLength: '120', 'aria-label': 'New deck title', value: deck.title }
                 })],
                 submitLabel: 'Save',
                 onSubmit: async (form, close) => {
@@ -1352,7 +1375,7 @@ export async function renderDecksHub(container) {
                   if (!newTitle) { showToast('Title cannot be empty.', 'error'); return; }
                   try {
                     await withPendingAction(form.querySelector('button[type="submit"]'), async () => {
-                      await apiRequest(`/api/decks/${d.id}`, { method: 'PUT', body: { title: newTitle } });
+                      await apiRequest(`/api/decks/${deck.id}`, { method: 'PUT', body: { title: newTitle } });
                     });
                     showToast('Deck renamed.');
                     close();
@@ -1366,16 +1389,16 @@ export async function renderDecksHub(container) {
             // Duplicate
             addMenuItem('Duplicate', async () => {
               try {
-                const duplicated = await apiRequest(`/api/decks/${d.id}/duplicate`, { method: 'POST' });
+                const duplicated = await apiRequest(`/api/decks/${deck.id}/duplicate`, { method: 'POST' });
                 showToast('Deck duplicated.');
                 await loadMine();
               } catch {
                 // If duplicate endpoint doesn't exist, fall back to manual recreation
                 try {
-                  const detail = await apiRequest(`/api/decks/${d.id}`);
+                  const detail = await apiRequest(`/api/decks/${deck.id}`);
                   const items = Array.isArray(detail.items) ? detail.items.map((entry) => entry.id) : [];
                   if (items.length) {
-                    await apiRequest('/api/decks', { method: 'POST', body: { entityType: d.entityType, ids: items, title: `${d.title} (copy)`, description: d.description } });
+                    await apiRequest('/api/decks', { method: 'POST', body: { entityType: deck.entityType, ids: items, title: `${deck.title} (copy)`, description: deck.description } });
                     showToast('Deck duplicated.');
                     await loadMine();
                   } else {
@@ -1389,12 +1412,12 @@ export async function renderDecksHub(container) {
             // Delete (destructive)
             addMenuItem('Delete', () => {
               confirmDialog({
-                title: `Delete ${d.title}?`,
+                title: `Delete ${deck.title}?`,
                 description: 'This permanently deletes the deck, its items, follows and suggestions. This cannot be undone.',
                 confirmLabel: 'Delete',
                 onConfirm: async () => {
                   try {
-                    await apiRequest(`/api/decks/${d.id}`, { method: 'DELETE' });
+                    await apiRequest(`/api/decks/${deck.id}`, { method: 'DELETE' });
                     showToast('Deck deleted.');
                     await loadMine();
                   } catch (error) {
