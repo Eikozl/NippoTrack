@@ -581,6 +581,11 @@ nav .nav-group-label:first-child { margin-top: 0; }
 .user-menu-identity { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: .7rem; padding: .7rem; }
 .account-initials { display: inline-grid; position: relative; overflow: hidden; flex: none; width: 2rem; height: 2rem; place-items: center; border-radius: 999px; background: var(--jlt-primary-soft); color: var(--jlt-primary-strong); font-size: .75rem; font-weight: 700; letter-spacing: .03em; }
 .account-initials--large { width: 2.75rem; height: 2.75rem; font-size: .85rem; }
+/* Nav account trigger while showing a photo: fixed round clipping box so
+   any source aspect fills (never exceeds) the icon bounds. Applied only
+   while the photo is set (see syncTriggerPhoto); without photo the trigger
+   keeps its default icon-button styling byte-identical. */
+.icon-button.account-trigger--photo { position: relative; overflow: hidden; border-radius: 999px; }
 .user-menu-divider { height: 1px; margin: .35rem .4rem; background: var(--nt-border-subtle); }
 .user-menu-item { display: flex; min-height: 2.65rem; width: 100%; align-items: center; justify-content: space-between; gap: .7rem; border-radius: 11px; padding: .55rem .7rem; color: var(--jlt-ink); font-size: .875rem; text-align: left; transition: background-color 160ms ease, color 160ms ease; }
 .user-menu-item:hover, .user-menu-item:focus-visible { background: var(--jlt-primary-soft); color: var(--jlt-primary-strong); }

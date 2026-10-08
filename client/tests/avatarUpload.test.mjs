@@ -132,6 +132,16 @@ test('compressor rejects animated GIF (and non still-image types) before decode'
   assert.ok(/Animated[^.]*not supported/i.test(module), 'gif rejection carries a still-image message');
 });
 
+test('nav trigger photo is clipped to the icon box (never exceeds it)', async () => {
+  const main = await readFile(join('client', 'src', 'main.js'), 'utf-8');
+  const css = await readFile(join('client', 'src', 'styles.css'), 'utf-8');
+  assert.ok(main.includes('account-trigger--photo'), 'trigger toggles the photo clipping class');
+  assert.ok(main.includes('absolute inset-0 h-full w-full'), 'trigger photo fills (never exceeds) the icon box');
+  assert.ok(css.includes('.icon-button.account-trigger--photo'), 'clipping rule exists for the trigger');
+  assert.ok(/\.icon-button\.account-trigger--photo\s*\{[^}]*overflow:\s*hidden/.test(css), 'clipping rule hides overflow');
+  assert.ok(/\.icon-button\.account-trigger--photo\s*\{[^}]*position:\s*relative/.test(css), 'clipping rule positions the box');
+});
+
 test('account-initials fallback retained; community still renders via the untouched avatarFace()', async () => {
   const { union, settings } = await avatarUiSources();
   const feed = await readRequired(COMMUNITY_FEED_PATH);

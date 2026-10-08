@@ -341,20 +341,25 @@ function createUserMenu(trigger, index) {
   signOutButton.addEventListener('click', () => { close(); confirmSignOut(); });
   // Trigger photo: the avatar replaces the trigger icon while set; the exact
   // boot-time trigger content is snapshotted once and restored verbatim when
-  // no photo is served (fallback path untouched).
+  // no photo is served (fallback path untouched). The photo is absolutely
+  // positioned inside a clipped round box (see .account-trigger--photo):
+  // an in-flow img would size from its intrinsic pixels and overflow the
+  // 40px trigger on tall/wide photos.
   let triggerPhotoSnapshot = null;
   function syncTriggerPhoto(safe) {
     if (safe) {
       if (!triggerPhotoSnapshot) triggerPhotoSnapshot = Array.from(trigger.childNodes);
       const photo = element('img', {
-        className: 'h-full w-full rounded-full object-cover',
+        className: 'absolute inset-0 h-full w-full rounded-full object-cover',
         attrs: { src: safe, alt: '', loading: 'lazy', decoding: 'async', width: '40', height: '40', 'aria-hidden': 'true' }
       });
       photo.addEventListener('error', () => syncTriggerPhoto(null));
       trigger.replaceChildren(photo);
+      trigger.classList.add('account-trigger--photo');
     } else if (triggerPhotoSnapshot) {
       trigger.replaceChildren(...triggerPhotoSnapshot);
       triggerPhotoSnapshot = null;
+      trigger.classList.remove('account-trigger--photo');
     }
   }
   const update = () => {
