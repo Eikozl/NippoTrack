@@ -2,7 +2,7 @@
 // follow/unfollow and public author profiles.
 const pool = require('../config/db');
 const { ValidationError, sendRouteError } = require('../errors/http');
-const { parseIdParam } = require('../validation');
+const { parseIdParam, rejectUnknownFields } = require('../validation');
 const {
   deleteDeckPublication,
   getDeckAnalytics,
@@ -179,8 +179,7 @@ const PROFILE_JLPT_LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1'];
 async function putOwnProfile(req, res) {
   try {
     const body = req.body || {};
-    const unknown = Object.keys(body).filter((key) => !OWN_PROFILE_FIELDS.includes(key));
-    if (unknown.length) throw new ValidationError(`Unexpected field(s): ${unknown.join(', ')}.`);
+    rejectUnknownFields(body, OWN_PROFILE_FIELDS);
     const patch = {};
     if (body.username !== undefined) {
       const username = String(body.username || '').toLowerCase();
