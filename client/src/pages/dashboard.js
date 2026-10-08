@@ -7,6 +7,7 @@ import { dashboardWelcomeModel, localDayKey, readVisitRecord, recordDashboardVis
 import { smartGoalsWidget } from '../smartGoals.js';
 import { weeklyInsightsWidget } from '../weeklyInsightsWidget.js';
 import { CONFIGS } from './v2Pages';
+import { applySessionContext } from '../sessionContext.js';
 
 function metric(iconName, label, value, note, page = null, featured = false) {
   const body = [
@@ -239,18 +240,6 @@ function continueSection(studyNow) {
     element('h2', { className: 'font-semibold text-ink', text: 'Continue where you left off' }),
     element('div', { className: 'mt-3 grid gap-4 sm:grid-cols-2' }, cards)
   ]);
-}
-
-// Session-creation responses carry batched per-item context (V5.6 Completion
-// Pass); merge it into the client queue so cards render Context blocks with
-// zero extra requests. Entries without context keep reviewing normally.
-function applySessionContext(queueItems, session) {
-  const byKey = new Map((Array.isArray(session?.items) ? session.items : []).map((entry) => [`${entry.entityType}:${entry.entityId}`, entry.context]));
-  for (const item of queueItems) {
-    const context = byKey.get(`${item.entityType}:${item.entityId}`);
-    if (context) item.context = context;
-  }
-  return queueItems;
 }
 
 function activityCalendar(items) {
