@@ -47,13 +47,19 @@ test('Learning reuses target and first-experience semantics; appearance UI is go
   assert.doesNotMatch(source, /accent picker|font selector|density|animation toggle/i);
 });
 
-test('No avatar/upload surface; public-profile editing lives only in Community', () => {
+test('Avatar upload surface lives in Settings profile; public-profile editing lives only in Community', () => {
   const settings = readSource('src/pages/settings.js');
   const account = readSource('src/accountProfile.js');
   for (const source of [settings, account]) {
-    assert.doesNotMatch(source, /avatar|upload|supabase storage|remote avatar/i);
+    assert.ok(
+      source.includes('Avatar upload controls') || source.includes('avatarUrl'),
+      'approved avatar surface only (settings upload controls / store passthrough)'
+    );
     assert.doesNotMatch(source, /innerHTML/);
   }
+  assert.ok(settings.includes('/api/users/me/avatar'), 'settings uses the avatar endpoints');
+  assert.ok(settings.includes('account-initials'), 'initials fallback retained in settings');
+  assert.ok(account.includes('initials'), 'initials derivation retained');
   // The user-approved public identity (username/bio/visibility for Community)
   // moved out of settings: no block, fields, or save remain here.
   assert.equal(settings.split('Public profile').length - 1, 0, 'no public-profile block in settings');

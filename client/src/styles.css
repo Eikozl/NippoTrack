@@ -572,13 +572,14 @@ nav .nav-group-label:first-child { margin-top: 0; }
 .jlpt-progress-details { margin-top: 1rem; }
 .jlpt-progress-details > summary { cursor: pointer; font-size: 0.875rem; font-weight: 600; color: var(--jlt-ink); }
 /* v5.1-C account surface: the existing app user icon anchors this one
-   responsive menu. Identity is text/initials only; no avatar media surface. */
+   responsive menu. Identity is initials by default; a served profile photo
+   overlays the mark (same box, round, cover) and falls back to initials. */
 .account-menu-anchor { position: relative; display: inline-flex; flex: none; }
 .user-menu { position: absolute; top: calc(100% + .55rem); right: 0; z-index: 60; display: grid; width: min(19rem, calc(100vw - 2rem)); gap: .2rem; padding: .45rem; border: 1px solid var(--nt-border-subtle); border-radius: 16px; background: var(--jlt-surface); box-shadow: var(--shadow-raised-md); opacity: 0; transform: translateY(-.35rem); transition: opacity 170ms ease, transform 170ms ease; }
 .user-menu[hidden] { display: none; }
 .user-menu.is-open { opacity: 1; transform: translateY(0); }
 .user-menu-identity { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: .7rem; padding: .7rem; }
-.account-initials { display: inline-grid; flex: none; width: 2rem; height: 2rem; place-items: center; border-radius: 999px; background: var(--jlt-primary-soft); color: var(--jlt-primary-strong); font-size: .75rem; font-weight: 700; letter-spacing: .03em; }
+.account-initials { display: inline-grid; position: relative; overflow: hidden; flex: none; width: 2rem; height: 2rem; place-items: center; border-radius: 999px; background: var(--jlt-primary-soft); color: var(--jlt-primary-strong); font-size: .75rem; font-weight: 700; letter-spacing: .03em; }
 .account-initials--large { width: 2.75rem; height: 2.75rem; font-size: .85rem; }
 .user-menu-divider { height: 1px; margin: .35rem .4rem; background: var(--nt-border-subtle); }
 .user-menu-item { display: flex; min-height: 2.65rem; width: 100%; align-items: center; justify-content: space-between; gap: .7rem; border-radius: 11px; padding: .55rem .7rem; color: var(--jlt-ink); font-size: .875rem; text-align: left; transition: background-color 160ms ease, color 160ms ease; }

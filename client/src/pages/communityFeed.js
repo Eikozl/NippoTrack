@@ -98,9 +98,13 @@ function initialsFor(display, username) {
 function isSafeAvatarUrl(value) {
   const trimmed = String(value || '').trim();
   if (!trimmed) return false;
-  // Backend avatar_url values are https storage URLs (or relative paths).
-  // Never render javascript:/data-non-image schemes into <img src>.
-  return /^(https?:\/\/|\/|data:image\/)/i.test(trimmed);
+  // Avatars are Supabase Storage public URLs for the avatars bucket (with
+  // ?v= cache-buster) or same-origin relative paths. data:/blob:/script
+  // schemes are rejected outright (SVG polyglots execute outside <img>);
+  // plain http: and foreign https: hosts are rejected (mixed content +
+  // tracker-host risk) since avatar_url is allowlisted at write time.
+  return /^https:\/\/[A-Za-z0-9-]+\.supabase\.co\/storage\/v1\/object\/public\/avatars\//i.test(trimmed)
+    || /^\/(?!\/)/.test(trimmed);
 }
 
 function avatarUrlFor(source) {

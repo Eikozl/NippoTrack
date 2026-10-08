@@ -248,6 +248,28 @@ function rawAccountText(node, value) {
   node.textContent = value == null ? '' : String(value);
 }
 
+// Same safe-URL rule as communityFeed.js (mirrored — that module does not
+// export its gate): Supabase Storage avatars-bucket URLs or same-origin
+// relative paths only. data:/blob:/script schemes, plain http: and foreign
+// hosts are rejected (see communityFeed.js for the full rationale).
+function isSafeAvatarUrl(value) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return false;
+  return /^https:\/\/[A-Za-z0-9-]+\.supabase\.co\/storage\/v1\/object\/public\/avatars\//i.test(trimmed)
+    || /^\/(?!\/)/.test(trimmed);
+}
+
+// Photo overlay for the initials mark: the initials (or user icon) stay
+// underneath so a broken URL falls back gracefully on img error.
+function avatarOverlayImg(url, size) {
+  const img = element('img', {
+    className: 'absolute inset-0 h-full w-full object-cover',
+    attrs: { src: String(url).trim(), alt: '', loading: 'lazy', decoding: 'async', width: String(size), height: String(size), 'aria-hidden': 'true' }
+  });
+  img.addEventListener('error', () => { try { img.remove(); } catch { /* fallback underneath remains */ } });
+  return img;
+}
+
 function createUserMenu(trigger, index) {
   if (!trigger?.parentElement) return null;
   const menuId = `account-menu-${index}`;
@@ -317,12 +339,33 @@ function createUserMenu(trigger, index) {
   });
   settingsButton.addEventListener('click', () => { close(); navigate('settings'); });
   signOutButton.addEventListener('click', () => { close(); confirmSignOut(); });
+  // Trigger photo: the avatar replaces the trigger icon while set; the exact
+  // boot-time trigger content is snapshotted once and restored verbatim when
+  // no photo is served (fallback path untouched).
+  let triggerPhotoSnapshot = null;
+  function syncTriggerPhoto(safe) {
+    if (safe) {
+      if (!triggerPhotoSnapshot) triggerPhotoSnapshot = Array.from(trigger.childNodes);
+      const photo = element('img', {
+        className: 'h-full w-full rounded-full object-cover',
+        attrs: { src: safe, alt: '', loading: 'lazy', decoding: 'async', width: '40', height: '40', 'aria-hidden': 'true' }
+      });
+      photo.addEventListener('error', () => syncTriggerPhoto(null));
+      trigger.replaceChildren(photo);
+    } else if (triggerPhotoSnapshot) {
+      trigger.replaceChildren(...triggerPhotoSnapshot);
+      triggerPhotoSnapshot = null;
+    }
+  }
   const update = () => {
     const profile = profileStore.get();
     const initials = profile?.initials || '';
     mark.replaceChildren();
     if (initials) rawAccountText(mark, initials);
     else mark.appendChild(icon('user', { size: 18 }));
+    const safe = isSafeAvatarUrl(profile?.avatarUrl) ? String(profile.avatarUrl).trim() : null;
+    if (safe) mark.appendChild(avatarOverlayImg(safe, 32));
+    syncTriggerPhoto(safe);
     rawAccountText(name, profile?.displayName || t('Account'));
     rawAccountText(email, profile?.email || currentAuthEmail || '');
     rawAccountText(languageButton.firstElementChild, t('Language'));
@@ -343,6 +386,9 @@ function closeUserMenu(refocus = false) { openUserMenu?.close(refocus); }
 
 accountButtons.forEach((button, index) => createUserMenu(button, index));
 document.addEventListener('click', () => closeUserMenu());
+// Avatar changes from Settings refresh the cached store and announce here;
+// the existing update()/syncUserMenus flow repaints marks and triggers.
+window.addEventListener('jlt-profile-change', () => syncUserMenus());
 
 // Phase 9 refinement — single header level-estimate control. One controller
 // manages both the desktop and mobile header morphs (only one header is

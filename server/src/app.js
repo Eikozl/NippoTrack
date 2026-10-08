@@ -102,6 +102,8 @@ app.get('/api', (req, res) => {
       'GET /api/users/:username/decks',
       'GET /api/users/me',
       'PUT /api/users/me',
+      'POST /api/users/me/avatar',
+      'DELETE /api/users/me/avatar',
       'POST /api/decks',
       'GET /api/decks',
       'GET /api/decks/:id',

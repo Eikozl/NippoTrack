@@ -17,6 +17,7 @@ const {
   decideSuggestion,
   listSuggestions
 } = require('../services/deckSuggestions');
+const profileAvatar = require('../services/profileAvatar');
 
 async function postPublish(req, res) {
   try {
@@ -174,6 +175,8 @@ async function getOwnProfile(req, res) {
 
 const OWN_PROFILE_FIELDS = ['username', 'display_name', 'bio', 'avatar_url', 'is_public', 'jlpt_level', 'target_jlpt', 'interests'];
 const PROFILE_JLPT_LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1'];
+// Project-agnostic (testing + production refs): own avatars object only.
+const AVATAR_URL_PATTERN = /^https:\/\/[A-Za-z0-9-]+\.supabase\.co\/storage\/v1\/object\/public\/avatars\/[A-Za-z0-9-]{1,64}\/avatar\.jpg(\?.*)?$/;
 
 async function putOwnProfile(req, res) {
   try {
@@ -193,7 +196,20 @@ async function putOwnProfile(req, res) {
       patch.display_name = displayName === '' ? null : displayName;
     }
     if (body.bio !== undefined) patch.bio = String(body.bio || '').slice(0, 500) || null;
-    if (body.avatar_url !== undefined) patch.avatar_url = String(body.avatar_url || '').slice(0, 500) || null;
+    // avatar_url allowlist (security): only null/empty (clear) or the
+    // caller's own Supabase Storage avatars object URL (as issued by
+    // POST /api/users/me/avatar, with ?v= cache-buster). Anything else —
+    // foreign hosts, data:/blob:/script schemes — is rejected so the open
+    // PUT cannot bypass the upload pipeline's magic-byte/type/path controls.
+    if (body.avatar_url !== undefined) {
+      const raw = String(body.avatar_url || '');
+      if (raw === '') patch.avatar_url = null;
+      else {
+        if (raw.length > 500) throw new ValidationError('avatar_url is too long.');
+        if (!AVATAR_URL_PATTERN.test(raw)) throw new ValidationError('avatar_url must be your uploaded profile photo.');
+        patch.avatar_url = raw;
+      }
+    }
     if (body.is_public !== undefined) {
       if (typeof body.is_public !== 'boolean') throw new ValidationError('is_public must be a boolean');
       patch.is_public = body.is_public;
@@ -240,6 +256,37 @@ async function putOwnProfile(req, res) {
     });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to save the public profile.' });
+  }
+}
+
+// Profile avatar upload: stores multipart field `avatar` as the single fixed
+// `<userId>/avatar.jpg` object in the public `avatars` bucket (service-key
+// mediated; see services/profileAvatar). Responds { avatarUrl }; the client
+// persists the URL itself via PUT /api/users/me { avatar_url }.
+async function postOwnAvatar(req, res) {
+  try {
+    const buffer = profileAvatar.extractAvatarFromMultipart(req);
+    profileAvatar.validateAvatarBuffer(buffer);
+    const consumed = profileAvatar.tryConsumeAvatarUpload({ userId: req.user.id });
+    if (!consumed.allowed) {
+      res.setHeader('Retry-After', String(consumed.retryAfterSec));
+      return res.status(429).json({ error: 'Too many avatar uploads. Please try again later.' });
+    }
+    const { avatarUrl } = await profileAvatar.storeAvatar({ userId: req.user.id, buffer });
+    return res.json({ avatarUrl });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to upload the avatar.' });
+  }
+}
+
+// Profile avatar removal: deletes the storage object (not-found ignored) and
+// NULLs avatar_url through the same upsert path as putOwnProfile.
+async function deleteOwnAvatar(req, res) {
+  try {
+    const result = await profileAvatar.clearAvatar({ userId: req.user.id });
+    return res.json(result);
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to remove the avatar.' });
   }
 }
 
@@ -294,6 +341,7 @@ async function listPublicUserDecks(req, res) {
 module.exports = {
   deleteDeck,
   deleteFollow,
+  deleteOwnAvatar,
   getAnalytics,
   getDeck,
   getOwnProfile,
@@ -304,6 +352,7 @@ module.exports = {
   listSuggest,
   postDecide,
   postFollow,
+  postOwnAvatar,
   postPublish,
   postSuggest,
   putOwnProfile

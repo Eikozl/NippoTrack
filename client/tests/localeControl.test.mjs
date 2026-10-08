@@ -39,9 +39,13 @@ test('account menu keeps only the frozen quick actions', () => {
   const source = readSource('src/main.js');
   const menuBlock = source.slice(source.indexOf('function createUserMenu'), source.indexOf('function syncUserMenus'));
   for (const marker of ['Language', 'Settings', 'Sign out']) assert.ok(menuBlock.includes(marker), `${marker} action present`);
-  for (const forbidden of ['Theme', 'JLPT target', 'Starting Point', 'Export backup', 'avatar', 'OAuth']) {
+  for (const forbidden of ['Theme', 'JLPT target', 'Starting Point', 'Export backup', 'OAuth']) {
     assert.doesNotMatch(menuBlock, new RegExp(forbidden, 'i'), `${forbidden} stays out of menu`);
   }
+  // Approved exception: the identity mark may overlay the user's photo when
+  // set (photo display only — no menu action or destination is added).
+  assert.ok(menuBlock.includes('avatarOverlayImg'), 'avatar photo overlay helper present');
+  assert.ok(!/role:\s*['"]menuitem[^}]*avatar/i.test(menuBlock), 'no avatar menu action');
 });
 
 test('account trigger remains the existing accessible icon control', () => {

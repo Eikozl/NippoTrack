@@ -58,6 +58,12 @@ function sendRouteError(res, error, {
     return res.status(409).json({ error: 'Record is still in use.' });
   }
 
+  // Multipart/body-parser size rejections (e.g. avatar uploads past the
+  // in-route raw limit) carry status 413, not a 500: report them honestly.
+  if (error?.type === 'entity.too.large' || error?.status === 413) {
+    return res.status(413).json({ error: 'Request body is too large.' });
+  }
+
   console.error('API operation failed:', error);
   return res.status(defaultStatus).json({ error: defaultMessage });
 }

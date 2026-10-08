@@ -261,7 +261,22 @@ Object.assign(translations.es, {
   'Could not save the target level. Please try again.': 'No se pudo guardar el objetivo de nivel. Inténtalo de nuevo.',
   'Choose the existing light or dark surface for NippoTrack.': 'Elige la superficie clara u oscura existente de NippoTrack.',
   'Account identity and existing data actions.': 'Identidad de la cuenta y acciones de datos existentes.',
-  'Email unavailable': 'Correo no disponible'
+  'Email unavailable': 'Correo no disponible',
+  'Choose photo': 'Elegir foto',
+  'Upload photo': 'Subir foto',
+  'Remove photo': 'Quitar foto',
+  'Uploading…': 'Subiendo…',
+  'Removing…': 'Quitando…',
+  'Photo selected — Upload to save it.': 'Foto seleccionada: súbela para guardarla.',
+  'Profile photo updated.': 'Foto de perfil actualizada.',
+  'Profile photo removed.': 'Foto de perfil eliminada.',
+  'Could not upload your photo. Please try again.': 'No se pudo subir tu foto. Inténtalo de nuevo.',
+  'Could not remove your photo. Please try again.': 'No se pudo quitar tu foto. Inténtalo de nuevo.',
+  'Please choose an image file (JPEG, PNG, or WebP).': 'Elige un archivo de imagen (JPEG, PNG o WebP).',
+  'That photo is too large. Please choose an image under 10 MB.': 'Esa foto es demasiado grande. Elige una imagen de menos de 10 MB.',
+  'Could not read that image. Please try another photo.': 'No se pudo leer esa imagen. Prueba con otra foto.',
+  'Could not process that image on this device. Please try again.': 'No se pudo procesar esa imagen en este dispositivo. Inténtalo de nuevo.',
+  'JPEG, PNG, or WebP up to 10 MB. Compressed to a small photo before upload.': 'JPEG, PNG o WebP de hasta 10 MB. Se comprime a una foto pequeña antes de subirla.'
 });
 
 export function getLocale() {

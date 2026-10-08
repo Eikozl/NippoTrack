@@ -28,6 +28,9 @@ export function normalizeProfile(value = {}) {
     displayName,
     initials: initialsForDisplayName(displayName),
     email,
+    // Avatar passthrough (presentation only): the backend owns the URL and
+    // the upload/remove decisions; the store never derives or validates it.
+    avatarUrl: value?.avatarUrl ?? value?.avatar_url ?? value?.author_avatar ?? null,
     updatedAt: value?.updatedAt ?? value?.updated_at ?? null
   };
 }
