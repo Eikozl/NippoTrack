@@ -449,6 +449,23 @@ test('PUT /api/users/me avatar_url allowlist: own storage URL passes, anything e
   }
 });
 
+test('GET /api/profile serves avatarUrl: nav/settings/community-outside-feed read it from here', async () => {
+  const { getProfile } = require('../src/services/profile');
+  const url = `${PUBLIC_BASE}/storage/v1/object/public/avatars/${USER_ID}/avatar.jpg?v=7`;
+  const db = { execute: async (sql) => {
+    assert.match(sql, /avatar_url/, 'profile query selects the avatar column');
+    return [[{ display_name: 'Yuki', avatar_url: url, updated_at: '2026-10-01' }]];
+  } };
+  assert.deepEqual(await getProfile(db, USER_ID, 'yuki@example.com'), {
+    displayName: 'Yuki',
+    avatarUrl: url,
+    updatedAt: '2026-10-01',
+    email: 'yuki@example.com'
+  });
+  const empty = await getProfile({ execute: async () => [[]] }, USER_ID, null);
+  assert.equal(empty.avatarUrl, null, 'no photo degrades to null (initials fallback)');
+});
+
 test('migration 043: public bucket, SELECT-only policy, writes stay service-mediated', () => {
   const sql = fs.readFileSync(
     path.join(__dirname, '../db/migrations-postgres/043_avatar_storage.sql'), 'utf8'

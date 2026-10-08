@@ -15,6 +15,7 @@ function normalizeDisplayName(value) {
 function profileShape(row, email) {
   return {
     displayName: row?.display_name ?? null,
+    avatarUrl: row?.avatar_url || null,
     updatedAt: row?.updated_at ?? null,
     email: email || null
   };
@@ -22,7 +23,7 @@ function profileShape(row, email) {
 
 async function getProfile(database, userId, email) {
   const [rows] = await database.execute(
-    'SELECT display_name, updated_at FROM user_profile WHERE user_id = ?',
+    'SELECT display_name, avatar_url, updated_at FROM user_profile WHERE user_id = ?',
     [userId]
   );
   return profileShape(rows?.[0], email);
