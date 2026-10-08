@@ -32,7 +32,7 @@ test('zero durable data shows the checklist with all actions pending', async () 
   assert.ok(states.every((action) => action.completed === false));
 });
 
-test('one vocabulary entry completes vocabulary+analyzer but keeps the checklist', async () => {
+test('one vocabulary entry completes vocabulary+analyzer; any datum shows the normal dashboard', async () => {
   const firstUse = await import('../../client/src/firstUseDashboard.js');
   const data = dashboard({ vocabularyCount: 1 });
   const states = new Map(firstUse.getFirstUseActionStates(data).map((action) => [action.route, action.completed]));
@@ -41,12 +41,12 @@ test('one vocabulary entry completes vocabulary+analyzer but keeps the checklist
   assert.equal(states.get('sessions'), false);
   assert.equal(
     firstUse.shouldShowFirstUseDashboard({ firstExperience: onboarded(), dashboard: data }),
-    true,
-    'a single action must not dismiss the checklist'
+    false,
+    'any durable datum shows the normal dashboard (checklist persists inside it)'
   );
 });
 
-test('one session alone keeps vocabulary and analyzer pending', async () => {
+test('one session alone keeps vocabulary and analyzer pending, on the normal dashboard', async () => {
   const firstUse = await import('../../client/src/firstUseDashboard.js');
   const data = dashboard({ recentSessions: [{ id_session: 1 }] });
   const states = new Map(firstUse.getFirstUseActionStates(data).map((action) => [action.route, action.completed]));
@@ -55,11 +55,11 @@ test('one session alone keeps vocabulary and analyzer pending', async () => {
   assert.equal(states.get('analyzer'), false);
   assert.equal(
     firstUse.shouldShowFirstUseDashboard({ firstExperience: onboarded(), dashboard: data }),
-    true
+    false
   );
 });
 
-test('checklist hides only when vocabulary, collection, and session are all done', async () => {
+test('normal dashboard on any durable data; first-use only at zero data', async () => {
   const firstUse = await import('../../client/src/firstUseDashboard.js');
   assert.equal(
     firstUse.shouldShowFirstUseDashboard({
@@ -68,13 +68,13 @@ test('checklist hides only when vocabulary, collection, and session are all done
     }),
     false
   );
-  // Kanji/session without vocabulary still leaves vocabulary pending.
+  // Kanji/session without vocabulary is still durable data → normal dashboard.
   assert.equal(
     firstUse.shouldShowFirstUseDashboard({
       firstExperience: onboarded(),
       dashboard: dashboard({ kanjiCount: 3, recentSessions: [{ id_session: 1 }] })
     }),
-    true
+    false
   );
 });
 
