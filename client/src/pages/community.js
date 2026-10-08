@@ -2,7 +2,7 @@
 // sharing, importing, browsing and collections live here — entity tabs carry
 // no deck actions. Public identity lives in Settings → Profile.
 import { apiRequest } from '../api';
-import { element, emptyState, openDialog, confirmDialog, pageHeader, showToast, withPendingAction } from '../ui';
+import { element, emptyState, errorState, loadingState, openDialog, confirmDialog, pageHeader, showToast, withPendingAction } from '../ui';
 import { icon } from '../icons';
 import { speakJapanese } from '../speech.js';
 import { loadStrokePaths, STROKE_SVG_NS, STROKE_SVG_VIEWBOX } from '../strokeOrder.js';
