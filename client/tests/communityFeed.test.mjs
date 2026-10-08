@@ -746,3 +746,109 @@ test('deck + reading dialogs never leave a stale loading header', () => {
   assert.ok(viewerBlock.includes('errorState(error, () => loadDeck'), 'deck error stays in-dialog with retry, no loading header');
   assert.ok(previewBlock.includes('errorState(error, () => loadPreview'), 'preview error stays in-dialog with retry, no loading header');
 });
+
+// V6.1.2: Decks page UX modernization assertions
+test('v6.1.2: My Decks section has modern page header with Create action', () => {
+  const source = readSource('src/pages/community.js');
+  assert.ok(source.includes("title: 'My Decks'"), 'My Decks page header title');
+  assert.ok(source.includes('Organize your learning material into studyable decks.'), 'My Decks page header description');
+  assert.ok(source.includes('+ Create deck'), 'Create deck primary action in header');
+  assert.ok(source.includes('button-primary'), 'Create button uses primary style');
+});
+
+test('v6.1.2: deckCard renders study-focused hierarchy with Title Case type pill', () => {
+  const source = readSource('src/pages/community.js');
+  assert.ok(source.includes("labelMap = { vocabulary: 'Vocabulary', kanji: 'Kanji', grammar: 'Grammar', reading: 'Reading' }"), 'typePill maps backend lowercase to Title Case');
+  assert.ok(source.includes('function deckCard'), 'deckCard function exists');
+  assert.ok(source.includes('Study'), 'Study action text present in deckCard');
+  assert.ok(source.includes('button-primary'), 'Study button uses primary style');
+  assert.ok(source.includes('reviewsDue'), 'reviews due signal used when available');
+  assert.ok(source.includes('status-pill--success'), 'public visibility pill uses success variant');
+  assert.ok(source.includes('status-pill--warning'), 'private visibility pill uses warning variant');
+  assert.ok(source.includes('Shared from Community'), 'imported deck badge present');
+});
+
+test('v6.1.2: deckCard passes no raw-string children to element()', () => {
+  const source = readSource('src/pages/community.js');
+  // Regression guard: element() appends children verbatim via appendChild,
+  // so a bare string child throws "Argument 1 ('node') to Node.appendChild".
+  // Button labels must travel via the `text` option (project pattern).
+  const deckCardSection = source.substring(source.indexOf('function deckCard'), source.indexOf('function starWidget'));
+  assert.ok(!deckCardSection.includes("}, 'Study')"), 'Study label must use text: option, never a string child');
+  assert.ok(deckCardSection.includes("text: 'Study'"), 'Study label present via text option');
+});
+
+test('v6.1.2: Study is primary action, admin actions in overflow menu', () => {
+  const source = readSource('src/pages/community.js');
+  assert.ok(source.includes('showStudyAction'), 'deckCard accepts showStudyAction option');
+  assert.ok(source.includes('onStudy'), 'deckCard accepts onStudy callback');
+  assert.ok(source.includes('showOverflow'), 'deckCard accepts showOverflow option');
+  assert.ok(source.includes('onOverflowActions'), 'deckCard accepts onOverflowActions callback');
+  assert.ok(source.includes('aria-haspopup') && source.includes("'menu'"), 'overflow menu uses aria-haspopup=menu');
+  assert.ok(source.includes('role: \'menuitem\''), 'overflow menu items use role=menuitem');
+  assert.ok(source.includes('Rename'), 'Rename action in overflow menu');
+  assert.ok(source.includes('Duplicate'), 'Duplicate action in overflow menu');
+  assert.ok(source.includes('Delete'), 'Delete action in overflow menu');
+  assert.ok(source.includes('text-red-700'), 'destructive Delete action styled differently');
+});
+
+test('v6.1.2: itemsDialog includes Start Review button with save-then-queue flow', () => {
+  const source = readSource('src/pages/community.js');
+  assert.ok(source.includes('Start Review'), 'Start Review button in itemsDialog');
+  assert.ok(source.includes('/api/review/sessions'), 'Start Review calls review sessions endpoint');
+  assert.ok(source.includes('ensureDeckOwnedId'), 'save-then-queue uses ensureDeckOwnedId');
+  assert.ok(source.includes('findOwnedEntityId'), 'search-first reuse for owned IDs');
+  assert.ok(source.includes('saveDeckItemReturningId'), 'saves missing items via existing endpoints');
+  assert.ok(source.includes('jlt-immersion-review-queue'), 'immersion hand-off pattern reused');
+  assert.ok(source.includes('#review?reviewSessionId='), 'navigates to created review session');
+});
+
+test('v6.1.2: Feed uses YouTube-style filter selector button', () => {
+  const source = readSource('src/pages/community.js');
+  assert.ok(source.includes('FEED_FILTERS'), 'feed filter definitions exist');
+  assert.ok(source.includes('filterButton'), 'single filter selector button');
+  assert.ok(source.includes("icon('filter'"), 'filter button uses sliders glyph from icons.js');
+  assert.ok(source.includes('Filter:'), 'button shows current selection text');
+  assert.ok(source.includes('role: \'menu\''), 'filter dropdown uses role=menu');
+  assert.ok(source.includes('aria-haspopup') && source.includes("'menu'"), 'button announces menu');
+  assert.ok(source.includes('aria-expanded'), 'button exposes open state');
+  assert.ok(source.includes('aria-current'), 'active filter marked with aria-current');
+  assert.ok(source.includes('Escape') && source.includes('closeFeedFilter'), 'Escape closes filter menu');
+  // Filter options include deck-relevant types
+  for (const value of ["value: ''", "value: 'vocabulary'", "value: 'kanji'", "value: 'grammar'", "value: 'reading'"]) {
+    assert.ok(source.includes(value), `feed filter ${value} exists`);
+  }
+});
+
+test('v6.1.2: Empty states guide with actions', () => {
+  const source = readSource('src/pages/community.js');
+  // My Decks empty state
+  assert.ok(source.includes('Your study library is empty'), 'My Decks empty state title');
+  assert.ok(source.includes('Create your first deck or explore shared content from Community'), 'My Decks empty state description');
+  assert.ok(source.includes('Create deck'), 'Create deck button in empty state');
+  assert.ok(source.includes('Explore Community'), 'Explore Community button in empty state');
+  // Feed search no-results
+  assert.ok(source.includes('Nothing matches. Try another filter.'), 'Feed no-results message updated');
+});
+
+test('v6.1.2: Responsive grid for My Decks cards (xl:3, sm:2, mobile:1)', () => {
+  const source = readSource('src/pages/community.js');
+  assert.ok(source.includes('grid-cols-1 sm:grid-cols-2 xl:grid-cols-3'), 'responsive grid classes on My Decks container');
+});
+
+test('v6.1.2: Community connection badges and Publish to Community language', () => {
+  const source = readSource('src/pages/community.js');
+  assert.ok(source.includes('Shared from Community'), 'imported decks show community badge');
+  assert.ok(source.includes('Publish to Community') || source.includes('Publish deck'), 'composer uses community language');
+  // Composer audit: improved hierarchy/spacing/labels/responsive/validation/loading
+  assert.ok(source.includes('field-control'), 'composer uses field-control for inputs');
+  assert.ok(source.includes('button-primary'), 'composer publish uses primary button');
+  assert.ok(source.includes('min-h-10') || source.includes('min-h-11'), 'composer buttons meet 44px touch target');
+});
+
+test('v6.1.2: deck review helpers mirrored from communityFeed (no cross-module deps)', () => {
+  const source = readSource('src/pages/community.js');
+  for (const fn of ['deckItemDisplay', 'isUsableMeaning', 'SINGLE_HAN', 'deckItemSaveable', 'ownedIdFromSaveResponse', 'findOwnedEntityId', 'saveDeckItemReturningId', 'ensureDeckOwnedId', 'todayISODate']) {
+    assert.ok(source.includes(`function ${fn}`) || source.includes(`const ${fn}`), `helper ${fn} exists in community.js`);
+  }
+});
