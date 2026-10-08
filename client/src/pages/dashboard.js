@@ -304,18 +304,15 @@ function goalsPreview(items, showAll) {
 }
 
 function isEmptyDashboardSnapshot(data) {
-  // Despite the legacy name, this is NOT an "empty dashboard" check: it
-  // answers "is the post-onboarding checklist incomplete?" (mirrors
-  // getFirstUseActionStates' durable-data half). One cheap decision so a
-  // learner with a FULLY completed checklist never pays for the extra
-  // first-experience fetch below. Partial progress (any action incomplete)
-  // still fetches so the checklist can render with per-action states.
+  // Cheap pre-check mirroring shouldShowFirstUseDashboard's durable-data
+  // half (see firstUseDashboard.js): true only when zero durable data, so
+  // ANY datum skips the extra first-experience fetch below and falls
+  // through to the normal dashboard. Malformed payloads fetch anyway; the
+  // strict rule then fails open to the normal dashboard.
   if (!data || typeof data !== 'object') return false;
-  const hasVocabulary = Number(data.vocabularyCount) > 0;
-  const hasCollection = hasVocabulary || Number(data.kanjiCount) > 0 || Number(data.grammarCount) > 0;
-  const hasSession = Array.isArray(data.recentSessions) && data.recentSessions.length > 0;
-  if (hasVocabulary && hasCollection && hasSession) return false;
-  return true;
+  const counts = ['vocabularyCount', 'kanjiCount', 'grammarCount'].some((key) => Number(data[key]) > 0);
+  const sessions = Array.isArray(data.recentSessions) && data.recentSessions.length > 0;
+  return !(counts || sessions);
 }
 
 function dashboardStudyHomeSkeleton() {

@@ -541,5 +541,13 @@ test('dashboard wiring: lazy first-use branch, fail-open, normal snapshot untouc
   for (const marker of ['Recent sessions', 'Activity calendar', 'Active goals', 'View detailed analytics in Statistics']) {
     assert.ok(source.includes(marker), `normal dashboard intact: ${marker}`);
   }
-  assert.ok(!source.includes('POST') && !source.includes('PUT'), 'no write requests added to the dashboard');
+  // The first-use wiring branch (empty-snapshot gate → first-experience
+  // fetch → first-use render) issues zero writes; unrelated dashboard
+  // surfaces (Study-Now session POST, etc.) are out of this audit.
+  const branchStart = source.indexOf('v5.1-A.4 first-use state');
+  const branchEnd = source.indexOf('Fail open to the normal dashboard', branchStart);
+  assert.ok(branchStart !== -1 && branchEnd > branchStart, 'first-use wiring block located');
+  const branch = source.substring(branchStart, branchEnd);
+  assert.ok(!branch.includes("method: 'POST'") && !branch.includes('method: "POST"'), 'first-use branch posts nothing');
+  assert.ok(!branch.includes("method: 'PUT'") && !branch.includes('method: "PUT"'), 'first-use branch puts nothing');
 });
