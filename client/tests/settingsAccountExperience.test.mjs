@@ -60,6 +60,12 @@ test('Avatar upload surface lives in Settings profile; public-profile editing li
   assert.ok(settings.includes('/api/users/me/avatar'), 'settings uses the avatar endpoints');
   assert.ok(settings.includes('account-initials'), 'initials fallback retained in settings');
   assert.ok(account.includes('initials'), 'initials derivation retained');
+  // In-place language switch: settings renders once, so it must re-render
+  // the active tab on locale change (never drop a pending avatar pick).
+  assert.ok(settings.includes("window.addEventListener('jlt-locale-change'"), 'settings listens for locale changes');
+  assert.ok(settings.includes('settingsLocaleController'), 'locale subscription is abortable on remount');
+  assert.ok(settings.includes("#profile-avatar-file')?.files?.length"), 're-render skips while an avatar photo is picked');
+  assert.ok(settings.includes('container.isConnected'), 'detached re-renders guarded');
   // The user-approved public identity (username/bio/visibility for Community)
   // moved out of settings: no block, fields, or save remain here.
   assert.equal(settings.split('Public profile').length - 1, 0, 'no public-profile block in settings');

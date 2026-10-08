@@ -14,6 +14,11 @@ const SETTINGS_SECTIONS = [
   { key: 'account', label: 'Account' }
 ];
 
+// Single live locale subscription for the mounted settings page (aborted on
+// remount). Section labels render via t() at mount; without this, switching
+// language while settings is open would leave the whole page stale.
+let settingsLocaleController = null;
+
 function rawText(tag, className, value) {
   const node = element(tag, { className });
   node.textContent = value == null ? '' : String(value);
@@ -179,6 +184,7 @@ async function renderProfileSection(slot) {
   function clearSelection() {
     revokePendingPreview();
     pendingFile = null;
+    try { fileInput.value = ''; } catch { /* reset is best-effort */ }
     uploadButton.disabled = true;
     selectionNote.textContent = '';
   }
@@ -398,5 +404,13 @@ export async function renderSettings(container) {
     if (active === 'learning') return renderLearningSection(panel);
     return renderAccountSection(panel);
   }
+  settingsLocaleController?.abort();
+  settingsLocaleController = new AbortController();
+  window.addEventListener('jlt-locale-change', () => {
+    if (!container.isConnected) return;
+    // Never drop a picked-but-not-uploaded avatar photo for a re-render.
+    if (container.querySelector('#profile-avatar-file')?.files?.length) return;
+    renderActive().catch(() => undefined);
+  }, { signal: settingsLocaleController.signal });
   await renderActive();
 }

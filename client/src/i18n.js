@@ -276,7 +276,16 @@ Object.assign(translations.es, {
   'That photo is too large. Please choose an image under 10 MB.': 'Esa foto es demasiado grande. Elige una imagen de menos de 10 MB.',
   'Could not read that image. Please try another photo.': 'No se pudo leer esa imagen. Prueba con otra foto.',
   'Could not process that image on this device. Please try again.': 'No se pudo procesar esa imagen en este dispositivo. Inténtalo de nuevo.',
-  'JPEG, PNG, or WebP up to 10 MB. Compressed to a small photo before upload.': 'JPEG, PNG o WebP de hasta 10 MB. Se comprime a una foto pequeña antes de subirla.'
+  'JPEG, PNG, or WebP up to 10 MB. Compressed to a small photo before upload.': 'JPEG, PNG o WebP de hasta 10 MB. Se comprime a una foto pequeña antes de subirla.',
+  Settings: 'Ajustes',
+  'Settings sections': 'Secciones de ajustes',
+  'Loading your starting point…': 'Cargando tu punto de partida…',
+  'Answer 10 short Japanese questions to establish a starting reference.': 'Responde 10 preguntas cortas de japonés para establecer una referencia inicial.',
+  'This is a starting estimate, not an official JLPT assessment.': 'Es una estimación inicial, no una evaluación oficial del JLPT.',
+  'Take quick placement': 'Hacer la prueba de nivel rápida',
+  'Starting point is unavailable right now.': 'El punto de partida no está disponible ahora.',
+  'Target JLPT level': 'Nivel JLPT objetivo',
+  'Export backup': 'Exportar copia de seguridad'
 });
 
 export function getLocale() {
