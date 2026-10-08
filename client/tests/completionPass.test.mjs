@@ -83,7 +83,7 @@ test('handwriting has one reset control, not two', () => {
   const source = readSource('src/kanjiWriting.js');
   assert.ok(source.includes("text: 'Clear'"), 'Clear remains with announcement');
   assert.ok(!source.includes("text: 'Retry'"), 'duplicate Retry removed');
-  assert.ok(source.includes("text: 'Watch order'") && source.includes("text: 'Done'"), 'watch and done intact');
+  assert.ok(source.includes("text: 'Watch stroke order'") && source.includes("text: 'Done'"), 'watch and done intact');
 });
 
 test('V5.7 recognition options come from the queue, never the network', () => {
