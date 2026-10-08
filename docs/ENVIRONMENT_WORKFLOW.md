@@ -4,65 +4,81 @@ NippoTrack uses one application codebase with explicit runtime configuration. Au
 behavior is identical in every environment; only the configured Supabase and PostgreSQL
 targets change.
 
-## Local development
+> Loader reference (verified by reading, never executing): every entry below names the
+> exact file/loader that reads each env file. Process environment always wins over files.
 
-Run the normal local environment with:
+## Loader → file matrix
+
+| Loader | File(s) read | Keys consumed | Target |
+| --- | --- | --- | --- |
+| `server/src/config/postgres.js` | `POSTGRES_ENV_FILE` \|\| `server/.env.postgres` (relative to `server/` cwd) | `POSTGRES_HOST/PORT/USER/PASSWORD/DB`, `POSTGRES_SSL/SSL_CA`, `POSTGRES_TIMEZONE` | Migration/admin pool only. Local disposable admin target for `postgres:migrate` / `postgres:check`. Never the app runtime. |
+| `server/src/config/runtimeEnvironment.js` (via `postgresRuntime.js`) | base `POSTGRES_ENV_FILE` \|\| `server/.env.postgres`, layered with runtime `POSTGRES_RUNTIME_ENV_FILE` \|\| `server/.env.runtime`; merge order base < runtime file < process env | `POSTGRES_RUNTIME_HOST/PORT/USER/PASSWORD/DB/SSL/SSL_CA/POOL_MAX`, `POSTGRES_TIMEZONE` | App runtime pool. Missing vars fall back to compiled Production defaults (Supavisor pooler) — development guards refuse to start there (see below). `POSTGRES_*` fallbacks apply ONLY in test mode (`NODE_ENV=test` + `JLT_AUTH_BYPASS_FOR_TESTS=true`). |
+| `scripts/development-environment.js` (`selectDevelopmentServices`, used by `dev.js`) | plain dev: `server/.env.development`; `--integration`: `server/.env.integration` (injected as `POSTGRES_RUNTIME_ENV_FILE`) | Full runtime shape (`POSTGRES_RUNTIME_*`, `SUPABASE_URL/PUBLISHABLE_KEY/AUTH_REDIRECT_URL`, `PORT`) | Plain dev = local disposable target; integration = disposable Supabase Testing project. `dev.js` also reads the same file for its `PORT` health-check probe only. |
+| `dev.js` client spawn | plain dev: bare `vite` (development mode); `--integration`: `vite --mode integration` | — | Selects which `client/.env.*` Vite loads (see next row). |
+| Vite (+ `scripts/production-guard.js` `resolveClientSupabaseUrl`, mirroring Vite precedence `.env` < `.env.local` < `.env.{mode}` < `.env.{mode}.local` < process env) | dev mode: `client/.env.development.local`; integration mode: `client/.env.integration` | `VITE_SUPABASE_URL/PUBLISHABLE_KEY`, `VITE_API_BASE_URL` (integration only, `http://127.0.0.1:3101`) | Disposable Testing project on both; Auth invariant: frontend and backend MUST use the SAME Supabase project (cross-project JWTs never verify; `assertAlignedEnvironments` aborts on mismatch). |
+
+## Local development
 
 ```powershell
 npm.cmd run dev
 ```
 
-It starts the API with `server/.env.development` (safe local PostgreSQL;
-see `server/.env.development.example`) and Vite with `client/.env.local`.
-`npm run dev` never resolves to Production: a fail-closed guard
-(`scripts/production-guard.js`, enforced in `dev.js` and `server/index.js`)
-refuses development-mode startup when the resolved database/auth identity
-matches the Production project. The local database only has the legacy
-baseline schema, so features needing Supabase-auth migrations (Phase 11+)
-require the integration workflow below.
-
-## Production safety
-
-- `npm.cmd run dev` = safe local workflow (local PostgreSQL).
-- `npm.cmd run dev:integration` = disposable Supabase-compatible workflow.
-- Production must never be used for normal smoke testing.
-- Auth invariant: for any non-Production workflow the frontend and backend
-  must use the SAME Supabase project (cross-project JWTs never verify).
-  Plain dev uses `server/.env.development` (backend) plus
-  `client/.env.development.local` (frontend, overrides `client/.env.local`
-  in development mode); both point at the disposable project.
-- `server/.env.runtime` is no longer loaded by `npm run dev`. If a legacy
-  `.env.runtime` file points at Production, development startup aborts with
-  "Refusing to start development server against Production" instead of
-  connecting. The Vite config (`client/vite.config.js`) and the root
-  launcher (`dev.js`) enforce the same fail-closed rule for the frontend
-  Supabase URL and for frontend/backend project mismatch. Intentional
-  production startup is `NODE_ENV=production`
-  with explicit production configuration (Vercel deployments use
-  `api/index.js` with platform environment variables and are unaffected
-  by the development guard).
+Starts the API with `server/.env.development` and Vite in development mode
+(`client/.env.development.local`). `npm run dev` never resolves to Production: a fail-closed
+guard (`scripts/production-guard.js`, enforced in `dev.js`, `server/index.js`, and
+`client/vite.config.js`) refuses development-mode startup when the resolved database/auth
+identity matches the Production project ref, or when no Supabase identity is configured at
+all (the compiled fallbacks point at Production, so unknown means unsafe).
 
 ## Isolated integration environment
-
-Run the disposable integration environment with:
 
 ```powershell
 npm.cmd run dev:integration
 ```
 
-The command starts the API with `server/.env.integration` and starts Vite in
-`integration` mode, which loads `client/.env.integration.local`. The two files must
-target the same isolated Supabase project. Do not use production accounts or credentials
-in either integration file.
+Starts the API with `server/.env.integration` and Vite in `integration` mode
+(`client/.env.integration`). The two files must target the same isolated Supabase project.
+Do not use production accounts or credentials in either integration file.
+
+## Naming mismatches (known, docs fixed here — files NOT renamed)
+
+1. Old revisions of this doc claimed plain dev loads `client/.env.local`. **No such file
+   exists.** The real file is `client/.env.development.local` (gitignored, overrides per-mode).
+2. Old revisions claimed integration loads `client/.env.integration.local`. **No such file
+   exists.** The real file is `client/.env.integration` (gitignored, includes `VITE_API_BASE_URL`).
+3. The integration template lives at repo root (`integration.env.example`) but its target lives
+   in `server/` (`server/.env.integration`). `docs/AUTOMATED_AUTH_AND_ISOLATION_TESTING.md`
+   already documents this root→`server/` copy step; the template is NOT duplicated.
+
+## Missing-keys list (documentation only — do NOT create new `.env` files)
+
+Compared against the loaders above and the live gitignored files' key shapes (values never
+listed here). Template owners should add these as **commented placeholders**:
+
+- `server/.env.development.example` lacks: `SUPABASE_SECRET_KEY` (server-only, avatar
+  storage — see `docs/VERCEL_APPLICATION_TOPOLOGY.md` correction note),
+  `JLT_DECK_SHARE_SECRET` (present in the live dev file, absent from the template),
+  `POSTGRES_RUNTIME_SSL_CA` (optional TLS CA override).
+- `server/.env.postgres.example` lacks: `POSTGRES_SSL`, `POSTGRES_SSL_CA` (both read by
+  `server/src/config/postgres.js` via `postgresSslConfig`).
+- `integration.env.example` lacks vs the live `server/.env.integration` shape:
+  `SUPABASE_URL` / `SUPABASE_PUBLISHABLE_KEY` mirror lines, `PORT`,
+  `SUPABASE_INTEGRATION_TEST_EMAIL` / `SUPABASE_INTEGRATION_TEST_PASSWORD`,
+  `SUPABASE_INTEGRATION_PROJECT_REF`, `JLT_LOCAL_AUTH_BYPASS` / `JLT_LOCAL_AUTH_USER_ID`.
 
 ## Vercel workflow
 
 Once the Vercel project is connected to GitHub:
 
 1. Push a branch to create a Vercel Preview deployment.
-2. Smoke-test the Preview URL.
-3. Merge or push the approved change to `master` to create a Production deployment.
+2. Smoke-test the Preview URL (see `docs/VERCEL_PREVIEW_SMOKE.md`).
+3. Merge the approved change through the agreed branch strategy to create a Production
+   deployment (this doc previously said `master`; the current working branch is `dev` and
+   `origin/HEAD` points at `master` with a `main` branch also present — confirm the release
+   target with the release owner before promoting; see the smoke doc's branch-strategy note).
 
 Vercel environment variables remain outside Git. Browser variables are limited to
 `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`; migration credentials and
-Supabase admin keys must never be added to Vercel.
+Supabase admin keys must never be added to the browser build. Server-runtime key policy
+(including `SUPABASE_SECRET_KEY` for avatar storage) is clarified in
+`docs/VERCEL_APPLICATION_TOPOLOGY.md` — pending runtime-owner confirmation.

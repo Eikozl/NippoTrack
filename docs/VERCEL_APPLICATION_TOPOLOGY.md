@@ -51,3 +51,13 @@ Never set migration credentials, Supabase secret/service-role keys, SMTP credent
 ## Deferred production decisions
 
 - Production site URL, Auth redirect URLs, confirmation URLs, recovery URLs, and SMTP configuration must wait for the approved Vercel domain/preview topology.
+
+## Correction note (2026-10-08, docs owner — pending runtime-owner confirmation)
+
+The "never set … in the browser build or the Vercel runtime" line above overstates the
+server side: secrets must never be exposed to the BROWSER build (no `VITE_*` secret keys,
+ever), but the server runtime MAY need to hold `SUPABASE_SECRET_KEY` because avatar storage
+writes are mediated server-side with that key (`server/src/services/profileAvatar.js`; the
+key never leaves the server and no client storage credentials exist). Pending runtime-owner
+confirmation of the exact Vercel server-env name and rotation story; until then, treat this
+paragraph — not the blanket line — as the operative policy.
