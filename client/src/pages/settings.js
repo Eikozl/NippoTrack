@@ -4,6 +4,7 @@ import { compressAvatarImage } from '../avatarImage.js';
 import { icon } from '../icons';
 import { profileStore, MAX_DISPLAY_NAME_LENGTH, normalizeDisplayName } from '../accountProfile.js';
 import { element, loadingState, pageHeader, showToast, withPendingAction } from '../ui';
+import { isSafeAvatarUrl } from '../avatarPolicy.js';
 import { smartGoalsSettingsSection } from '../smartGoals.js';
 import { enterPlacement, placementResultFromState, placementResultNode, selfReportResultNode } from '../firstExperience.js';
 import { targetLevelOptions } from '../jlptTarget.js';
@@ -32,17 +33,6 @@ function sectionSurface(title, description, children = []) {
     ...(description ? [element('p', { className: 'mt-2 max-w-2xl text-sm leading-6 text-muted', text: description })] : []),
     ...children
   ]);
-}
-
-// Same safe-URL rule as communityFeed.js (mirrored — that module does not
-// export its gate): Supabase Storage avatars-bucket URLs or same-origin
-// relative paths only. data:/blob:/script schemes, plain http: and foreign
-// hosts are rejected (see communityFeed.js for the full rationale).
-function isSafeAvatarUrl(value) {
-  const trimmed = String(value || '').trim();
-  if (!trimmed) return false;
-  return /^https:\/\/[A-Za-z0-9-]+\.supabase\.co\/storage\/v1\/object\/public\/avatars\//i.test(trimmed)
-    || /^\/(?!\/)/.test(trimmed);
 }
 
 function identityPreview(profile) {

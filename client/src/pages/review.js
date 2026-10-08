@@ -3,6 +3,7 @@ import { kanjiReferenceRoute } from '../kanjiReference';
 import { icon } from '../icons';
 import { element, emptyState, errorState, loadingState, openDetailModal, openDialog, confirmDialog, pageHeader, setActionPending, showToast, withPendingAction } from '../ui';
 import { mountKanjiWriting } from '../kanjiWriting.js';
+import { applySessionContext } from '../sessionContext.js';
 
 const TYPE_ORDER = ['kanji', 'vocabulary', 'grammar'];
 const TYPE_LABEL = { kanji: 'Kanji', vocabulary: 'Vocabulary', grammar: 'Grammar' };
@@ -299,18 +300,6 @@ function suggestedGradeForMistakes(mistakes) {
   if (mistakes <= 1) return 'Good';
   if (mistakes === 2) return 'Hard';
   return 'Again';
-}
-
-// V5.6 Completion Pass: session-creation responses carry batched per-item
-// context (same helper shape as the dashboard auto-session). Merge it into
-// the client queue so cards render Context blocks with zero extra requests.
-function applySessionContext(queueItems, session) {
-  const byKey = new Map((Array.isArray(session?.items) ? session.items : []).map((entry) => [`${entry.entityType}:${entry.entityId}`, entry.context]));
-  for (const item of queueItems) {
-    const context = byKey.get(`${item.entityType}:${item.entityId}`);
-    if (context) item.context = context;
-  }
-  return queueItems;
 }
 
 // Relative day label for honest history ("Last failed 4 days ago").

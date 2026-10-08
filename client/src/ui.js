@@ -26,6 +26,8 @@ export function element(tagName, { className, text, attrs, dataset } = {}, child
 // param stays accepted so existing call sites keep working, but it is
 // intentionally never rendered. Functional labels (onboarding steps,
 // landing copy, kanji ownership) live outside this helper and are untouched.
+// @deprecated The `eyebrow` param is deprecated (accepted but never rendered);
+// tests pin this shape, so it stays instead of being removed.
 export function pageHeader({ eyebrow: _eyebrow, title, description, action }) {
   const headerIcon = iconForTitle(title);
   const heading = element('div', { className: 'flex items-center gap-3' }, [
@@ -491,6 +493,8 @@ export function openDialog({ title, content, submitLabel = 'Save', submitClassNa
 // drawers never host a second form stack. Single-instance like dialogs:
 // opening a drawer replaces any open dialog/drawer overlay.
 // Focus trap + Escape + overlay-click + focus return mirror openDialog.
+// @deprecated openDrawer stays exported (tests pin its shape) but is no longer
+// the entity-detail path; new detail UI uses openDetailModal instead.
 export function openDrawer({ title, subtitle = null, content = [], actions = [], onClose = null }) {
   const root = document.getElementById('modal-root');
   const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;

@@ -95,8 +95,10 @@ test('composer lives ONLY in the + dialog, no inline card remains', () => {
 
 test('shared deck items show han characters, never generic placeholders', () => {
   const source = readSource('src/pages/communityFeed.js');
-  assert.ok(source.includes('function deckItemDisplay'), 'per-type display mapping exists');
-  assert.ok(source.includes('character_kanji') && source.includes('grammar_point'), 'kanji and grammar columns mapped');
+  const gate = readSource('src/deckSaveGate.js');
+  assert.ok(gate.includes('function deckItemDisplay'), 'per-type display mapping lives in the shared gate');
+  assert.ok(source.includes('deckItemDisplay') && source.includes('deckSaveGate'), 'feed reuses the shared display mapping');
+  assert.ok((source + gate).includes('character_kanji') && (source + gate).includes('grammar_point'), 'kanji and grammar columns mapped');
 });
 
 test('own posts can be edited through the existing endpoint', () => {
@@ -323,8 +325,10 @@ test('progress cards present the verified snapshot, manual-only stays body-only'
 
 test('honesty gates block invented glosses from the library and review', () => {
   const source = readSource('src/pages/communityFeed.js');
+  const gate = readSource('src/deckSaveGate.js');
   assert.ok(!source.includes('Saved from Community'), 'invented gloss string gone from save paths');
-  assert.ok(source.includes('function isUsableMeaning'), 'usable-meaning gate reused from review.js');
+  assert.ok(gate.includes('function isUsableMeaning'), 'usable-meaning gate lives in the shared gate');
+  assert.ok(source.includes('isUsableMeaning') && source.includes('deckSaveGate'), 'feed reuses the shared gate');
   assert.ok(source.includes('No dictionary meaning available'), 'honest disabled reason shown');
   assert.ok(source.includes('disabled'), 'ungated Save renders disabled');
   assert.ok(source.includes('entityCreateBody(post.entityType'), 'single saves gate through the body builder');
@@ -332,7 +336,9 @@ test('honesty gates block invented glosses from the library and review', () => {
 
 test('kanji saves require a single Han character before any request', () => {
   const source = readSource('src/pages/communityFeed.js');
-  assert.ok(source.includes('Script=Han'), 'single-Han validation present (same as Decks hub)');
+  const gate = readSource('src/deckSaveGate.js');
+  assert.ok(gate.includes('Script=Han'), 'single-Han validation lives in the shared gate');
+  assert.ok(source.includes('SINGLE_HAN') && source.includes('deckSaveGate'), 'feed reuses the shared single-Han check');
   assert.ok(source.includes('single kanji character is required'), 'honest error toast, no request fired');
   assert.ok(source.includes('deckItemSaveable'), 'deck per-item gating reuses the same rule');
 });
@@ -855,9 +861,13 @@ test('v6.1.2: Community connection badges and Publish to Community language', ()
   assert.ok(source.includes('min-h-10') || source.includes('min-h-11'), 'composer buttons meet 44px touch target');
 });
 
-test('v6.1.2: deck review helpers mirrored from communityFeed (no cross-module deps)', () => {
-  const source = readSource('src/pages/community.js');
+test('v6.1.2: deck review helpers shared via deckSaveGate (no duplication)', () => {
+  const gate = readSource('src/deckSaveGate.js');
   for (const fn of ['deckItemDisplay', 'isUsableMeaning', 'SINGLE_HAN', 'deckItemSaveable', 'ownedIdFromSaveResponse', 'findOwnedEntityId', 'saveDeckItemReturningId', 'ensureDeckOwnedId', 'todayISODate']) {
-    assert.ok(source.includes(`function ${fn}`) || source.includes(`const ${fn}`), `helper ${fn} exists in community.js`);
+    assert.ok(gate.includes(`function ${fn}`) || gate.includes(`const ${fn}`), `helper ${fn} lives in the shared gate`);
+  }
+  for (const path of ['src/pages/community.js', 'src/pages/communityFeed.js']) {
+    const source = readSource(path);
+    assert.ok(source.includes('deckSaveGate'), `${path} reuses the shared gate`);
   }
 });

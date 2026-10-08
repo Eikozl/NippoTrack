@@ -5,6 +5,8 @@
 import { apiRequest } from '../api';
 import { icon } from '../icons';
 import { speakJapanese } from '../speech.js';
+import { avatarUrlFor, isSafeAvatarUrl } from '../avatarPolicy.js';
+import { deckItemDisplay, deckItemSaveable, ensureDeckOwnedId, findOwnedEntityId, isUsableMeaning, ownedIdFromSaveResponse, saveDeckItemReturningId, SINGLE_HAN, speechPieces, todayISODate } from '../deckSaveGate.js';
 import {
   element, emptyState, errorState, loadingState, openDialog, confirmDialog,
   showToast, withPendingAction, skeleton
@@ -95,26 +97,6 @@ function initialsFor(display, username) {
   return (letters.slice(0, 2).join('') || '?').toUpperCase();
 }
 
-function isSafeAvatarUrl(value) {
-  const trimmed = String(value || '').trim();
-  if (!trimmed) return false;
-  // Avatars are Supabase Storage public URLs for the avatars bucket (with
-  // ?v= cache-buster) or same-origin relative paths. data:/blob:/script
-  // schemes are rejected outright (SVG polyglots execute outside <img>);
-  // plain http: and foreign https: hosts are rejected (mixed content +
-  // tracker-host risk) since avatar_url is allowlisted at write time.
-  return /^https:\/\/[A-Za-z0-9-]+\.supabase\.co\/storage\/v1\/object\/public\/avatars\//i.test(trimmed)
-    || /^\/(?!\/)/.test(trimmed);
-}
-
-function avatarUrlFor(source) {
-  if (!source || typeof source !== 'object') return null;
-  const candidate = source.authorAvatar || source.avatarUrl || source.actorAvatar || null;
-  if (!candidate) return null;
-  const trimmed = String(candidate).trim();
-  return isSafeAvatarUrl(trimmed) ? trimmed : null;
-}
-
 function avatarFace(display, username, avatarUrl, sizeClass = 'size-10 text-sm') {
   const name = String(display || username || 'Someone').trim() || 'Someone';
   const initials = element('span', {
@@ -179,31 +161,6 @@ function typePill(postType) {
   return element('span', { className: 'status-pill text-xs', text: POST_TYPE_LABEL[postType] || postType });
 }
 
-// Phase 5-frontend honesty gates (same tight rule as review.js
-// isUsableMeaning): fragments, links, or symbol-only strings are never
-// quizzable, so they must never be saved from shared posts either.
-function isUsableMeaning(value) {
-  const text = String(value || '').trim();
-  if (!text) return false;
-  if (/[-–—―]$/.test(text) || /^[-–—―]/.test(text)) return false;
-  if (/https?:\/\/|www\./i.test(text)) return false;
-  if (/[\r\n]/.test(text)) return false;
-  if (!/[\p{L}\p{N}]/u.test(text)) return false;
-  return true;
-}
-
-// Same single-Han check as the Decks hub (community.js:91): kanji saves
-// require exactly one Han character, never a word or multi-char string.
-const SINGLE_HAN = /^\p{Script=Han}$/u;
-
-function speechPieces() {
-  const hasWindow = typeof window !== 'undefined';
-  return {
-    synthesis: hasWindow ? window.speechSynthesis : null,
-    Utterance: hasWindow ? window.SpeechSynthesisUtterance : null
-  };
-}
-
 // Single-utterance TTS reusing the shared speakJapanese infrastructure
 // (same pattern as the Decks hub playQueue single-item path). No furigana
 // or analysis is fabricated — the given text plays as-is.
@@ -252,16 +209,6 @@ function statsBlock(stats) {
 
 function entityCreateEndpoint(entityType) {
   return entityType === 'vocabulary' ? '/api/vocabulary' : entityType === 'kanji' ? '/api/kanji' : '/api/grammar';
-}
-
-// Deck snapshots store raw columns (word / character_kanji /
-// grammar_point), never a generic display field — mirror the server's
-// displayOf() so shared decks show han characters, not "Item N".
-function deckItemDisplay(kind, entry) {
-  if (!entry || typeof entry !== 'object') return null;
-  if (kind === 'kanji') return entry.character_kanji || entry.display || null;
-  if (kind === 'grammar') return entry.grammar_point || entry.display || null;
-  return entry.word || entry.display || entry.title || null;
 }
 
 function entityCreateBody(entityType, snapshot) {
@@ -791,110 +738,6 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     return link;
   }
 
-  // Deck items reuse the same honesty gates as single saves (no invented
-  // gloss, single-Han kanji). Used to disable per-item Save honestly.
-  function deckItemSaveable(kind, entry) {
-    const display = deckItemDisplay(kind, entry);
-    if (!display) return false;
-    if (!isUsableMeaning(entry?.meaning)) return false;
-    if (kind === 'kanji' && !SINGLE_HAN.test(String(display))) return false;
-    return true;
-  }
-
-  // Owned-id helpers for the deck review session flow (POST
-  // /api/review/sessions requires OWNED library ids: {entityType, entityId}).
-  // Deck snapshots are foreign, so unsaved items are saved first via the
-  // existing POST /api/vocabulary|kanji|grammar endpoints. Never fakes an id.
-  function ownedIdFromSaveResponse(kind, data) {
-    if (!data || typeof data !== 'object') return null;
-    const candidates = kind === 'kanji'
-      ? [data.id_kanji, data.idKanji, data.id, data.insertId]
-      : kind === 'grammar'
-        ? [data.id_grammar, data.idGrammar, data.id, data.insertId]
-        : [data.id_vocabulary, data.idVocabulary, data.id, data.insertId];
-    for (const candidate of candidates) {
-      const id = Number(candidate);
-      if (Number.isInteger(id) && id > 0) return id;
-    }
-    return null;
-  }
-
-  async function findOwnedEntityId(kind, display) {
-    const text = String(display || '').trim();
-    if (!text) return null;
-    const endpoint = kind === 'kanji' ? '/api/kanji/options' : kind === 'grammar' ? '/api/grammar/options' : '/api/vocabulary/options';
-    try {
-      const data = await apiRequest(`${endpoint}?search=${encodeURIComponent(text)}&limit=20`);
-      const rows = Array.isArray(data?.items) ? data.items : [];
-      for (const row of rows) {
-        if (!row || typeof row !== 'object') continue;
-        if (kind === 'kanji' && String(row.character_kanji || '') === text) {
-          const id = Number(row.id_kanji);
-          if (Number.isInteger(id) && id > 0) return id;
-        } else if (kind === 'grammar' && String(row.grammar_point || '') === text) {
-          const id = Number(row.id_grammar);
-          if (Number.isInteger(id) && id > 0) return id;
-        } else if (kind !== 'kanji' && kind !== 'grammar' && String(row.word || '') === text) {
-          const id = Number(row.id_vocabulary);
-          if (Number.isInteger(id) && id > 0) return id;
-        }
-      }
-    } catch {
-      return null;
-    }
-    return null;
-  }
-
-  async function saveDeckItemReturningId(kind, entry) {
-    const display = deckItemDisplay(kind, entry);
-    const meaning = String(entry?.meaning || '').trim();
-    if (!display || !isUsableMeaning(meaning)) return null;
-    if (kind === 'kanji' && !SINGLE_HAN.test(String(display))) return null;
-    try {
-      let created = null;
-      if (kind === 'kanji') {
-        created = await apiRequest('/api/kanji', { method: 'POST', body: { character_kanji: display, meaning } });
-      } else if (kind === 'grammar') {
-        created = await apiRequest('/api/grammar', { method: 'POST', body: { grammar_point: display, meaning } });
-      } else {
-        created = await apiRequest('/api/vocabulary', { method: 'POST', body: { word: display, ...(entry.reading ? { reading: entry.reading } : {}), meaning } });
-      }
-      const entityId = ownedIdFromSaveResponse(kind, created);
-      return entityId ? { entityId, saved: true } : null;
-    } catch (error) {
-      if (error?.status === 409) {
-        const existing = error?.data?.existingKanji;
-        const existingId = Number(existing?.idKanji ?? existing?.id_kanji ?? existing?.id);
-        if (Number.isInteger(existingId) && existingId > 0) return { entityId: existingId, already: true };
-      }
-      return null;
-    }
-  }
-
-  // Search-first to avoid creating duplicates for vocabulary/grammar (which
-  // allow duplicate words): reuse the owned row when the exact display
-  // already exists, otherwise save. Returns {entityId, saved} or
-  // {entityId, already} or null (unsaveable/unqueueable — honestly skipped).
-  async function ensureDeckOwnedId(kind, entry) {
-    const display = deckItemDisplay(kind, entry);
-    if (!display || !deckItemSaveable(kind, entry)) return null;
-    const existing = await findOwnedEntityId(kind, display);
-    if (existing) return { entityId: existing, already: true };
-    const saved = await saveDeckItemReturningId(kind, entry);
-    if (saved) return saved;
-    const retry = await findOwnedEntityId(kind, display);
-    if (retry) return { entityId: retry, already: true };
-    return null;
-  }
-
-  function todayISODate() {
-    try {
-      return new Date().toISOString().slice(0, 10);
-    } catch {
-      return '2026-01-01';
-    }
-  }
-
   function exampleActions(post) {
     // Japanese Example posts (#6): Save-as-vocab (gated on a real usable
     // translation) + TTS via shared speakJapanese. Analyze is OMITTED:
@@ -1212,8 +1055,6 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     };
     await loadDeck();
   }
-
-  function openDeckViewerRefresh() {}
 
   async function saveDeckItem(kind, entry) {
     const display = deckItemDisplay(kind, entry);
@@ -1959,7 +1800,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
         title: 'Your community is quiet',
         description: 'Follow learners to build your feed, or share something you learned today.',
         action: element('button', {
-          className: 'button-primary min-h-11 px-5 py-2.5 text-sm font-semibold', text: 'Discover learners', attrs: { type: 'button' }
+          className: 'button-primary min-h-11 px-5 py-2.5 text-sm font-semibold', text: 'Discover learners', attrs: { type: 'button' }, dataset: { action: 'discover-learners' }
         })
       });
     }
@@ -1967,7 +1808,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       title: 'No posts yet',
       description: 'Be the first to share something you learned today.',
       action: element('button', {
-        className: 'button-primary min-h-11 px-5 py-2.5 text-sm font-semibold', text: 'Create a post', attrs: { type: 'button' }
+        className: 'button-primary min-h-11 px-5 py-2.5 text-sm font-semibold', text: 'Create a post', attrs: { type: 'button' }, dataset: { action: 'create-post' }
       })
     });
   }
@@ -1988,11 +1829,11 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   }
 
   function wireEmptyActions() {
-    body.querySelectorAll('button').forEach((button) => {
-      if (button.textContent === 'Discover learners') {
+    body.querySelectorAll('button[data-action]').forEach((button) => {
+      if (button.dataset.action === 'discover-learners') {
         button.addEventListener('click', () => showTab('discover'));
       }
-      if (button.textContent === 'Create a post') {
+      if (button.dataset.action === 'create-post') {
         button.addEventListener('click', () => {
           openComposerDialog(async () => {
             if (state.profile || state.tab !== 'feed') await showTab('feed');

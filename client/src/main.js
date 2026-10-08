@@ -11,6 +11,7 @@ import { openAuthModal } from './authModal.js';
 import { createLevelEstimateControl } from './levelEstimateControl';
 import { authConfigured, localAuthBypass, localAuthBypassEmail, supabase } from './authClient';
 import { profileStore } from './accountProfile.js';
+import { isSafeAvatarUrl } from './avatarPolicy.js';
 import { getLocale, setLocale, t, translateDocument } from './i18n';
 import { authViewFromSearch } from './landing/routing';
 
@@ -258,17 +259,6 @@ function rawAccountText(node, value) {
   node.textContent = value == null ? '' : String(value);
 }
 
-// Same safe-URL rule as communityFeed.js (mirrored — that module does not
-// export its gate): Supabase Storage avatars-bucket URLs or same-origin
-// relative paths only. data:/blob:/script schemes, plain http: and foreign
-// hosts are rejected (see communityFeed.js for the full rationale).
-function isSafeAvatarUrl(value) {
-  const trimmed = String(value || '').trim();
-  if (!trimmed) return false;
-  return /^https:\/\/[A-Za-z0-9-]+\.supabase\.co\/storage\/v1\/object\/public\/avatars\//i.test(trimmed)
-    || /^\/(?!\/)/.test(trimmed);
-}
-
 // Photo overlay for the initials mark: the initials (or user icon) stay
 // underneath so a broken URL falls back gracefully on img error.
 function avatarOverlayImg(url, size) {
@@ -432,56 +422,6 @@ const levelEstimateControl = createLevelEstimateControl({
 if (themeToggle?.parentElement) levelEstimateControl.mount(themeToggle.parentElement);
 if (mobileThemeToggle?.parentElement) levelEstimateControl.mount(mobileThemeToggle.parentElement);
 
-// Header language control (desktop header only — it mounts into the desktop
-// controls group, which is hidden below lg, so the compact mobile header
-// gains no permanent button). Same locale mechanism as the auth gate and
-// Settings: setLocale persists to localStorage and dispatches
-// jlt-locale-change; switching language never touches the session.
-/* Legacy standalone header language control removed in v5.1-C.
-const localeWrap = element('span', { className: 'header-locale-wrap' });
-const localeButton = element('button', { className: 'icon-button header-locale-button', text: 'EN', attrs: { type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': t('Language'), title: t('Language') } });
-const localeOptions = [['en', 'English'], ['es', 'Spanish']].map(([value, label]) => {
-  const option = element('button', { className: 'header-locale-option', text: label, attrs: { type: 'button', role: 'menuitemradio', 'aria-checked': 'false', 'data-locale': value } });
-  option.addEventListener('click', () => { setLocale(value); syncLocaleControl(); closeLocaleMenu(); });
-  return option;
-});
-const localeMenu = element('div', { className: 'header-locale-menu', attrs: { role: 'menu', hidden: '' } }, localeOptions);
-localeWrap.append(localeButton, localeMenu);
-function syncLocaleControl() {
-  const current = getLocale();
-  localeButton.textContent = current === 'es' ? 'ES' : 'EN';
-  localeButton.setAttribute('aria-label', t('Language'));
-  localeButton.setAttribute('title', t('Language'));
-  localeOptions.forEach((option) => {
-    const active = option.dataset.locale === current;
-    option.setAttribute('aria-checked', String(active));
-    option.textContent = t(option.dataset.locale === 'en' ? 'English' : 'Spanish');
-  });
-}
-function closeLocaleMenu(refocus = false) {
-  localeMenu.setAttribute('hidden', '');
-  localeButton.setAttribute('aria-expanded', 'false');
-  if (refocus) localeButton.focus();
-}
-localeButton.addEventListener('click', (event) => {
-  event.stopPropagation();
-  if (localeMenu.hasAttribute('hidden')) {
-    localeMenu.removeAttribute('hidden');
-    localeButton.setAttribute('aria-expanded', 'true');
-  } else closeLocaleMenu();
-});
-localeWrap.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && !localeMenu.hasAttribute('hidden')) { event.stopPropagation(); closeLocaleMenu(true); }
-});
-document.addEventListener('click', (event) => {
-  if (!localeMenu.hasAttribute('hidden') && !localeWrap.contains(event.target)) closeLocaleMenu();
-});
-// Mount between the estimate control and the theme toggle:
-// [ Estimate ] [ Language ] … [ Theme ] [ User ].
-themeToggle?.before(localeWrap);
-syncLocaleControl();
-window.addEventListener('jlt-locale-change', () => syncLocaleControl());
-*/
 window.addEventListener('jlt-review-complete', () => levelEstimateControl.refresh());
 window.addEventListener('jlt-locale-change', () => {
   translateDocument();
