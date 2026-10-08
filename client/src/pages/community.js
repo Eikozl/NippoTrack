@@ -334,11 +334,15 @@ function itemsDialog(deckId, title, entityType, deckRef = null) {
         viewerFollowing: detail.viewerFollowing ?? deckRef?.viewerFollowing ?? false
       })]);
 
-      // V6.1.2: Start Review button — save-then-queue → POST /api/review/sessions
+      // V6.1.2: Start Review button — save-then-queue → POST /api/review/sessions.
+      // The label travels via the `text` option: element() appends children
+      // verbatim, so a raw string child here threw "Argument 1 ('node') to
+      // Node.appendChild" when opening any deck with items.
       const startReview = items.length > 0 ? element('button', {
         className: 'button-primary min-h-10 px-4 py-2 text-sm font-semibold shrink-0',
+        text: 'Start Review',
         attrs: { type: 'button', 'aria-label': 'Save deck items and start a review session' }
-      }, 'Start Review') : null;
+      }) : null;
       if (startReview) {
         startReview.addEventListener('click', () => withPendingAction(startReview, async () => {
           // Save-then-queue: resolve OWNED ids first (search-first reuse to avoid duplicates, then POST missing)
