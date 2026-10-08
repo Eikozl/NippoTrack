@@ -122,6 +122,16 @@ test('file picker allowlists jpeg/png/webp only (no svg/gif)', async () => {
   }
 });
 
+test('compressor rejects animated GIF (and non still-image types) before decode', async () => {
+  const { module } = await avatarUiSources();
+  assert.ok(module.includes('ALLOWED_AVATAR_INPUT_TYPES'), 'compressor has an explicit input allowlist');
+  for (const mime of ["'image/jpeg'", "'image/png'", "'image/webp'"]) {
+    assert.ok(module.includes(mime), `compressor allows ${mime}`);
+  }
+  assert.ok(module.includes('image/gif'), 'compressor names gif to reject it explicitly');
+  assert.ok(/Animated[^.]*not supported/i.test(module), 'gif rejection carries a still-image message');
+});
+
 test('account-initials fallback retained; community still renders via the untouched avatarFace()', async () => {
   const { union, settings } = await avatarUiSources();
   const feed = await readRequired(COMMUNITY_FEED_PATH);

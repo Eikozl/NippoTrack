@@ -52,7 +52,9 @@ function decodeViaImageElement(file) {
 async function decodeImage(file) {
   if (typeof createImageBitmap === 'function') {
     try {
-      const bitmap = await createImageBitmap(file);
+      // imageOrientation applies EXIF rotation at decode time (iPhone
+      // portrait photos); the <img> fallback below honors it natively.
+      const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
       const width = Number(bitmap?.width || 0);
       const height = Number(bitmap?.height || 0);
       if (!width || !height) {
@@ -80,6 +82,10 @@ function encodeToBlob(source, width, height, quality) {
   canvas.height = height;
   const context = canvas.getContext('2d');
   if (!context) throw new Error('Could not process that image on this device. Please try again.');
+  // Opaque matte: output is always JPEG (no alpha), so transparent PNGs
+  // flatten onto white instead of black.
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, width, height);
   context.drawImage(source, 0, 0, width, height);
   return new Promise((resolve, reject) => {
     try {
@@ -97,9 +103,18 @@ function encodeToBlob(source, width, height, quality) {
   });
 }
 
+// Still-image inputs only. Animated GIFs are rejected outright (canvas
+// would silently freeze frame 0 while charging a full multi-frame decode),
+// and anything outside the still-image set never reaches the decoder.
+const ALLOWED_AVATAR_INPUT_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+
 export async function compressAvatarImage(file) {
-  if (!file || typeof file !== 'object' || typeof file.type !== 'string' || !file.type.startsWith('image/')) {
-    throw new Error('Please choose an image file (JPEG, PNG, or WebP).');
+  if (!file || typeof file !== 'object' || typeof file.type !== 'string' || !ALLOWED_AVATAR_INPUT_TYPES.includes(file.type)) {
+    throw new Error(
+      file?.type === 'image/gif'
+        ? 'Animated photos are not supported. Please choose a JPEG, PNG, or WebP still image.'
+        : 'Please choose an image file (JPEG, PNG, or WebP).'
+    );
   }
   if (typeof file.size === 'number' && file.size > AVATAR_LIMITS.MAX_RAW_BYTES) {
     throw new Error('That photo is too large. Please choose an image under 10 MB.');
