@@ -1080,13 +1080,12 @@ export function renderEntityPage(container, config) {
         content.querySelector('[data-writing-practice]')?.addEventListener('click', () => {
           const character = record.character_kanji || '';
           const holder = element('div', { className: 'grid gap-3' });
-          const closeButton = element('button', { className: 'button-ghost', text: 'Close', attrs: { type: 'button' } });
+          // Header X (openDetailModal) is the sole dismiss; Done inside the
+          // writing widget finishes practice.
           const closePractice = openDetailModal({
             title: character ? `Practice writing ${character}` : 'Practice writing',
-            content: [holder],
-            actions: [closeButton]
+            content: [holder]
           });
-          closeButton.addEventListener('click', closePractice);
           mountKanjiWriting(holder, { character, onDone: closePractice });
         });
       }

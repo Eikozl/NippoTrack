@@ -709,7 +709,10 @@ test('post dialog leaves no desktop dead space: full-width body, capped comments
   assert.ok(source.includes('sm:overscroll-contain'), 'internal scroll does not chain to the page');
   assert.ok(!source.includes("commentsWrap = element('div', { className: 'grid gap-2' }"), 'uncapped comments wrap gone');
   assert.ok(source.includes("content: [element('div', { className: 'grid min-w-0 gap-3 sm:col-span-2' }"), 'post dialog body is the full-width node');
-  assert.ok(source.includes("submitLabel: 'Close'"), 'footer Close kept, reachable without scrolling whitespace');
+  const postBodyAt = source.indexOf("content: [element('div', { className: 'grid min-w-0 gap-3 sm:col-span-2' }");
+  const postDialogTail = source.substring(postBodyAt, postBodyAt + 2200);
+  assert.ok(postDialogTail.includes('showFooter: false'), 'post dialog dismisses via header X only (redundant footer removed)');
+  assert.ok(!postDialogTail.includes("submitLabel: 'Close'"), 'redundant footer Close gone from post dialog');
   assert.ok(source.includes('border-l-2 border-stone pl-2'), 'reply threading styling untouched');
   assert.ok(source.includes('min-w-0 rounded-xl border border-stone bg-paper p-3'), 'comment card styling untouched');
 });

@@ -1629,8 +1629,8 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
         // Desktop dead-space fix: the generic openDialog body is a 2-column grid
         // on sm+ (ui.js), so this single content node spans both columns
         // (sm:col-span-2) instead of leaving the whole right half an empty
-        // void. Tight gap-3, no min-height, no large gaps — the footer sits
-        // right under the content. Mobile stays single-column, unchanged.
+        // void. Tight gap-3, no min-height, no large gaps. Mobile stays
+        // single-column, unchanged.
         content: [element('div', { className: 'grid min-w-0 gap-3 sm:col-span-2' }, [
           ...(post.japaneseText ? [element('p', { className: 'break-words font-jp text-lg leading-8 text-ink', text: post.japaneseText, attrs: { lang: 'ja' } })] : []),
           ...(post.title ? [element('p', { className: 'break-words font-semibold text-ink', text: post.title })] : []),
@@ -1642,8 +1642,9 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
           element('div', { className: 'flex flex-wrap items-center gap-2' }, [like, followRow].filter(Boolean)),
           element('div', { className: 'grid gap-2' }, [commentsWrap, element('div', { className: 'flex gap-2' }, [input, send])])
         ])],
-        submitLabel: 'Close',
-        onSubmit: async (form, close) => close()
+        // View-only dialog (like/follow/comment-send all live in-body): the
+        // header X is the sole dismiss, so no footer is rendered.
+        showFooter: false
       });
       reloadComments();
       if (focusComments) setTimeout(() => { try { input.focus(); } catch { /* noop */ } }, 60);

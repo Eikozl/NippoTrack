@@ -105,8 +105,9 @@ export function openEnrollDialog(storyId, storyTitle, preview, meta = {}) {
     title: `Enroll from ${storyTitle}`,
     description: 'Checked rows become SRS review items. Practice only until graded.',
     content: [dialogStackLike()],
-    submitLabel: 'Close',
-    onSubmit: async (form, close) => { close(); }
+    // Enroll + result actions live in-body; the header X is the sole
+    // dismiss, so no footer is rendered.
+    showFooter: false
   });
 }
 
