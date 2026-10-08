@@ -15,7 +15,7 @@ const readSource = (path) => readFileSync(join(root, path), 'utf8');
 test('tutorial module exposes the hold contract and responsive sources', () => {
   const source = readSource('src/tutorialVideo.js');
   assert.ok(source.includes('TUTORIAL_SKIP_HOLD_MS'), 'hold duration is a named constant');
-  assert.ok(source.includes('3000'), 'hold lasts 3 seconds');
+  assert.ok(source.includes('1500'), 'hold lasts 1.5 seconds');
   assert.ok(source.includes('(max-width: 767px)'), 'handsets selected by viewport width (tablets keep horizontal)');
   assert.ok(source.includes('/videos/tutorial-vertical.mp4'), 'vertical cut served to handsets');
   assert.ok(source.includes('/videos/tutorial-horizontal.mp4'), 'horizontal cut served to desktop/tablets');
@@ -36,6 +36,24 @@ test('takeover is fullscreen with a single low-key bottom-right exit', () => {
   assert.ok(source.includes('pointercancel'), 'cancelled gestures reset the hold');
   assert.ok(source.includes("event.key === 'Enter'") || source.includes('event.key === "Enter"'), 'keyboard hold parity (Enter)');
   assert.ok(source.includes('keyup'), 'releasing the key resets the hold');
+});
+
+test('sound toggle unmutes on user gesture (autoplay stays muted by policy)', () => {
+  const source = readSource('src/tutorialVideo.js');
+  assert.ok(source.includes('video.muted = true'), 'video starts muted (autoplay policy)');
+  assert.ok(source.includes('bottom-5 left-5'), 'sound toggle sits bottom-left, mirroring skip');
+  assert.ok(source.includes('opacity-60'), 'sound toggle rests low-key like skip');
+  assert.ok(source.includes('aria-pressed'), 'sound toggle exposes pressed state');
+  assert.ok(source.includes("'mute'") && source.includes("'volume'"), 'toggle swaps mute/volume glyphs');
+  assert.ok(source.includes('Unmute tutorial video') && source.includes('Mute tutorial video'), 'toggle labels both states');
+});
+
+test('handset cut gets a slight zoom; desktop cut untouched', () => {
+  const source = readSource('src/tutorialVideo.js');
+  const css = readSource('src/styles.css');
+  assert.ok(source.includes('tutorial-video--zoom'), 'mobile video carries the zoom class');
+  assert.ok(css.includes('.tutorial-video--zoom'), 'zoom rule exists');
+  assert.ok(/\.tutorial-video--zoom\s*\{[^}]*scale\(1\.12\)/.test(css), 'zoom is a slight 1.12 scale');
 });
 
 test('video plays muted inline; end and load failure both complete (fail-open)', () => {

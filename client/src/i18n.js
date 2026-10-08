@@ -287,7 +287,9 @@ Object.assign(translations.es, {
   'Target JLPT level': 'Nivel JLPT objetivo',
   'Export backup': 'Exportar copia de seguridad',
   Skip: 'Omitir',
-  'Hold for 3 seconds to skip the tutorial': 'Mantén presionado 3 segundos para omitir el tutorial',
+  'Hold for 1.5 seconds to skip the tutorial': 'Mantén presionado 1.5 segundos para omitir el tutorial',
+  'Mute tutorial video': 'Silenciar el video tutorial',
+  'Unmute tutorial video': 'Activar el sonido del video tutorial',
   'Tutorial video': 'Video tutorial'
 });
 

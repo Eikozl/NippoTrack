@@ -586,6 +586,9 @@ nav .nav-group-label:first-child { margin-top: 0; }
    while the photo is set (see syncTriggerPhoto); without photo the trigger
    keeps its default icon-button styling byte-identical. */
 .icon-button.account-trigger--photo { position: relative; overflow: hidden; border-radius: 999px; }
+/* Tutorial takeover: slight zoom on the handset cut so the baked-in framing
+   fills small screens edge to edge. Desktop/tablet cut untouched. */
+.tutorial-video--zoom { transform: scale(1.12); transform-origin: center; }
 .user-menu-divider { height: 1px; margin: .35rem .4rem; background: var(--nt-border-subtle); }
 .user-menu-item { display: flex; min-height: 2.65rem; width: 100%; align-items: center; justify-content: space-between; gap: .7rem; border-radius: 11px; padding: .55rem .7rem; color: var(--jlt-ink); font-size: .875rem; text-align: left; transition: background-color 160ms ease, color 160ms ease; }
 .user-menu-item:hover, .user-menu-item:focus-visible { background: var(--jlt-primary-soft); color: var(--jlt-primary-strong); }

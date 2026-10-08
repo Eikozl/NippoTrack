@@ -6,9 +6,10 @@
 // any video/load failure dismisses immediately onto the setup shell
 // underneath, and the seen flag is still recorded so nobody is trapped.
 import { element } from './ui.js';
+import { icon } from './icons.js';
 
 export const TUTORIAL_VIDEO_STORAGE_KEY = 'jlt-tutorial-seen';
-export const TUTORIAL_SKIP_HOLD_MS = 3000;
+export const TUTORIAL_SKIP_HOLD_MS = 1500;
 export const TUTORIAL_MOBILE_QUERY = '(max-width: 767px)';
 export const TUTORIAL_VIDEO_SOURCES = {
   desktop: '/videos/tutorial-horizontal.mp4',
@@ -68,7 +69,9 @@ export function mountTutorialVideo(host, { onDone = null } = {}) {
   });
   const video = doc.createElement('video');
   video.src = pickTutorialSource(useMobile);
-  video.className = 'absolute inset-0 h-full w-full object-cover';
+  // Slight zoom on the handset cut so the baked-in framing fills small
+  // screens edge to edge; the desktop/tablet cut is untouched.
+  video.className = `absolute inset-0 h-full w-full object-cover${useMobile ? ' tutorial-video--zoom' : ''}`;
   video.setAttribute('autoplay', '');
   video.setAttribute('muted', '');
   video.setAttribute('playsinline', '');
@@ -85,8 +88,32 @@ export function mountTutorialVideo(host, { onDone = null } = {}) {
   const fill = element('span', { className: 'absolute inset-y-0 left-0 w-0 bg-white/25', attrs: { 'aria-hidden': 'true' } });
   const skip = element('button', {
     className: 'absolute bottom-5 right-5 overflow-hidden rounded-full border border-white/40 bg-black/30 px-5 py-2.5 text-sm font-medium text-white/80 opacity-60 backdrop-blur-sm transition hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-white',
-    attrs: { type: 'button', 'aria-label': 'Hold for 3 seconds to skip the tutorial' }
+    attrs: { type: 'button', 'aria-label': 'Hold for 1.5 seconds to skip the tutorial' }
   }, [fill, element('span', { className: 'relative', text: 'Skip' })]);
+  // Sound toggle (bottom-left, same low-key treatment): browsers forbid
+  // autoplay with sound, so the video starts muted and this user gesture
+  // is what legally unmutes it.
+  const sound = element('button', {
+    className: 'absolute bottom-5 left-5 grid size-11 place-items-center rounded-full border border-white/40 bg-black/30 text-white/80 opacity-60 backdrop-blur-sm transition hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-white',
+    attrs: { type: 'button', 'aria-label': 'Unmute tutorial video', 'aria-pressed': 'false' }
+  }, [icon('mute', { size: 20 })]);
+  const paintSound = () => {
+    const muted = video.muted;
+    sound.setAttribute('aria-label', muted ? 'Unmute tutorial video' : 'Mute tutorial video');
+    sound.setAttribute('aria-pressed', String(!muted));
+    sound.replaceChildren(icon(muted ? 'mute' : 'volume', { size: 20 }));
+  };
+  sound.addEventListener('click', (event) => {
+    event.stopPropagation();
+    video.muted = !video.muted;
+    if (!video.muted) {
+      try {
+        const playing = video.play();
+        if (playing && typeof playing.catch === 'function') playing.catch(() => { /* stays paused: user can replay via toggle */ });
+      } catch { /* play unavailable after gesture: toggle state still applies */ }
+    }
+    paintSound();
+  });
 
   let rafId = 0;
   let holdStart = 0;
@@ -125,6 +152,8 @@ export function mountTutorialVideo(host, { onDone = null } = {}) {
     skip.removeEventListener('pointerleave', cancelHold);
     skip.removeEventListener('keydown', onKeyDown);
     skip.removeEventListener('keyup', cancelHold);
+    // Sound button listeners die with the overlay subtree (no window-level
+    // listeners involved), same as skip's once removed.
     try { video.pause(); } catch { /* pause is best-effort */ }
   }
   function complete() {
@@ -145,7 +174,7 @@ export function mountTutorialVideo(host, { onDone = null } = {}) {
   skip.addEventListener('keyup', cancelHold);
   video.addEventListener('ended', complete);
   video.addEventListener('error', complete);
-  overlay.append(video, skip);
+  overlay.append(video, sound, skip);
   try { host.appendChild(overlay); } catch {
     finish();
     return () => {};
