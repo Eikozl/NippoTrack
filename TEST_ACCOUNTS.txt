@@ -13,6 +13,11 @@ once testing is done.
    Password: test5678
    Sign-in verified: OK
 
+3) Mobile video, spare (vertical cut)
+   Email:    nippotest3@example.com
+   Password: test9012
+   Sign-in verified: OK
+
 Notes:
 - Both are brand-new accounts, so the first login shows the fullscreen
   tutorial (desktop plays tutorial-horizontal.mp4, handsets play
