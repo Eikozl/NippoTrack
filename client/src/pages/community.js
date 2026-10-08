@@ -755,14 +755,18 @@ export async function renderDecksHub(container) {
   const publish = section('Publish', 'Pick items from your collection and publish a deck — or pick a text tab to publish reading texts.');
   const share = section('Share & import', 'Signed codes: share your own items, import codes as new rows.');
   
-  // My Decks — V6.1.2: modern header with primary Create action
+  // My Decks — V6.1.2: modern header with primary Create action.
+  // The label travels via the `text` option: element() appends children
+  // verbatim, so a string child here threw "Argument 1 ('node') to
+  // Node.appendChild" and aborted the whole hub mount.
   const mineHeader = pageHeader({
     title: 'My Decks',
     description: 'Organize your learning material into studyable decks.',
     action: element('button', {
       className: 'button-primary min-h-10 px-4 py-2 text-sm font-semibold shrink-0',
+      text: '+ Create deck',
       attrs: { type: 'button', 'aria-label': 'Create a new deck' }
-    }, ['+ Create deck'])
+    })
   });
   const mineBody = element('div', { className: 'grid gap-4' });
   const mine = { wrap: element('section', { className: 'surface mt-4 p-5 sm:p-6', attrs: { 'aria-label': 'My Decks' } }, [mineHeader, mineBody]), body: mineBody };

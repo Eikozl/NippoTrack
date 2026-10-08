@@ -779,6 +779,9 @@ test('v6.1.2: deckCard passes no raw-string children to element()', () => {
   const itemsDialogSection = source.substring(source.indexOf('function itemsDialog'), source.indexOf('function deckCard'));
   assert.ok(!itemsDialogSection.includes("}, 'Start Review')"), 'Start Review label must use text: option, never a string child');
   assert.ok(itemsDialogSection.includes("text: 'Start Review'"), 'Start Review label present via text option');
+  const hubSection = source.substring(source.indexOf('const mineHeader = pageHeader'));
+  assert.ok(!hubSection.includes("}, ['+ Create deck'])"), 'Create deck label must use text: option, never a string-array child');
+  assert.ok(hubSection.includes("text: '+ Create deck'"), 'Create deck label present via text option');
 });
 
 test('v6.1.2: Study is primary action, admin actions in overflow menu', () => {
