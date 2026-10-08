@@ -172,9 +172,48 @@ export function mountTutorialVideo(host, { onDone = null } = {}) {
   skip.addEventListener('pointerleave', cancelHold);
   skip.addEventListener('keydown', onKeyDown);
   skip.addEventListener('keyup', cancelHold);
-  video.addEventListener('ended', complete);
+  // End card (only when the video finishes naturally — a skip-hold
+  // dismisses straight away): Repeat replays, Continue dismisses. The
+  // controls hide while choosing so the two options stay unambiguous.
+  const repeat = element('button', {
+    className: 'button-secondary',
+    text: 'Repeat',
+    attrs: { type: 'button' }
+  });
+  const cont = element('button', {
+    className: 'button-primary',
+    text: 'Continue',
+    attrs: { type: 'button' }
+  });
+  const endCard = element('div', {
+    className: 'absolute inset-0 grid place-items-center bg-black/60 p-6',
+    attrs: { role: 'group', 'aria-label': 'Video finished' }
+  }, [
+    element('div', { className: 'flex flex-wrap items-center justify-center gap-3' }, [repeat, cont])
+  ]);
+  endCard.hidden = true;
+  repeat.addEventListener('click', () => {
+    endCard.hidden = true;
+    skip.hidden = false;
+    sound.hidden = false;
+    try { video.currentTime = 0; } catch { /* seek is best-effort */ }
+    try {
+      const playing = video.play();
+      if (playing && typeof playing.catch === 'function') playing.catch(() => { /* stays paused: toggle/skip remain */ });
+    } catch { /* play unavailable: controls remain */ }
+    try { skip.focus({ preventScroll: true }); } catch { try { skip.focus(); } catch { /* focus is best-effort */ } }
+  });
+  cont.addEventListener('click', () => complete());
+  const showEndCard = () => {
+    cancelHold();
+    skip.hidden = true;
+    sound.hidden = true;
+    endCard.hidden = false;
+    try { cont.focus({ preventScroll: true }); } catch { try { cont.focus(); } catch { /* focus is best-effort */ } }
+  };
+  video.addEventListener('ended', showEndCard);
   video.addEventListener('error', complete);
-  overlay.append(video, sound, skip);
+  overlay.append(video, sound, skip, endCard);
   try { host.appendChild(overlay); } catch {
     finish();
     return () => {};

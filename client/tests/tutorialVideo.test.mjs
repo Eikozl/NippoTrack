@@ -63,6 +63,14 @@ test('video plays muted inline; end and load failure both complete (fail-open)',
   assert.ok(source.includes("'ended'") && source.includes("'error'"), 'end + error listeners present');
 });
 
+test('finished video offers a Repeat / Continue end card (skip path unchanged)', () => {
+  const source = readSource('src/tutorialVideo.js');
+  assert.ok(source.includes("text: 'Repeat'") && source.includes("text: 'Continue'"), 'end card offers Repeat and Continue');
+  assert.ok(source.includes("addEventListener('ended', showEndCard)"), 'natural finish opens the end card, not an instant dismiss');
+  assert.ok(source.includes("addEventListener('error', complete)"), 'load failure still dismisses directly (fail-open)');
+  assert.ok(source.includes('video.currentTime = 0'), 'Repeat restarts playback from the beginning');
+});
+
 test('boot shows the tutorial only for unseen new accounts, over the setup shell', () => {
   const source = readSource('src/main.js');
   assert.ok(source.includes('hasSeenTutorialVideo'), 'boot consults the seen flag');
