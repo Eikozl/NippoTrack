@@ -335,12 +335,21 @@ function createUserMenu(trigger, index) {
     const next = event.key === 'ArrowDown' ? (at + 1) % items.length : event.key === 'ArrowUp' ? (at - 1 + items.length) % items.length : event.key === 'Home' ? 0 : items.length - 1;
     items[next]?.focus();
   });
-  menu.addEventListener('focusout', (event) => { if (!menu.contains(event.relatedTarget)) close(); });
+  menu.addEventListener('focusout', () => {
+    // Deferred one frame: on touch, focus can hop mid-tap with an
+    // unreliable (often null) relatedTarget; closing synchronously would
+    // hide the menu under the finger and swallow the tap. Re-check once
+    // the tap completes: a real focus-out still closes a frame later.
+    requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (!active || !menu.contains(active)) close();
+    });
+  });
   languageButton.addEventListener('click', () => {
     const open = languagePanel.hidden;
     languagePanel.hidden = !open;
     languageButton.setAttribute('aria-expanded', String(open));
-    if (open) languagePanel.querySelector('button')?.focus();
+    if (open) languagePanel.querySelector('button')?.focus({ preventScroll: true });
   });
   settingsButton.addEventListener('click', () => { close(); navigate('settings'); });
   signOutButton.addEventListener('click', () => { close(); confirmSignOut(); });

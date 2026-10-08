@@ -594,6 +594,11 @@ nav .nav-group-label:first-child { margin-top: 0; }
 .user-menu-item:hover, .user-menu-item:focus-visible { background: var(--jlt-primary-soft); color: var(--jlt-primary-strong); }
 .user-menu-language { display: grid; gap: .2rem; }
 .user-menu-language-panel { display: grid; gap: .15rem; padding: 0 .3rem .25rem 1rem; }
+/* Unlayered author display beats Tailwind's layered [hidden] rule, so the
+   hidden attribute needs its own guard (same precedent as
+   .user-menu[hidden] above) — otherwise the language panel never collapses
+   and its toggle looks dead. */
+.user-menu-language-panel[hidden] { display: none; }
 .user-menu-language-panel[hidden] { display: none; }
 .user-menu-option { display: flex; min-height: 2.35rem; width: 100%; align-items: center; gap: .45rem; border-radius: 9px; padding: .45rem .6rem; color: var(--jlt-muted); font-size: .8rem; text-align: left; }
 .user-menu-option:hover, .user-menu-option[aria-checked="true"] { background: var(--jlt-primary-soft); color: var(--jlt-primary-strong); }
