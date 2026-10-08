@@ -727,9 +727,13 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     // already announces loading honestly via aria-busy.
     const bodyHost = element('div', { className: 'grid min-w-0 gap-3' }, [skeleton({ rows: 2, variant: 'cards', label: 'Loading preview…' })]);
     bodyHost.setAttribute('aria-busy', 'true');
+    // View-only excerpt (Import lives in-body, footer holds only
+    // Cancel/Close with no submit): the header X is the sole dismiss, so the
+    // footer is hidden at this call site (ui.js defaults untouched).
     openDialog({
       title: fallbackTitle || 'Reading preview',
       content: [bodyHost],
+      showFooter: false,
       submitLabel: 'Close',
       onSubmit: async (form, close) => close()
     });

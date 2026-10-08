@@ -667,7 +667,10 @@ export function renderSessions(container) {
         ]),
         ...((record.stories || []).length ? [relatedList('Stories', record.stories, (item) => item.title, (item) => item.content_type)] : [])
       ]);
-      openDialog({ title: 'Study session detail', content: [details], submitLabel: 'Close', onSubmit: async (form, close) => close() });
+      // View-only detail: the header X (openDialog showCloseButton) is the
+      // sole dismiss — the footer held only Cancel/Close with no submit, so
+      // it is hidden at this call site (ui.js defaults untouched).
+      openDialog({ title: 'Study session detail', content: [details], showFooter: false, submitLabel: 'Close', onSubmit: async (form, close) => close() });
     } catch (error) {
       showToast(error.message, 'error');
     }

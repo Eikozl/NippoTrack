@@ -584,6 +584,29 @@ function section(title, description) {
   return { wrap, body };
 }
 
+// Collapsible hub sections (Publish / Share & import / Collections only):
+// same outer <section aria-label> + byte-identical h2/p copy, but the
+// header becomes a native <details>/<summary> (default CLOSED) so the hub
+// stays decluttered. <summary> wraps the real <h2> (heading semantics, no
+// div-role-button). Nodes stay in the DOM when closed, so querySelector
+// wiring (picker tabs, title input, refreshCollections) keeps working.
+// My Decks / Feed / Texts keep using section() untouched.
+function collapsibleSection(title, description) {
+  const body = element('div', { className: 'grid gap-3' });
+  const summary = element('summary', { className: 'cursor-pointer' }, [
+    element('h2', { className: 'font-semibold text-ink', text: title })
+  ]);
+  const disclosure = element('details', { className: 'grid gap-3' }, [
+    summary,
+    element('p', { className: 'mt-1 text-sm text-muted', text: description }),
+    body
+  ]);
+  const wrap = element('section', { className: 'surface mt-4 p-5 sm:p-6', attrs: { 'aria-label': title } }, [
+    disclosure
+  ]);
+  return { wrap, body };
+}
+
 // Full card stays for owner-managed contexts (My decks, Collections) where
 // selection, analytics, suggestions and member controls need the room.
 // Feed and Ver-más lists use deckRowButton instead.
@@ -769,8 +792,8 @@ export async function renderDecksHub(container) {
   // the shell loader first (appending under it left it spinning forever).
   container.replaceChildren();
   const feed = section('Feed', 'Public decks. Filter, listen, open details, follow.');
-  const publish = section('Publish', 'Pick items from your collection and publish a deck — or pick a text tab to publish reading texts.');
-  const share = section('Share & import', 'Signed codes: share your own items, import codes as new rows.');
+  const publish = collapsibleSection('Publish', 'Pick items from your collection and publish a deck — or pick a text tab to publish reading texts.');
+  const share = collapsibleSection('Share & import', 'Signed codes: share your own items, import codes as new rows.');
   
   // My Decks — V6.1.2: modern header with primary Create action.
   // The label travels via the `text` option: element() appends children
@@ -788,11 +811,16 @@ export async function renderDecksHub(container) {
   const mineBody = element('div', { className: 'grid gap-4' });
   const mine = { wrap: element('section', { className: 'surface mt-4 p-5 sm:p-6', attrs: { 'aria-label': 'My Decks' } }, [mineHeader, mineBody]), body: mineBody };
   
-  const collections = section('Collections', 'Group decks into playlists and share them as one code.');
+  const collections = collapsibleSection('Collections', 'Group decks into playlists and share them as one code.');
   container.append(feed.wrap, publish.wrap, share.wrap, mine.wrap, collections.wrap);
 
   // Wire Create deck button to switch to Publish tab and focus title
   mineHeader.querySelector('button').addEventListener('click', () => {
+    // Publish lives inside a closed <details>: open it first so the tab and
+    // title input are visible before focusing (nodes stay in the DOM, so
+    // querySelector works either way — this only affects visibility).
+    const publishDisclosure = publish.wrap.querySelector('details');
+    if (publishDisclosure) publishDisclosure.open = true;
     // Find and click the first picker tab (Vocabulary) to ensure we're in deck mode
     const vocabTab = publish.wrap.querySelector('[data-picker-key="vocabulary"]');
     if (vocabTab) vocabTab.click();
@@ -1322,6 +1350,8 @@ export async function renderDecksHub(container) {
         const createBtn = mine.body.querySelector('button:first-of-type');
         const exploreBtn = mine.body.querySelector('button:last-of-type');
         if (createBtn) createBtn.addEventListener('click', () => {
+          const publishDisclosure = publish.wrap.querySelector('details');
+          if (publishDisclosure) publishDisclosure.open = true;
           const vocabTab = publish.wrap.querySelector('[data-picker-key="vocabulary"]');
           if (vocabTab) vocabTab.click();
           const titleInput = publish.wrap.querySelector('input[aria-label="Deck title"]');

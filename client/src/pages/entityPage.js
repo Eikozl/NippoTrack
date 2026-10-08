@@ -874,15 +874,16 @@ export function renderEntityPage(container, config) {
       // stays an explicit dialog action via the footer — SEEN first, edited
       // deliberately.
       const editButton = element('button', { className: 'button-secondary', text: `Edit ${config.singular}`, attrs: { type: 'button' } });
-      const closeButton = element('button', { className: 'button-ghost', text: 'Close', attrs: { type: 'button' } });
+      // View-only detail: the header X (openDetailModal close, aria-label
+      // 'Close detail view') is the sole dismiss — the in-footer Close
+      // duplicated it, so only Edit stays at this call site.
       const closeDetail = openDetailModal({
         title: config.primary(record) || `${config.title} detail`,
         subtitle: config.secondary(record) || null,
         content: [content],
-        actions: [closeButton, editButton],
+        actions: [editButton],
         size: config === ENTITY_CONFIGS.kanji ? 'kanji' : 'default'
       });
-      closeButton.addEventListener('click', closeDetail);
       editButton.addEventListener('click', async () => {
         closeDetail();
         await editRecord(record);
