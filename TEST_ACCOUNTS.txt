@@ -18,6 +18,16 @@ once testing is done.
    Password: test9012
    Sign-in verified: OK
 
+4) Spare (any cut)
+   Email:    nippotest4@example.com
+   Password: test2468
+   Sign-in verified: OK
+
+5) Spare (any cut)
+   Email:    nippotest5@example.com
+   Password: test1357
+   Sign-in verified: OK
+
 Notes:
 - Both are brand-new accounts, so the first login shows the fullscreen
   tutorial (desktop plays tutorial-horizontal.mp4, handsets play
