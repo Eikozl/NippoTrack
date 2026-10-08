@@ -46,18 +46,19 @@ Set these only in Vercel project settings when deployment is explicitly approved
 | Runtime PostgreSQL role | `POSTGRES_RUNTIME_HOST` (Supavisor transaction pooler), `POSTGRES_RUNTIME_PORT=6543`, `POSTGRES_RUNTIME_USER`, `POSTGRES_RUNTIME_PASSWORD`, `POSTGRES_RUNTIME_DB`, `POSTGRES_RUNTIME_SSL=verify-full`, `POSTGRES_RUNTIME_SSL_CA`, `POSTGRES_RUNTIME_POOL_MAX=2`, `POSTGRES_TIMEZONE=America/Santo_Domingo` |
 | Browser Supabase client | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` |
 
-Never set migration credentials, Supabase secret/service-role keys, SMTP credentials, or `SUPABASE_INTEGRATION_SECRET_KEY` in the browser build or the Vercel runtime.
+Never set migration credentials, SMTP credentials, or `SUPABASE_INTEGRATION_SECRET_KEY` in the browser build or the Vercel runtime. Never expose any secret through a `VITE_*` variable (browser build) — no exceptions.
 
 ## Deferred production decisions
 
 - Production site URL, Auth redirect URLs, confirmation URLs, recovery URLs, and SMTP configuration must wait for the approved Vercel domain/preview topology.
 
-## Correction note (2026-10-08, docs owner — pending runtime-owner confirmation)
+## Server secret policy (confirmed 2026-10-08 against runtime code)
 
-The "never set … in the browser build or the Vercel runtime" line above overstates the
-server side: secrets must never be exposed to the BROWSER build (no `VITE_*` secret keys,
-ever), but the server runtime MAY need to hold `SUPABASE_SECRET_KEY` because avatar storage
-writes are mediated server-side with that key (`server/src/services/profileAvatar.js`; the
-key never leaves the server and no client storage credentials exist). Pending runtime-owner
-confirmation of the exact Vercel server-env name and rotation story; until then, treat this
-paragraph — not the blanket line — as the operative policy.
+The server runtime HOLDS `SUPABASE_SECRET_KEY` (preferred name; legacy
+`SUPABASE_SERVICE_ROLE_KEY` also accepted, test-only
+`SUPABASE_INTEGRATION_SECRET_KEY` last) because avatar storage writes are
+mediated server-side with that key (`server/src/services/profileAvatar.js`).
+Verified: no `SECRET`/`SERVICE_ROLE` reference exists anywhere under
+`client/`; the browser holds only the publishable key. Rotation story:
+regenerate in the Supabase dashboard → update the server/Vercel runtime env
+→ redeploy; never commit the value (see `.gitignore` env block).
