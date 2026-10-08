@@ -29,6 +29,7 @@
 // the annotation path below renders exactly as before — both orders work.
 
 import { apiRequest, listReadingLibrary, getReadingText, createUserReadingText, deleteReadingText, updateReadingProgress, importReadingSources, importReadingUrl, previewReadingImport, listReadingProgress, publishReadingText } from '../api';
+import { localDayKey } from '../dashboardWelcome.js';
 import { icon } from '../icons';
 import { speakJapanese } from '../speech.js';
 import { element, pageHeader, showToast, withPendingAction, paginationControls, openDetailModal, openDialog, confirmDialog, emptyState, errorState, loadingState } from '../ui';
@@ -1496,7 +1497,7 @@ async function renderReader(container, textId) {
   ]);
   finishButton.addEventListener('click', () => withPendingAction(finishButton, async () => {
     try {
-      await updateReadingProgress(textId, { position: Math.max(1, total), completed: true, timeSpentSeconds: accumulatedSeconds() });
+      await updateReadingProgress(textId, { position: Math.max(1, total), completed: true, timeSpentSeconds: accumulatedSeconds(), today: localDayKey() });
       completed = true;
       finishButton.querySelector('span').textContent = 'Finished';
       finishButton.disabled = true;
@@ -1557,7 +1558,7 @@ async function renderReader(container, textId) {
     let furthest = -1;
     seen.forEach((index) => { if (index > furthest) furthest = index; });
     const position = furthest >= 0 ? Math.max(1, Math.min(total, paragraphs[furthest].end)) : 1;
-    updateReadingProgress(textId, { position, timeSpentSeconds: accumulatedSeconds(), completed: false }).catch(() => { /* best-effort autosave */ });
+    updateReadingProgress(textId, { position, timeSpentSeconds: accumulatedSeconds(), completed: false, today: localDayKey() }).catch(() => { /* best-effort autosave */ });
   }
 
   const onScroll = () => {

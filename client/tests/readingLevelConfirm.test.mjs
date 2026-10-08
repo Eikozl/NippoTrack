@@ -38,6 +38,19 @@ test('item3: No opens an N5–N1 + no-level selector and saves the choice', () =
   assert.ok(source.includes('effectiveReadingLevel'), 'library + reader present the saved value');
 });
 
+test('progress saves anchor daily credit on the client local day (UTC evenings)', () => {
+  const source = readSource('src/pages/reading.js');
+  const api = readSource('src/api.js');
+  // DB CURRENT_DATE is UTC: evening sessions (UTC-4) would land on
+  // tomorrow's row and "today" stats would read 0 (dashboard fixed the same
+  // class via ?today=). Both save paths forward the local day.
+  assert.ok(source.includes("from '../dashboardWelcome.js'"), 'reading imports the local-day helper');
+  assert.ok((source.match(/today: localDayKey\(\)/g) || []).length >= 2, 'autosave + completion saves both send today');
+  const apiFnStart = api.indexOf('export function updateReadingProgress');
+  const apiFn = api.substring(apiFnStart, apiFnStart + 600);
+  assert.ok(apiFn.includes('today'), 'progress API accepts and forwards today');
+});
+
 test('item3: scope is user-created texts only, no schema change', () => {
   const source = readSource('src/pages/reading.js');
   assert.ok(source.includes('user-created texts only'), 'scope documented (not imports/community copies)');

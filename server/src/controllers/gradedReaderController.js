@@ -121,7 +121,7 @@ async function updateProgress(req, res) {
   try {
     const id = parseIdParam(req, 'reading text');
     const body = bodyObject(req.body);
-    rejectUnknownFields(body, ['position', 'timeSpentSeconds', 'completed']);
+    rejectUnknownFields(body, ['position', 'timeSpentSeconds', 'completed', 'today']);
     if (!Number.isSafeInteger(body.position) || body.position < 1 || body.position > MAX_READING_TEXT_LENGTH) {
       throw new ValidationError(`position must be a positive integer no greater than ${MAX_READING_TEXT_LENGTH}.`);
     }
@@ -130,6 +130,12 @@ async function updateProgress(req, res) {
     }
     if (body.completed !== undefined && typeof body.completed !== 'boolean') {
       throw new ValidationError('completed must be a boolean.');
+    }
+    if (body.today !== undefined && body.today !== null) {
+      const dayValue = String(body.today);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dayValue) || Number.isNaN(Date.parse(`${dayValue}T00:00:00Z`))) {
+        throw new ValidationError('today must be a YYYY-MM-DD date.');
+      }
     }
     const progress = await upsertReadingProgress(pool, req.user.id, id, body);
     if (!progress) return res.status(404).json({ error: 'Reading text not found.' });

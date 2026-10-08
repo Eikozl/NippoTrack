@@ -1042,7 +1042,8 @@ async function deleteUserReadingText(executor, userId, textId) {
 async function upsertReadingProgress(executor, userId, textId, {
   position,
   timeSpentSeconds,
-  completed
+  completed,
+  today
 } = {}) {
   const [textRows] = await executor.execute(
     'SELECT id_reading_text, text FROM reading_texts WHERE id_reading_text = ? AND (user_id IS NULL OR user_id = ?)',
@@ -1057,6 +1058,18 @@ async function upsertReadingProgress(executor, userId, textId, {
     throw new ValidationError('timeSpentSeconds must be a positive integer no greater than 86400.');
   }
   if (completed !== undefined && typeof completed !== 'boolean') throw new ValidationError('completed must be a boolean.');
+  // Credit day: the browser's LOCAL date anchors attribution. The DB clock
+  // is UTC, so evening sessions (UTC-4) would otherwise land on tomorrow's
+  // row and "today" stats would read 0 — same class already fixed on the
+  // dashboard via ?today=. Absent/invalid falls back to CURRENT_DATE.
+  let creditDay = null;
+  if (today !== undefined && today !== null) {
+    const dayValue = String(today);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dayValue) || Number.isNaN(Date.parse(`${dayValue}T00:00:00Z`))) {
+      throw new ValidationError('today must be a YYYY-MM-DD date.');
+    }
+    creditDay = dayValue;
+  }
   // PUT replaces the progress state: omitted optional values reset to their
   // schema defaults, making retries deterministic rather than additive.
   // Position is the one exception: it only ever advances (GREATEST), so a
@@ -1098,9 +1111,9 @@ async function upsertReadingProgress(executor, userId, textId, {
   const credited = Math.max(0, (timeSpentSeconds ?? 0) - previousSeconds);
   if (credited > 0) {
     await executor.execute(
-      `INSERT INTO reading_study_days (user_id, day, seconds) VALUES (?, CURRENT_DATE, ?)
+      `INSERT INTO reading_study_days (user_id, day, seconds) VALUES (?, COALESCE(?::date, CURRENT_DATE), ?)
        ON CONFLICT (user_id, day) DO UPDATE SET seconds = reading_study_days.seconds + EXCLUDED.seconds`,
-      [userId, credited]
+      [userId, creditDay, credited]
     );
   }
   return {

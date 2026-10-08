@@ -248,7 +248,8 @@ test('progress is user-scoped, validates bounds, and uses an upsert', async () =
     // Delta credit: submitted 15s minus stored 5s credits 10s to today.
     const daily = calls.find(({ sql }) => /INSERT INTO reading_study_days/i.test(sql));
     assert.ok(daily, 'reading time accrues to the daily row');
-    assert.deepEqual(daily.params, [USER_ID, 10]);
+    assert.deepEqual(daily.params, [USER_ID, null, 10]);
+    assert.match(daily.sql, /COALESCE\(\?::date, CURRENT_DATE\)/i);
     assert.match(daily.sql, /ON CONFLICT \(user_id, day\) DO UPDATE/i);
   });
 
@@ -272,6 +273,35 @@ test('progress is user-scoped, validates bounds, and uses an upsert', async () =
     await controller.updateProgress({ params: { id: '31' }, body: { position: 1, timeSpentSeconds: 15 }, user: { id: USER_ID } }, response.res);
     assert.equal(response.status(), 200);
     assert.equal(response.body().position, 5);
+  });
+
+  const anchoredCalls = [];
+  await withPoolStubs({ execute: async (sql, params = []) => {
+    anchoredCalls.push({ sql, params });
+    if (/SELECT id_reading_text, text FROM reading_texts/i.test(sql)) {
+      return [[{ id_reading_text: 31, text: '学生' }]];
+    }
+    if (/SELECT time_spent_seconds FROM user_reading_progress/i.test(sql)) {
+      return [[{ time_spent_seconds: 5 }]];
+    }
+    if (/INSERT INTO user_reading_progress/i.test(sql)) return [[{ id: 4 }]];
+    if (/SELECT position FROM user_reading_progress/i.test(sql)) return [[{ position: '2' }]];
+    if (/INSERT INTO reading_study_days/i.test(sql)) return [{ affectedRows: 1 }];
+    throw new Error(`Unexpected progress SQL: ${sql}`);
+  } }, async () => {
+    // Client local day anchors the credit row (UTC-4 evenings must not land
+    // on tomorrow's UTC row, or "today" stats read 0).
+    const anchored = mockRes();
+    await controller.updateProgress({ params: { id: '31' }, body: { position: 2, timeSpentSeconds: 15, today: '2026-10-08' }, user: { id: USER_ID } }, anchored.res);
+    assert.equal(anchored.status(), 200);
+    const anchoredDaily = anchoredCalls.find(({ sql }) => /INSERT INTO reading_study_days/i.test(sql));
+    assert.deepEqual(anchoredDaily.params, [USER_ID, '2026-10-08', 10]);
+    // Malformed today is a 400 before any write.
+    for (const bad of ['yesterday', '2026-13-40', '10/08/2026', 20261008]) {
+      const rejected = mockRes();
+      await controller.updateProgress({ params: { id: '31' }, body: { position: 2, timeSpentSeconds: 15, today: bad }, user: { id: USER_ID } }, rejected.res);
+      assert.equal(rejected.status(), 400, `invalid today rejected: ${bad}`);
+    }
   });
 
   await withPoolStubs({ execute: async (sql) => {
