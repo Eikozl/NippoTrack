@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to NippoTrack — confirm your account</title>
+</head>
+<body style="margin:0;padding:0;background-color:#F5F0E8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F5F0E8;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;background-color:#FFFCF7;border:1px solid #DCD4CA;border-radius:16px;overflow:hidden;">
+          <tr>
+            <td style="padding:32px 32px 8px 32px;">
+              <p style="margin:0;font-size:22px;font-weight:700;letter-spacing:-0.01em;color:#111111;">NippoTrack <span lang="ja">日本語</span></p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:8px 32px 0 32px;">
+              <h1 style="margin:0;font-size:20px;font-weight:700;color:#111111;">Welcome aboard 🎌</h1>
+              <p style="margin:12px 0 0 0;font-size:15px;line-height:24px;color:#111111;">Thank you for choosing NippoTrack to organize your Japanese study. We're glad you're here.</p>
+              <p style="margin:12px 0 0 0;font-size:15px;line-height:24px;color:#111111;">One last step: confirm this email address (<strong>{{ .Email }}</strong>) to activate your account.</p>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:24px 32px 8px 32px;">
+              <!--[if mso]>
+              <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="{{ .ConfirmationURL }}" style="height:48px;v-text-anchor:middle;width:220px;" arcsize="25%" fillcolor="#5A5A8D">
+                <v:textbox inset="0,0,0,0"><center style="color:#ffffff;font-size:15px;font-weight:700;">Authenticate</center></v:textbox>
+              </v:roundrect>
+              <![endif]-->
+              <!--[if !mso]><!-- -->
+              <a href="{{ .ConfirmationURL }}" style="display:inline-block;background-color:#5A5A8D;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;padding:14px 36px;border-radius:12px;">Authenticate</a>
+              <!--<![endif]-->
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 32px 0 32px;">
+              <p style="margin:0;font-size:13px;line-height:20px;color:#5C5853;">If the button doesn't work, paste this link into your browser:</p>
+              <p style="margin:8px 0 0 0;font-size:13px;line-height:20px;word-break:break-all;"><a href="{{ .ConfirmationURL }}" style="color:#5A5A8D;">{{ .ConfirmationURL }}</a></p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:24px 32px 32px 32px;border-top:1px solid #E8E1D8;">
+              <p style="margin:0;font-size:12px;line-height:18px;color:#5C5853;">You received this because someone created a NippoTrack account with {{ .Email }}. If that wasn't you, just ignore it.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

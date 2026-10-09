@@ -4,7 +4,7 @@ const { createHash } = require('node:crypto');
 const verifiedUsers = new Map();
 const verificationTtlMs = 15_000;
 const verificationTimeoutMs = 5_000;
-const productionAuthRedirectUrl = 'https://nippotrack.vercel.app/';
+const productionAuthRedirectUrl = 'https://nippotrack.vercel.app/app';
 const defaultSupabaseUrl = 'https://milayuvlajmgrcxmrxdg.supabase.co';
 const defaultSupabasePublishableKey = 'sb_publishable_UJQwQKZge3SKbj-j-BfVkg_2QmvbX4O';
 const localDevelopmentToken = 'jlt-local-development';
@@ -59,13 +59,13 @@ function authRedirectUrl(req) {
     // Branch previews share one build: prefer the requesting preview host so
     // email confirm/recovery links return to the preview that sent them. Only
     // well-formed hostnames are echoed; anything else uses the safe fallback.
-    if (/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.vercel\.app$/.test(host)) return `https://${host}/`;
+    if (/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.vercel\.app$/.test(host)) return `https://${host}/app`;
   }
 
   const configuredRedirect = process.env.SUPABASE_AUTH_REDIRECT_URL;
   if (configuredRedirect?.trim()) return configuredRedirect.trim();
 
-  return 'http://localhost:5173/';
+  return 'http://localhost:5173/app';
 }
 
 function withTimeout(promise, timeoutMs) {
