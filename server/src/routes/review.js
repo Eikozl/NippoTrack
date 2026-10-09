@@ -4,6 +4,7 @@ const controller = require('../controllers/reviewController');
 const router = express.Router();
 router.get('/candidates', controller.listCandidates);
 router.get('/difficult', controller.listDifficultItems);
+router.get('/reminders', controller.listReviewReminders);
 router.get('/due', controller.listDueReviewCards);
 router.get('/types', controller.getReviewTypes);
 router.get('/patterns', controller.getReviewPatterns);

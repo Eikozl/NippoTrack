@@ -55,7 +55,11 @@ test('streak and calendar day cells expose their labels (F S3)', () => {
   const main = readSource('src/main.js');
   assert.ok(main.includes("attrs: { role: 'img', 'aria-label': day.stateLabel }"), 'sidebar streak cells carry img role');
   const dashboard = readSource('src/pages/dashboard.js');
-  assert.ok(dashboard.includes("attrs: { role: 'img', title:"), 'calendar cells carry img role');
+  // Calendar days are real buttons now (tap announces minutes via the live
+  // line): no img role on an interactive control, labels intact.
+  assert.ok(dashboard.includes("element('button', { className: `activity-calendar-day"), 'calendar days are buttons');
+  assert.ok(dashboard.includes("'aria-label': label"), 'calendar buttons keep their day labels');
+  assert.ok(!dashboard.includes("attrs: { role: 'img', title:"), 'old non-interactive img role gone');
 });
 
 test('kanji glyph panel is a group, not an image (F S4)', () => {

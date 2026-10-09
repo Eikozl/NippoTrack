@@ -246,18 +246,83 @@ function activityCalendar(items) {
   const minutesByDate = new Map(items.map((item) => [String(item.date).slice(0, 10), Number(item.minutes)]));
   const today = new Date();
   const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  // Tapping a day announces its minutes in the live line below — the same
+  // data the title/aria-label already carry, now reachable on touch screens.
+  const dayDetail = element('p', { className: 'mt-3 text-sm text-muted', attrs: { 'aria-live': 'polite' } }, [
+    element('span', { text: 'Tap a day to see its minutes.' })
+  ]);
   const days = Array.from({ length: 35 }, (_, index) => {
     const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (34 - index));
     const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
     const minutes = minutesByDate.get(value) || 0;
     const isToday = value === todayKey;
-    return element('div', { className: `activity-calendar-day grid aspect-square place-items-center rounded-md text-xs font-semibold ${minutes ? 'bg-vermilion' : 'bg-paper'}${isToday ? ' is-today' : ''}`, text: date.getDate(), attrs: { role: 'img', title: `${formatDate(value)} · ${minutes} minutes`, 'aria-label': `${formatDate(value)}: ${minutes ? `${minutes} minutes` : 'no study'}${isToday ? ' (today)' : ''}` } });
+    const label = `${formatDate(value)}: ${minutes ? `${minutes} minutes` : 'no study'}${isToday ? ' (today)' : ''}`;
+    const day = element('button', { className: `activity-calendar-day grid aspect-square place-items-center rounded-md text-xs font-semibold ${minutes ? 'bg-vermilion' : 'bg-paper'}${isToday ? ' is-today' : ''}`, text: date.getDate(), attrs: { type: 'button', title: `${formatDate(value)} · ${minutes} minutes`, 'aria-label': label } });
+    day.addEventListener('click', () => {
+      dayDetail.replaceChildren(element('span', { text: label }));
+    });
+    return day;
   });
-  return element('article', { className: 'surface activity-calendar p-5 sm:p-6' }, [element('div', { className: 'flex items-center gap-3' }, [iconTile('sessions', { className: 'panel-icon' }), element('h2', { className: 'font-semibold text-ink', text: 'Activity calendar' })]), element('p', { className: 'mt-1 text-sm text-muted', text: 'The last 35 days. Highlighted days contain at least one study session.' }), element('div', { className: 'mt-5 grid grid-cols-7 gap-2', attrs: { role: 'group', 'aria-label': 'Daily study activity, last 35 days' } }, days)]);
+  return element('article', { className: 'surface activity-calendar p-5 sm:p-6' }, [element('div', { className: 'flex items-center gap-3' }, [iconTile('sessions', { className: 'panel-icon' }), element('h2', { className: 'font-semibold text-ink', text: 'Activity calendar' })]), element('p', { className: 'mt-1 text-sm text-muted', text: 'The last 35 days. Highlighted days contain at least one study session.' }), element('div', { className: 'mt-5 grid grid-cols-7 gap-2', attrs: { role: 'group', 'aria-label': 'Daily study activity, last 35 days' } }, days), dayDetail]);
 }
 
-function recentSessions(items) {
-  const body = items.length ? element('div', { className: 'divide-y divide-stone' }, items.map((session) => element('div', { className: 'flex items-center justify-between gap-4 py-4 first:pt-0 last:pb-0' }, [
+// Review Reminder: never-reviewed or overdue items (Mastered rests), with a
+// one-tap session built from the exact entity queue. Fail-open and hidden
+// when empty — same study-home aesthetic as the sibling sections.
+function reviewReminderSection() {
+  const section = element('section', { className: 'surface mt-5 p-5 sm:p-6', attrs: { 'aria-label': 'Review reminder' } });
+  section.hidden = true;
+  async function load() {
+    let items = [];
+    try {
+      const data = await apiRequest('/api/review/reminders');
+      items = Array.isArray(data?.items) ? data.items : [];
+    } catch {
+      return;
+    }
+    if (!items.length) return;
+    const queue = items
+      .filter((item) => item && item.entityType && Number.isSafeInteger(Number(item.entityId)))
+      .slice(0, 500)
+      .map((item) => ({ entityType: item.entityType, entityId: Number(item.entityId) }));
+    const startButton = element('button', {
+      className: 'button-primary mt-4 min-h-10 px-4 py-2 text-sm',
+      text: `Review these ${items.length}`,
+      attrs: { type: 'button' }
+    });
+    startButton.addEventListener('click', () => {
+      withPendingAction(startButton, async () => {
+        const today = localDayKey();
+        const session = await apiRequest('/api/review/sessions', {
+          method: 'POST',
+          body: { sourceFrom: today, sourceTo: today, items: queue }
+        });
+        if (!session || !session.id) throw new Error('Unable to start that session.');
+        window.location.hash = `#review?retake=${Number(session.id)}`;
+      }, { pendingLabel: 'Starting…' }).catch((error) => {
+        showToast(error?.message || 'Unable to start that session.', 'error');
+      });
+    });
+    const reasonLabel = (item) => (item.reason === 'never'
+      ? 'Never reviewed'
+      : `Overdue${item.lastResult ? ` · last ${item.lastResult}` : ''}`);
+    section.replaceChildren(
+      element('div', { className: 'flex items-center gap-3' }, [iconTile('review', { className: 'panel-icon' }), element('h2', { className: 'font-semibold text-ink', text: 'Review reminder' })]),
+      element('p', { className: 'mt-1 text-sm text-muted', text: 'Words and patterns waiting too long — never reviewed once, or past their review date.' }),
+      element('ul', { className: 'mt-4 grid gap-2', attrs: { role: 'list' } }, items.slice(0, 5).map((item) => element('li', { className: 'flex flex-wrap items-baseline gap-x-2 gap-y-1 rounded-xl border border-stone bg-paper px-3 py-2.5 text-sm' }, [
+        element('span', { className: 'min-w-0 break-words font-jp font-semibold text-ink', text: item.display }),
+        element('span', { className: 'status-pill', text: reasonLabel(item) })
+      ]))),
+      ...(items.length > 5 ? [element('p', { className: 'mt-2 text-xs text-muted', text: `+${items.length - 5} more in the session` })] : []),
+      startButton
+    );
+    section.hidden = false;
+  }
+  void load();
+  return section;
+}
+
+function recentSessions(items) {  const body = items.length ? element('div', { className: 'divide-y divide-stone' }, items.map((session) => element('div', { className: 'flex items-center justify-between gap-4 py-4 first:pt-0 last:pb-0' }, [
     element('div', {}, [element('p', { className: 'text-sm font-semibold text-ink', text: session.category }), element('p', { className: 'mt-1 text-xs text-muted', text: formatDate(session.session_date) })]),
     element('span', { className: 'status-pill', text: `${session.duration_minutes} min` })
   ]))) : element('p', { className: 'py-10 text-center text-sm text-muted', text: 'No study sessions recorded yet.' });
@@ -453,6 +518,7 @@ export async function renderDashboard(container) {
         // snapshot. Progress/continue render nothing when data is absent.
         ...(todayProgressSection(studyNow) ? [todayProgressSection(studyNow)] : []),
         ...(continueSection(studyNow) ? [continueSection(studyNow)] : []),
+        reviewReminderSection(),
         ...(pulse ? [pulse] : []),
         // V5.6 Completion Pass: the metrics grid no longer duplicates what
         // Study Now (due reviews → action) and Today's Progress (today's

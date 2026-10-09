@@ -309,6 +309,7 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
   const speechListeners = new Map();
   const mountCalls = [];
   const confirmCalls = [];
+  const soundCalls = [];
   const confirmDialog = (options = {}) => {
     confirmCalls.push(options);
     return () => {};
@@ -406,6 +407,7 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
     .replace(/import\s*\{[^}]+\}\s*from\s*['"]\.\.\/ui['"];?/, '')
     .replace(/import\s*\{[^}]+\}\s*from\s*['"]\.\.\/kanjiWriting\.js['"];?/, '')
     .replace(/import\s*\{[^}]+\}\s*from\s*['"]\.\.\/sessionContext\.js['"];?/, '')
+    .replace(/import\s*\{[^}]+\}\s*from\s*['"]\.\.\/reviewSounds\.js['"];?/, '')
     .replace(/export\s+async\s+function\s+renderReview/, 'async function renderReview');
   code += '\nreturn { renderReview };';
   const openDetailModal = ({ title, subtitle, content, actions = [] } = {}) => {
@@ -448,7 +450,7 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
       : null
   );
   const factory = new Function(
-    'apiRequest', 'queryString', 'kanjiReferenceRoute', 'icon', 'element', 'emptyState', 'errorState', 'loadingState', 'openDetailModal', 'openDialog', 'pageHeader', 'setActionPending', 'showToast', 'withPendingAction', 'document', 'window', 'mountKanjiWriting', 'confirmDialog', 'applySessionContext',
+    'apiRequest', 'queryString', 'kanjiReferenceRoute', 'icon', 'element', 'emptyState', 'errorState', 'loadingState', 'openDetailModal', 'openDialog', 'pageHeader', 'setActionPending', 'showToast', 'withPendingAction', 'document', 'window', 'mountKanjiWriting', 'confirmDialog', 'applySessionContext', 'isReviewSoundOn', 'playReviewSound', 'setReviewSoundOn',
     code
   );
   const fakeWindow = {
@@ -474,9 +476,9 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
     }
   };
   const { renderReview } = factory(
-    apiRequest, queryString, kanjiReferenceRoute, icon, ui.element, ui.emptyState, ui.errorState, ui.loadingState, openDetailModal, openDialog, ui.pageHeader, setActionPending, ui.showToast, ui.withPendingAction, doc, fakeWindow, (...args) => { mountCalls.push(args); return () => {}; }, confirmDialog, sharedApplySessionContext
+    apiRequest, queryString, kanjiReferenceRoute, icon, ui.element, ui.emptyState, ui.errorState, ui.loadingState, openDetailModal, openDialog, ui.pageHeader, setActionPending, ui.showToast, ui.withPendingAction, doc, fakeWindow, (...args) => { mountCalls.push(args); return () => {}; }, confirmDialog, sharedApplySessionContext, () => true, (result) => { soundCalls.push(result); }, () => {}
   );
-  return { doc, toasts, apiCalls, dialogs, renderReview, ui, openDialogCalls, speechCalls, speechCancelCalls, speechListeners, fakeWindow, mountCalls, confirmCalls };
+  return { doc, toasts, apiCalls, dialogs, renderReview, ui, openDialogCalls, speechCalls, speechCancelCalls, speechListeners, fakeWindow, mountCalls, confirmCalls, soundCalls };
 }
 
 // ---------------------------------------------------------------- fixtures

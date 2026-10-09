@@ -8,10 +8,12 @@ import { isSafeAvatarUrl } from '../avatarPolicy.js';
 import { smartGoalsSettingsSection } from '../smartGoals.js';
 import { enterPlacement, placementResultFromState, placementResultNode, selfReportResultNode } from '../firstExperience.js';
 import { targetLevelOptions } from '../jlptTarget.js';
+import { isReviewSoundOn, setReviewSoundOn } from '../reviewSounds.js';
 
 const SETTINGS_SECTIONS = [
   { key: 'profile', label: 'Profile' },
   { key: 'learning', label: 'Learning' },
+  { key: 'accessibility', label: 'Accessibility' },
   { key: 'account', label: 'Account' }
 ];
 
@@ -339,8 +341,28 @@ async function renderLearningSection(slot) {
   slot.replaceChildren(element('div', { className: 'grid gap-5' }, [targetSection, smartGoalsSettingsSection(), placement]));
 }
 
-function renderAccountSection(slot) {
-  const profile = profileStore.get() || { email: null };
+// Accessibility: device-local preferences (localStorage, never synced).
+// Review sounds is the first option; future options (motion, contrast,
+// text size) extend this section, not the review page.
+function renderAccessibilitySection(slot) {
+  const soundBox = element('input', { attrs: { type: 'checkbox', id: 'settings-review-sounds' } });
+  soundBox.checked = isReviewSoundOn();
+  soundBox.addEventListener('change', () => {
+    setReviewSoundOn(soundBox.checked);
+    showToast(soundBox.checked ? 'Review sounds on.' : 'Review sounds off.');
+  });
+  slot.replaceChildren(sectionSurface('Accessibility', 'Comfort options for studying. Stored on this device only.', [
+    element('label', { className: 'mt-5 flex min-h-11 cursor-pointer items-start gap-3', attrs: { for: 'settings-review-sounds' } }, [
+      soundBox,
+      element('span', { className: 'min-w-0' }, [
+        element('span', { className: 'block text-sm font-semibold text-ink', text: 'Review sounds' }),
+        element('span', { className: 'mt-0.5 block text-xs leading-5 text-muted', text: 'A short chime when you answer correctly, a low tone when you miss. Never on grading buttons.' })
+      ])
+    ])
+  ]));
+}
+
+function renderAccountSection(slot) {  const profile = profileStore.get() || { email: null };
   const exportButton = element('button', { className: 'button-secondary mt-5', text: 'Export backup', attrs: { type: 'button' } });
   exportButton.addEventListener('click', () => {
     withPendingAction(exportButton, async () => {
@@ -392,6 +414,7 @@ export async function renderSettings(container) {
   async function renderActive() {
     if (active === 'profile') return renderProfileSection(panel);
     if (active === 'learning') return renderLearningSection(panel);
+    if (active === 'accessibility') return renderAccessibilitySection(panel);
     return renderAccountSection(panel);
   }
   settingsLocaleController?.abort();

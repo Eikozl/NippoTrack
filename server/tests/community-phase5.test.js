@@ -218,6 +218,25 @@ test('includeStats validation: non-progress and non-boolean rejected', async () 
   await assert.rejects(service.updatePost(pool, USER_ID, 55, { includeStats: true }), /Unexpected field/, 'snapshots frozen: no stats edits via update');
 });
 
+test('progress with stats needs no message; stat-less progress still requires one', async () => {
+  await withPoolExecute(async (sql, params = []) => {
+    if (/INSERT INTO community_posts/i.test(sql)) return [{ insertId: 57 }];
+    if (/p\.id_community_post = \?/i.test(sql)) {
+      return [[{ ...progressPostRow({ streakDays: 3 }), id: 57, body: null }]];
+    }
+    return shareStatsStub()(sql, params);
+  }, async () => {
+    const post = await service.createPost(pool, USER_ID, { postType: 'progress', includeStats: true });
+    assert.equal(post.stats.streakDays, 3, 'stats-only milestone publishes');
+    assert.equal(post.body, null, 'no message required when the snapshot carries the post');
+  });
+  await assert.rejects(
+    service.createPost(pool, USER_ID, { postType: 'progress' }),
+    /body is required/,
+    'stat-less progress without a message still rejected'
+  );
+});
+
 test('every phase-5 query binds exactly its placeholders like Postgres would', async () => {
   const calls = [];
   await withPoolExecute(async (sql, params = []) => {

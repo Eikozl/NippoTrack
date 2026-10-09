@@ -5,6 +5,7 @@
 import { apiRequest } from '../api';
 import { icon } from '../icons';
 import { speakJapanese } from '../speech.js';
+import { mountKanjiWriting } from '../kanjiWriting.js';
 import { avatarUrlFor, isSafeAvatarUrl } from '../avatarPolicy.js';
 import { deckItemDisplay, deckItemSaveable, ensureDeckOwnedId, findOwnedEntityId, isUsableMeaning, ownedIdFromSaveResponse, saveDeckItemReturningId, SINGLE_HAN, speechPieces, todayISODate } from '../deckSaveGate.js';
 import {
@@ -834,7 +835,118 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     return button;
   }
 
-  async function openDeckViewer(deckId, title) {
+  // Tap-to-define for example sentences (deck items and anywhere else a raw
+// sentence needs help): one bounded lookup, then tappable word/kanji chips.
+// Each definition shows reading + meaning (owned first, badged), the sentence
+// as context, audio, and the handwriting overlay for single kanji — the same
+// "like reading" treatment, without inventing anything.
+function openDefineDialog(sentence) {
+  const text = String(sentence || '').trim();
+  if (!text) { showToast('No example sentence to define.', 'error'); return; }
+  const host = element('div', { className: 'grid min-w-0 gap-3 sm:col-span-2' }, [
+    element('p', { className: 'break-words font-jp text-base leading-8 text-ink', text, attrs: { lang: 'ja' } }),
+    loadingState('Looking up words…')
+  ]);
+  openDialog({
+    title: 'Define words',
+    description: 'Tap a word or kanji for its reading and meaning.',
+    content: [host],
+    submitLabel: 'Done',
+    onSubmit: async (form, close) => { close(); }
+  });
+  apiRequest('/api/lookup/define-sentence', { method: 'POST', body: { sentence: text } }).then((data) => {
+    const vocabulary = Array.isArray(data?.vocabulary) ? data.vocabulary : [];
+    const kanji = Array.isArray(data?.kanji) ? data.kanji : [];
+    const chip = (item, kind) => {
+      const button = element('button', {
+        className: 'min-h-9 rounded-full border border-stone bg-paper px-3 py-1.5 font-jp text-sm text-ink transition hover:border-vermilion',
+        text: item.surface,
+        attrs: { type: 'button', lang: 'ja', 'aria-label': `Define ${item.surface}` }
+      });
+      button.addEventListener('click', () => openDefinitionDialog(item, kind, text));
+      return button;
+    };
+    const group = (label, items, kind) => (items.length ? element('div', { className: 'grid gap-2' }, [
+      element('p', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: label }),
+      element('div', { className: 'flex flex-wrap gap-2' }, items.map((item) => chip(item, kind)))
+    ]) : null);
+    host.replaceChildren(
+      element('p', { className: 'break-words font-jp text-base leading-8 text-ink', text, attrs: { lang: 'ja' } }),
+      ...(group('Words', vocabulary, 'vocabulary') ? [group('Words', vocabulary, 'vocabulary')] : []),
+      ...(group('Kanji', kanji, 'kanji') ? [group('Kanji', kanji, 'kanji')] : []),
+      ...(!vocabulary.length && !kanji.length ? [element('p', { className: 'text-sm text-muted', text: 'No definable words found in this sentence.' })] : [])
+    );
+  }).catch((error) => {
+    host.replaceChildren(
+      element('p', { className: 'break-words font-jp text-base leading-8 text-ink', text, attrs: { lang: 'ja' } }),
+      errorState(error, () => openDefineDialog(text))
+    );
+  });
+}
+
+function openDefinitionDialog(item, kind, contextSentence) {
+  const surface = String(item?.surface || '').trim() || 'Definition';
+  const singleKanji = kind === 'kanji' && SINGLE_HAN.test(surface);
+  const content = [
+    ...(item.reading ? [element('p', { className: 'break-words font-jp text-sm text-muted', text: item.reading, attrs: { lang: 'ja' } })] : []),
+    element('div', { className: 'rounded-xl bg-vermilion-soft p-3', attrs: { 'aria-label': 'Meaning' } }, [
+      ...(item.owned && item.meaning ? [element('p', { className: 'mb-1 text-[11px] font-semibold uppercase tracking-wide text-vermilion', text: 'Your definition' })] : []),
+      element('p', { className: 'min-w-0 break-words text-sm leading-6 text-ink', text: item.meaning || 'No definition available — the dictionary has no entry and it is not in your library.' })
+    ]),
+    element('details', { className: 'surface min-w-0 p-3' }, [
+      element('summary', { className: 'cursor-pointer text-sm font-semibold text-vermilion', text: 'Sentence context' }),
+      element('p', { className: 'mt-2 min-w-0 break-words font-jp text-sm leading-8 text-ink', text: contextSentence, attrs: { lang: 'ja' } })
+    ])
+  ];
+  const actions = element('div', { className: 'flex flex-wrap gap-2' });
+  const play = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', attrs: { type: 'button', 'aria-label': `Play ${surface} aloud` } }, [icon('volume', { size: 16 }), element('span', { text: 'Play' })]);
+  play.addEventListener('click', () => playJapaneseText(contextSentence));
+  actions.appendChild(play);
+  if (singleKanji) {
+    const practice = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-xs', text: 'Practice strokes', attrs: { type: 'button' } });
+    practice.addEventListener('click', () => {
+      const holder = element('div', { className: 'grid gap-3' });
+      const closePractice = openDialog({
+        title: `Practice strokes: ${surface}`,
+        description: 'Trace in stroke order. Practice only — nothing is graded.',
+        content: [holder],
+        submitLabel: 'Done',
+        onSubmit: async (form, closeDialog) => { closeDialog(); }
+      });
+      mountKanjiWriting(holder, { character: surface, onDone: closePractice });
+    });
+    actions.appendChild(practice);
+  }
+  content.push(actions);
+  openDialog({
+    title: surface,
+    description: `${kind === 'kanji' ? 'Kanji' : 'Word'}${item.owned ? ' · in your library' : ''}`,
+    content,
+    submitLabel: 'Done',
+    onSubmit: async (form, close) => { close(); }
+  });
+}
+
+// Deck item example row: the sentence stays readable (2-line clamp) with a
+// small Define entry into tap-to-define — the "like reading" treatment for
+// imported decks whose kanji never entered the learner's library.
+function exampleDefineRow(sentence) {
+  const define = element('button', {
+    className: 'mt-1 min-h-8 shrink-0 rounded-full border border-stone px-2.5 py-1 text-[11px] font-semibold text-muted transition hover:border-vermilion hover:text-ink',
+    text: 'Define words',
+    attrs: { type: 'button', 'aria-label': `Define words in: ${sentence.slice(0, 60)}` }
+  });
+  define.addEventListener('click', (event) => {
+    event.stopPropagation();
+    openDefineDialog(sentence);
+  });
+  return element('div', { className: 'mt-1 min-w-0' }, [
+    element('p', { className: 'example-clamp min-w-0 break-words font-jp text-xs leading-5 text-muted', text: sentence, attrs: { lang: 'ja' } }),
+    define
+  ]);
+}
+
+async function openDeckViewer(deckId, title) {
     // Loading-first: the dialog opens with a skeleton immediately, then the
     // deck content (or an in-dialog errorState) replaces it. No fetch-then-open.
     // No dialog description: the title already names the deck and the body
@@ -922,10 +1034,11 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
               });
             });
           }
-          return element('div', { className: 'flex min-w-0 items-center justify-between gap-3 rounded-xl border border-stone bg-paper px-3 py-2' }, [
+          return element('div', { className: 'flex min-w-0 items-start justify-between gap-3 rounded-xl border border-stone bg-paper px-3 py-2' }, [
             element('div', { className: 'min-w-0' }, [
               element('p', { className: 'truncate font-jp text-sm font-semibold text-ink', text: label, attrs: { lang: 'ja' } }),
-              ...(entry.meaning ? [element('p', { className: 'truncate text-xs text-muted', text: entry.meaning })] : [])
+              ...(entry.meaning ? [element('p', { className: 'truncate text-xs text-muted', text: entry.meaning })] : []),
+              ...((typeof entry.example_sentence === 'string' && entry.example_sentence.trim()) || (typeof entry.example === 'string' && entry.example.trim()) ? [exampleDefineRow(String(entry.example_sentence || entry.example || '').trim())] : [])
             ]),
             save
           ]);

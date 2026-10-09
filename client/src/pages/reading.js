@@ -29,6 +29,7 @@
 // the annotation path below renders exactly as before — both orders work.
 
 import { apiRequest, listReadingLibrary, getReadingText, createUserReadingText, deleteReadingText, updateReadingProgress, importReadingSources, importReadingUrl, previewReadingImport, listReadingProgress, publishReadingText } from '../api';
+import { ownedIdFromSaveResponse } from '../deckSaveGate.js';
 import { localDayKey } from '../dashboardWelcome.js';
 import { icon } from '../icons';
 import { speakJapanese } from '../speech.js';
@@ -703,6 +704,51 @@ async function renderReader(container, textId) {
   const sessionStart = Date.now();
   const addedKeys = new Set();
   const savedMetas = [];
+  // Saved words + review handoff survive navigation: the collection writes
+  // already landed server-side, but the session list and the enroll handoff
+  // lived only in memory — leaving the reader (or losing connection) wiped
+  // the "Review saved words" path. Persist per text until review consumes it.
+  const savedStateKey = `jlt-reading-saved:${String(textId)}`;
+  function persistSavedState() {
+    try {
+      if (typeof window === 'undefined' || !window.localStorage) return;
+      if (!savedMetas.length && !latestReviewSession) {
+        window.localStorage.removeItem(savedStateKey);
+        return;
+      }
+      window.localStorage.setItem(savedStateKey, JSON.stringify({
+        metas: savedMetas.slice(-200),
+        reviewSession: latestReviewSession
+      }));
+    } catch { /* storage blocked: session-only behavior, as before */ }
+  }
+  function restoreSavedState() {
+    try {
+      if (typeof window === 'undefined' || !window.localStorage) return;
+      const raw = window.localStorage.getItem(savedStateKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const metas = Array.isArray(parsed?.metas) ? parsed.metas : [];
+      const validTypes = ['vocabulary', 'kanji', 'grammar'];
+      for (const meta of metas) {
+        if (!meta || typeof meta.display !== 'string') continue;
+        const entityId = Number(meta.entityId);
+        savedMetas.push({
+          key: typeof meta.key === 'string' ? meta.key : `${meta.type || 'word'}:${meta.display}`,
+          type: validTypes.includes(meta.type) ? meta.type : 'vocabulary',
+          display: meta.display,
+          reading: typeof meta.reading === 'string' ? meta.reading : null,
+          meaning: typeof meta.meaning === 'string' ? meta.meaning : null,
+          entityId: Number.isInteger(entityId) && entityId > 0 ? entityId : null
+        });
+        addedKeys.add(String(meta.key || meta.display));
+      }
+      const session = parsed?.reviewSession;
+      if (session && Number.isSafeInteger(Number(session.reviewSessionId)) && Array.isArray(session.queueItems)) {
+        latestReviewSession = { reviewSessionId: Number(session.reviewSessionId), queueItems: session.queueItems };
+      }
+    } catch { /* corrupt entry: start fresh */ }
+  }
   // Token layer, feature-detected (additive backend fields). hasTokenLayer
   // gates every token use below; without tokens[] the annotation path stays
   // exactly as before. sentences[] (when a non-empty array) becomes the
@@ -1050,11 +1096,15 @@ async function renderReader(container, textId) {
 
   // Collection save shared by the word sheet: the same per-type endpoints
   // the previous annotation dialog used, with server-owned fields only.
+  // The created entity id is kept on the meta so saved words can seed a
+  // REAL review session later (even after leaving the reader) — without it
+  // only the enroll path could hand off to review.
   async function saveAnnotation(annotation, key) {
+    let created = null;
     if (annotation.type === 'vocabulary') {
-      await apiRequest('/api/vocabulary', { method: 'POST', body: { word: annotation.word, reading: annotation.reading || '', meaning: annotation.meaning } });
+      created = await apiRequest('/api/vocabulary', { method: 'POST', body: { word: annotation.word, reading: annotation.reading || '', meaning: annotation.meaning } });
     } else if (annotation.type === 'kanji') {
-      await apiRequest('/api/kanji', {
+      created = await apiRequest('/api/kanji', {
         method: 'POST',
         body: {
           character_kanji: annotation.char,
@@ -1063,7 +1113,7 @@ async function renderReader(container, textId) {
         }
       });
     } else {
-      await apiRequest('/api/grammar', {
+      created = await apiRequest('/api/grammar', {
         method: 'POST',
         body: { grammar_point: annotation.pattern, meaning: annotation.meaning || annotation.explanation, ...(annotation.level ? { jlpt_level: annotation.level } : {}) }
       });
@@ -1074,8 +1124,10 @@ async function renderReader(container, textId) {
       type: annotation.type,
       display: annotationDisplay(annotation),
       reading: annotation.reading || null,
-      meaning: annotation.meaning || annotation.explanation || null
+      meaning: annotation.meaning || annotation.explanation || null,
+      entityId: ownedIdFromSaveResponse(annotation.type, created)
     });
+    persistSavedState();
   }
 
   // Token save (token layer only). Enroll by candidateId when available;
@@ -1089,6 +1141,7 @@ async function renderReader(container, textId) {
     });
     if (result && result.reviewSessionId && Array.isArray(result.queueItems)) {
       latestReviewSession = { reviewSessionId: result.reviewSessionId, queueItems: result.queueItems };
+      persistSavedState();
     }
     return result;
   }
@@ -1096,8 +1149,9 @@ async function renderReader(container, textId) {
   async function saveTokenToCollection(token, surface) {
     const kind = tokenKind(token);
     const word = token.lemma || token.surface || surface;
+    let created = null;
     if (kind === 'kanji') {
-      await apiRequest('/api/kanji', {
+      created = await apiRequest('/api/kanji', {
         method: 'POST',
         body: {
           character_kanji: token.surface || token.lemma || surface,
@@ -1106,27 +1160,30 @@ async function renderReader(container, textId) {
         }
       });
     } else if (kind === 'vocabulary') {
-      await apiRequest('/api/vocabulary', {
+      created = await apiRequest('/api/vocabulary', {
         method: 'POST',
         body: { word, reading: token.lemmaReading || token.surfaceReading || '', meaning: token.gloss }
       });
     } else {
-      await apiRequest('/api/grammar', {
+      created = await apiRequest('/api/grammar', {
         method: 'POST',
         body: { grammar_point: word, meaning: token.gloss, ...(token.level ? { jlpt_level: token.level } : {}) }
       });
     }
+    return ownedIdFromSaveResponse(kind, created);
   }
 
-  function markTokenSaved(token, surface, key) {
+  function markTokenSaved(token, surface, key, entityId = null) {
     addedKeys.add(key);
     savedMetas.push({
       key,
       type: tokenKind(token),
       display: token.surface || surface,
       reading: token.surfaceReading || token.lemmaReading || null,
-      meaning: token.gloss || null
+      meaning: token.gloss || null,
+      entityId: Number.isInteger(entityId) && entityId > 0 ? entityId : null
     });
+    persistSavedState();
   }
 
   // Token sheet (token layer only): same shape as the annotation sheet.
@@ -1149,16 +1206,17 @@ async function renderReader(container, textId) {
     });
     saveButton.addEventListener('click', () => withPendingAction(saveButton, async () => {
       try {
+        let collectionId = null;
         if (hasCandidateId(token)) {
           try {
             await enrollToken(token);
           } catch {
-            await saveTokenToCollection(token, surface);
+            collectionId = await saveTokenToCollection(token, surface);
           }
         } else {
-          await saveTokenToCollection(token, surface);
+          collectionId = await saveTokenToCollection(token, surface);
         }
-        markTokenSaved(token, surface, key);
+        markTokenSaved(token, surface, key, collectionId);
         saveButton.textContent = 'Saved to your collection';
         saveButton.disabled = true;
         liveNote.textContent = `${display} is now in your collection.`;
@@ -1176,6 +1234,7 @@ async function renderReader(container, textId) {
       content: [
         ...(token.surfaceReading ? [element('p', { className: 'font-jp text-sm text-muted sm:col-span-2', text: token.surfaceReading, attrs: { lang: 'ja' } })] : []),
         element('div', { className: 'rounded-xl bg-vermilion-soft p-3 sm:col-span-2', attrs: { 'aria-label': 'Meaning' } }, [
+          ...(token.known === true && token.gloss ? [element('p', { className: 'mb-1 text-[11px] font-semibold uppercase tracking-wide text-vermilion', text: 'Your definition' })] : []),
           element('p', { className: 'min-w-0 break-words text-sm leading-6 text-ink', text: token.gloss || 'No dictionary gloss is available for this item.' })
         ]),
         ...((token.lemma && surface && surface !== token.lemma)
@@ -1243,6 +1302,7 @@ async function renderReader(container, textId) {
       content: [
         ...(annotation.reading ? [element('p', { className: 'font-jp text-sm text-muted sm:col-span-2', text: annotation.reading, attrs: { lang: 'ja' } })] : []),
         element('div', { className: 'rounded-xl bg-vermilion-soft p-3 sm:col-span-2', attrs: { 'aria-label': 'Meaning' } }, [
+          ...(alreadyAdded && (annotation.meaning || annotation.explanation) ? [element('p', { className: 'mb-1 text-[11px] font-semibold uppercase tracking-wide text-vermilion', text: 'Your definition' })] : []),
           element('p', { className: 'min-w-0 break-words text-sm leading-6 text-ink', text: annotation.meaning || annotation.explanation || 'No dictionary gloss is available for this item.' })
         ]),
         ...((baseForm && surface && surface !== baseForm)
@@ -1440,28 +1500,67 @@ async function renderReader(container, textId) {
 
   const savedCount = element('p', { className: 'text-xs text-muted', attrs: { 'aria-live': 'polite' } });
   const savedList = element('div', { className: 'mt-3 min-w-0' });
-  // Review routing: when a token enroll returned a review session, both
-  // review buttons hand it off with the same sessionStorage shape the
-  // immersion flow uses; otherwise they keep the plain #review target.
-  function openReviewTarget() {
-    try {
-      if (typeof window !== 'undefined' && window.sessionStorage && latestReviewSession
-        && latestReviewSession.reviewSessionId && Array.isArray(latestReviewSession.queueItems)) {
-        window.sessionStorage.setItem('jlt-immersion-review-queue', JSON.stringify({
-          reviewSessionId: Number(latestReviewSession.reviewSessionId),
-          items: latestReviewSession.queueItems
-        }));
-        window.location.hash = `#review?reviewSessionId=${Number(latestReviewSession.reviewSessionId)}`;
+  // Review routing, in order: (1) an enroll review session hands off with
+  // the same sessionStorage shape the immersion flow uses; (2) saved words
+  // carrying owned entity ids seed a REAL session (save-then-queue, capped
+  // at 500) so collection-saved words are reviewable even after leaving;
+  // (3) plain #review as the last resort. The persisted backup clears only
+  // once a handoff or a seeded session actually carries the words away.
+  function queueFromSavedMetas() {
+    const seen = new Set();
+    const queue = [];
+    for (const meta of savedMetas) {
+      const entityId = Number(meta?.entityId);
+      const entityType = meta?.type;
+      if (!Number.isInteger(entityId) || entityId <= 0) continue;
+      if (entityType !== 'vocabulary' && entityType !== 'kanji' && entityType !== 'grammar') continue;
+      const key = `${entityType}:${entityId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      queue.push({ entityType, entityId });
+      if (queue.length >= 500) break;
+    }
+    return queue;
+  }
+  function clearSavedBackup() {
+    try { window.localStorage?.removeItem(savedStateKey); } catch { /* noop */ }
+  }
+  function openReviewTarget(button) {
+    withPendingAction(button, async () => {
+      try {
+        if (typeof window !== 'undefined' && window.sessionStorage && latestReviewSession
+          && latestReviewSession.reviewSessionId && Array.isArray(latestReviewSession.queueItems)) {
+          window.sessionStorage.setItem('jlt-immersion-review-queue', JSON.stringify({
+            reviewSessionId: Number(latestReviewSession.reviewSessionId),
+            items: latestReviewSession.queueItems
+          }));
+          clearSavedBackup();
+          window.location.hash = `#review?reviewSessionId=${Number(latestReviewSession.reviewSessionId)}`;
+          return;
+        }
+      } catch { /* storage blocked: try the seeded session below */ }
+      const queue = queueFromSavedMetas();
+      if (queue.length) {
+        const today = localDayKey();
+        const session = await apiRequest('/api/review/sessions', {
+          method: 'POST',
+          body: { sourceFrom: today, sourceTo: today, items: queue }
+        });
+        if (!session || !session.id) throw new Error('Unable to start that session.');
+        clearSavedBackup();
+        window.location.hash = `#review?retake=${Number(session.id)}`;
         return;
       }
-    } catch { /* storage blocked: fall back to the review page */ }
-    if (typeof window !== 'undefined') {
-      window.location.hash = 'review';
-    }
+      if (typeof window !== 'undefined') {
+        window.location.hash = 'review';
+      }
+    }, { pendingLabel: 'Starting…' }).catch((error) => {
+      showToast(error?.message || 'Unable to open review.', 'error');
+    });
   }
 
   const openReviewButton = element('button', { className: 'button-primary min-h-9 px-4 py-2 text-xs', text: 'Open review', attrs: { type: 'button' } });
-  openReviewButton.addEventListener('click', openReviewTarget);
+  openReviewButton.addEventListener('click', () => openReviewTarget(openReviewButton));
   const savedCard = element('section', { className: 'surface mt-3 min-w-0 p-5 sm:p-6', attrs: { 'aria-label': 'Saved words' } }, [
     element('h2', { className: 'font-semibold text-ink', text: 'Saved words' }),
     element('p', { className: 'mt-1 text-sm leading-6 text-muted', text: 'Words you save while studying land in your collection and become review material.' }),
@@ -1473,11 +1572,11 @@ async function renderReader(container, textId) {
 
   function renderSavedList() {
     if (!savedMetas.length) {
-      savedCount.textContent = '0 saved this session';
+      savedCount.textContent = '0 saved · kept here until you review';
       savedList.replaceChildren(element('p', { className: 'text-sm leading-6 text-muted', text: 'No saved words yet. Switch to Study and tap a word to save it.' }));
       return;
     }
-    savedCount.textContent = `${savedMetas.length} saved this session`;
+    savedCount.textContent = `${savedMetas.length} saved · kept here until you review`;
     savedList.replaceChildren(element('ul', { className: 'grid gap-2' }, savedMetas.map((meta) => element('li', { className: 'surface min-w-0 p-3' }, [
       element('div', { className: 'flex flex-wrap items-baseline gap-x-2 gap-y-1' }, [
         element('span', { className: 'min-w-0 break-words font-jp font-semibold text-ink', text: meta.display }),
@@ -1508,7 +1607,7 @@ async function renderReader(container, textId) {
     }
   }));
   const reviewSavedButton = element('button', { className: 'button-secondary min-h-9 px-4 py-2 text-xs', text: 'Review saved words', attrs: { type: 'button' } });
-  reviewSavedButton.addEventListener('click', openReviewTarget);
+  reviewSavedButton.addEventListener('click', () => openReviewTarget(reviewSavedButton));
   const anotherStoryButton = element('button', { className: 'button-secondary min-h-9 px-4 py-2 text-xs', text: 'Read another story', attrs: { type: 'button' } });
   anotherStoryButton.addEventListener('click', () => { window.location.hash = 'reading'; });
   const endCard = element('section', { className: 'surface mt-4 min-w-0 p-5 sm:p-6', attrs: { 'aria-label': 'End of story' } }, [
@@ -1591,6 +1690,9 @@ async function renderReader(container, textId) {
   if (completed) {
     for (let index = 0; index < paragraphCount; index += 1) seen.add(index);
   }
+  // Restored saves (if any) render before first paint so a returning
+  // reader sees their words immediately, not an empty session.
+  restoreSavedState();
   renderSavedList();
   updateStoryProgressUI();
   window.requestAnimationFrame(() => {

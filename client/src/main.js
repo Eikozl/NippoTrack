@@ -651,6 +651,11 @@ if (typeof drawerMedia.addEventListener === 'function') drawerMedia.addEventList
 syncDrawerState();
 
 async function navigate(pageName, { updateHash = true } = {}) {
+  // Orphaned placement chrome never survives navigation: an active placement
+  // clears itself via its own hashchange guard; anything left here is stale.
+  try {
+    if (!window.__jltPlacementActive) document.body.classList.remove('placement-fullscreen');
+  } catch { /* cosmetic only */ }
   // v5.1-A.2 first-experience gate: while focused setup is active the full
   // workflow stays hidden — sidebar clicks, hash changes, and back/forward
   // re-show the current setup screen instead of rendering a page.

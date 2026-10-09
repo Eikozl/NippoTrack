@@ -4,6 +4,7 @@ import { icon } from '../icons';
 import { element, emptyState, errorState, loadingState, openDetailModal, openDialog, confirmDialog, pageHeader, setActionPending, showToast, withPendingAction } from '../ui';
 import { mountKanjiWriting } from '../kanjiWriting.js';
 import { applySessionContext } from '../sessionContext.js';
+import { playReviewSound } from '../reviewSounds.js';
 
 const TYPE_ORDER = ['kanji', 'vocabulary', 'grammar'];
 const TYPE_LABEL = { kanji: 'Kanji', vocabulary: 'Vocabulary', grammar: 'Grammar' };
@@ -857,9 +858,37 @@ export async function renderReview(container) {
         difficultHasContent = true;
         return;
       }
+      // One tap turns the list into a real session (exact entity queue, up
+      // to 500) instead of making the learner rebuild it by hand.
+      const practiceButton = element('button', {
+        className: 'button-primary mt-3 min-h-10 px-4 py-2 text-sm',
+        text: `Practice these ${items.length}`,
+        attrs: { type: 'button' }
+      });
+      practiceButton.addEventListener('click', () => {
+        withPendingAction(practiceButton, async () => {
+          const today = new Date().toISOString().slice(0, 10);
+          const session = await apiRequest('/api/review/sessions', {
+            method: 'POST',
+            body: {
+              sourceFrom: today,
+              sourceTo: today,
+              items: items
+                .filter((item) => item && item.entityType && Number.isSafeInteger(Number(item.entityId)))
+                .slice(0, 500)
+                .map((item) => ({ entityType: item.entityType, entityId: Number(item.entityId) }))
+            }
+          });
+          if (!session || !session.id) throw new Error('Unable to start that session.');
+          window.location.hash = `#review?retake=${Number(session.id)}`;
+        }, { pendingLabel: 'Starting…' }).catch((error) => {
+          showToast(error?.message || 'Unable to start that session.', 'error');
+        });
+      });
       difficultBlock.replaceChildren(
         header,
         description,
+        practiceButton,
         element('ul', { className: 'mt-4 grid gap-2', attrs: { role: 'list' } }, items.map((item) => {
           const iso = String(item.lastReviewedAt || '');
           const date = iso ? formattedDate(iso) : '';
@@ -1071,8 +1100,12 @@ const CARD_TYPE_DESCRIPTIONS = {
   function foldKana(value) {
     return String(value || '').replace(/[\u30A1-\u30F6]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0x60));
   }
+  // Decorative symbols are never the point of the answer: wave dashes,
+  // middle dots, CJK/JP punctuation and brackets are ignored so a phone
+  // keyboard without 〜 or • still matches 〜たら or A • B.
+  const MATCH_STRIP_PATTERN = /[‐‑‒–—―〜～~・•·、。〰．,.!！?？:：;；「」『』“”‘’"'\u0028\u0029\uFF08\uFF09\[\]【】…⋯\u3000]/g;
   function normForMatch(value) {
-    return foldKana(String(value || '').trim().toLowerCase()).replace(/\s+/g, '');
+    return foldKana(String(value || '').trim().toLowerCase()).replace(MATCH_STRIP_PATTERN, '').replace(/\s+/g, '');
   }
   function matchTypedAnswer(typed, item) {
     const raw = String(typed || '').trim();
@@ -2008,6 +2041,7 @@ const CARD_TYPE_DESCRIPTIONS = {
             answerResult.textContent = `Not quite — listen again (${triesLeft} ${triesLeft === 1 ? 'try' : 'tries'} left before reveal).`;
           }
         } else {
+          playReviewSound('Again');
           showCheck({ matched: false, typed: String(typed).trim() });
         }
       };
@@ -2054,11 +2088,14 @@ const CARD_TYPE_DESCRIPTIONS = {
         ]);
         button.addEventListener('click', () => {
           withPendingAction(button, async () => {
-            await apiRequest('/api/review/grade', {
+            const graded_response = await apiRequest('/api/review/grade', {
               method: 'POST',
               body: { entityType: item.entityType, entityId: item.entityId, result, reviewSessionId: sessionId }
             });
             graded.push({ ...item, result });
+            if (graded_response && graded_response.promotedTo) {
+              showToast(`Promoted to ${graded_response.promotedTo} — your reviews moved this one up.`);
+            }
             await proceedToNextCard();
           }, { pendingLabel: 'Saving…' }).catch((error) => {
             showToast(error?.message || 'Unable to save this response.', 'error');
@@ -2101,9 +2138,29 @@ const CARD_TYPE_DESCRIPTIONS = {
     };
 
     if (cardType === 'cloze') {
-      const sentenceLine = element('p', { className: 'mb-3 break-words text-base leading-8 text-ink', text: 'Loading sentence…', attrs: { lang: 'ja' } });
-      frontWrap.appendChild(sentenceLine);
-      const built = buildAnswerInput();
+      const sentenceLine = element('p', { className: 'mb-3 min-w-0 flex-1 break-words text-base leading-8 text-ink', text: 'Loading sentence…', attrs: { lang: 'ja' } });
+      // Ear training: hear the full sentence (blank filled) on demand, and
+      // automatically once the typed answer matches — same device TTS as
+      // audio cards, so no network and no new dependencies.
+      const speakClozeSentence = ({ quiet = false } = {}) => {
+        const say = clozeFilled || clozeBlank || String(item.display || '');
+        if (!say || say.includes('＿＿')) return;
+        if (quiet) {
+          try {
+            if (audioVoiceStatus() !== 'ready') return;
+          } catch { return; }
+        }
+        speakDisplay(say);
+      };
+      const hearButton = element('button', {
+        className: 'icon-button shrink-0',
+        text: '🔊',
+        attrs: { type: 'button', 'aria-label': 'Hear the sentence aloud' }
+      });
+      hearButton.addEventListener('click', () => speakClozeSentence());
+      const sentenceRow = element('div', { className: 'mb-3 flex items-start gap-2' }, [sentenceLine, hearButton]);
+      frontWrap.appendChild(sentenceRow);
+      const built = buildAnswerInput({ onMatch: () => { playReviewSound('Good'); speakClozeSentence({ quiet: true }); } });
       frontWrap.append(built.row, frontResult, revealButton);
       fetchClozeSentence(item).then((sentence) => {
         if (!sentence) {
@@ -2134,7 +2191,7 @@ const CARD_TYPE_DESCRIPTIONS = {
         revealButton.setAttribute('disabled', '');
         const built = buildAnswerInput({
           conceal: true,
-          onMatch: () => { revealButton.removeAttribute('disabled'); }
+          onMatch: () => { playReviewSound('Good'); revealButton.removeAttribute('disabled'); }
         });
         frontWrap.replaceChildren();
         frontWrap.append(
@@ -2232,6 +2289,7 @@ const CARD_TYPE_DESCRIPTIONS = {
         button.setAttribute('aria-pressed', 'true');
         frontResult.textContent = `That's right — “${item.display}” means “${item.meaning}.”`;
         answerResult.textContent = `That's right — “${item.display}” means “${item.meaning}.”`;
+        playReviewSound('Good');
         finalizeRecognitionGrade();
       } else {
         recognitionMistakes += 1;
@@ -2239,6 +2297,7 @@ const CARD_TYPE_DESCRIPTIONS = {
         button.setAttribute('aria-pressed', 'false');
         frontResult.textContent = `Not quite — that means “${option.meaning}.” Try again.`;
         answerResult.textContent = `Not quite — that means “${option.meaning}.” Try again.`;
+        playReviewSound('Again');
       }
     }
 

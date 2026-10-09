@@ -227,7 +227,7 @@ test('completeReviewSession foreign or missing session returns 404 without leak'
 });
 
 // ------------------------------------------------------- gradeEntity helpers
-function makeGradeConnection({ calls, entityTable = 'kanji', entityId = 5, sessionId = 9, reviewItemId = 55, intervalDays = 3, fkColumn = 'id_kanji', tracker = {} }) {
+function makeGradeConnection({ calls, entityTable = 'kanji', entityId = 5, sessionId = 9, reviewItemId = 55, intervalDays = 3, fkColumn = 'id_kanji', tracker = {}, goodCount = 0, currentStatus = 'New' }) {
   let step = 0;
   return {
     async beginTransaction() { tracker.begin = (tracker.begin || 0) + 1; },
@@ -272,6 +272,20 @@ function makeGradeConnection({ calls, entityTable = 'kanji', entityId = 5, sessi
       }
       if (step === 9) {
         assert.match(sql, /UPDATE review_items/i);
+        return [{ affectedRows: 1 }];
+      }
+      // Assimilation ladder (Good grades only): Good-count read, current
+      // status read, then a single upward promotion UPDATE at most.
+      if (step === 10) {
+        assert.match(sql, /FROM review_events WHERE id_review_item = \? AND result = 'Good'/);
+        return [[{ good: goodCount }]];
+      }
+      if (step === 11) {
+        assert.match(sql, new RegExp(`SELECT status FROM ${entityTable} WHERE`));
+        return [[{ status: currentStatus }]];
+      }
+      if (step === 12) {
+        assert.match(sql, new RegExp(`UPDATE ${entityTable} SET status`));
         return [{ affectedRows: 1 }];
       }
       throw new Error(`Unexpected grade step ${step}: ${sql}`);
@@ -431,6 +445,8 @@ test('legacy recordReview still works with NULL session id', async () => {
       if (step === 3) return [[{ 1: 1 }]];
       if (step === 4) return [{ affectedRows: 1 }];
       if (step === 5) return [{ affectedRows: 1 }];
+      // Assimilation ladder: zero Goods → no promotion, response unchanged.
+      if (step === 6) return [[{ good: 0 }]];
       throw new Error(`Unexpected step ${step}`);
     },
     async commit() {},
@@ -465,6 +481,8 @@ test('interval mapping Again 1 Hard 3 Good 7 via stubbed flows', async () => {
         if (step === 3) return [[{ 1: 1 }]];
         if (step === 4) return [{ affectedRows: 1 }];
         if (step === 5) return [{ affectedRows: 1 }];
+        // Good grades read the ladder count; zero Goods → no promotion.
+        if (step === 6) return [[{ good: 0 }]];
         throw new Error('unexpected');
       },
       async commit() {},
@@ -615,5 +633,50 @@ test('HTTP POST /api/review/sessions rejects from after to with 400', async () =
   } finally {
     if (previous === undefined) delete process.env.JLT_TEST_USER_ID;
     else process.env.JLT_TEST_USER_ID = previous;
+  }
+});
+
+test('assimilation ladder promotes upward only on Good counts (1/3/8)', async () => {
+  const cases = [
+    { goodCount: 1, currentStatus: 'New', promotedTo: 'Learning', updates: 1 },
+    { goodCount: 3, currentStatus: 'Learning', promotedTo: 'Familiar', updates: 1 },
+    { goodCount: 8, currentStatus: 'Familiar', promotedTo: 'Mastered', updates: 1 },
+    { goodCount: 8, currentStatus: 'New', promotedTo: 'Mastered', updates: 1 },
+    { goodCount: 1, currentStatus: 'Mastered', promotedTo: undefined, updates: 0 },
+    { goodCount: 0, currentStatus: 'New', promotedTo: undefined, updates: 0 }
+  ];
+  for (const { goodCount, currentStatus, promotedTo, updates } of cases) {
+    const calls = [];
+    const tracker = {};
+    const connection = makeGradeConnection({ calls, tracker, goodCount, currentStatus });
+    const original = pool.getConnection;
+    pool.getConnection = async () => connection;
+    try {
+      const { res, status, body } = mockRes();
+      await reviewController.gradeEntity({ user: { id: USER_ID }, body: { entityType: 'kanji', entityId: 5, result: 'Good', reviewSessionId: 9 } }, res);
+      assert.equal(status(), 200);
+      assert.equal(body().promotedTo, promotedTo, `${goodCount} Good(s) from ${currentStatus}`);
+      const promotionUpdates = calls.filter((c) => /UPDATE kanji SET status/.test(c.sql));
+      assert.equal(promotionUpdates.length, updates, 'single upward UPDATE at most');
+      if (updates) assert.deepEqual(promotionUpdates[0].params, [promotedTo, 5]);
+    } finally { pool.getConnection = original; }
+  }
+});
+
+test('assimilation never runs on Again/Hard (no ladder queries)', async () => {
+  for (const result of ['Again', 'Hard']) {
+    const calls = [];
+    const tracker = {};
+    const connection = makeGradeConnection({ calls, tracker });
+    const original = pool.getConnection;
+    pool.getConnection = async () => connection;
+    try {
+      const { res, status, body } = mockRes();
+      await reviewController.gradeEntity({ user: { id: USER_ID }, body: { entityType: 'kanji', entityId: 5, result, reviewSessionId: 9 } }, res);
+      assert.equal(status(), 200);
+      assert.equal(body().promotedTo, undefined);
+      assert.ok(!calls.some((c) => /FROM review_events WHERE id_review_item/.test(c.sql)), `no Good-count read for ${result}`);
+      assert.ok(!calls.some((c) => /UPDATE kanji SET status/.test(c.sql)), `no promotion UPDATE for ${result}`);
+    } finally { pool.getConnection = original; }
   }
 });

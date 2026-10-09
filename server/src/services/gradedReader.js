@@ -193,6 +193,7 @@ function batches(values, size = MAX_DATABASE_IN_VALUES) {
 async function loadKanjiData(executor, userId, characters) {
   const referenceByCharacter = new Map();
   const ownedCharacters = new Set();
+  const ownedMeanings = new Map();
   for (const group of batches(characters)) {
     const placeholders = group.map(() => '?').join(', ');
     const [referenceRows, ownedRows] = await Promise.all([
@@ -201,7 +202,7 @@ async function loadKanjiData(executor, userId, characters) {
         group
       ),
       executor.execute(
-        `SELECT id_kanji, character_kanji FROM kanji WHERE user_id = ? AND character_kanji IN (${placeholders})`,
+        `SELECT id_kanji, character_kanji, meaning FROM kanji WHERE user_id = ? AND character_kanji IN (${placeholders})`,
         [userId, ...group]
       )
     ]);
@@ -209,10 +210,23 @@ async function loadKanjiData(executor, userId, characters) {
       if (row && typeof row.character === 'string') referenceByCharacter.set(row.character, row);
     }
     for (const row of ownedRows[0] || []) {
-      if (row && typeof row.character_kanji === 'string') ownedCharacters.add(row.character_kanji);
+      if (row && typeof row.character_kanji === 'string') {
+        ownedCharacters.add(row.character_kanji);
+        const meaning = typeof row.meaning === 'string' ? row.meaning.trim() : '';
+        if (meaning && !ownedMeanings.has(row.character_kanji)) ownedMeanings.set(row.character_kanji, meaning);
+      }
     }
   }
-  return { referenceByCharacter, ownedCharacters };
+  return { referenceByCharacter, ownedCharacters, ownedMeanings };
+}
+
+// Owned-meaning priority (content-only, shapes frozen): the learner's own
+// definition wins over the dictionary gloss wherever a token, annotation or
+// enrollable candidate is built. known === true already implies owned, so
+// clients can badge "your definition" off known without a new key.
+function ownedMeaningOf(match) {
+  const meaning = typeof match?.ownedMeaning === 'string' ? match.ownedMeaning.trim() : '';
+  return meaning || null;
 }
 
 function mergeVocabularyCandidates(target, candidate, offset) {
@@ -378,7 +392,7 @@ function buildVocabularyTokens(lexicalTokens, vocabulary) {
       lemma: token.lemma || null,
       surfaceReading,
       lemmaReading: token.lemmaReading || null,
-      gloss: hasAggregate ? (aggregate.gloss || null) : null,
+      gloss: hasAggregate ? (ownedMeaningOf(aggregate.match) || aggregate.gloss || null) : null,
       entityKind: 'vocabulary',
       candidateId,
       start: token.start,
@@ -397,6 +411,7 @@ function buildKanjiTokens(text, sentences, kanjiData) {
   const tokens = [];
   const referenceByCharacter = kanjiData?.referenceByCharacter || new Map();
   const ownedCharacters = kanjiData?.ownedCharacters || new Set();
+  const ownedMeanings = kanjiData?.ownedMeanings || new Map();
   for (let offset = 0; offset < points.length; offset += 1) {
     const character = points[offset];
     if (!/\p{Script=Han}/u.test(character)) continue;
@@ -407,7 +422,7 @@ function buildKanjiTokens(text, sentences, kanjiData) {
       lemma: null,
       surfaceReading: null,
       lemmaReading: null,
-      gloss: meanings[0] || null,
+      gloss: ownedMeanings.get(character) || meanings[0] || null,
       entityKind: 'kanji',
       candidateId: kanjiCandidateId(character),
       start: offset,
@@ -510,6 +525,7 @@ function deriveBlendedLevel(kanjiLevel, baseConfidence, stats) {
 
 function makeAnnotations(kanjiPositions, kanjiData, vocabulary, grammar) {
   const annotations = [];
+  const ownedMeanings = kanjiData?.ownedMeanings || new Map();
   for (const [character, position] of kanjiPositions) {
     const reference = kanjiData.referenceByCharacter.get(character);
     const readings = Array.isArray(reference?.onyomi) ? reference.onyomi : [];
@@ -521,7 +537,7 @@ function makeAnnotations(kanjiPositions, kanjiData, vocabulary, grammar) {
       level: normalizeJlpt(reference?.jlpt_level),
       known: kanjiData.ownedCharacters.has(character),
       reading: readings[0] || null,
-      meaning: meanings[0] || null,
+      meaning: ownedMeanings.get(character) || meanings[0] || null,
       info: reference ? {
         onyomi: readings,
         kunyomi: Array.isArray(reference.kunyomi) ? reference.kunyomi : []
@@ -536,7 +552,7 @@ function makeAnnotations(kanjiPositions, kanjiData, vocabulary, grammar) {
       level: null,
       known: candidate.match?.state === 'existing',
       reading: candidate.lemmaReading || candidate.surfaceReading || null,
-      meaning: candidate.gloss || null
+      meaning: ownedMeaningOf(candidate.match) || candidate.gloss || null
     });
   }
   for (const match of grammar) {
@@ -1139,13 +1155,14 @@ function buildEnrollableReadingCandidates(vocabulary, grammar, kanjiData) {
       id,
       display: candidate.canonical,
       reading: reading || null,
-      meaning: candidate.gloss || null,
+      meaning: ownedMeaningOf(candidate.match) || candidate.gloss || null,
       jlpt: null,
       known: candidate.match?.state === 'existing'
     });
   }
   const referenceByCharacter = kanjiData?.referenceByCharacter || new Map();
   const ownedCharacters = kanjiData?.ownedCharacters || new Set();
+  const ownedKanjiMeanings = kanjiData?.ownedMeanings || new Map();
   const enrollableKanji = [];
   const seenKanjiIds = new Set();
   for (const [character] of referenceByCharacter) {
@@ -1159,7 +1176,7 @@ function buildEnrollableReadingCandidates(vocabulary, grammar, kanjiData) {
       id,
       display: character,
       reading: onyomi[0] || null,
-      meaning: meanings[0] || null,
+      meaning: ownedKanjiMeanings.get(character) || meanings[0] || null,
       jlpt: normalizeJlpt(reference?.jlpt_level),
       known: ownedCharacters.has(character)
     });

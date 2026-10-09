@@ -220,7 +220,7 @@ async function matchOwnedVocabulary(pool, userId, candidates) {
   if (words.length) {
     const placeholders = words.map(() => '?').join(', ');
     const [rows] = await pool.execute(
-      `SELECT word, reading FROM vocabulary WHERE user_id = ? AND word IN (${placeholders})`,
+      `SELECT word, reading, meaning FROM vocabulary WHERE user_id = ? AND word IN (${placeholders})`,
       [userId, ...words]
     );
     queries += 1;
@@ -247,7 +247,17 @@ async function matchOwnedVocabulary(pool, userId, candidates) {
     collect(candidate.canonical);
     for (const entry of candidate.observed || []) collect(entry.surface);
     if (hits.length) {
-      candidate.match = { state: 'existing', ownedCount: hits.length, possibleMatches: [] };
+      // Owned-meaning priority: the learner's own definition (first
+      // non-empty one across hits) travels on the match so every consumer
+      // — reading tokens, immersion candidates, sentence lookup — shows it
+      // instead of the dictionary gloss. Dictionary errors (e.g. よく →
+      // "greed") stay visible only until the learner writes their own.
+      let ownedMeaning = null;
+      for (const hit of hits) {
+        const meaning = typeof hit?.meaning === 'string' ? hit.meaning.trim() : '';
+        if (meaning) { ownedMeaning = meaning; break; }
+      }
+      candidate.match = { state: 'existing', ownedCount: hits.length, possibleMatches: [], ...(ownedMeaning ? { ownedMeaning } : {}) };
       matched += 1;
     } else {
       unmatched.push(candidate);
