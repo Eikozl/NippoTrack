@@ -9,6 +9,14 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readSource = (path) => readFileSync(join(root, path), 'utf8');
+import { PROFILE_INTEREST_OPTIONS, formatProfileInterests, parseProfileInterests } from '../src/profileInterests.js';
+
+test('profile interests parse/format round-trips canonical values', () => {
+  assert.ok(PROFILE_INTEREST_OPTIONS.length >= 8, 'a real option set');
+  assert.deepEqual(parseProfileInterests('manga, Travel; manga; N3 grammar'), ['manga', 'travel'], 'canonical kept, free text dropped, dupes collapsed');
+  assert.deepEqual(parseProfileInterests(null), []);
+  assert.equal(formatProfileInterests(['manga', 'bogus', 'manga', 'Anime']), 'manga, anime', 'format keeps canonical order-free uniqueness');
+});
 
 test('grading sounds fire on practice success only, never on grade buttons', () => {
   const sounds = readSource('src/reviewSounds.js');
@@ -48,6 +56,13 @@ test('dashboard owns a fail-open Review Reminder with the same aesthetic', () =>
   assert.ok(source.includes('#review?retake='), 'session handoff like everywhere else');
 });
 
+test('today-progress new items open a category drill-down', () => {
+  const source = readSource('src/pages/dashboard.js');
+  assert.ok(source.includes('/api/dashboard/study-now/new-items'), 'drill endpoint wired');
+  assert.ok(source.includes('Added today'), 'grouped dialog');
+  assert.ok(source.includes('grouped by category'), 'count row explains the drill-down');
+});
+
 test('calendar days are buttons announcing their minutes', () => {
   const source = readSource('src/pages/dashboard.js');
   assert.ok(source.includes('Tap a day to see its minutes'), 'discovery copy');
@@ -71,6 +86,46 @@ test('owned meanings are badged as your definition', () => {
   assert.ok(reading.includes('Your definition'), 'owned-meaning badge in word sheets');
 });
 
+test('nameless learners meet the claim editor, not a dead end', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('openEditProfileDialog(null)'), 'My profile opens the claim editor without a username');
+  assert.ok(source.includes('Claim a username to open your public profile.'), 'still-nameless saves stay instead of a broken page');
+  assert.ok(source.includes('Only you will see your posts until you claim a username'), 'composer warns private-by-default authors');
+});
+
+test('username changes warn about the 24h cooldown up front', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('Usernames can change once every 24 hours.'), 'rule named in the editor');
+  assert.ok(source.includes('the next change unlocks'), 'exact unlock moment shown when stamped');
+  assert.ok(source.includes('usernameChangedAt'), 'prefill carries the server stamp');
+  assert.ok(source.includes('cooldownUnlockAt(prefillRef.usernameChangedAt)'), 'submit pre-checks the stamp before any save');
+  assert.ok(source.includes('you can change it again in'), 'pre-check speaks the exact server wording');
+});
+
+test('dialog submit buttons always release, even on swallowed failures', () => {
+  const ui = readSource('src/ui.js');
+  assert.ok(ui.includes('} finally {'), 'submit wrapper releases in finally');
+  assert.ok(ui.includes('stuck on the pending label forever') || ui.includes('never stuck'), 'regression note present');
+});
+
+test('placement abstention advances immediately', () => {
+  const source = readSource('src/firstExperience.js');
+  const block = source.slice(source.indexOf('abstainButton.addEventListener'), source.indexOf('abstainButton.addEventListener') + 600);
+  assert.ok(block.includes('state.answers[question.id] = null'), 'abstention still recorded');
+  assert.ok(block.includes('state.index += 1'), 'moves to the next question at once');
+  assert.ok(block.includes("state.phase = 'review'"), 'last question jumps to review');
+});
+
+test('interests are a canonical multi-select feeding Discover', () => {
+  const feed = readSource('src/pages/communityFeed.js');
+  assert.ok(feed.includes('../profileInterests.js'), 'editor shares the canonical list');
+  assert.ok(feed.includes('PROFILE_INTEREST_OPTIONS'), 'options list used');
+  assert.ok(feed.includes('parseProfileInterests'), 'legacy text prefills the boxes');
+  assert.ok(feed.includes('selectedInterests()'), 'submit joins the checked boxes');
+  assert.ok(!feed.includes('profile-interests'), 'free-text input gone from the editor');
+  assert.ok(feed.includes('matchReasons'), 'matcher reasons surface on learner rows');
+  assert.ok(feed.includes('Matched by shared interests and level'), 'discover explains the matching');
+});
 test('deck examples define words like reading does', () => {
   const source = readSource('src/pages/communityFeed.js');
   assert.ok(source.includes('/api/lookup/define-sentence'), 'bounded sentence lookup');

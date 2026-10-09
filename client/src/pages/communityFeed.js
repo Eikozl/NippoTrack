@@ -4,6 +4,7 @@
 // all identity comes from the server payloads (req.user.id server-side).
 import { apiRequest } from '../api';
 import { icon } from '../icons';
+import { PROFILE_INTEREST_OPTIONS, formatProfileInterests, parseProfileInterests } from '../profileInterests.js';
 import { speakJapanese } from '../speech.js';
 import { mountKanjiWriting } from '../kanjiWriting.js';
 import { avatarUrlFor, isSafeAvatarUrl } from '../avatarPolicy.js';
@@ -414,13 +415,14 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     // endpoint (GET /api/users/me, same one Settings + the composer use),
     // then reuses the standard openProfile/renderProfile path — so the
     // followers/following lists on the own profile lead onward to any other
-    // profile. Unclaimed usernames stay in Community with guidance instead
-    // of a dead navigation.
+    // profile. Without a username there is no profile page to open (routes
+    // key on @username), so the claim editor opens inline instead of a dead
+    // toast — the profile gets created exactly where it is asked for.
     try {
       const me = await apiRequest('/api/users/me');
       const ownUsername = me?.username || me?.user?.username || null;
       if (!ownUsername) {
-        showToast('Claim a username to open your profile.', 'error');
+        openEditProfileDialog(null);
         return;
       }
       openProfile(ownUsername);
@@ -603,8 +605,18 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
           description: 'Only text fields change — the linked content stays as published.',
           content: [element('div', { className: 'grid gap-3' }, [titleInput, bodyInput, translationInput])],
           submitLabel: 'Save changes',
-          onSubmit: async (form, close) => {
-            try {
+      onSubmit: async (form, close) => {
+        // Cooldown pre-check: when the handle effectively changed and the
+        // prefill stamp is still inside 24h, fail HERE with the exact server
+        // wording — no save attempt, and the throw releases the submit
+        // button via the dialog wrapper (never stuck on "Saving…").
+        const wantedUsername = String(usernameInput.value || '').trim().toLowerCase();
+        const originalUsername = String(prefillRef.username || '').toLowerCase();
+        if (wantedUsername !== originalUsername) {
+          const unlockAt = cooldownUnlockAt(prefillRef.usernameChangedAt);
+          if (Number.isFinite(unlockAt) && unlockAt > Date.now()) throw new Error(cooldownErrorFor(unlockAt));
+        }
+        try {
               await apiRequest(`/api/community/posts/${post.id}`, {
                 method: 'PUT',
                 body: { title: titleInput.value, body: bodyInput.value, translation: translationInput.value }
@@ -1830,7 +1842,26 @@ async function openDeckViewer(deckId, title) {
     typeSelect.addEventListener('change', () => { paintTypeHint(); paintLink(); });
     paintTypeHint();
     paintLink();
-    const fields = element('div', { className: 'grid gap-3 sm:col-span-2' }, [typeField, titleInput, bodyInput, japaneseInput, translationInput, linkBox, statsWrap]);
+    // Publicity nudge: posts from private profiles are visible to the author
+    // only. New learners otherwise publish "into the void" and conclude the
+    // feed is broken — say so upfront, with the fix one tap away (My profile
+    // opens the claim editor when there is no username yet).
+    const visibilityNote = element('p', { className: 'text-xs leading-5 text-muted sm:col-span-2', attrs: { 'aria-live': 'polite' } });
+    apiRequest('/api/users/me').then((me) => {
+      const username = me?.username || me?.user?.username || null;
+      const isPublic = Boolean(me?.isPublic ?? me?.user?.isPublic);
+      if (!username) {
+        visibilityNote.replaceChildren(
+          element('span', { text: 'Only you will see your posts until you claim a username and go public — ' }),
+          element('span', { className: 'font-semibold text-vermilion', text: 'open My profile from the … menu to claim one.' })
+        );
+      } else if (!isPublic) {
+        visibilityNote.replaceChildren(
+          element('span', { text: `Posting as @${username} (private) — only you will see it until you enable “Public profile” in Edit profile.` })
+        );
+      }
+    }).catch(() => { /* fail-open: no nudge */ });
+    const fields = element('div', { className: 'grid gap-3 sm:col-span-2' }, [typeField, titleInput, bodyInput, japaneseInput, translationInput, linkBox, statsWrap, visibilityNote]);
     // Dialog submit carries the byte-identical publish (same conditional
     // fields, same payload keys). Toast + close + refresh on success.
     openDialog({
@@ -2210,7 +2241,7 @@ async function openDeckViewer(deckId, title) {
         const questions = Array.isArray(data?.questions) ? data.questions.slice(0, 5) : [];
         const sections = [];
         if (learners.length) {
-          const { section, list } = discoverSection('Learners you may like', 'Active posters you do not follow yet — follow whoever inspires you.');
+          const { section, list } = discoverSection('Learners you may like', 'Matched by shared interests and level — set yours in Edit profile.');
           for (const person of learners) {
             const row = personRow(person, () => {}, openProfile);
             if (row) list.appendChild(row);
@@ -2274,7 +2305,13 @@ async function openDeckViewer(deckId, title) {
       element('div', { className: 'min-w-0' }, [
         element('p', { className: 'truncate text-sm font-semibold text-ink', text: person.displayName || person.username }),
         element('p', { className: 'truncate text-xs text-muted', text: `@${person.username}${person.bio ? ` · ${person.bio}` : ''}` }),
-        ...(followsYou ? [element('p', { className: 'truncate text-xs text-muted', text: 'Follows you' })] : [])
+        ...(followsYou ? [element('p', { className: 'truncate text-xs text-muted', text: 'Follows you' })] : []),
+        // Discover explains itself: the matcher names why this learner
+        // surfaced (shared interests, same level). Other rows carry no
+        // matchReasons and render exactly as before.
+        ...(Array.isArray(person.matchReasons) && person.matchReasons.length
+          ? [element('p', { className: 'truncate text-xs font-medium text-vermilion', text: person.matchReasons.slice(0, 2).join(' · ') })]
+          : [])
       ])
     ]);
     if (typeof onProfile === 'function') {
@@ -2312,17 +2349,50 @@ async function openDeckViewer(deckId, title) {
       JLPT_PROFILE_OPTIONS.map((value) => element('option', { text: value === '' ? 'Current level: not set' : value, attrs: { value } })));
     const targetSelect = element('select', { className: 'field-control', attrs: { id: 'profile-target', name: 'target_jlpt', 'aria-label': 'Target JLPT level' } },
       JLPT_PROFILE_OPTIONS.map((value) => element('option', { text: value === '' ? 'Target level: not set' : value, attrs: { value } })));
-    const interestsInput = element('input', {
-      className: 'field-control', attrs: { id: 'profile-interests', name: 'interests', type: 'text', maxlength: '500', placeholder: 'Interests: manga, N3 grammar, travel…' }
+    // Interests are a canonical multi-select (shared list drives Discover
+    // matching); stored comma-joined in the same column, no migration.
+    const interestBoxes = PROFILE_INTEREST_OPTIONS.map((value) => {
+      const box = element('input', { attrs: { type: 'checkbox', name: 'profile-interest', value, 'aria-label': value } });
+      const item = element('label', { className: 'flex min-h-9 cursor-pointer items-center gap-2 rounded-xl border border-stone px-3 py-1.5 text-sm text-ink' }, [box, element('span', { text: value })]);
+      return { value, box, item };
     });
+    const interestsGroup = element('div', { className: 'flex flex-wrap gap-2' }, interestBoxes.map((entry) => entry.item));
+    const selectedInterests = () => formatProfileInterests(interestBoxes.filter((entry) => entry.box.checked).map((entry) => entry.value));
     const publicBox = element('input', { attrs: { id: 'profile-public', name: 'is_public', type: 'checkbox' } });
+    // Handle cooldown (24h, enforced server-side): the hint names the rule
+    // up front and, when the profile carries a recent change, the exact
+    // moment the next change unlocks — no surprise rejections.
+    const COOLDOWN_MS = 24 * 3600 * 1000;
+    const cooldownUnlockAt = (changedAt) => {
+      const at = changedAt ? Date.parse(changedAt) : NaN;
+      return Number.isFinite(at) ? at + COOLDOWN_MS : NaN;
+    };
+    const cooldownErrorFor = (unlockAt) => {
+      const remainingMs = Math.max(0, unlockAt - Date.now());
+      const hours = Math.floor(remainingMs / 3600000);
+      const minutes = Math.ceil((remainingMs % 3600000) / 60000);
+      return `Username was changed recently — you can change it again in ${hours}h ${minutes}m.`;
+    };
+    let prefillRef = { username: null, usernameChangedAt: null };
+    const cooldownNote = element('p', { className: 'text-xs leading-5 text-muted sm:col-span-2', text: 'Usernames can change once every 24 hours.' });
+    const paintCooldownNote = (saved) => {
+      const next = cooldownUnlockAt(saved && saved.usernameChangedAt);
+      if (!Number.isFinite(next) || next <= Date.now()) {
+        cooldownNote.textContent = 'Usernames can change once every 24 hours.';
+        return;
+      }
+      cooldownNote.textContent = `You last changed it recently — the next change unlocks ${new Date(next).toLocaleString()}.`;
+    };
     const fillFrom = (saved) => {
       usernameInput.value = saved.username || '';
       bioInput.value = saved.bio || '';
       levelSelect.value = saved.jlptLevel || '';
       targetSelect.value = saved.targetJlpt || '';
-      interestsInput.value = saved.interests || '';
+      const picked = new Set(parseProfileInterests(saved.interests));
+      for (const entry of interestBoxes) entry.box.checked = picked.has(entry.value);
       publicBox.checked = Boolean(saved.isPublic);
+      prefillRef = { username: saved.username || null, usernameChangedAt: saved.usernameChangedAt || null };
+      paintCooldownNote(saved);
     };
     openDialog({
       title: 'Edit profile',
@@ -2330,10 +2400,11 @@ async function openDeckViewer(deckId, title) {
       content: [
         element('p', { className: 'text-sm text-muted sm:col-span-2', attrs: { id: 'profile-username-hint' }, text: 'Claim a username to be followable in Community. Only what you publish is public.' }),
         element('label', { className: 'field sm:col-span-2', attrs: { for: 'profile-username' } }, [element('span', { text: 'Username (2–30, lowercase, hyphens)' }), usernameInput]),
+        cooldownNote,
         element('label', { className: 'field sm:col-span-2', attrs: { for: 'profile-bio' } }, [element('span', { text: 'Bio' }), bioInput]),
         element('label', { className: 'field', attrs: { for: 'profile-level' } }, [element('span', { text: 'Current level' }), levelSelect]),
         element('label', { className: 'field', attrs: { for: 'profile-target' } }, [element('span', { text: 'Studying toward' }), targetSelect]),
-        element('label', { className: 'field sm:col-span-2', attrs: { for: 'profile-interests' } }, [element('span', { text: 'Interests' }), interestsInput]),
+        element('div', { className: 'field sm:col-span-2', attrs: { role: 'group', 'aria-label': 'Interests' } }, [element('span', { text: 'Interests (pick what fits — drives Discover matching)' }), interestsGroup]),
         element('label', { className: 'flex items-center gap-2 text-sm text-ink sm:col-span-2', attrs: { for: 'profile-public' } }, [publicBox, element('span', { text: 'Public profile' })])
       ],
       submitLabel: 'Save changes',
@@ -2346,7 +2417,7 @@ async function openDeckViewer(deckId, title) {
               bio: bioInput.value,
               jlpt_level: levelSelect.value || '',
               target_jlpt: targetSelect.value || '',
-              interests: interestsInput.value,
+              interests: selectedInterests(),
               is_public: publicBox.checked
             }
           });
@@ -2354,6 +2425,12 @@ async function openDeckViewer(deckId, title) {
           showToast(saved.username ? `Public profile: ${saved.username}.` : 'Profile saved (private).');
           close();
           const next = saved.username || currentUsername;
+          if (!next) {
+            // Still nameless: there is no @username route to render, so stay
+            // in Community instead of opening a broken profile page.
+            showToast('Claim a username to open your public profile.', 'error');
+            return;
+          }
           state.profile = next;
           renderProfile(next);
         } catch (error) {

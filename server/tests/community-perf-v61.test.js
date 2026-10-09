@@ -117,8 +117,9 @@ function mockRes() {
    await withPoolExecute(async function(sql, params) {
      params = params || [];
      seen.push({ sql: sql, params: params });
-     assert.equal(params.length, placeholders(sql), 'discover binds every placeholder');
-     if (/GROUP BY up.user_id/i.test(sql)) { return [[]]; }
+      assert.equal(params.length, placeholders(sql), 'discover binds every placeholder');
+      if (/SELECT interests, jlpt_level, target_jlpt FROM user_profile/i.test(sql)) { return [[{ interests: null, jlpt_level: null, target_jlpt: null }]]; }
+      if (/GROUP BY up.user_id/i.test(sql)) { return [[]]; }
      if (/INTERVAL/.test(sql)) { return [[FEED_ROW]]; }
      if (/FROM deck_publications/i.test(sql)) { return [[]]; }
      if (/FROM reading_publications/i.test(sql)) { return [[]]; }

@@ -1209,6 +1209,10 @@ test('mutual exclusion: picking an option clears the abstention and vice versa',
   assert.equal(pressedOptions(container).length, 1, 'one option picked');
   assert.equal(findAbstainButton(container).getAttribute('aria-pressed'), 'false', 'abstention clear after a pick');
   await clickAbstain(container);
+  // Abstention is a complete answer: the quiz moves on at once, no Next tap.
+  assert.ok(textOf(container).includes('Question 2 of 10'), 'abstention advances immediately');
+  await clickExact(container, 'Previous');
+  assert.ok(textOf(container).includes('Question 1 of 10'), 'back on Q1');
   assert.equal(pressedOptions(container).length, 0, 'pick cleared by the abstention');
   assert.equal(findAbstainButton(container).getAttribute('aria-pressed'), 'true', 'abstention pressed');
   assert.ok(findAbstainButton(container).className.includes('underline'), 'pressed cue is not color-only');
@@ -1275,16 +1279,18 @@ test('prev/next preserve abstention; abstain-all submits ten nulls', async () =>
   await enterQuiz(container);
   await sleep(5);
   await clickAbstain(container);
-  await clickExact(container, 'Next');
-  assert.ok(textOf(container).includes('Question 2 of 10'), 'moved on');
+  assert.ok(textOf(container).includes('Question 2 of 10'), 'abstention moves on without Next');
   await clickExact(container, 'Previous');
   assert.ok(textOf(container).includes('Question 1 of 10'), 'back on Q1');
   assert.equal(findAbstainButton(container).getAttribute('aria-pressed'), 'true', 'abstention survived navigation');
   assert.equal(pressedOptions(container).length, 0, 'no option picked up along the way');
-  for (let index = 0; index < 10; index += 1) {
+  await clickExact(container, 'Next');
+  assert.ok(textOf(container).includes('Question 2 of 10'), 'Next still works after an abstention');
+  // Abstain-all: each abstention advances on its own; the tenth lands on
+  // review with no Next/Review taps needed.
+  await clickAbstain(container);
+  for (let index = 0; index < 8; index += 1) {
     await clickAbstain(container);
-    if (index < 9) await clickExact(container, 'Next');
-    else await clickExact(container, 'Review answers');
   }
   assert.ok(textOf(container).includes('10 of 10 answered'), 'abstentions complete the set');
   const finish = findAll(container, (node) => node.tag === 'button' && textOf(node) === 'Finish placement').at(-1);
@@ -1307,6 +1313,8 @@ test('fresh sessions reload the same server-assigned set with no carried abstent
   await sleep(5);
   assert.ok(textOf(first.container).includes('水をのみます'), 'first session serves the assigned set');
   await clickAbstain(first.container);
+  assert.ok(textOf(first.container).includes('Question 2 of 10'), 'abstention advances at once');
+  await clickExact(first.container, 'Previous');
   assert.equal(findAbstainButton(first.container).getAttribute('aria-pressed'), 'true', 'first session abstained');
   const second = createPlacementHarness({ apiImpl: createApiMock({ questions: bank }) });
   renderPlacement(second.container, second.deps);

@@ -357,4 +357,38 @@ async function getStudyNow(req, res) {
   }
 }
 
-module.exports = { getDashboard, getActivity, getStudyNow };
+// New-items drill-down: what the "N new items today" row counts, split by
+// category (display/reading/meaning, newest first, 30 each). Same
+// created_at::date predicate + ?today= anchoring as the count, so the
+// dialog can never disagree with the row.
+const NEW_ITEMS_LIMIT = 30;
+async function getNewItems(req, res) {
+  try {
+    const today = resolveToday(req.query);
+    const userId = req.user.id;
+    const [[vocabulary], [kanji], [grammar]] = await Promise.all([
+      pool.query(
+        'SELECT word AS display, reading, meaning FROM vocabulary WHERE user_id = ? AND created_at::date = COALESCE(?::date, CURRENT_DATE) ORDER BY id_vocabulary DESC LIMIT ?',
+        [userId, today, NEW_ITEMS_LIMIT]
+      ),
+      pool.query(
+        'SELECT character_kanji AS display, NULL AS reading, meaning FROM kanji WHERE user_id = ? AND created_at::date = COALESCE(?::date, CURRENT_DATE) ORDER BY id_kanji DESC LIMIT ?',
+        [userId, today, NEW_ITEMS_LIMIT]
+      ),
+      pool.query(
+        'SELECT grammar_point AS display, NULL AS reading, meaning FROM grammar_points WHERE user_id = ? AND created_at::date = COALESCE(?::date, CURRENT_DATE) ORDER BY id_grammar DESC LIMIT ?',
+        [userId, today, NEW_ITEMS_LIMIT]
+      )
+    ]);
+    const clean = (rows) => (Array.isArray(rows) ? rows : []).map((row) => ({
+      display: row.display,
+      reading: row.reading || null,
+      meaning: row.meaning || null
+    }));
+    return res.json({ vocabulary: clean(vocabulary), kanji: clean(kanji), grammar: clean(grammar) });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load new items.' });
+  }
+}
+
+module.exports = { getDashboard, getActivity, getStudyNow, getNewItems };

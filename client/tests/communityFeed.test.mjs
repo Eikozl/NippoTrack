@@ -248,11 +248,11 @@ test('empty states guide instead of dead-ending', () => {
 
 test('community owns the full public identity incl. visibility (moved from settings)', () => {
   const feed = readSource('src/pages/communityFeed.js');
-  for (const marker of ['profile-level', 'profile-target', 'profile-interests', 'profile-public', 'jlpt_level', 'target_jlpt']) {
+  for (const marker of ['profile-level', 'profile-target', 'profile-interest', 'profile-public', 'jlpt_level', 'target_jlpt']) {
     assert.ok(feed.includes(marker), `community dialog edits ${marker}`);
   }
   const settings = readSource('src/pages/settings.js');
-  for (const marker of ['profile-level', 'profile-target', 'profile-interests', 'profile-public', 'jlpt_level', 'target_jlpt']) {
+  for (const marker of ['profile-level', 'profile-target', 'profile-interest', 'profile-public', 'jlpt_level', 'target_jlpt']) {
     assert.ok(!settings.includes(marker), `settings no longer edits ${marker}`);
   }
 });
@@ -586,7 +586,7 @@ test('overflow items reuse existing destinations, profiles resolve via the own-p
   assert.ok(source.includes('openNotifications()'), 'Notifications item reuses the same inbox action');
   assert.ok(source.includes('/api/users/me'), 'own profile resolves through the existing own-profile endpoint');
   assert.ok(source.includes('openProfile(ownUsername)'), 'own profile reuses the standard profile path');
-  assert.ok(source.includes('Claim a username to open your profile.'), 'unclaimed usernames get guidance, never a dead navigation');
+  assert.ok(source.includes('openEditProfileDialog(null)'), 'nameless learners meet the claim editor, never a dead navigation');
   assert.ok(source.includes('Unable to open your profile.'), 'own-profile failure toasts');
 });
 

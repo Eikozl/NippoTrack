@@ -72,6 +72,10 @@ test('createPost persists and returns the gated post', async () => {
   const seen = [];
   await withPoolExecute(async (sql, params = []) => {
     seen.push({ sql, params });
+    if (/INSERT INTO user_profile/i.test(sql)) {
+      assert.deepEqual(params, [USER_ID], 'profile ensure binds the author only');
+      return [{ affectedRows: 1 }];
+    }
     if (/INSERT INTO community_posts/i.test(sql)) return [{ insertId: 7 }];
     if (/FROM community_posts p/i.test(sql)) return [[POST_ROW]];
     throw new Error(`Unexpected SQL: ${sql.slice(0, 60)}`);
@@ -80,6 +84,7 @@ test('createPost persists and returns the gated post', async () => {
     assert.equal(post.id, 7);
     assert.equal(post.mine, true);
     assert.ok(seen.some(({ sql }) => /INSERT INTO community_posts/i.test(sql)), 'insert issued');
+    assert.ok(seen.some(({ sql }) => /INSERT INTO user_profile/i.test(sql)), 'author profile row ensured so own posts never vanish from the join');
   });
 });
 
@@ -129,6 +134,7 @@ test('share posts snapshot the linked content server-side', async () => {
       assert.ok(params.includes(USER_ID), 'entity snapshot reads own rows only');
       return [[{ display: '懐かしい', reading: 'なつかしい', meaning: 'nostalgic' }]];
     }
+    if (/INSERT INTO user_profile/i.test(sql)) return [{ affectedRows: 1 }];
     if (/INSERT INTO community_posts/i.test(sql)) return [{ insertId: 9 }];
     if (/FROM community_posts p/i.test(sql)) {
       return [[{ ...POST_ROW, id: 9, post_type: 'share_vocab', entity_type: 'vocabulary', entity_id: 5, snapshot_json: { display: '懐かしい', reading: 'なつかしい', meaning: 'nostalgic' } }]];

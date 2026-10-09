@@ -936,6 +936,14 @@ function renderPlacement(container, deps = {}) {
     abstainButton.addEventListener('click', () => {
       if (busy) return;
       state.answers[question.id] = null;
+      // "I don't know" is a complete answer: move on immediately instead of
+      // making the learner confirm it with Next.
+      if (state.index === state.questions.length - 1) {
+        state.phase = 'review';
+        renderReview();
+        return;
+      }
+      state.index += 1;
       renderQuestion();
     });
     const prev = el('button', { className: 'button-secondary w-full sm:w-auto', text: PLACEMENT_COPY.previous, attrs: { type: 'button' } });

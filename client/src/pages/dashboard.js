@@ -1,7 +1,7 @@
 import { apiRequest } from '../api';
 import { destroyCharts } from '../chartRegistry';
 import { iconTile } from '../icons';
-import { element, errorState, formatDate, pageHeader, showToast, withPendingAction } from '../ui';
+import { element, errorState, formatDate, loadingState, openDialog, pageHeader, showToast, withPendingAction } from '../ui';
 import { profileStore } from '../accountProfile.js';
 import { dashboardWelcomeModel, localDayKey, readVisitRecord, recordDashboardVisit } from '../dashboardWelcome.js';
 import { smartGoalsWidget } from '../smartGoals.js';
@@ -149,6 +149,57 @@ function todayProgressSection(studyNow) {
     element('p', { className: 'text-sm text-muted', text: label }),
     element('p', { className: 'text-sm font-semibold tabular-nums text-ink', text: value })
   ]);
+  // New-items drill-down: the count row becomes a button opening what was
+  // added today, grouped by category (same created_at::date predicate as
+  // the server count, so the dialog never disagrees with the row).
+  const newItemsRow = fresh > 0
+    ? element('button', {
+      className: 'flex w-full items-baseline justify-between gap-3 py-2 text-left transition hover:opacity-80',
+      attrs: { type: 'button', 'aria-label': `Show ${fresh} new items added today, grouped by category` }
+    }, [
+      element('p', { className: 'text-sm text-muted', text: 'New items' }),
+      element('p', { className: 'text-sm font-semibold tabular-nums text-vermilion underline-offset-4 hover:underline', text: `${fresh} new item${fresh === 1 ? '' : 's'} today` })
+    ])
+    : null;
+  if (newItemsRow) {
+    newItemsRow.addEventListener('click', () => {
+      const host = element('div', { className: 'grid min-w-0 gap-4 sm:col-span-2' }, [loadingState('Loading today’s additions…')]);
+      openDialog({
+        title: 'Added today',
+        description: 'Everything that entered your collection today, by category.',
+        content: [host],
+        submitLabel: 'Done',
+        onSubmit: async (form, close) => { close(); }
+      });
+      const loadNewItems = () => {
+        host.replaceChildren(loadingState('Loading today’s additions…'));
+        apiRequest(`/api/dashboard/study-now/new-items?today=${localDayKey()}`).then((data) => {
+        const groups = [
+          ['Vocabulary', Array.isArray(data?.vocabulary) ? data.vocabulary : []],
+          ['Kanji', Array.isArray(data?.kanji) ? data.kanji : []],
+          ['Grammar', Array.isArray(data?.grammar) ? data.grammar : []]
+        ];
+        const total = groups.reduce((sum, [, items]) => sum + items.length, 0);
+        if (!total) {
+          host.replaceChildren(element('p', { className: 'text-sm text-muted', text: 'Nothing added today yet.' }));
+          return;
+        }
+        host.replaceChildren(...groups.filter(([, items]) => items.length).map(([label, items]) => element('div', { className: 'grid min-w-0 gap-2' }, [
+          element('p', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: `${label} (${items.length})` }),
+          element('ul', { className: 'grid min-w-0 gap-1.5', attrs: { role: 'list' } }, items.map((item) => element('li', { className: 'min-w-0 rounded-xl border border-stone bg-paper px-3 py-2' }, [
+            element('p', { className: 'break-words font-jp text-sm font-semibold text-ink', text: item.display, attrs: { lang: 'ja' } }),
+            ...([item.reading, item.meaning].filter(Boolean).length
+              ? [element('p', { className: 'mt-0.5 break-words text-xs leading-5 text-muted', text: [item.reading, item.meaning].filter(Boolean).join(' · ') })]
+              : [])
+          ])))
+        ])));
+      }).catch((error) => {
+        host.replaceChildren(errorState(error, loadNewItems));
+      });
+      };
+      loadNewItems();
+    });
+  }
   // Reviews line: with pending reviews show done-of-expected ("7 of 10");
   // with none pending show only what was done ("52 reviews done") — never
   // a self-referential "52 of 52". done/due are disjoint server-side.
@@ -160,7 +211,7 @@ function todayProgressSection(studyNow) {
     element('div', { className: 'mt-2 divide-y divide-stone' }, [
       row('Reviews', reviewsLine),
       row('Study time', minutes > 0 ? `${minutes} min today` : 'Nothing logged yet'),
-      row('New items', fresh > 0 ? `${fresh} new item${fresh === 1 ? '' : 's'} today` : 'Nothing added yet')
+      ...(newItemsRow ? [newItemsRow] : [row('New items', 'Nothing added yet')])
     ])
   ]);
 }
