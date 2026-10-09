@@ -10,24 +10,42 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiRequest(path, { method = 'GET', body, signal, notifyAuth = true } = {}) {
+export async function apiRequest(path, { method = 'GET', body, signal, notifyAuth = true, timeout = 30000 } = {}) {
   let response;
+  // Default timeout so a stalled request can never hang the UI forever
+  // (dialog "Publishing…", feed loaders, stats previews all await this).
+  // A caller signal still wins; a caller timeout of null/0 disables it.
+  const controller = new AbortController();
+  const onCallerAbort = () => controller.abort();
+  let timer = null;
+  let timedOut = false;
+  if (signal) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener('abort', onCallerAbort, { once: true });
+  }
+  if (Number.isFinite(timeout) && timeout > 0) {
+    timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeout);
+  }
 
   try {
     const token = await accessToken();
     response = await fetch(`${API_BASE}${path}`, {
       method,
       credentials: 'include',
-      signal,
+      signal: controller.signal,
       headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body)
     });
   } catch (error) {
-    if (error?.name === 'AbortError') throw error;
+    if (error?.name === 'AbortError' && !timedOut) throw error;
+    if (timedOut) throw new ApiError('The request timed out. Check your connection and try again.', 0);
     throw new ApiError(
       'Unable to reach the API. Run "npm start" from the project root and open the Vite URL.',
       0
     );
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (signal) signal.removeEventListener('abort', onCallerAbort);
   }
 
   if (response.status === 204) {

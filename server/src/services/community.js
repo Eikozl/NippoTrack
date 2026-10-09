@@ -542,7 +542,12 @@ async function createPost(executor, authorId, payload) {
   }
   if (wantStats && postType !== 'progress') throw new ValidationError('includeStats is only allowed on progress posts.');
   const title = cleanText(payload.title, 200, 'title');
-  const body = validatePostBody(postType, payload);
+  // A progress post carrying the verified snapshot is meaningful on its own:
+  // the personal message stays optional when stats are attached, required
+  // otherwise (unchanged for text/question, unchanged for stat-less progress).
+  const body = (postType === 'progress' && wantStats)
+    ? cleanText(payload.body, 2000, 'body')
+    : validatePostBody(postType, payload);
   const japaneseText = postType === 'example'
     ? cleanText(payload.japaneseText, 2000, 'japaneseText', { required: true })
     : cleanText(payload.japaneseText, 2000, 'japaneseText');

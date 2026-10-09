@@ -1071,8 +1071,12 @@ const CARD_TYPE_DESCRIPTIONS = {
   function foldKana(value) {
     return String(value || '').replace(/[\u30A1-\u30F6]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0x60));
   }
+  // Decorative symbols are never the point of the answer: wave dashes,
+  // middle dots, CJK/JP punctuation and brackets are ignored so a phone
+  // keyboard without 〜 or • still matches 〜たら or A • B.
+  const MATCH_STRIP_PATTERN = /[‐‑‒–—―〜～~・•·、。〰．,.!！?？:：;；「」『』“”‘’"'\u0028\u0029\uFF08\uFF09\[\]【】…⋯\u3000]/g;
   function normForMatch(value) {
-    return foldKana(String(value || '').trim().toLowerCase()).replace(/\s+/g, '');
+    return foldKana(String(value || '').trim().toLowerCase()).replace(MATCH_STRIP_PATTERN, '').replace(/\s+/g, '');
   }
   function matchTypedAnswer(typed, item) {
     const raw = String(typed || '').trim();
@@ -2101,9 +2105,29 @@ const CARD_TYPE_DESCRIPTIONS = {
     };
 
     if (cardType === 'cloze') {
-      const sentenceLine = element('p', { className: 'mb-3 break-words text-base leading-8 text-ink', text: 'Loading sentence…', attrs: { lang: 'ja' } });
-      frontWrap.appendChild(sentenceLine);
-      const built = buildAnswerInput();
+      const sentenceLine = element('p', { className: 'mb-3 min-w-0 flex-1 break-words text-base leading-8 text-ink', text: 'Loading sentence…', attrs: { lang: 'ja' } });
+      // Ear training: hear the full sentence (blank filled) on demand, and
+      // automatically once the typed answer matches — same device TTS as
+      // audio cards, so no network and no new dependencies.
+      const speakClozeSentence = ({ quiet = false } = {}) => {
+        const say = clozeFilled || clozeBlank || String(item.display || '');
+        if (!say || say.includes('＿＿')) return;
+        if (quiet) {
+          try {
+            if (audioVoiceStatus() !== 'ready') return;
+          } catch { return; }
+        }
+        speakDisplay(say);
+      };
+      const hearButton = element('button', {
+        className: 'icon-button shrink-0',
+        text: '🔊',
+        attrs: { type: 'button', 'aria-label': 'Hear the sentence aloud' }
+      });
+      hearButton.addEventListener('click', () => speakClozeSentence());
+      const sentenceRow = element('div', { className: 'mb-3 flex items-start gap-2' }, [sentenceLine, hearButton]);
+      frontWrap.appendChild(sentenceRow);
+      const built = buildAnswerInput({ onMatch: () => speakClozeSentence({ quiet: true }) });
       frontWrap.append(built.row, frontResult, revealButton);
       fetchClozeSentence(item).then((sentence) => {
         if (!sentence) {

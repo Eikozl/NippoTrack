@@ -703,6 +703,48 @@ async function renderReader(container, textId) {
   const sessionStart = Date.now();
   const addedKeys = new Set();
   const savedMetas = [];
+  // Saved words + review handoff survive navigation: the collection writes
+  // already landed server-side, but the session list and the enroll handoff
+  // lived only in memory — leaving the reader (or losing connection) wiped
+  // the "Review saved words" path. Persist per text until review consumes it.
+  const savedStateKey = `jlt-reading-saved:${String(textId)}`;
+  function persistSavedState() {
+    try {
+      if (typeof window === 'undefined' || !window.localStorage) return;
+      if (!savedMetas.length && !latestReviewSession) {
+        window.localStorage.removeItem(savedStateKey);
+        return;
+      }
+      window.localStorage.setItem(savedStateKey, JSON.stringify({
+        metas: savedMetas.slice(-200),
+        reviewSession: latestReviewSession
+      }));
+    } catch { /* storage blocked: session-only behavior, as before */ }
+  }
+  function restoreSavedState() {
+    try {
+      if (typeof window === 'undefined' || !window.localStorage) return;
+      const raw = window.localStorage.getItem(savedStateKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const metas = Array.isArray(parsed?.metas) ? parsed.metas : [];
+      for (const meta of metas) {
+        if (!meta || typeof meta.display !== 'string') continue;
+        savedMetas.push({
+          key: typeof meta.key === 'string' ? meta.key : `${meta.type || 'word'}:${meta.display}`,
+          type: typeof meta.type === 'string' ? meta.type : 'vocabulary',
+          display: meta.display,
+          reading: typeof meta.reading === 'string' ? meta.reading : null,
+          meaning: typeof meta.meaning === 'string' ? meta.meaning : null
+        });
+        addedKeys.add(String(meta.key || meta.display));
+      }
+      const session = parsed?.reviewSession;
+      if (session && Number.isSafeInteger(Number(session.reviewSessionId)) && Array.isArray(session.queueItems)) {
+        latestReviewSession = { reviewSessionId: Number(session.reviewSessionId), queueItems: session.queueItems };
+      }
+    } catch { /* corrupt entry: start fresh */ }
+  }
   // Token layer, feature-detected (additive backend fields). hasTokenLayer
   // gates every token use below; without tokens[] the annotation path stays
   // exactly as before. sentences[] (when a non-empty array) becomes the
@@ -1076,6 +1118,7 @@ async function renderReader(container, textId) {
       reading: annotation.reading || null,
       meaning: annotation.meaning || annotation.explanation || null
     });
+    persistSavedState();
   }
 
   // Token save (token layer only). Enroll by candidateId when available;
@@ -1089,6 +1132,7 @@ async function renderReader(container, textId) {
     });
     if (result && result.reviewSessionId && Array.isArray(result.queueItems)) {
       latestReviewSession = { reviewSessionId: result.reviewSessionId, queueItems: result.queueItems };
+      persistSavedState();
     }
     return result;
   }
@@ -1127,6 +1171,7 @@ async function renderReader(container, textId) {
       reading: token.surfaceReading || token.lemmaReading || null,
       meaning: token.gloss || null
     });
+    persistSavedState();
   }
 
   // Token sheet (token layer only): same shape as the annotation sheet.
@@ -1451,6 +1496,8 @@ async function renderReader(container, textId) {
           reviewSessionId: Number(latestReviewSession.reviewSessionId),
           items: latestReviewSession.queueItems
         }));
+        // Handoff consumed: the persisted backup has served its purpose.
+        try { window.localStorage?.removeItem(savedStateKey); } catch { /* noop */ }
         window.location.hash = `#review?reviewSessionId=${Number(latestReviewSession.reviewSessionId)}`;
         return;
       }
@@ -1473,11 +1520,11 @@ async function renderReader(container, textId) {
 
   function renderSavedList() {
     if (!savedMetas.length) {
-      savedCount.textContent = '0 saved this session';
+      savedCount.textContent = '0 saved · kept here until you review';
       savedList.replaceChildren(element('p', { className: 'text-sm leading-6 text-muted', text: 'No saved words yet. Switch to Study and tap a word to save it.' }));
       return;
     }
-    savedCount.textContent = `${savedMetas.length} saved this session`;
+    savedCount.textContent = `${savedMetas.length} saved · kept here until you review`;
     savedList.replaceChildren(element('ul', { className: 'grid gap-2' }, savedMetas.map((meta) => element('li', { className: 'surface min-w-0 p-3' }, [
       element('div', { className: 'flex flex-wrap items-baseline gap-x-2 gap-y-1' }, [
         element('span', { className: 'min-w-0 break-words font-jp font-semibold text-ink', text: meta.display }),
@@ -1591,6 +1638,9 @@ async function renderReader(container, textId) {
   if (completed) {
     for (let index = 0; index < paragraphCount; index += 1) seen.add(index);
   }
+  // Restored saves (if any) render before first paint so a returning
+  // reader sees their words immediately, not an empty session.
+  restoreSavedState();
   renderSavedList();
   updateStoryProgressUI();
   window.requestAnimationFrame(() => {
