@@ -40,11 +40,11 @@ test('listDifficultItems returns items with >=2 Again in camelCase shape', async
       assert.deepEqual(params, [USER_ID, USER_ID, USER_ID, USER_ID, USER_ID, USER_ID]);
       return [[
         {
-          id: '11', entityType: 'kanji', display: '食', reading: null, meaning: 'eat',
+          id: '11', entityType: 'kanji', entityId: '7', display: '食', reading: null, meaning: 'eat',
           againCount: '3', totalEvents: '4', lastReviewedAt: '2026-09-10T10:00:00.000Z'
         },
         {
-          id: '12', entityType: 'vocabulary', display: '食べ物', reading: 'たべもの', meaning: 'food',
+          id: '12', entityType: 'vocabulary', entityId: '9', display: '食べ物', reading: 'たべもの', meaning: 'food',
           againCount: '2', totalEvents: '2', lastReviewedAt: '2026-09-09T10:00:00.000Z'
         }
       ]];
@@ -58,11 +58,11 @@ test('listDifficultItems returns items with >=2 Again in camelCase shape', async
     assert.deepEqual(body(), {
       items: [
         {
-          idReviewItem: 11, entityType: 'kanji', display: '食', reading: null, meaning: 'eat',
+          idReviewItem: 11, entityType: 'kanji', entityId: 7, display: '食', reading: null, meaning: 'eat',
           againCount: 3, totalEvents: 4, lastReviewedAt: '2026-09-10T10:00:00.000Z'
         },
         {
-          idReviewItem: 12, entityType: 'vocabulary', display: '食べ物', reading: 'たべもの', meaning: 'food',
+          idReviewItem: 12, entityType: 'vocabulary', entityId: 9, display: '食べ物', reading: 'たべもの', meaning: 'food',
           againCount: 2, totalEvents: 2, lastReviewedAt: '2026-09-09T10:00:00.000Z'
         }
       ]

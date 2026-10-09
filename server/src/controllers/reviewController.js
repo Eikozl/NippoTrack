@@ -62,6 +62,44 @@ function extractInsertId(first) {
   return undefined;
 }
 
+// Assimilation ladder: Good reviews promote the entity status upward only
+// (New → Learning at 1 Good, → Familiar at 3, → Mastered at 8). Counts are
+// cumulative over the item's review_events; manual status edits are never
+// demoted by this. Runs inside the grade transaction; fail-open (a promotion
+// hiccup never blocks grading).
+const ASSIMILATION_LADDER = [
+  { at: 8, status: 'Mastered' },
+  { at: 3, status: 'Familiar' },
+  { at: 1, status: 'Learning' }
+];
+const ASSIMILATION_RANK = { New: 0, Learning: 1, Familiar: 2, Mastered: 3 };
+async function maybePromoteAssimilation(connection, { entityType, entityId, reviewItemId }) {
+  const config = ENTITY_CONFIG[entityType];
+  if (!config) return null;
+  try {
+    const [countRows] = await connection.execute(
+      "SELECT COUNT(*) AS good FROM review_events WHERE id_review_item = ? AND result = 'Good'",
+      [reviewItemId]
+    );
+    const goods = Number(countRows?.[0]?.good || 0);
+    const target = ASSIMILATION_LADDER.find((step) => goods >= step.at)?.status || null;
+    if (!target) return null;
+    const [statusRows] = await connection.execute(
+      `SELECT status FROM ${config.table} WHERE ${config.pk} = ?`,
+      [entityId]
+    );
+    const current = statusRows?.[0]?.status;
+    if (!current || (ASSIMILATION_RANK[current] ?? 0) >= (ASSIMILATION_RANK[target] ?? 0)) return null;
+    await connection.execute(
+      `UPDATE ${config.table} SET status = ? WHERE ${config.pk} = ?`,
+      [target, entityId]
+    );
+    return target;
+  } catch {
+    return null;
+  }
+}
+
 // Internal: body of the grade transaction after ownership is established.
 // Returns null on missing-or-foreign review item so callers can keep the
 // legacy exact behavior (rollback + 404 {error:'review item not found'}).
@@ -99,7 +137,17 @@ async function applyGrade(connection, { reviewItemId, result, sessionId, userId 
     'UPDATE review_items SET due_on = CURRENT_DATE + CAST(? AS INTEGER), interval_days = ?, last_reviewed_at = CURRENT_TIMESTAMP, last_result = ? WHERE id_review_item = ?',
     [nextInterval, nextInterval, result, reviewItemId]
   );
-  return { result, nextIntervalDays: nextInterval };
+  // Assimilation ladder (Good-only, upward-only, fail-open): the grade above
+  // is already written, so the Good count includes this event.
+  let promotedTo = null;
+  if (result === 'Good') {
+    const entityType = reviewItem.id_kanji ? 'kanji' : reviewItem.id_vocabulary ? 'vocabulary' : reviewItem.id_grammar ? 'grammar' : null;
+    const entityId = reviewItem.id_kanji || reviewItem.id_vocabulary || reviewItem.id_grammar || null;
+    if (entityType && entityId) {
+      promotedTo = await maybePromoteAssimilation(connection, { entityType, entityId: Number(entityId), reviewItemId });
+    }
+  }
+  return { result, nextIntervalDays: nextInterval, promotedTo };
 }
 
 // Session-id validation helper. Throws ValidationError('review session is not
@@ -490,6 +538,7 @@ async function gradeEntity(req, res) {
       success: true,
       result: applied.result,
       nextIntervalDays: applied.nextIntervalDays,
+      ...(applied.promotedTo ? { promotedTo: applied.promotedTo } : {}),
       idReviewItem: Number(reviewItemId),
       idReviewSession: numericSessionId
     });
@@ -807,6 +856,54 @@ async function getReviewSessionItems(req, res) {
 const DIFFICULT_THRESHOLD = 2;
 const DIFFICULT_LIMIT = 10;
 
+// Review Reminder feed: owned items that need attention — never reviewed
+// (placeholder interval, never touched) or overdue (due before today) —
+// excluding Mastered, which rests by ladder rule. Bounded 50, oldest first.
+const REMINDER_LIMIT = 50;
+async function listReviewReminders(req, res) {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT
+        CASE WHEN ri.id_kanji IS NOT NULL THEN 'kanji'
+             WHEN ri.id_vocabulary IS NOT NULL THEN 'vocabulary'
+             ELSE 'grammar' END AS "entityType",
+        COALESCE(ri.id_kanji, ri.id_vocabulary, ri.id_grammar) AS "entityId",
+        COALESCE(v.word, k.character_kanji, g.grammar_point) AS display,
+        v.reading AS reading,
+        COALESCE(v.meaning, k.meaning, g.meaning) AS meaning,
+        COALESCE(v.status, k.status, g.status, 'New') AS status,
+        CASE WHEN ri.last_reviewed_at IS NULL THEN 'never' ELSE 'overdue' END AS reason,
+        ri.due_on AS "dueOn",
+        ri.last_result AS "lastResult"
+       FROM review_items ri
+       LEFT JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary AND v.user_id = ?
+       LEFT JOIN kanji k ON k.id_kanji = ri.id_kanji AND k.user_id = ?
+       LEFT JOIN grammar_points g ON g.id_grammar = ri.id_grammar AND g.user_id = ?
+       WHERE (v.user_id = ? OR k.user_id = ? OR g.user_id = ?)
+         AND COALESCE(v.status, k.status, g.status, 'New') <> 'Mastered'
+         AND (ri.last_reviewed_at IS NULL OR ri.due_on < CURRENT_DATE)
+       ORDER BY (ri.last_reviewed_at IS NULL) DESC, ri.due_on ASC NULLS FIRST
+       LIMIT ${REMINDER_LIMIT}`,
+      [req.user.id, req.user.id, req.user.id, req.user.id, req.user.id, req.user.id]
+    );
+    return res.json({
+      items: (rows || []).map((row) => ({
+        entityType: row.entityType,
+        entityId: Number(row.entityId),
+        display: row.display,
+        reading: row.reading || null,
+        meaning: row.meaning || null,
+        status: row.status || 'New',
+        reason: row.reason,
+        dueOn: row.dueOn || null,
+        lastResult: row.lastResult || null
+      }))
+    });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load review reminders.' });
+  }
+}
+
 async function listDifficultItems(req, res) {
   try {
     const [rows] = await pool.execute(
@@ -814,6 +911,7 @@ async function listDifficultItems(req, res) {
         CASE WHEN ri.id_kanji IS NOT NULL THEN 'kanji'
              WHEN ri.id_vocabulary IS NOT NULL THEN 'vocabulary'
              ELSE 'grammar' END AS "entityType",
+        COALESCE(ri.id_kanji, ri.id_vocabulary, ri.id_grammar) AS "entityId",
         COALESCE(v.word, k.character_kanji, g.grammar_point) AS display,
         v.reading AS reading,
         COALESCE(v.meaning, k.meaning, g.meaning) AS meaning,
@@ -842,6 +940,7 @@ async function listDifficultItems(req, res) {
       items: (rows || []).map((row) => ({
         idReviewItem: Number(row.id),
         entityType: row.entityType,
+        entityId: Number(row.entityId),
         display: row.display,
         reading: row.reading || null,
         meaning: row.meaning || null,
@@ -881,4 +980,4 @@ async function clearReviewSessions(req, res) {
   }
 }
 
-module.exports = { createReviewItem, listDueReviews, listDueReviewCards, recordReview, createReviewSession, completeReviewSession, gradeEntity, listCandidates, listReviewSessions, getReviewSession, getReviewSessionItems, deleteReviewSession, clearReviewSessions, listDifficultItems, getReviewTypes, putReviewPreferences, getReviewPatterns };
+module.exports = { createReviewItem, listDueReviews, listDueReviewCards, recordReview, createReviewSession, completeReviewSession, gradeEntity, listCandidates, listReviewSessions, getReviewSession, getReviewSessionItems, deleteReviewSession, clearReviewSessions, listDifficultItems, listReviewReminders, getReviewTypes, putReviewPreferences, getReviewPatterns };
