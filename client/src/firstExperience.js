@@ -621,8 +621,43 @@ function renderPlacement(container, deps = {}) {
   let active = true;
   let busy = false;
 
+  // First placement owns the whole screen: sidebar + top bars stay hidden
+  // until complete or skip, so a new learner never sees the app chrome
+  // mid-quiz. Body-level class (CSS) + a hashchange guard for learners who
+  // leave via back/forward or shortcuts — the destination page then owns
+  // the container and placement stops repainting.
+  function setFullscreen(on) {
+    try {
+      if (typeof document !== 'undefined' && document.body) {
+        document.body.classList.toggle('placement-fullscreen', Boolean(on));
+      }
+    } catch { /* cosmetic only */ }
+  }
+  function teardownFullscreen() {
+    setFullscreen(false);
+    try {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('hashchange', onPlacementAway);
+        if (window.__jltPlacementActive) delete window.__jltPlacementActive;
+      }
+    } catch { /* teardown is best-effort */ }
+  }
+  function onPlacementAway() {
+    if (!active) return;
+    active = false;
+    teardownFullscreen();
+  }
+  setFullscreen(true);
+  try {
+    if (typeof window !== 'undefined') {
+      window.__jltPlacementActive = true;
+      window.addEventListener('hashchange', onPlacementAway);
+    }
+  } catch { /* guard is best-effort */ }
+
   function goDashboard() {
     active = false;
+    teardownFullscreen();
     if (typeof navigate === 'function') navigate('dashboard');
     else if (typeof window !== 'undefined' && window.location) window.location.hash = '#dashboard';
   }
@@ -1211,7 +1246,7 @@ function renderPlacement(container, deps = {}) {
   return {
     get active() { return active; },
     reshow() { if (active) renderCurrent(); },
-    finish() { active = false; }
+    finish() { active = false; teardownFullscreen(); }
   };
 }
 

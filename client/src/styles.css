@@ -878,3 +878,16 @@ nav .nav-group-label:first-child { margin-top: 0; }
 .stroke-replay:focus-visible { outline: 2px solid var(--jlt-primary); outline-offset: 2px; }
 .kanji-glyph-large[hidden] { display: none; }
 .stroke-note { position: absolute; right: var(--nt-space-2); bottom: var(--nt-space-2); margin: 0; font-size: 0.75rem; color: var(--jlt-muted); pointer-events: none; }
+
+/* First placement owns the whole screen: sidebar, top bars and the mobile
+   search bar hide until complete/skip (class owned by renderPlacement).
+   The shell grid collapses to a single column so no sidebar gap remains. */
+body.placement-fullscreen #app-shell { display: block; }
+body.placement-fullscreen #sidebar,
+body.placement-fullscreen #app-shell header,
+body.placement-fullscreen #mobile-backdrop,
+body.placement-fullscreen #mobile-search-bar { display: none !important; }
+
+/* Deck example sentences clamp to two lines; the Define button opens
+   tap-to-define instead of stretching item cards. */
+.example-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

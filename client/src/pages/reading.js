@@ -1221,6 +1221,7 @@ async function renderReader(container, textId) {
       content: [
         ...(token.surfaceReading ? [element('p', { className: 'font-jp text-sm text-muted sm:col-span-2', text: token.surfaceReading, attrs: { lang: 'ja' } })] : []),
         element('div', { className: 'rounded-xl bg-vermilion-soft p-3 sm:col-span-2', attrs: { 'aria-label': 'Meaning' } }, [
+          ...(token.known === true && token.gloss ? [element('p', { className: 'mb-1 text-[11px] font-semibold uppercase tracking-wide text-vermilion', text: 'Your definition' })] : []),
           element('p', { className: 'min-w-0 break-words text-sm leading-6 text-ink', text: token.gloss || 'No dictionary gloss is available for this item.' })
         ]),
         ...((token.lemma && surface && surface !== token.lemma)
@@ -1288,6 +1289,7 @@ async function renderReader(container, textId) {
       content: [
         ...(annotation.reading ? [element('p', { className: 'font-jp text-sm text-muted sm:col-span-2', text: annotation.reading, attrs: { lang: 'ja' } })] : []),
         element('div', { className: 'rounded-xl bg-vermilion-soft p-3 sm:col-span-2', attrs: { 'aria-label': 'Meaning' } }, [
+          ...(alreadyAdded && (annotation.meaning || annotation.explanation) ? [element('p', { className: 'mb-1 text-[11px] font-semibold uppercase tracking-wide text-vermilion', text: 'Your definition' })] : []),
           element('p', { className: 'min-w-0 break-words text-sm leading-6 text-ink', text: annotation.meaning || annotation.explanation || 'No dictionary gloss is available for this item.' })
         ]),
         ...((baseForm && surface && surface !== baseForm)

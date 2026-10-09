@@ -4,6 +4,7 @@ import { icon } from '../icons';
 import { element, emptyState, errorState, loadingState, openDetailModal, openDialog, confirmDialog, pageHeader, setActionPending, showToast, withPendingAction } from '../ui';
 import { mountKanjiWriting } from '../kanjiWriting.js';
 import { applySessionContext } from '../sessionContext.js';
+import { isReviewSoundOn, playReviewSound, setReviewSoundOn } from '../reviewSounds.js';
 
 const TYPE_ORDER = ['kanji', 'vocabulary', 'grammar'];
 const TYPE_LABEL = { kanji: 'Kanji', vocabulary: 'Vocabulary', grammar: 'Grammar' };
@@ -857,9 +858,37 @@ export async function renderReview(container) {
         difficultHasContent = true;
         return;
       }
+      // One tap turns the list into a real session (exact entity queue, up
+      // to 500) instead of making the learner rebuild it by hand.
+      const practiceButton = element('button', {
+        className: 'button-primary mt-3 min-h-10 px-4 py-2 text-sm',
+        text: `Practice these ${items.length}`,
+        attrs: { type: 'button' }
+      });
+      practiceButton.addEventListener('click', () => {
+        withPendingAction(practiceButton, async () => {
+          const today = new Date().toISOString().slice(0, 10);
+          const session = await apiRequest('/api/review/sessions', {
+            method: 'POST',
+            body: {
+              sourceFrom: today,
+              sourceTo: today,
+              items: items
+                .filter((item) => item && item.entityType && Number.isSafeInteger(Number(item.entityId)))
+                .slice(0, 500)
+                .map((item) => ({ entityType: item.entityType, entityId: Number(item.entityId) }))
+            }
+          });
+          if (!session || !session.id) throw new Error('Unable to start that session.');
+          window.location.hash = `#review?retake=${Number(session.id)}`;
+        }, { pendingLabel: 'Starting…' }).catch((error) => {
+          showToast(error?.message || 'Unable to start that session.', 'error');
+        });
+      });
       difficultBlock.replaceChildren(
         header,
         description,
+        practiceButton,
         element('ul', { className: 'mt-4 grid gap-2', attrs: { role: 'list' } }, items.map((item) => {
           const iso = String(item.lastReviewedAt || '');
           const date = iso ? formattedDate(iso) : '';
@@ -2049,7 +2078,25 @@ const CARD_TYPE_DESCRIPTIONS = {
       if (item.reading) answerWrap.appendChild(element('p', { className: 'text-sm text-muted', text: item.reading }));
       if (item.meaning) answerWrap.appendChild(element('p', { className: 'mt-2 text-base leading-7 text-ink', text: item.meaning }));
       answerWrap.appendChild(answerResult);
-      answerWrap.appendChild(element('p', { className: 'mt-5 text-sm font-semibold text-ink', text: 'How did recall feel?' }));
+      const gradeHeadingRow = element('div', { className: 'mt-5 flex items-center justify-between gap-3' }, [
+        element('p', { className: 'text-sm font-semibold text-ink', text: 'How did recall feel?' })
+      ]);
+      const soundToggle = element('button', {
+        className: 'button-ghost min-h-8 px-2.5 py-1 text-xs',
+        attrs: { type: 'button', 'aria-pressed': String(isReviewSoundOn()), 'aria-label': 'Toggle grading sounds' }
+      });
+      const paintSoundToggle = () => {
+        const on = isReviewSoundOn();
+        soundToggle.textContent = on ? '🔔 Sounds on' : '🔕 Sounds off';
+        soundToggle.setAttribute('aria-pressed', String(on));
+      };
+      paintSoundToggle();
+      soundToggle.addEventListener('click', () => {
+        setReviewSoundOn(!isReviewSoundOn());
+        paintSoundToggle();
+      });
+      gradeHeadingRow.appendChild(soundToggle);
+      answerWrap.appendChild(gradeHeadingRow);
       const grades = element('div', { className: 'mt-3 grid gap-2 sm:grid-cols-3' });
       GRADES.forEach(({ result, hint }, gradeIndex) => {
         const button = element('button', { className: 'button-secondary flex-col gap-1 px-4 py-3 text-center', attrs: { type: 'button', 'aria-keyshortcuts': String(gradeIndex + 1) } }, [
@@ -2058,11 +2105,15 @@ const CARD_TYPE_DESCRIPTIONS = {
         ]);
         button.addEventListener('click', () => {
           withPendingAction(button, async () => {
-            await apiRequest('/api/review/grade', {
+            const graded_response = await apiRequest('/api/review/grade', {
               method: 'POST',
               body: { entityType: item.entityType, entityId: item.entityId, result, reviewSessionId: sessionId }
             });
             graded.push({ ...item, result });
+            playReviewSound(result);
+            if (graded_response && graded_response.promotedTo) {
+              showToast(`Promoted to ${graded_response.promotedTo} — your reviews moved this one up.`);
+            }
             await proceedToNextCard();
           }, { pendingLabel: 'Saving…' }).catch((error) => {
             showToast(error?.message || 'Unable to save this response.', 'error');
