@@ -22,6 +22,38 @@ function mockRes() {
   return { res, status: () => statusCode, body: () => body };
 }
 
+test('new-items drill-down splits today additions by category, newest first', async () => {
+  const seen = [];
+  await withPoolQuery(async (sql, params = []) => {
+    seen.push({ sql, params });
+    assert.ok(params.includes(USER_ID), 'every branch binds the caller');
+    assert.ok(params.includes(TODAY), 'window anchored on the client local day');
+    assert.ok(/LIMIT \?/.test(sql), 'bounded per category');
+    if (/FROM vocabulary/i.test(sql)) return [[{ display: '食べる', reading: 'たべる', meaning: 'to eat' }]];
+    if (/FROM kanji/i.test(sql)) return [[{ display: '食', reading: null, meaning: 'eat' }]];
+    if (/FROM grammar_points/i.test(sql)) return [[{ display: '〜たら', reading: null, meaning: 'if/when' }]];
+    throw new Error(`Unexpected SQL: ${sql.slice(0, 80)}`);
+  }, async () => {
+    const { res, status, body } = mockRes();
+    await controller.getNewItems({ user: { id: USER_ID }, query: { today: TODAY } }, res);
+    assert.equal(status(), 200);
+    assert.deepEqual(body(), {
+      vocabulary: [{ display: '食べる', reading: 'たべる', meaning: 'to eat' }],
+      kanji: [{ display: '食', reading: null, meaning: 'eat' }],
+      grammar: [{ display: '〜たら', reading: null, meaning: 'if/when' }]
+    });
+  });
+  assert.equal(seen.length, 3, 'one bounded query per category, no more');
+});
+
+test('new-items rejects a malformed today without touching the DB', async () => {
+  await withPoolQuery(async () => { throw new Error('DB must not be hit on validation failure'); }, async () => {
+    const { res, status } = mockRes();
+    await controller.getNewItems({ user: { id: USER_ID }, query: { today: 'tomorrow' } }, res);
+    assert.equal(status(), 400);
+  });
+});
+
 async function withPoolQuery(stub, callback) {
   const original = pool.query;
   pool.query = stub;

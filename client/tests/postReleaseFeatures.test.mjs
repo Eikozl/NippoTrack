@@ -56,6 +56,13 @@ test('dashboard owns a fail-open Review Reminder with the same aesthetic', () =>
   assert.ok(source.includes('#review?retake='), 'session handoff like everywhere else');
 });
 
+test('today-progress new items open a category drill-down', () => {
+  const source = readSource('src/pages/dashboard.js');
+  assert.ok(source.includes('/api/dashboard/study-now/new-items'), 'drill endpoint wired');
+  assert.ok(source.includes('Added today'), 'grouped dialog');
+  assert.ok(source.includes('grouped by category'), 'count row explains the drill-down');
+});
+
 test('calendar days are buttons announcing their minutes', () => {
   const source = readSource('src/pages/dashboard.js');
   assert.ok(source.includes('Tap a day to see its minutes'), 'discovery copy');
