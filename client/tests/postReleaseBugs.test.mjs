@@ -32,6 +32,9 @@ test('reading saves survive navigation until review consumes them', () => {
   assert.ok(source.includes('restoreSavedState'), 'state restored before first paint');
   assert.ok(source.includes("removeItem(savedStateKey)"), 'backup cleared once review consumes the handoff');
   assert.ok(source.includes('kept here until you review'), 'copy tells the learner saves persist');
+  assert.ok(source.includes('ownedIdFromSaveResponse'), 'collection saves keep their entity ids');
+  assert.ok(source.includes('queueFromSavedMetas'), 'saved words seed a real session queue');
+  assert.ok(source.includes('/api/review/sessions'), 'seeded session via the sessions endpoint');
 });
 
 test('cloze matching ignores decorative symbols phones cannot type', () => {

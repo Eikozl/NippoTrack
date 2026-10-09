@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readSource = (path) => readFileSync(join(root, path), 'utf8');
 
-test('grading sounds are synthesized, toggleable and never blocking', () => {
+test('grading sounds fire on practice success only, never on grade buttons', () => {
   const sounds = readSource('src/reviewSounds.js');
   assert.ok(sounds.includes('AudioContext'), 'Web Audio synth, zero assets');
   assert.ok(sounds.includes('jlt-review-sound'), 'persisted toggle');
@@ -18,9 +18,18 @@ test('grading sounds are synthesized, toggleable and never blocking', () => {
   assert.ok(sounds.includes("result === 'Good'") && sounds.includes("result === 'Again'"), 'success + fail voices');
   const review = readSource('src/pages/review.js');
   assert.ok(review.includes('../reviewSounds.js'), 'review page imports the synth');
-  assert.ok(review.includes('playReviewSound(result)'), 'sound fires on every recorded grade');
-  assert.ok(review.includes('promotedTo'), 'assimilation promotion toasted');
-  assert.ok(review.includes('Sounds on') && review.includes('aria-pressed'), 'visible persisted toggle');
+  assert.ok(!review.includes('playReviewSound(result)'), 'grade buttons stay silent');
+  assert.ok(!review.includes('Sounds on'), 'no sound toggle inside review');
+  assert.ok(review.includes("playReviewSound('Good')"), 'success chime on correct answers');
+  assert.ok(review.includes("playReviewSound('Again')"), 'low tone on misses');
+});
+
+test('sound toggle lives in Settings Accessibility, away from review', () => {
+  const settings = readSource('src/pages/settings.js');
+  assert.ok(settings.includes("'accessibility'"), 'accessibility section registered');
+  assert.ok(settings.includes('renderAccessibilitySection'), 'section renderer');
+  assert.ok(settings.includes('settings-review-sounds'), 'review sounds checkbox');
+  assert.ok(settings.includes('../reviewSounds.js'), 'settings owns the toggle');
 });
 
 test('difficult section starts a real session in one tap', () => {

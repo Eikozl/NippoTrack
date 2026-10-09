@@ -4,7 +4,7 @@ import { icon } from '../icons';
 import { element, emptyState, errorState, loadingState, openDetailModal, openDialog, confirmDialog, pageHeader, setActionPending, showToast, withPendingAction } from '../ui';
 import { mountKanjiWriting } from '../kanjiWriting.js';
 import { applySessionContext } from '../sessionContext.js';
-import { isReviewSoundOn, playReviewSound, setReviewSoundOn } from '../reviewSounds.js';
+import { playReviewSound } from '../reviewSounds.js';
 
 const TYPE_ORDER = ['kanji', 'vocabulary', 'grammar'];
 const TYPE_LABEL = { kanji: 'Kanji', vocabulary: 'Vocabulary', grammar: 'Grammar' };
@@ -2041,6 +2041,7 @@ const CARD_TYPE_DESCRIPTIONS = {
             answerResult.textContent = `Not quite — listen again (${triesLeft} ${triesLeft === 1 ? 'try' : 'tries'} left before reveal).`;
           }
         } else {
+          playReviewSound('Again');
           showCheck({ matched: false, typed: String(typed).trim() });
         }
       };
@@ -2078,25 +2079,7 @@ const CARD_TYPE_DESCRIPTIONS = {
       if (item.reading) answerWrap.appendChild(element('p', { className: 'text-sm text-muted', text: item.reading }));
       if (item.meaning) answerWrap.appendChild(element('p', { className: 'mt-2 text-base leading-7 text-ink', text: item.meaning }));
       answerWrap.appendChild(answerResult);
-      const gradeHeadingRow = element('div', { className: 'mt-5 flex items-center justify-between gap-3' }, [
-        element('p', { className: 'text-sm font-semibold text-ink', text: 'How did recall feel?' })
-      ]);
-      const soundToggle = element('button', {
-        className: 'button-ghost min-h-8 px-2.5 py-1 text-xs',
-        attrs: { type: 'button', 'aria-pressed': String(isReviewSoundOn()), 'aria-label': 'Toggle grading sounds' }
-      });
-      const paintSoundToggle = () => {
-        const on = isReviewSoundOn();
-        soundToggle.textContent = on ? '🔔 Sounds on' : '🔕 Sounds off';
-        soundToggle.setAttribute('aria-pressed', String(on));
-      };
-      paintSoundToggle();
-      soundToggle.addEventListener('click', () => {
-        setReviewSoundOn(!isReviewSoundOn());
-        paintSoundToggle();
-      });
-      gradeHeadingRow.appendChild(soundToggle);
-      answerWrap.appendChild(gradeHeadingRow);
+      answerWrap.appendChild(element('p', { className: 'mt-5 text-sm font-semibold text-ink', text: 'How did recall feel?' }));
       const grades = element('div', { className: 'mt-3 grid gap-2 sm:grid-cols-3' });
       GRADES.forEach(({ result, hint }, gradeIndex) => {
         const button = element('button', { className: 'button-secondary flex-col gap-1 px-4 py-3 text-center', attrs: { type: 'button', 'aria-keyshortcuts': String(gradeIndex + 1) } }, [
@@ -2110,7 +2093,6 @@ const CARD_TYPE_DESCRIPTIONS = {
               body: { entityType: item.entityType, entityId: item.entityId, result, reviewSessionId: sessionId }
             });
             graded.push({ ...item, result });
-            playReviewSound(result);
             if (graded_response && graded_response.promotedTo) {
               showToast(`Promoted to ${graded_response.promotedTo} — your reviews moved this one up.`);
             }
@@ -2178,7 +2160,7 @@ const CARD_TYPE_DESCRIPTIONS = {
       hearButton.addEventListener('click', () => speakClozeSentence());
       const sentenceRow = element('div', { className: 'mb-3 flex items-start gap-2' }, [sentenceLine, hearButton]);
       frontWrap.appendChild(sentenceRow);
-      const built = buildAnswerInput({ onMatch: () => speakClozeSentence({ quiet: true }) });
+      const built = buildAnswerInput({ onMatch: () => { playReviewSound('Good'); speakClozeSentence({ quiet: true }); } });
       frontWrap.append(built.row, frontResult, revealButton);
       fetchClozeSentence(item).then((sentence) => {
         if (!sentence) {
@@ -2209,7 +2191,7 @@ const CARD_TYPE_DESCRIPTIONS = {
         revealButton.setAttribute('disabled', '');
         const built = buildAnswerInput({
           conceal: true,
-          onMatch: () => { revealButton.removeAttribute('disabled'); }
+          onMatch: () => { playReviewSound('Good'); revealButton.removeAttribute('disabled'); }
         });
         frontWrap.replaceChildren();
         frontWrap.append(
@@ -2307,6 +2289,7 @@ const CARD_TYPE_DESCRIPTIONS = {
         button.setAttribute('aria-pressed', 'true');
         frontResult.textContent = `That's right — “${item.display}” means “${item.meaning}.”`;
         answerResult.textContent = `That's right — “${item.display}” means “${item.meaning}.”`;
+        playReviewSound('Good');
         finalizeRecognitionGrade();
       } else {
         recognitionMistakes += 1;
@@ -2314,6 +2297,7 @@ const CARD_TYPE_DESCRIPTIONS = {
         button.setAttribute('aria-pressed', 'false');
         frontResult.textContent = `Not quite — that means “${option.meaning}.” Try again.`;
         answerResult.textContent = `Not quite — that means “${option.meaning}.” Try again.`;
+        playReviewSound('Again');
       }
     }
 
