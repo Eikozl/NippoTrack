@@ -605,8 +605,18 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
           description: 'Only text fields change — the linked content stays as published.',
           content: [element('div', { className: 'grid gap-3' }, [titleInput, bodyInput, translationInput])],
           submitLabel: 'Save changes',
-          onSubmit: async (form, close) => {
-            try {
+      onSubmit: async (form, close) => {
+        // Cooldown pre-check: when the handle effectively changed and the
+        // prefill stamp is still inside 24h, fail HERE with the exact server
+        // wording — no save attempt, and the throw releases the submit
+        // button via the dialog wrapper (never stuck on "Saving…").
+        const wantedUsername = String(usernameInput.value || '').trim().toLowerCase();
+        const originalUsername = String(prefillRef.username || '').toLowerCase();
+        if (wantedUsername !== originalUsername) {
+          const unlockAt = cooldownUnlockAt(prefillRef.usernameChangedAt);
+          if (Number.isFinite(unlockAt) && unlockAt > Date.now()) throw new Error(cooldownErrorFor(unlockAt));
+        }
+        try {
               await apiRequest(`/api/community/posts/${post.id}`, {
                 method: 'PUT',
                 body: { title: titleInput.value, body: bodyInput.value, translation: translationInput.value }
@@ -2352,15 +2362,22 @@ async function openDeckViewer(deckId, title) {
     // Handle cooldown (24h, enforced server-side): the hint names the rule
     // up front and, when the profile carries a recent change, the exact
     // moment the next change unlocks — no surprise rejections.
+    const COOLDOWN_MS = 24 * 3600 * 1000;
+    const cooldownUnlockAt = (changedAt) => {
+      const at = changedAt ? Date.parse(changedAt) : NaN;
+      return Number.isFinite(at) ? at + COOLDOWN_MS : NaN;
+    };
+    const cooldownErrorFor = (unlockAt) => {
+      const remainingMs = Math.max(0, unlockAt - Date.now());
+      const hours = Math.floor(remainingMs / 3600000);
+      const minutes = Math.ceil((remainingMs % 3600000) / 60000);
+      return `Username was changed recently — you can change it again in ${hours}h ${minutes}m.`;
+    };
+    let prefillRef = { username: null, usernameChangedAt: null };
     const cooldownNote = element('p', { className: 'text-xs leading-5 text-muted sm:col-span-2', text: 'Usernames can change once every 24 hours.' });
     const paintCooldownNote = (saved) => {
-      const changedAt = saved && saved.usernameChangedAt ? Date.parse(saved.usernameChangedAt) : NaN;
-      if (!Number.isFinite(changedAt)) {
-        cooldownNote.textContent = 'Usernames can change once every 24 hours.';
-        return;
-      }
-      const next = changedAt + 24 * 3600 * 1000;
-      if (next <= Date.now()) {
+      const next = cooldownUnlockAt(saved && saved.usernameChangedAt);
+      if (!Number.isFinite(next) || next <= Date.now()) {
         cooldownNote.textContent = 'Usernames can change once every 24 hours.';
         return;
       }
@@ -2374,6 +2391,7 @@ async function openDeckViewer(deckId, title) {
       const picked = new Set(parseProfileInterests(saved.interests));
       for (const entry of interestBoxes) entry.box.checked = picked.has(entry.value);
       publicBox.checked = Boolean(saved.isPublic);
+      prefillRef = { username: saved.username || null, usernameChangedAt: saved.usernameChangedAt || null };
       paintCooldownNote(saved);
     };
     openDialog({

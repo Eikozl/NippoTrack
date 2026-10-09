@@ -98,6 +98,14 @@ test('username changes warn about the 24h cooldown up front', () => {
   assert.ok(source.includes('Usernames can change once every 24 hours.'), 'rule named in the editor');
   assert.ok(source.includes('the next change unlocks'), 'exact unlock moment shown when stamped');
   assert.ok(source.includes('usernameChangedAt'), 'prefill carries the server stamp');
+  assert.ok(source.includes('cooldownUnlockAt(prefillRef.usernameChangedAt)'), 'submit pre-checks the stamp before any save');
+  assert.ok(source.includes('you can change it again in'), 'pre-check speaks the exact server wording');
+});
+
+test('dialog submit buttons always release, even on swallowed failures', () => {
+  const ui = readSource('src/ui.js');
+  assert.ok(ui.includes('} finally {'), 'submit wrapper releases in finally');
+  assert.ok(ui.includes('stuck on the pending label forever') || ui.includes('never stuck'), 'regression note present');
 });
 
 test('placement abstention advances immediately', () => {

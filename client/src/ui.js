@@ -457,13 +457,15 @@ export function openDialog({ title, content, submitLabel = 'Save', submitClassNa
   if (submitButton && typeof onSubmit === 'function') form.addEventListener('submit', async (event) => {
     event.preventDefault();
     // Local pending feedback on the submit action itself (never a blocking
-    // overlay). Guarded so double-submit cannot re-enter; cleanup restores
-    // the original label, enabled state, and removes the spinner.
+    // overlay). Guarded so double-submit cannot re-enter. The button ALWAYS
+    // releases (finally): handlers that toast-and-swallow internally used to
+    // leave it stuck on the pending label forever after a failure.
     if (!setActionPending(submitButton, true, { pendingLabel })) return;
     try {
       await onSubmit(form, close);
     } catch (error) {
       showToast(error.message || 'Unable to save.', 'error');
+    } finally {
       setActionPending(submitButton, false);
     }
   });
