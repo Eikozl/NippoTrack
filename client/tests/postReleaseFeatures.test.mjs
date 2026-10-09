@@ -56,6 +56,22 @@ test('dashboard owns a fail-open Review Reminder with the same aesthetic', () =>
   assert.ok(source.includes('#review?retake='), 'session handoff like everywhere else');
 });
 
+test('follow button unfollows on any held follow and re-syncs', () => {
+  const feed = readSource('src/pages/communityFeed.js');
+  assert.ok(feed.includes('following === true || mutual === true'), 'one rule: any held follow unfollows');
+  assert.ok(feed.includes('/api/community/profile/'), 'state re-synced from the server after toggle');
+  assert.ok(feed.includes('renderProfile(profile.username)'), 'profile refreshes so counts follow the button');
+});
+
+test('empty-feed actions wire at creation, never by late query', () => {
+  const feed = readSource('src/pages/communityFeed.js');
+  assert.ok(feed.includes("text: 'Discover learners'"), 'following empty state keeps its button');
+  assert.ok(!feed.includes('wireEmptyActions'), 'query-after-fetch wiring removed');
+  const block = feed.slice(feed.indexOf('function feedEmptyState'), feed.indexOf('function renderFeedRoot'));
+  assert.ok(block.includes("showTab('discover')"), 'discover button navigates at creation');
+  assert.ok(block.includes('openComposerDialog'), 'create-post button opens the composer at creation');
+});
+
 test('today-progress new items open a category drill-down', () => {
   const source = readSource('src/pages/dashboard.js');
   assert.ok(source.includes('/api/dashboard/study-now/new-items'), 'drill endpoint wired');

@@ -1650,14 +1650,32 @@ async function openDeckViewer(deckId, title) {
     button.addEventListener('click', (event) => {
       event.stopPropagation();
       withPendingAction(button, async () => {
-        if (following) {
+        // One rule, no flag skew: any held follow (plain or mutual)
+        // unfollows, anything else follows. Flag combinations from mixed
+        // sources could otherwise re-follow forever instead of unfollowing.
+        const holding = following === true || mutual === true;
+        if (holding) {
           await apiRequest('/api/community/unfollow', { method: 'POST', body: { username } });
-          following = false;
-          if (mutual) mutual = false;
         } else {
           await apiRequest('/api/community/follow', { method: 'POST', body: { username } });
-          following = true;
-          if (followsYou) mutual = true;
+        }
+        // Re-sync from the server: local flips lie after races or stale
+        // flags, so the button paints authoritative state (one cheap read).
+        try {
+          const synced = await apiRequest(`/api/community/profile/${encodeURIComponent(username)}`);
+          following = (synced.viewerFollowing ?? synced.following) === true;
+          followsYou = synced.followsYou === true;
+          mutual = synced.mutual === true || (following && followsYou);
+        } catch {
+          // Fail-open: the mutation already succeeded, so the local flip
+          // still paints (a private target 404s the sync read, for example).
+          if (holding) {
+            following = false;
+            mutual = false;
+          } else {
+            following = true;
+            if (followsYou) mutual = true;
+          }
         }
         paint();
         if (typeof onChange === 'function') onChange(following);
@@ -1939,21 +1957,33 @@ async function openDeckViewer(deckId, title) {
   }
 
   function feedEmptyState(tab) {
+    // Listeners attach AT CREATION: the empty state renders after the async
+    // feed fetch, so wiring by a later DOM query always ran too early and
+    // these buttons never registered clicks.
     if (tab === 'following') {
+      const discover = element('button', {
+        className: 'button-primary min-h-11 px-5 py-2.5 text-sm font-semibold', text: 'Discover learners', attrs: { type: 'button' }
+      });
+      discover.addEventListener('click', () => showTab('discover'));
       return emptyState({
         title: 'Your community is quiet',
         description: 'Follow learners to build your feed, or share something you learned today.',
-        action: element('button', {
-          className: 'button-primary min-h-11 px-5 py-2.5 text-sm font-semibold', text: 'Discover learners', attrs: { type: 'button' }, dataset: { action: 'discover-learners' }
-        })
+        action: discover
       });
     }
+    const create = element('button', {
+      className: 'button-primary min-h-11 px-5 py-2.5 text-sm font-semibold', text: 'Create a post', attrs: { type: 'button' }
+    });
+    create.addEventListener('click', () => {
+      openComposerDialog(async () => {
+        if (state.profile || state.tab !== 'feed') await showTab('feed');
+        else renderFeedRoot();
+      });
+    });
     return emptyState({
       title: 'No posts yet',
       description: 'Be the first to share something you learned today.',
-      action: element('button', {
-        className: 'button-primary min-h-11 px-5 py-2.5 text-sm font-semibold', text: 'Create a post', attrs: { type: 'button' }, dataset: { action: 'create-post' }
-      })
+      action: create
     });
   }
 
@@ -1969,23 +1999,6 @@ async function openDeckViewer(deckId, title) {
     const refreshFeed = () => feedLoader(listHost, apiTab);
     body.appendChild(listHost);
     refreshFeed();
-    wireEmptyActions();
-  }
-
-  function wireEmptyActions() {
-    body.querySelectorAll('button[data-action]').forEach((button) => {
-      if (button.dataset.action === 'discover-learners') {
-        button.addEventListener('click', () => showTab('discover'));
-      }
-      if (button.dataset.action === 'create-post') {
-        button.addEventListener('click', () => {
-          openComposerDialog(async () => {
-            if (state.profile || state.tab !== 'feed') await showTab('feed');
-            else renderFeedRoot();
-          });
-        });
-      }
-    });
   }
 
   // ---- discover: search + sections (Phase 4-frontend, V6.1 filter selector)
@@ -2481,7 +2494,7 @@ async function openDeckViewer(deckId, title) {
               // (only share-stats / post stats carry streakDays). Never invent.
             ])
           ]),
-          ...(profile.isSelf ? [] : [followButton(profile.username, () => {}, {
+          ...(profile.isSelf ? [] : [followButton(profile.username, () => renderProfile(profile.username), {
             initialFollowing: (profile.viewerFollowing ?? profile.following) === true,
             followsYou: profile.followsYou === true,
             mutual: profile.mutual === true
