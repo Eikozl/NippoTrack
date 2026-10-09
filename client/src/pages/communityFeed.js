@@ -414,13 +414,14 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     // endpoint (GET /api/users/me, same one Settings + the composer use),
     // then reuses the standard openProfile/renderProfile path — so the
     // followers/following lists on the own profile lead onward to any other
-    // profile. Unclaimed usernames stay in Community with guidance instead
-    // of a dead navigation.
+    // profile. Without a username there is no profile page to open (routes
+    // key on @username), so the claim editor opens inline instead of a dead
+    // toast — the profile gets created exactly where it is asked for.
     try {
       const me = await apiRequest('/api/users/me');
       const ownUsername = me?.username || me?.user?.username || null;
       if (!ownUsername) {
-        showToast('Claim a username to open your profile.', 'error');
+        openEditProfileDialog(null);
         return;
       }
       openProfile(ownUsername);
@@ -1830,7 +1831,26 @@ async function openDeckViewer(deckId, title) {
     typeSelect.addEventListener('change', () => { paintTypeHint(); paintLink(); });
     paintTypeHint();
     paintLink();
-    const fields = element('div', { className: 'grid gap-3 sm:col-span-2' }, [typeField, titleInput, bodyInput, japaneseInput, translationInput, linkBox, statsWrap]);
+    // Publicity nudge: posts from private profiles are visible to the author
+    // only. New learners otherwise publish "into the void" and conclude the
+    // feed is broken — say so upfront, with the fix one tap away (My profile
+    // opens the claim editor when there is no username yet).
+    const visibilityNote = element('p', { className: 'text-xs leading-5 text-muted sm:col-span-2', attrs: { 'aria-live': 'polite' } });
+    apiRequest('/api/users/me').then((me) => {
+      const username = me?.username || me?.user?.username || null;
+      const isPublic = Boolean(me?.isPublic ?? me?.user?.isPublic);
+      if (!username) {
+        visibilityNote.replaceChildren(
+          element('span', { text: 'Only you will see your posts until you claim a username and go public — ' }),
+          element('span', { className: 'font-semibold text-vermilion', text: 'open My profile from the … menu to claim one.' })
+        );
+      } else if (!isPublic) {
+        visibilityNote.replaceChildren(
+          element('span', { text: `Posting as @${username} (private) — only you will see it until you enable “Public profile” in Edit profile.` })
+        );
+      }
+    }).catch(() => { /* fail-open: no nudge */ });
+    const fields = element('div', { className: 'grid gap-3 sm:col-span-2' }, [typeField, titleInput, bodyInput, japaneseInput, translationInput, linkBox, statsWrap, visibilityNote]);
     // Dialog submit carries the byte-identical publish (same conditional
     // fields, same payload keys). Toast + close + refresh on success.
     openDialog({
@@ -2354,6 +2374,12 @@ async function openDeckViewer(deckId, title) {
           showToast(saved.username ? `Public profile: ${saved.username}.` : 'Profile saved (private).');
           close();
           const next = saved.username || currentUsername;
+          if (!next) {
+            // Still nameless: there is no @username route to render, so stay
+            // in Community instead of opening a broken profile page.
+            showToast('Claim a username to open your public profile.', 'error');
+            return;
+          }
           state.profile = next;
           renderProfile(next);
         } catch (error) {

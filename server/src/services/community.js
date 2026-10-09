@@ -553,6 +553,16 @@ async function createPost(executor, authorId, payload) {
     : cleanText(payload.japaneseText, 2000, 'japaneseText');
   const translation = cleanText(payload.translation, 2000, 'translation');
   const links = await validateLinkedContent(executor, authorId, payload);
+  // A post without a user_profile row is invisible EVERYWHERE (feed, detail
+  // and discover all INNER JOIN the profile): ensure the row so the author's
+  // own posts always resolve. Runs after all validation + link checks, so
+  // rejected payloads never mint profile rows. Cross-user visibility still
+  // honors is_public — this never makes anything public, it only stops
+  // self-posts vanishing.
+  await executor.execute(
+    'INSERT INTO user_profile (user_id) VALUES (?) ON CONFLICT (user_id) DO NOTHING',
+    [authorId]
+  );
   // Single write: the snapshot is a point-in-time reading, so no transaction
   // spans the stat reads + INSERT (no multi-write atomicity to preserve).
   // Reuses posts.snapshot_json from 039 — no migration.

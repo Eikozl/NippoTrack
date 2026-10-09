@@ -138,6 +138,7 @@ test('progress includeStats:true snapshots server values; client fakes ignored',
   const seen = [];
   await withPoolExecute(async (sql, params = []) => {
     seen.push({ sql, params });
+    if (/INSERT INTO user_profile/i.test(sql)) return [{ affectedRows: 1 }];
     if (/INSERT INTO community_posts/i.test(sql)) {
       capturedSnapshot = JSON.parse(params[params.length - 1]);
       return [{ insertId: 55 }];
@@ -178,6 +179,7 @@ test('progress includeStats:true snapshots server values; client fakes ignored',
 test('progress without includeStats has no stats; feed maps stats too', async () => {
   let capturedSnapshot = 'unset';
   await withPoolExecute(async (sql, params = []) => {
+    if (/INSERT INTO user_profile/i.test(sql)) return [{ affectedRows: 1 }];
     if (/INSERT INTO community_posts/i.test(sql)) {
       capturedSnapshot = JSON.parse(params[params.length - 1]);
       return [{ insertId: 56 }];
@@ -220,6 +222,7 @@ test('includeStats validation: non-progress and non-boolean rejected', async () 
 
 test('progress with stats needs no message; stat-less progress still requires one', async () => {
   await withPoolExecute(async (sql, params = []) => {
+    if (/INSERT INTO user_profile/i.test(sql)) return [{ affectedRows: 1 }];
     if (/INSERT INTO community_posts/i.test(sql)) return [{ insertId: 57 }];
     if (/p\.id_community_post = \?/i.test(sql)) {
       return [[{ ...progressPostRow({ streakDays: 3 }), id: 57, body: null }]];

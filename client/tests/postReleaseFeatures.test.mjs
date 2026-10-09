@@ -71,8 +71,22 @@ test('owned meanings are badged as your definition', () => {
   assert.ok(reading.includes('Your definition'), 'owned-meaning badge in word sheets');
 });
 
-test('deck examples define words like reading does', () => {
+test('nameless learners meet the claim editor, not a dead end', () => {
   const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('openEditProfileDialog(null)'), 'My profile opens the claim editor without a username');
+  assert.ok(source.includes('Claim a username to open your public profile.'), 'still-nameless saves stay instead of a broken page');
+  assert.ok(source.includes('Only you will see your posts until you claim a username'), 'composer warns private-by-default authors');
+});
+
+test('placement abstention advances immediately', () => {
+  const source = readSource('src/firstExperience.js');
+  const block = source.slice(source.indexOf('abstainButton.addEventListener'), source.indexOf('abstainButton.addEventListener') + 600);
+  assert.ok(block.includes('state.answers[question.id] = null'), 'abstention still recorded');
+  assert.ok(block.includes('state.index += 1'), 'moves to the next question at once');
+  assert.ok(block.includes("state.phase = 'review'"), 'last question jumps to review');
+});
+
+test('deck examples define words like reading does', () => {  const source = readSource('src/pages/communityFeed.js');
   assert.ok(source.includes('/api/lookup/define-sentence'), 'bounded sentence lookup');
   assert.ok(source.includes('openDefineDialog'), 'chips dialog');
   assert.ok(source.includes('openDefinitionDialog'), 'per-word definition dialog');

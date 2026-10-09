@@ -586,7 +586,7 @@ test('overflow items reuse existing destinations, profiles resolve via the own-p
   assert.ok(source.includes('openNotifications()'), 'Notifications item reuses the same inbox action');
   assert.ok(source.includes('/api/users/me'), 'own profile resolves through the existing own-profile endpoint');
   assert.ok(source.includes('openProfile(ownUsername)'), 'own profile reuses the standard profile path');
-  assert.ok(source.includes('Claim a username to open your profile.'), 'unclaimed usernames get guidance, never a dead navigation');
+  assert.ok(source.includes('openEditProfileDialog(null)'), 'nameless learners meet the claim editor, never a dead navigation');
   assert.ok(source.includes('Unable to open your profile.'), 'own-profile failure toasts');
 });
 
