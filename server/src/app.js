@@ -14,6 +14,7 @@ const v2Routes = require('./routes/v2');
 const reviewRoutes = require('./routes/review');
 const analyzeRoutes = require('./routes/analyze');
 const immersionRoutes = require('./routes/immersion');
+const lookupRoutes = require('./routes/lookup');
 const levelRoutes = require('./routes/level');
 const firstExperienceRoutes = require('./routes/firstExperience');
 const profileRoutes = require('./routes/profile');
@@ -131,6 +132,7 @@ app.get('/api', (req, res) => {
       'GET /api/share/deck/:code',
       'POST /api/share/deck/:code/import',
       'POST /api/analyze/text',
+      'POST /api/lookup/define-sentence',
       'POST /api/immersion/analyze',
       'POST /api/immersion/create-session',
       'GET /api/immersion/history',
@@ -171,6 +173,7 @@ app.use('/api', v2Routes);
 app.use('/api/review', reviewRoutes);
 app.use('/api/analyze', analyzeRoutes);
 app.use('/api/immersion', immersionRoutes);
+app.use('/api/lookup', lookupRoutes);
 app.use('/api/reading', gradedReaderRoutes);
 app.use('/api/goals', smartGoalsRoutes);
 app.use('/api/insights', insightsRoutes);

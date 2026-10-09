@@ -193,11 +193,14 @@ async function buildLexicalImmersionCandidates(executor, userId, sourceText) {
       const id = `vocabulary::${candidate.canonical}::${reading || ''}`;
       if (seenVocabularyIds.has(id)) continue; // same word+reading across POS tags
       seenVocabularyIds.add(id);
+      const ownedMeaning = typeof candidate.match?.ownedMeaning === 'string' && candidate.match.ownedMeaning.trim()
+        ? candidate.match.ownedMeaning.trim()
+        : null;
       vocabulary.push({
         id,
         display: candidate.canonical,
         reading,
-        meaning: candidate.gloss || null,
+        meaning: ownedMeaning || candidate.gloss || null,
         jlpt: null, // JMdict carries no JLPT band; vocabulary level stays null
         known: candidate.match?.state === 'existing'
       });
@@ -242,6 +245,7 @@ async function runAnalysis(executor, userId, text) {
 
   const referenceByCharacter = new Map();
   const ownedCharacters = new Set();
+  const ownedKanjiMeanings = new Map();
   if (uniqueHan.length) {
     const placeholders = uniqueHan.map(() => '?').join(', ');
     const [referenceResult, ownedResult] = await Promise.all([
@@ -250,7 +254,7 @@ async function runAnalysis(executor, userId, text) {
         uniqueHan
       ),
       executor.execute(
-        `SELECT id_kanji, character_kanji, jlpt_level, status FROM kanji WHERE user_id = ? AND character_kanji IN (${placeholders})`,
+        `SELECT id_kanji, character_kanji, jlpt_level, status, meaning FROM kanji WHERE user_id = ? AND character_kanji IN (${placeholders})`,
         [userId, ...uniqueHan]
       )
     ]);
@@ -258,7 +262,11 @@ async function runAnalysis(executor, userId, text) {
       if (row && typeof row.character === 'string') referenceByCharacter.set(row.character, row);
     }
     for (const row of ownedResult[0] || []) {
-      if (row && typeof row.character_kanji === 'string') ownedCharacters.add(row.character_kanji);
+      if (row && typeof row.character_kanji === 'string') {
+        ownedCharacters.add(row.character_kanji);
+        const meaning = typeof row.meaning === 'string' ? row.meaning.trim() : '';
+        if (meaning && !ownedKanjiMeanings.has(row.character_kanji)) ownedKanjiMeanings.set(row.character_kanji, meaning);
+      }
     }
   }
 
@@ -266,11 +274,12 @@ async function runAnalysis(executor, userId, text) {
     const reference = referenceByCharacter.get(character) || null;
     const onyomi = Array.isArray(reference?.onyomi) ? reference.onyomi : [];
     const meanings = Array.isArray(reference?.meanings) ? reference.meanings : [];
+    const ownedMeaning = ownedKanjiMeanings.get(character) || null;
     return {
       id: `kanji::${character}`,
       display: character,
       reading: onyomi[0] || null,
-      meaning: meanings[0] || null,
+      meaning: ownedMeaning || meanings[0] || null,
       jlpt: normalizeJlpt(reference?.jlpt_level),
       known: ownedCharacters.has(character)
     };

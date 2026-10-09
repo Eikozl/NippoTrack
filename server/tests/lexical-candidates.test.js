@@ -103,6 +103,37 @@ test('lemma exact match is confident existing (行きました → 行く)', asy
   assert.equal(candidates[0].match.ownedCount, 1);
 });
 
+test('existing matches carry the learner-owned meaning (dictionary second)', async () => {
+  const pool = {
+    execute: async (sql) => {
+      if (/AND word IN/i.test(sql)) {
+        return [[
+          { word: 'よく', reading: 'よく', meaning: '  my own note: often  ' },
+          { word: 'よく', reading: 'ヨク', meaning: '' }
+        ]];
+      }
+      return [[], []];
+    }
+  };
+  const { candidates } = buildLexicalCandidates([tok('よく', 'adverb')]);
+  await matchOwnedVocabulary(pool, 'user-1', candidates);
+  assert.equal(candidates[0].match.state, 'existing');
+  assert.equal(candidates[0].match.ownedMeaning, 'my own note: often', 'first non-empty owned meaning, trimmed');
+});
+
+test('existing matches without any owned meaning carry no ownedMeaning key', async () => {
+  const pool = {
+    execute: async (sql) => {
+      if (/AND word IN/i.test(sql)) return [[{ word: '学校', reading: 'がっこう', meaning: null }]];
+      return [[], []];
+    }
+  };
+  const { candidates } = buildLexicalCandidates([tok('学校', 'noun', { lemmaReading: 'がっこう' })]);
+  await matchOwnedVocabulary(pool, 'user-1', candidates);
+  assert.equal(candidates[0].match.state, 'existing');
+  assert.ok(!('ownedMeaning' in candidates[0].match), 'absent key keeps downstream shapes honest');
+});
+
 test('reading-only hits are ambiguous, never confident', async () => {
   const pool = {
     execute: async (sql, params) => {
