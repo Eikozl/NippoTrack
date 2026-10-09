@@ -9,6 +9,14 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readSource = (path) => readFileSync(join(root, path), 'utf8');
+import { PROFILE_INTEREST_OPTIONS, formatProfileInterests, parseProfileInterests } from '../src/profileInterests.js';
+
+test('profile interests parse/format round-trips canonical values', () => {
+  assert.ok(PROFILE_INTEREST_OPTIONS.length >= 8, 'a real option set');
+  assert.deepEqual(parseProfileInterests('manga, Travel; manga; N3 grammar'), ['manga', 'travel'], 'canonical kept, free text dropped, dupes collapsed');
+  assert.deepEqual(parseProfileInterests(null), []);
+  assert.equal(formatProfileInterests(['manga', 'bogus', 'manga', 'Anime']), 'manga, anime', 'format keeps canonical order-free uniqueness');
+});
 
 test('grading sounds fire on practice success only, never on grade buttons', () => {
   const sounds = readSource('src/reviewSounds.js');
@@ -78,6 +86,13 @@ test('nameless learners meet the claim editor, not a dead end', () => {
   assert.ok(source.includes('Only you will see your posts until you claim a username'), 'composer warns private-by-default authors');
 });
 
+test('username changes warn about the 24h cooldown up front', () => {
+  const source = readSource('src/pages/communityFeed.js');
+  assert.ok(source.includes('Usernames can change once every 24 hours.'), 'rule named in the editor');
+  assert.ok(source.includes('the next change unlocks'), 'exact unlock moment shown when stamped');
+  assert.ok(source.includes('usernameChangedAt'), 'prefill carries the server stamp');
+});
+
 test('placement abstention advances immediately', () => {
   const source = readSource('src/firstExperience.js');
   const block = source.slice(source.indexOf('abstainButton.addEventListener'), source.indexOf('abstainButton.addEventListener') + 600);
@@ -86,7 +101,18 @@ test('placement abstention advances immediately', () => {
   assert.ok(block.includes("state.phase = 'review'"), 'last question jumps to review');
 });
 
-test('deck examples define words like reading does', () => {  const source = readSource('src/pages/communityFeed.js');
+test('interests are a canonical multi-select feeding Discover', () => {
+  const feed = readSource('src/pages/communityFeed.js');
+  assert.ok(feed.includes('../profileInterests.js'), 'editor shares the canonical list');
+  assert.ok(feed.includes('PROFILE_INTEREST_OPTIONS'), 'options list used');
+  assert.ok(feed.includes('parseProfileInterests'), 'legacy text prefills the boxes');
+  assert.ok(feed.includes('selectedInterests()'), 'submit joins the checked boxes');
+  assert.ok(!feed.includes('profile-interests'), 'free-text input gone from the editor');
+  assert.ok(feed.includes('matchReasons'), 'matcher reasons surface on learner rows');
+  assert.ok(feed.includes('Matched by shared interests and level'), 'discover explains the matching');
+});
+test('deck examples define words like reading does', () => {
+  const source = readSource('src/pages/communityFeed.js');
   assert.ok(source.includes('/api/lookup/define-sentence'), 'bounded sentence lookup');
   assert.ok(source.includes('openDefineDialog'), 'chips dialog');
   assert.ok(source.includes('openDefinitionDialog'), 'per-word definition dialog');

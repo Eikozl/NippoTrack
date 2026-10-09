@@ -1627,6 +1627,41 @@ const DISCOVER_LEARNERS_WINDOW_DAYS = 30;
 // Comments weigh 3x likes: conversation signals harder than applause.
 // Pure in (likeCount, commentCount, createdAt, nowMs) → pure out, so the
 // ranking is deterministic: same input rows always yield the same order.
+// Learner-match score (EXACT formula — keep the report in sync if this
+// ever changes): shared interests +2 each (first 3 named in reasons),
+// same current JLPT level +2, same study target +1. Pure in
+// (viewerRow, candidateRow) → pure out { score, reasons }, so the ranking
+// is deterministic and unit-testable without a live DB. Interest tokens are
+// comma/semicolon-split, lowercased, capped — canonical multi-select values
+// and legacy free text normalize identically.
+function normalizeInterestTokens(value) {
+  return String(value || '')
+    .split(/[,;]/)
+    .map((token) => token.trim().toLowerCase())
+    .filter((token) => token.length > 0 && token.length <= 40)
+    .slice(0, 20);
+}
+function scoreLearnerMatch(viewer, candidate) {
+  const mine = new Set(normalizeInterestTokens(viewer?.interests));
+  const theirs = [...new Set(normalizeInterestTokens(candidate?.interests))];
+  const shared = theirs.filter((token) => mine.has(token));
+  let score = 0;
+  const reasons = [];
+  if (shared.length) {
+    score += 2 * shared.length;
+    for (const token of shared.slice(0, 3)) reasons.push(`Shares interest: ${token}`);
+  }
+  if (viewer?.jlpt_level && candidate?.jlpt_level && viewer.jlpt_level === candidate.jlpt_level) {
+    score += 2;
+    reasons.push(`Same level: ${viewer.jlpt_level}`);
+  }
+  if (viewer?.target_jlpt && candidate?.target_jlpt && viewer.target_jlpt === candidate.target_jlpt) {
+    score += 1;
+    reasons.push(`Studying toward ${viewer.target_jlpt}`);
+  }
+  return { score, reasons };
+}
+
 function popularScore(likeCount, commentCount, createdAt, nowMs = Date.now()) {
   const likes = Math.max(0, Number(likeCount) || 0);
   const comments = Math.max(0, Number(commentCount) || 0);
@@ -1639,6 +1674,12 @@ function popularScore(likeCount, commentCount, createdAt, nowMs = Date.now()) {
 const DISCOVER_POST_PROJECTION = 'p.id_community_post AS id, p.author_id, p.post_type, p.title, p.body, p.japanese_text, p.translation, ' + 'p.entity_type, p.entity_id, p.deck_id, p.reading_id, p.snapshot_json, p.created_at, ' + 'p.updated_at, ' + 'up.username AS author_username, up.display_name AS author_display, up.avatar_url AS author_avatar, ' + POST_COUNT_SELECT;
 
 async function getDiscover(executor, viewerId) {
+  // Learner matching inputs: the viewer's own interests + level tags. One
+  // bounded row; fail-open to {} (pure recency) when unreadable.
+  const viewerPromise = executor.execute(
+    'SELECT interests, jlpt_level, target_jlpt FROM user_profile WHERE user_id = ?',
+    [viewerId]
+  ).then(([rows]) => (Array.isArray(rows) ? rows[0] : null)).catch(() => null);
   // popular candidates: newest 50 visible posts in the 7-day window; ranked
   // in JS by popularScore (keeps the ranking unit-testable without a live DB
   // and deterministic across engines). Bound documented: beyond 50 posts in
@@ -1656,10 +1697,12 @@ async function getDiscover(executor, viewerId) {
   );
   // learners-you-may-like: authors with recent visible posts the viewer does
   // NOT follow yet. Excludes self, private profiles and blocked pairs (via
-  // visibilityWhere), windowed to 30 days, ordered by recent activity
-  // (max post id is monotonic → total order, deterministic).
+  // visibilityWhere), windowed to 30 days. Ranked in JS by learner-match
+  // score (shared interests + level affinity, then recent activity) so the
+  // ranking stays unit-testable without a live DB, like popularScore.
   const learnersPromise = executor.execute(
     `SELECT up.user_id, up.username, up.display_name, up.avatar_url, up.bio,
+       up.interests, up.jlpt_level, up.target_jlpt,
        MAX(p.id_community_post) AS last_post_id, MAX(p.created_at) AS last_active
       FROM community_posts p
       JOIN user_profile up ON up.user_id = p.author_id
@@ -1667,7 +1710,8 @@ async function getDiscover(executor, viewerId) {
         AND p.author_id <> ?
         AND p.created_at >= NOW() - INTERVAL '30 days'
         AND NOT EXISTS (SELECT 1 FROM user_follows f WHERE f.follower_id = ? AND f.followed_id = p.author_id)
-      GROUP BY up.user_id, up.username, up.display_name, up.avatar_url, up.bio
+      GROUP BY up.user_id, up.username, up.display_name, up.avatar_url, up.bio,
+        up.interests, up.jlpt_level, up.target_jlpt
       ORDER BY last_post_id DESC LIMIT ?`,
     [...visibilityParams(viewerId), viewerId, viewerId, MAX_DISCOVER_ITEMS]
   );
@@ -1708,8 +1752,8 @@ async function getDiscover(executor, viewerId) {
     ' ORDER BY p.id_community_post DESC LIMIT ?',
     [viewerId, ...visibilityParams(viewerId), MAX_DISCOVER_ITEMS]
   );
-  const [[popularRows], [learnerRows], [deckRows], [readingRows], [questionRows]] = await Promise.all([
-    popularPromise, learnersPromise, decksPromise, readingsPromise, questionsPromise
+  const [[popularRows], [learnerRows], [deckRows], [readingRows], [questionRows], viewerProfile] = await Promise.all([
+    popularPromise, learnersPromise, decksPromise, readingsPromise, questionsPromise, viewerPromise
   ]);
   // Phase 3 batched pattern reused: one edge query for viewer-relative flags
   // (no per-row N+1). Learners are unfollowed by construction, so `following`
@@ -1728,16 +1772,24 @@ async function getDiscover(executor, viewerId) {
       if (String(edge.followed_id) === String(viewerId)) followsYouSet.add(String(edge.follower_id));
     }
   }
-  const learners = (Array.isArray(learnerRows) ? learnerRows : []).map((row) => ({
-    userId: row.user_id,
-    username: row.username,
-    displayName: row.display_name || null,
-    avatarUrl: row.avatar_url || null,
-    bio: row.bio || null,
-    following: followingSet.has(String(row.user_id)),
-    followsYou: followsYouSet.has(String(row.user_id)),
-    lastActiveAt: row.last_active || null
-  }));
+  const learners = (Array.isArray(learnerRows) ? learnerRows : []).map((row) => {
+    const match = scoreLearnerMatch(viewerProfile, row);
+    return {
+      userId: row.user_id,
+      username: row.username,
+      displayName: row.display_name || null,
+      avatarUrl: row.avatar_url || null,
+      bio: row.bio || null,
+      following: followingSet.has(String(row.user_id)),
+      followsYou: followsYouSet.has(String(row.user_id)),
+      lastActiveAt: row.last_active || null,
+      matchScore: match.score,
+      matchReasons: match.reasons,
+      lastPostId: Number(row.last_post_id) || 0
+    };
+  }).sort((a, b) => (b.matchScore - a.matchScore) || (b.lastPostId - a.lastPostId))
+    .slice(0, MAX_DISCOVER_ITEMS)
+    .map(({ lastPostId, ...rest }) => rest);
   const popular = (Array.isArray(popularRows) ? popularRows : [])
     .map((row) => ({
       post: mapPost(row, viewerId),
@@ -1790,7 +1842,9 @@ module.exports = {
   listNotifications,
   markAllNotificationsRead,
   markNotificationRead,
+  normalizeInterestTokens,
   popularScore,
+  scoreLearnerMatch,
   searchCommunity,
   toggleLike,
   getShareStats,

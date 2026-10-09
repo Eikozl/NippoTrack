@@ -249,6 +249,9 @@ function discoverStub(candidates, learners) {
   return async (sql, params = []) => {
     const count = placeholders(sql);
     assert.equal(params.length, count, `params bind every placeholder: ${sql.slice(0, 90)}`);
+    if (/SELECT interests, jlpt_level, target_jlpt FROM user_profile/i.test(sql)) {
+      return [[{ interests: null, jlpt_level: null, target_jlpt: null }]];
+    }
     if (/GROUP BY up\.user_id/i.test(sql)) return [learners];
     if (/INTERVAL '7 days'/i.test(sql)) return [candidates];
     if (/FROM deck_publications d/i.test(sql)) {
@@ -327,7 +330,10 @@ test('discover returns exact section shape, capped and gated', async () => {
     assert.equal(discover.questions[0].postType, 'question');
   });
   const sectionQueries = seen.filter(({ sql }) => !/SELECT follower_id/i.test(sql));
-  assert.equal(sectionQueries.length, 5, 'five bounded section queries + one batched edge query');
+  assert.equal(sectionQueries.length, 6, 'five bounded section queries + viewer match inputs + one batched edge query');
+  const viewerQuery = seen.find(({ sql }) => /SELECT interests, jlpt_level, target_jlpt FROM user_profile/i.test(sql));
+  assert.ok(viewerQuery, 'matcher reads the viewer interests/levels once');
+  assert.deepEqual(viewerQuery.params, [USER_ID], 'viewer lookup binds the caller only');
   for (const { sql, params } of sectionQueries) {
     if (/GROUP BY|INTERVAL|question|deck_publications|reading_publications/i.test(sql)) {
       assert.ok(/user_blocks/i.test(sql), `every section excludes blocked pairs: ${sql.slice(0, 60)}`);
@@ -409,6 +415,9 @@ test('every phase-4 query binds exactly its placeholders like Postgres would', a
     calls.push({ sql, params });
     assert.equal(params.length, placeholders(sql), `param count must match placeholders: ${sql.slice(0, 100)}`);
     if (/FROM user_profile up/i.test(sql) && !/GROUP BY/i.test(sql)) return [[]];
+    if (/SELECT interests, jlpt_level, target_jlpt FROM user_profile/i.test(sql)) {
+      return [[{ interests: null, jlpt_level: null, target_jlpt: null }]];
+    }
     if (/GROUP BY up\.user_id/i.test(sql)) return [[]];
     if (/JOIN deck_publication_items/i.test(sql)) return [[]];
     if (/FROM community_posts p/i.test(sql)) {
@@ -434,4 +443,51 @@ test('every phase-4 query binds exactly its placeholders like Postgres would', a
     await service.getDiscover(pool, USER_ID);
   });
   assert.ok(calls.length > 15, `touched a realistic query count, got ${calls.length}`);
+});
+
+test('learner-match scoring: shared interests, level affinity, then recency', () => {
+  const scored = service.scoreLearnerMatch(
+    { interests: 'manga, travel', jlpt_level: 'N4', target_jlpt: 'N3' },
+    { interests: 'Travel; manga', jlpt_level: 'N4', target_jlpt: 'N3' }
+  );
+  assert.equal(scored.score, 2 * 2 + 2 + 1, 'two shared interests + same level + same target');
+  assert.deepEqual(scored.reasons, ['Shares interest: travel', 'Shares interest: manga', 'Same level: N4', 'Studying toward N3']);
+  const none = service.scoreLearnerMatch(
+    { interests: null, jlpt_level: null, target_jlpt: null },
+    { interests: 'manga', jlpt_level: 'N4', target_jlpt: 'N3' }
+  );
+  assert.deepEqual(none, { score: 0, reasons: [] }, 'empty viewer profile matches nothing (pure recency)');
+  const partial = service.scoreLearnerMatch(
+    { interests: '  ANIME ,, anime; ', jlpt_level: 'N5', target_jlpt: null },
+    { interests: 'anime', jlpt_level: 'N4', target_jlpt: null }
+  );
+  assert.equal(partial.score, 2, 'tokens normalize case/blank/dupes; levels must be equal');
+});
+
+test('discover learners order by match score, recency breaks ties', async () => {
+  const learners = [
+    { user_id: OTHER_ID, username: 'yuki', display_name: null, avatar_url: null, bio: null, interests: null, jlpt_level: null, target_jlpt: null, last_post_id: 90, last_active: '2026-09-25' },
+    { user_id: THIRD_ID, username: 'cara', display_name: null, avatar_url: null, bio: null, interests: 'manga', jlpt_level: 'N4', target_jlpt: null, last_post_id: 80, last_active: '2026-09-24' }
+  ];
+  await withPoolExecute(async (sql, params = []) => {
+    if (/SELECT interests, jlpt_level, target_jlpt FROM user_profile/i.test(sql)) {
+      return [[{ interests: 'manga, travel', jlpt_level: 'N4', target_jlpt: 'N3' }]];
+    }
+    if (/GROUP BY up\.user_id/i.test(sql)) return [learners];
+    if (/INTERVAL '7 days'/i.test(sql)) return [[]];
+    if (/FROM deck_publications d/i.test(sql)) return [[]];
+    if (/FROM reading_publications r/i.test(sql)) return [[]];
+    if (/post_type = 'question'/i.test(sql)) return [[]];
+    if (/SELECT follower_id, followed_id/i.test(sql)) return [[]];
+    throw new Error(`Unexpected SQL: ${sql.slice(0, 80)}`);
+  }, async () => {
+    const discover = await service.getDiscover(pool, USER_ID);
+    assert.equal(discover.learners.length, 2);
+    // cara scores 2 (manga) + 2 (N4) = 4 over yuki's 0 despite the older post.
+    assert.equal(discover.learners[0].username, 'cara');
+    assert.equal(discover.learners[0].matchScore, 4);
+    assert.deepEqual(discover.learners[0].matchReasons, ['Shares interest: manga', 'Same level: N4']);
+    assert.equal(discover.learners[1].username, 'yuki');
+    assert.deepEqual(discover.learners[1].matchReasons, []);
+  });
 });

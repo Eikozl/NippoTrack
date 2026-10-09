@@ -4,6 +4,7 @@
 // all identity comes from the server payloads (req.user.id server-side).
 import { apiRequest } from '../api';
 import { icon } from '../icons';
+import { PROFILE_INTEREST_OPTIONS, formatProfileInterests, parseProfileInterests } from '../profileInterests.js';
 import { speakJapanese } from '../speech.js';
 import { mountKanjiWriting } from '../kanjiWriting.js';
 import { avatarUrlFor, isSafeAvatarUrl } from '../avatarPolicy.js';
@@ -2230,7 +2231,7 @@ async function openDeckViewer(deckId, title) {
         const questions = Array.isArray(data?.questions) ? data.questions.slice(0, 5) : [];
         const sections = [];
         if (learners.length) {
-          const { section, list } = discoverSection('Learners you may like', 'Active posters you do not follow yet — follow whoever inspires you.');
+          const { section, list } = discoverSection('Learners you may like', 'Matched by shared interests and level — set yours in Edit profile.');
           for (const person of learners) {
             const row = personRow(person, () => {}, openProfile);
             if (row) list.appendChild(row);
@@ -2294,7 +2295,13 @@ async function openDeckViewer(deckId, title) {
       element('div', { className: 'min-w-0' }, [
         element('p', { className: 'truncate text-sm font-semibold text-ink', text: person.displayName || person.username }),
         element('p', { className: 'truncate text-xs text-muted', text: `@${person.username}${person.bio ? ` · ${person.bio}` : ''}` }),
-        ...(followsYou ? [element('p', { className: 'truncate text-xs text-muted', text: 'Follows you' })] : [])
+        ...(followsYou ? [element('p', { className: 'truncate text-xs text-muted', text: 'Follows you' })] : []),
+        // Discover explains itself: the matcher names why this learner
+        // surfaced (shared interests, same level). Other rows carry no
+        // matchReasons and render exactly as before.
+        ...(Array.isArray(person.matchReasons) && person.matchReasons.length
+          ? [element('p', { className: 'truncate text-xs font-medium text-vermilion', text: person.matchReasons.slice(0, 2).join(' · ') })]
+          : [])
       ])
     ]);
     if (typeof onProfile === 'function') {
@@ -2332,9 +2339,15 @@ async function openDeckViewer(deckId, title) {
       JLPT_PROFILE_OPTIONS.map((value) => element('option', { text: value === '' ? 'Current level: not set' : value, attrs: { value } })));
     const targetSelect = element('select', { className: 'field-control', attrs: { id: 'profile-target', name: 'target_jlpt', 'aria-label': 'Target JLPT level' } },
       JLPT_PROFILE_OPTIONS.map((value) => element('option', { text: value === '' ? 'Target level: not set' : value, attrs: { value } })));
-    const interestsInput = element('input', {
-      className: 'field-control', attrs: { id: 'profile-interests', name: 'interests', type: 'text', maxlength: '500', placeholder: 'Interests: manga, N3 grammar, travel…' }
+    // Interests are a canonical multi-select (shared list drives Discover
+    // matching); stored comma-joined in the same column, no migration.
+    const interestBoxes = PROFILE_INTEREST_OPTIONS.map((value) => {
+      const box = element('input', { attrs: { type: 'checkbox', name: 'profile-interest', value, 'aria-label': value } });
+      const item = element('label', { className: 'flex min-h-9 cursor-pointer items-center gap-2 rounded-xl border border-stone px-3 py-1.5 text-sm text-ink' }, [box, element('span', { text: value })]);
+      return { value, box, item };
     });
+    const interestsGroup = element('div', { className: 'flex flex-wrap gap-2' }, interestBoxes.map((entry) => entry.item));
+    const selectedInterests = () => formatProfileInterests(interestBoxes.filter((entry) => entry.box.checked).map((entry) => entry.value));
     const publicBox = element('input', { attrs: { id: 'profile-public', name: 'is_public', type: 'checkbox' } });
     // Handle cooldown (24h, enforced server-side): the hint names the rule
     // up front and, when the profile carries a recent change, the exact
@@ -2358,7 +2371,8 @@ async function openDeckViewer(deckId, title) {
       bioInput.value = saved.bio || '';
       levelSelect.value = saved.jlptLevel || '';
       targetSelect.value = saved.targetJlpt || '';
-      interestsInput.value = saved.interests || '';
+      const picked = new Set(parseProfileInterests(saved.interests));
+      for (const entry of interestBoxes) entry.box.checked = picked.has(entry.value);
       publicBox.checked = Boolean(saved.isPublic);
       paintCooldownNote(saved);
     };
@@ -2372,7 +2386,7 @@ async function openDeckViewer(deckId, title) {
         element('label', { className: 'field sm:col-span-2', attrs: { for: 'profile-bio' } }, [element('span', { text: 'Bio' }), bioInput]),
         element('label', { className: 'field', attrs: { for: 'profile-level' } }, [element('span', { text: 'Current level' }), levelSelect]),
         element('label', { className: 'field', attrs: { for: 'profile-target' } }, [element('span', { text: 'Studying toward' }), targetSelect]),
-        element('label', { className: 'field sm:col-span-2', attrs: { for: 'profile-interests' } }, [element('span', { text: 'Interests' }), interestsInput]),
+        element('div', { className: 'field sm:col-span-2', attrs: { role: 'group', 'aria-label': 'Interests' } }, [element('span', { text: 'Interests (pick what fits — drives Discover matching)' }), interestsGroup]),
         element('label', { className: 'flex items-center gap-2 text-sm text-ink sm:col-span-2', attrs: { for: 'profile-public' } }, [publicBox, element('span', { text: 'Public profile' })])
       ],
       submitLabel: 'Save changes',
@@ -2385,7 +2399,7 @@ async function openDeckViewer(deckId, title) {
               bio: bioInput.value,
               jlpt_level: levelSelect.value || '',
               target_jlpt: targetSelect.value || '',
-              interests: interestsInput.value,
+              interests: selectedInterests(),
               is_public: publicBox.checked
             }
           });
