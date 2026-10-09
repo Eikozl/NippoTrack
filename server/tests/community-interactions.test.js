@@ -145,6 +145,31 @@ test('follows are idempotent and gated on public, unblocked users', async () => 
   });
 });
 
+test('unfollow removes only the outgoing edge, so mutuals can leave', async () => {
+  const seen = [];
+  await withPoolExecute(async (sql, params = []) => {
+    seen.push({ sql, params });
+    if (/FROM user_profile WHERE username/i.test(sql)) return [[{ user_id: OTHER_ID }]];
+    if (/^DELETE FROM user_follows/i.test(sql.trim())) {
+      // Exactly one directed edge: the reverse (their follow of you) stays.
+      assert.deepEqual(params, [USER_ID, OTHER_ID], 'never touches the inbound edge');
+      assert.ok(!/OR/i.test(sql), 'no bidirectional delete');
+      return [{ affectedRows: 1 }];
+    }
+    throw new Error(`Unexpected SQL: ${sql.slice(0, 60)}`);
+  }, async () => {
+    assert.deepEqual(await service.unfollowUser(pool, USER_ID, 'yuki'), { unfollowed: OTHER_ID, username: 'yuki' });
+  });
+  // Idempotent: unfollowing someone you do not follow still succeeds.
+  await withPoolExecute(async (sql) => {
+    if (/FROM user_profile WHERE username/i.test(sql)) return [[{ user_id: OTHER_ID }]];
+    if (/^DELETE FROM user_follows/i.test(sql.trim())) return [{ affectedRows: 0 }];
+    throw new Error(`Unexpected SQL: ${sql.slice(0, 60)}`);
+  }, async () => {
+    assert.deepEqual(await service.unfollowUser(pool, USER_ID, 'yuki'), { unfollowed: OTHER_ID, username: 'yuki' });
+  });
+});
+
 test('notifications list paginates with unread count; read is own-only', async () => {
   const seen = [];
   await withPoolExecute(async (sql, params = []) => {

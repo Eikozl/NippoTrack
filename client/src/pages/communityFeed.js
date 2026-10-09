@@ -1650,14 +1650,32 @@ async function openDeckViewer(deckId, title) {
     button.addEventListener('click', (event) => {
       event.stopPropagation();
       withPendingAction(button, async () => {
-        if (following) {
+        // One rule, no flag skew: any held follow (plain or mutual)
+        // unfollows, anything else follows. Flag combinations from mixed
+        // sources could otherwise re-follow forever instead of unfollowing.
+        const holding = following === true || mutual === true;
+        if (holding) {
           await apiRequest('/api/community/unfollow', { method: 'POST', body: { username } });
-          following = false;
-          if (mutual) mutual = false;
         } else {
           await apiRequest('/api/community/follow', { method: 'POST', body: { username } });
-          following = true;
-          if (followsYou) mutual = true;
+        }
+        // Re-sync from the server: local flips lie after races or stale
+        // flags, so the button paints authoritative state (one cheap read).
+        try {
+          const synced = await apiRequest(`/api/community/profile/${encodeURIComponent(username)}`);
+          following = (synced.viewerFollowing ?? synced.following) === true;
+          followsYou = synced.followsYou === true;
+          mutual = synced.mutual === true || (following && followsYou);
+        } catch {
+          // Fail-open: the mutation already succeeded, so the local flip
+          // still paints (a private target 404s the sync read, for example).
+          if (holding) {
+            following = false;
+            mutual = false;
+          } else {
+            following = true;
+            if (followsYou) mutual = true;
+          }
         }
         paint();
         if (typeof onChange === 'function') onChange(following);
@@ -2476,7 +2494,7 @@ async function openDeckViewer(deckId, title) {
               // (only share-stats / post stats carry streakDays). Never invent.
             ])
           ]),
-          ...(profile.isSelf ? [] : [followButton(profile.username, () => {}, {
+          ...(profile.isSelf ? [] : [followButton(profile.username, () => renderProfile(profile.username), {
             initialFollowing: (profile.viewerFollowing ?? profile.following) === true,
             followsYou: profile.followsYou === true,
             mutual: profile.mutual === true
