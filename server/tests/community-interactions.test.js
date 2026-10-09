@@ -275,3 +275,63 @@ test('own profile accepts level, target and interests with strict validation', a
     assert.equal(unknown.status(), 400);
   });
 });
+
+test('username changes stamp the clock; repeats within 24h are rejected', async () => {
+  function mockRes() {
+    let statusCode = 200;
+    let body;
+    const res = {
+      status(code) { statusCode = code; return res; },
+      json(value) { body = value; return res; }
+    };
+    return { res, status: () => statusCode, body: () => body };
+  }
+  async function runPut(currentRow, body) {
+    const seen = [];
+    let outcome;
+    await withPoolExecute(async (sql, params = []) => {
+      seen.push({ sql, params });
+      if (/SELECT username, username_changed_at FROM user_profile/i.test(sql)) return [[currentRow]];
+      if (/INSERT INTO user_profile/i.test(sql)) return [{ affectedRows: 1 }];
+      if (/FROM user_profile WHERE user_id/i.test(sql)) {
+        return [[{ username: 'yuki', display_name: null, bio: null, avatar_url: null, is_public: false, jlpt_level: null, target_jlpt: null, interests: null, username_changed_at: '2026-10-09T12:00:00.000Z' }]];
+      }
+      throw new Error(`Unexpected SQL: ${sql.slice(0, 80)}`);
+    }, async () => {
+      const harness = mockRes();
+      await usersController.putOwnProfile({ body, user: { id: USER_ID } }, harness.res);
+      outcome = { status: harness.status(), body: harness.body(), seen };
+    });
+    return outcome;
+  }
+  // First-ever claim (NULL stamp): allowed and stamped.
+  {
+    const { status, seen } = await runPut({ username: null, username_changed_at: null }, { username: 'yuki' });
+    assert.equal(status, 200);
+    const upsert = seen.find(({ sql }) => /INSERT INTO user_profile/i.test(sql));
+    assert.ok(upsert.sql.includes('username_changed_at'), 'change stamps the clock');
+  }
+  // Recent change (1h ago): rejected with the remaining wait.
+  {
+    const recent = new Date(Date.now() - 3600 * 1000).toISOString();
+    const { status, body, seen } = await runPut({ username: 'yuki', username_changed_at: recent }, { username: 'yuko' });
+    assert.equal(status, 400);
+    assert.match(body.error, /again in 2\d?h|again in 23h/, 'names the remaining cooldown');
+    assert.ok(!seen.some(({ sql }) => /INSERT INTO user_profile/i.test(sql)), 'rejected before any write');
+  }
+  // Same value: no-op, no stamp, no rejection.
+  {
+    const recent = new Date(Date.now() - 3600 * 1000).toISOString();
+    const { status, seen } = await runPut({ username: 'yuki', username_changed_at: recent }, { username: 'yuki', bio: 'hi' });
+    assert.equal(status, 200);
+    const upsert = seen.find(({ sql }) => /INSERT INTO user_profile/i.test(sql));
+    assert.ok(!upsert.sql.includes('username_changed_at'), 're-saving the same handle never burns the cooldown');
+  }
+  // Old change (25h ago): allowed and stamped.
+  {
+    const old = new Date(Date.now() - 25 * 3600 * 1000).toISOString();
+    const { status, seen } = await runPut({ username: 'yuki', username_changed_at: old }, { username: 'yuko' });
+    assert.equal(status, 200);
+    assert.ok(seen.find(({ sql }) => /INSERT INTO user_profile/i.test(sql)).sql.includes('username_changed_at'));
+  }
+});

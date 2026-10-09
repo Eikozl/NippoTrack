@@ -2336,6 +2336,23 @@ async function openDeckViewer(deckId, title) {
       className: 'field-control', attrs: { id: 'profile-interests', name: 'interests', type: 'text', maxlength: '500', placeholder: 'Interests: manga, N3 grammar, travel…' }
     });
     const publicBox = element('input', { attrs: { id: 'profile-public', name: 'is_public', type: 'checkbox' } });
+    // Handle cooldown (24h, enforced server-side): the hint names the rule
+    // up front and, when the profile carries a recent change, the exact
+    // moment the next change unlocks — no surprise rejections.
+    const cooldownNote = element('p', { className: 'text-xs leading-5 text-muted sm:col-span-2', text: 'Usernames can change once every 24 hours.' });
+    const paintCooldownNote = (saved) => {
+      const changedAt = saved && saved.usernameChangedAt ? Date.parse(saved.usernameChangedAt) : NaN;
+      if (!Number.isFinite(changedAt)) {
+        cooldownNote.textContent = 'Usernames can change once every 24 hours.';
+        return;
+      }
+      const next = changedAt + 24 * 3600 * 1000;
+      if (next <= Date.now()) {
+        cooldownNote.textContent = 'Usernames can change once every 24 hours.';
+        return;
+      }
+      cooldownNote.textContent = `You last changed it recently — the next change unlocks ${new Date(next).toLocaleString()}.`;
+    };
     const fillFrom = (saved) => {
       usernameInput.value = saved.username || '';
       bioInput.value = saved.bio || '';
@@ -2343,6 +2360,7 @@ async function openDeckViewer(deckId, title) {
       targetSelect.value = saved.targetJlpt || '';
       interestsInput.value = saved.interests || '';
       publicBox.checked = Boolean(saved.isPublic);
+      paintCooldownNote(saved);
     };
     openDialog({
       title: 'Edit profile',
@@ -2350,6 +2368,7 @@ async function openDeckViewer(deckId, title) {
       content: [
         element('p', { className: 'text-sm text-muted sm:col-span-2', attrs: { id: 'profile-username-hint' }, text: 'Claim a username to be followable in Community. Only what you publish is public.' }),
         element('label', { className: 'field sm:col-span-2', attrs: { for: 'profile-username' } }, [element('span', { text: 'Username (2–30, lowercase, hyphens)' }), usernameInput]),
+        cooldownNote,
         element('label', { className: 'field sm:col-span-2', attrs: { for: 'profile-bio' } }, [element('span', { text: 'Bio' }), bioInput]),
         element('label', { className: 'field', attrs: { for: 'profile-level' } }, [element('span', { text: 'Current level' }), levelSelect]),
         element('label', { className: 'field', attrs: { for: 'profile-target' } }, [element('span', { text: 'Studying toward' }), targetSelect]),

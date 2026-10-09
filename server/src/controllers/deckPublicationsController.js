@@ -154,7 +154,7 @@ async function getPublicUser(req, res) {
 async function getOwnProfile(req, res) {
   try {
     const [rows] = await pool.execute(
-      'SELECT username, display_name, bio, avatar_url, is_public, jlpt_level, target_jlpt, interests FROM user_profile WHERE user_id = ?',
+      'SELECT username, display_name, bio, avatar_url, is_public, jlpt_level, target_jlpt, interests, username_changed_at FROM user_profile WHERE user_id = ?',
       [req.user.id]
     );
     const row = Array.isArray(rows) ? rows[0] : {};
@@ -166,7 +166,8 @@ async function getOwnProfile(req, res) {
       isPublic: Boolean(row?.is_public),
       jlptLevel: row?.jlpt_level || null,
       targetJlpt: row?.target_jlpt || null,
-      interests: row?.interests || null
+      interests: row?.interests || null,
+      usernameChangedAt: row?.username_changed_at || null
     });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load the profile.' });
@@ -181,12 +182,35 @@ async function putOwnProfile(req, res) {
     const body = req.body || {};
     rejectUnknownFields(body, OWN_PROFILE_FIELDS);
     const patch = {};
+    let stampUsernameChange = false;
     if (body.username !== undefined) {
       const username = String(body.username || '').toLowerCase();
       if (username !== '' && !/^[a-z0-9][a-z0-9-]{1,29}$/.test(username)) {
         throw new ValidationError('username holds 2-30 lowercase letters, numbers or hyphens');
       }
       patch.username = username === '' ? null : username;
+      // Handle cooldown (24h): handles are followable identity, so rapid
+      // rename cycling is rejected. Any effective change — set, rename or
+      // clear — stamps the clock uniformly. NULL stamp (never changed, or
+      // changed before migration 048) always allows the next change.
+      const [currentRows] = await pool.execute(
+        'SELECT username, username_changed_at FROM user_profile WHERE user_id = ?',
+        [req.user.id]
+      );
+      const current = Array.isArray(currentRows) ? currentRows[0] : null;
+      const currentUsername = typeof current?.username === 'string' ? current.username.toLowerCase() : null;
+      if (patch.username !== currentUsername) {
+        const changedAt = current?.username_changed_at ? new Date(current.username_changed_at).getTime() : NaN;
+        if (Number.isFinite(changedAt)) {
+          const remainingMs = 24 * 3600 * 1000 - (Date.now() - changedAt);
+          if (remainingMs > 0) {
+            const hours = Math.floor(remainingMs / 3600000);
+            const minutes = Math.ceil((remainingMs % 3600000) / 60000);
+            throw new ValidationError(`Username was changed recently — you can change it again in ${hours}h ${minutes}m.`);
+          }
+        }
+        stampUsernameChange = true;
+      }
     }
     if (body.display_name !== undefined) {
       const displayName = String(body.display_name || '').slice(0, 50);
@@ -234,11 +258,15 @@ async function putOwnProfile(req, res) {
     }
     if (body.interests !== undefined) patch.interests = String(body.interests || '').slice(0, 500) || null;
     const columns = Object.keys(patch);
-    if (!columns.length) throw new ValidationError('Nothing to update.');
-    const excluded = columns.map((column) => `${column} = EXCLUDED.${column}`).join(', ');
+    if (!columns.length && !stampUsernameChange) throw new ValidationError('Nothing to update.');
+    // A username-only "change" to the same value is a no-op (no stamp, and
+    // it still counts as an update only if other fields changed).
+    const insertColumns = stampUsernameChange ? [...columns, 'username_changed_at'] : columns;
+    const excluded = columns.map((column) => `${column} = EXCLUDED.${column}`).join(', ')
+      + (stampUsernameChange ? `${columns.length ? ', ' : ''}username_changed_at = CURRENT_TIMESTAMP` : '');
     try {
       await pool.execute(
-        `INSERT INTO user_profile (user_id, ${columns.join(', ')}) VALUES (?, ${columns.map(() => '?').join(', ')})
+        `INSERT INTO user_profile (user_id, ${insertColumns.join(', ')}) VALUES (?, ${columns.map(() => '?').join(', ')}${stampUsernameChange ? ', CURRENT_TIMESTAMP' : ''})
          ON CONFLICT (user_id) DO UPDATE SET ${excluded}`,
         [req.user.id, ...columns.map((column) => patch[column])]
       );
@@ -249,7 +277,7 @@ async function putOwnProfile(req, res) {
       throw error;
     }
     const [rows] = await pool.execute(
-      'SELECT username, display_name, bio, avatar_url, is_public, jlpt_level, target_jlpt, interests FROM user_profile WHERE user_id = ?',
+      'SELECT username, display_name, bio, avatar_url, is_public, jlpt_level, target_jlpt, interests, username_changed_at FROM user_profile WHERE user_id = ?',
       [req.user.id]
     );
     const row = Array.isArray(rows) ? rows[0] : {};
@@ -261,7 +289,8 @@ async function putOwnProfile(req, res) {
       isPublic: Boolean(row?.is_public),
       jlptLevel: row?.jlpt_level || null,
       targetJlpt: row?.target_jlpt || null,
-      interests: row?.interests || null
+      interests: row?.interests || null,
+      usernameChangedAt: row?.username_changed_at || null
     });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to save the public profile.' });
