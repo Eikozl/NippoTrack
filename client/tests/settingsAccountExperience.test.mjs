@@ -70,12 +70,12 @@ test('Avatar upload surface lives in Settings profile; public-profile editing li
   // moved out of settings: no block, fields, or save remain here.
   assert.equal(settings.split('Public profile').length - 1, 0, 'no public-profile block in settings');
   assert.ok(!settings.includes('publicProfileBlock'), 'block builder removed from settings');
-  for (const marker of ['profile-username', 'profile-bio', 'profile-level', 'profile-target', 'profile-interests', 'profile-public', 'jlpt_level', 'target_jlpt', 'Save public profile']) {
+  for (const marker of ['profile-username', 'profile-bio', 'profile-level', 'profile-target', 'profile-interest', 'profile-public', 'jlpt_level', 'target_jlpt', 'Save public profile']) {
     assert.ok(!settings.includes(marker), `settings no longer edits ${marker}`);
   }
   // The single editor now lives on the own Community profile dialog.
   const feed = readSource('src/pages/communityFeed.js');
-  for (const marker of ['profile-username', 'profile-bio', 'profile-level', 'profile-target', 'profile-interests', 'profile-public', 'jlpt_level', 'target_jlpt', 'is_public']) {
+  for (const marker of ['profile-username', 'profile-bio', 'profile-level', 'profile-target', 'profile-interest', 'profile-public', 'jlpt_level', 'target_jlpt', 'is_public']) {
     assert.ok(feed.includes(marker), `community dialog edits ${marker}`);
   }
   assert.ok(feed.includes('Edit profile'), 'own-profile entry point present');

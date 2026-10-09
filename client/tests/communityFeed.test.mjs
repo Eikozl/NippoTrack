@@ -248,11 +248,11 @@ test('empty states guide instead of dead-ending', () => {
 
 test('community owns the full public identity incl. visibility (moved from settings)', () => {
   const feed = readSource('src/pages/communityFeed.js');
-  for (const marker of ['profile-level', 'profile-target', 'profile-interests', 'profile-public', 'jlpt_level', 'target_jlpt']) {
+  for (const marker of ['profile-level', 'profile-target', 'profile-interest', 'profile-public', 'jlpt_level', 'target_jlpt']) {
     assert.ok(feed.includes(marker), `community dialog edits ${marker}`);
   }
   const settings = readSource('src/pages/settings.js');
-  for (const marker of ['profile-level', 'profile-target', 'profile-interests', 'profile-public', 'jlpt_level', 'target_jlpt']) {
+  for (const marker of ['profile-level', 'profile-target', 'profile-interest', 'profile-public', 'jlpt_level', 'target_jlpt']) {
     assert.ok(!settings.includes(marker), `settings no longer edits ${marker}`);
   }
 });
