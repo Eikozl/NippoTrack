@@ -2304,6 +2304,23 @@ async function openDeckViewer(deckId, title) {
     loadDiscover();
   }
 
+  // Match reasons, compacted: "Shares interest: a · Shares interest: b"
+  // collapses to "Shared interests: a, b" so the row never grows a second
+  // vermilion line (the extra line is what squeezed the row horizontally).
+  // Level/target reasons pass through untouched, capped at two total.
+  function formatMatchReasons(reasons) {
+    const list = Array.isArray(reasons) ? reasons : [];
+    const interests = [];
+    const rest = [];
+    for (const reason of list) {
+      const text = String(reason || '');
+      if (text.startsWith('Shares interest: ')) interests.push(text.slice('Shares interest: '.length));
+      else if (text) rest.push(text);
+    }
+    const merged = [...(interests.length ? [`Shared interest${interests.length === 1 ? '' : 's'}: ${[...new Set(interests)].join(', ')}`] : []), ...rest];
+    return merged.slice(0, 2);
+  }
+
   function personRow(person, onChange, onProfile) {
     // Followed-by signal: subtle "Follows you" text only when the backend
     // says so (search rows carry following/followsYou, follows member rows
@@ -2322,9 +2339,12 @@ async function openDeckViewer(deckId, title) {
         // Discover explains itself: the matcher names why this learner
         // surfaced (shared interests, same level). Other rows carry no
         // matchReasons and render exactly as before.
-        ...(Array.isArray(person.matchReasons) && person.matchReasons.length
-          ? [element('p', { className: 'truncate text-xs font-medium text-vermilion', text: person.matchReasons.slice(0, 2).join(' · ') })]
-          : [])
+        ...(() => {
+          const compact = formatMatchReasons(person.matchReasons);
+          return compact.length
+            ? [element('p', { className: 'truncate text-xs font-medium text-vermilion', text: compact.join(' · ') })]
+            : [];
+        })()
       ])
     ]);
     if (typeof onProfile === 'function') {
@@ -2333,13 +2353,13 @@ async function openDeckViewer(deckId, title) {
         onProfile(person.username);
       });
     }
-    return element('div', { className: 'surface flex items-center justify-between gap-3 p-3' }, [
+    return element('div', { className: 'surface flex w-full min-w-0 items-center justify-between gap-3 p-3' }, [
       nameButton,
-      followButton(person.username, onChange, hasInitial ? {
+      element('div', { className: 'shrink-0' }, [followButton(person.username, onChange, hasInitial ? {
         initialFollowing: rawFollowing === true,
         followsYou,
         mutual: person?.mutual === true || (rawFollowing === true && followsYou)
-      } : {})
+      } : {})])
     ]);
   }
 

@@ -93,3 +93,31 @@ test('Settings is reachable from the existing account trigger, not the sidebar',
   assert.ok(source.includes('id="account-button"') && source.includes('id="mobile-account-button"'), 'existing account triggers remain');
   assert.doesNotMatch(source, /sidebar[\s\S]{0,200}Account|Account[\s\S]{0,200}sidebar/i, 'no sidebar identity block added');
 });
+
+test('auth email links and token URLs forward to /app', () => {
+  const entry = readSource('src/entry.js');
+  assert.ok(entry.includes('access_token'), 'implicit tokens detected');
+  assert.ok(entry.includes('window.location.replace'), 'forward without history entry');
+  assert.ok(entry.includes('/app'), 'destination is the app, never the landing');
+});
+
+test('boot shows a neutral splash, never the login form, while verifying', () => {
+  const main = readSource('src/main.js');
+  assert.ok(main.includes('Checking your session'), 'splash copy');
+  assert.ok(main.includes('auth-boot-note'), 'splash styling hook');
+  const boot = main.slice(main.indexOf('async function bootstrapApp'));
+  assert.ok(boot.indexOf('Checking your session') < boot.indexOf('renderAuthGate'), 'splash renders before any gate');
+});
+
+test('auth emails carry branded buttons and working Supabase variables', () => {
+  const welcome = readFileSync(join(root, '../server/auth-emails/confirm-signup.html'), 'utf8');
+  const reset = readFileSync(join(root, '../server/auth-emails/reset-password.html'), 'utf8');
+  for (const [name, html] of [['welcome', welcome], ['reset', reset]]) {
+    assert.ok(html.includes('{{ .ConfirmationURL }}'), name + ' links the Supabase action URL');
+    assert.ok(html.includes('{{ .Email }}'), name + ' names the recipient');
+    assert.ok(html.includes('#5A5A8D'), name + ' uses the brand accent');
+    assert.ok(html.includes('#FFFCF7') && html.includes('#F5F0E8'), name + ' uses the warm canvas');
+  }
+  assert.ok(welcome.includes('>Authenticate</a>'), 'welcome CTA is a button, not a bare link');
+  assert.ok(reset.includes('>Reset password</a>'), 'recovery CTA is a button, not a bare link');
+});

@@ -172,20 +172,24 @@ function renderAuthGate(message = '', view = 'sign-in') {
 let firstExperienceSession = null;
 
 async function bootstrapApp() {
-  // Never leave the document blank while a stored session is checked remotely.
-  const closeGate = renderAuthGate('', initialAuthView);
+  // Neutral splash first: the old code rendered the sign-in form on EVERY
+  // cold boot (then swapped it away once the stored session verified), which
+  // read as "logged out again". The modal now opens only when no session
+  // exists; a valid stored session goes straight to the shell.
+  authRoot.replaceChildren(element('p', { className: 'auth-boot-note', text: 'Checking your session…', attrs: { role: 'status' } }));
+  const openGate = () => {
+    authRoot.replaceChildren();
+    renderAuthGate('', initialAuthView);
+  };
   try {
     if (!localAuthBypass) {
       const { data } = await supabase.auth.getSession();
-      if (!data.session) return;
+      if (!data.session) { openGate(); return; }
     }
     const session = await apiRequest('/api/auth/session', { notifyAuth: false });
-    if (!session.authenticated) return;
+    if (!session.authenticated) { openGate(); return; }
     currentAuthEmail = session.user?.email || localAuthBypassEmail || null;
     profileStore.setEmail(currentAuthEmail);
-    // Session restore must retire the gate modal through its own teardown
-    // (scroll lock, listeners, singleton) — never by dropping its nodes.
-    try { closeGate?.('silent'); } catch { /* teardown is best-effort */ }
     authRoot.replaceChildren();
     appShell.hidden = false;
     // Profile identity is presentation-only and never blocks the shell. The

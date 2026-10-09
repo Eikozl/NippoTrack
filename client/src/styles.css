@@ -891,3 +891,7 @@ body.placement-fullscreen #mobile-search-bar { display: none !important; }
 /* Deck example sentences clamp to two lines; the Define button opens
    tap-to-define instead of stretching item cards. */
 .example-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Boot splash: neutral session check shown instead of the sign-in form while
+   the stored session verifies, so returning learners never see a login flash. */
+.auth-boot-note { display: grid; min-height: 40vh; place-items: center; margin: 0; font-size: 0.875rem; color: var(--jlt-muted); }

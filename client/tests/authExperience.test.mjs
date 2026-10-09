@@ -99,11 +99,12 @@ test('legacy /app route reuses the same modal without diverging', () => {
   assert.ok(main.includes("onClose: () => window.location.assign('/')"), 'dismissed legacy gate lands on /');
 });
 
-test('session restore retires the gate through modal teardown, never by dropping nodes', () => {
+test('session restore never flashes the login form (neutral splash first)', () => {
   const boot = main.slice(main.indexOf('async function bootstrapApp()'));
-  assert.ok(boot.includes('const closeGate = renderAuthGate('), 'gate handle captured');
-  assert.ok(boot.includes("closeGate?.('silent')"), 'restore path silent-teardowns the modal first');
-  assert.ok(boot.indexOf("closeGate?.('silent')") < boot.indexOf('authRoot.replaceChildren()'), 'teardown precedes node replacement');
+  assert.ok(boot.includes('Checking your session'), 'splash copy while verifying');
+  assert.ok(boot.indexOf('Checking your session') < boot.indexOf('renderAuthGate'), 'splash renders before any gate');
+  assert.ok(!boot.includes('const closeGate = renderAuthGate('), 'no instant modal on cold boot');
+  assert.ok(boot.includes('openGate()'), 'gate opens only when the session check fails');
 });
 
 test('frozen focus and copy rules survive the move', () => {

@@ -142,6 +142,14 @@ test('interests are a canonical multi-select feeding Discover', () => {
   assert.ok(feed.includes('matchReasons'), 'matcher reasons surface on learner rows');
   assert.ok(feed.includes('Matched by shared interests and level'), 'discover explains the matching');
 });
+test('match reasons collapse without widening the row', () => {
+  const feed = readSource('src/pages/communityFeed.js');
+  assert.ok(feed.includes('formatMatchReasons'), 'compact formatter');
+  assert.ok(feed.includes('Shared interest'), 'interests merge into one line');
+  assert.ok(feed.includes('shrink-0'), 'follow action never squeezes');
+  assert.ok(feed.includes('w-full min-w-0'), 'row owns its full width');
+});
+
 test('deck examples define words like reading does', () => {
   const source = readSource('src/pages/communityFeed.js');
   assert.ok(source.includes('/api/lookup/define-sentence'), 'bounded sentence lookup');
