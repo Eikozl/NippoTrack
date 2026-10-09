@@ -1939,21 +1939,33 @@ async function openDeckViewer(deckId, title) {
   }
 
   function feedEmptyState(tab) {
+    // Listeners attach AT CREATION: the empty state renders after the async
+    // feed fetch, so wiring by a later DOM query always ran too early and
+    // these buttons never registered clicks.
     if (tab === 'following') {
+      const discover = element('button', {
+        className: 'button-primary min-h-11 px-5 py-2.5 text-sm font-semibold', text: 'Discover learners', attrs: { type: 'button' }
+      });
+      discover.addEventListener('click', () => showTab('discover'));
       return emptyState({
         title: 'Your community is quiet',
         description: 'Follow learners to build your feed, or share something you learned today.',
-        action: element('button', {
-          className: 'button-primary min-h-11 px-5 py-2.5 text-sm font-semibold', text: 'Discover learners', attrs: { type: 'button' }, dataset: { action: 'discover-learners' }
-        })
+        action: discover
       });
     }
+    const create = element('button', {
+      className: 'button-primary min-h-11 px-5 py-2.5 text-sm font-semibold', text: 'Create a post', attrs: { type: 'button' }
+    });
+    create.addEventListener('click', () => {
+      openComposerDialog(async () => {
+        if (state.profile || state.tab !== 'feed') await showTab('feed');
+        else renderFeedRoot();
+      });
+    });
     return emptyState({
       title: 'No posts yet',
       description: 'Be the first to share something you learned today.',
-      action: element('button', {
-        className: 'button-primary min-h-11 px-5 py-2.5 text-sm font-semibold', text: 'Create a post', attrs: { type: 'button' }, dataset: { action: 'create-post' }
-      })
+      action: create
     });
   }
 
@@ -1969,23 +1981,6 @@ async function openDeckViewer(deckId, title) {
     const refreshFeed = () => feedLoader(listHost, apiTab);
     body.appendChild(listHost);
     refreshFeed();
-    wireEmptyActions();
-  }
-
-  function wireEmptyActions() {
-    body.querySelectorAll('button[data-action]').forEach((button) => {
-      if (button.dataset.action === 'discover-learners') {
-        button.addEventListener('click', () => showTab('discover'));
-      }
-      if (button.dataset.action === 'create-post') {
-        button.addEventListener('click', () => {
-          openComposerDialog(async () => {
-            if (state.profile || state.tab !== 'feed') await showTab('feed');
-            else renderFeedRoot();
-          });
-        });
-      }
-    });
   }
 
   // ---- discover: search + sections (Phase 4-frontend, V6.1 filter selector)
