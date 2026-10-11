@@ -48,12 +48,12 @@ test('sound toggle unmutes on user gesture (autoplay stays muted by policy)', ()
   assert.ok(source.includes('Unmute tutorial video') && source.includes('Mute tutorial video'), 'toggle labels both states');
 });
 
-test('handset cut gets a slight zoom; desktop cut untouched', () => {
+test('no zoom transform on either cut (both render unscaled)', () => {
   const source = readSource('src/tutorialVideo.js');
   const css = readSource('src/styles.css');
-  assert.ok(source.includes('tutorial-video--zoom'), 'mobile video carries the zoom class');
-  assert.ok(css.includes('.tutorial-video--zoom'), 'zoom rule exists');
-  assert.ok(/\.tutorial-video--zoom\s*\{[^}]*scale\(1\.12\)/.test(css), 'zoom is a slight 1.12 scale');
+  assert.ok(!source.includes('tutorial-video--zoom'), 'no zoom class applied to any cut');
+  assert.ok(!css.includes('tutorial-video--zoom'), 'no zoom rule remains');
+  assert.ok(!/scale\(1\.12\)/.test(css), 'no leftover 1.12 scale');
 });
 
 test('video plays muted inline; end and load failure both complete (fail-open)', () => {

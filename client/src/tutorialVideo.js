@@ -69,9 +69,7 @@ export function mountTutorialVideo(host, { onDone = null } = {}) {
   });
   const video = doc.createElement('video');
   video.src = pickTutorialSource(useMobile);
-  // Slight zoom on the handset cut so the baked-in framing fills small
-  // screens edge to edge; the desktop/tablet cut is untouched.
-  video.className = `absolute inset-0 h-full w-full object-cover${useMobile ? ' tutorial-video--zoom' : ''}`;
+  video.className = 'absolute inset-0 h-full w-full object-cover';
   video.setAttribute('autoplay', '');
   video.setAttribute('muted', '');
   video.setAttribute('playsinline', '');
