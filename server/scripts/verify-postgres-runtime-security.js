@@ -9,6 +9,90 @@ const applicationTables = `
   WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname <> 'schema_migrations'
   ORDER BY c.relname`;
 
+// Explicit inventory of application tables. A migration that legitimately
+// adds a table must extend this set AND the migration-coverage test
+// (server/tests/runtime-security-schema.test.js derives the same inventory
+// from server/db/migrations-postgres and fails on drift), so the set can
+// never silently go stale again the way the old bare count did.
+const EXPECTED_APPLICATION_TABLES = new Set([
+  'community_posts',
+  'content_entries',
+  'content_entry_sessions',
+  'content_reports',
+  'deck_collection_decks',
+  'deck_collections',
+  'deck_follows',
+  'deck_publication_items',
+  'deck_publications',
+  'deck_suggestions',
+  'goals',
+  'grammar_examples',
+  'grammar_points',
+  'grammar_reference',
+  'immersion_session_items',
+  'immersion_sessions',
+  'jmdict_active_snapshot',
+  'jmdict_entries',
+  'jmdict_forms',
+  'jmdict_senses',
+  'jmdict_sources',
+  'kanji',
+  'kanji_encounters',
+  'kanji_reference',
+  'kanji_vocabulary',
+  'note_grammar',
+  'note_kanji',
+  'note_study_sessions',
+  'note_vocabulary',
+  'notes',
+  'notifications',
+  'post_comments',
+  'post_likes',
+  'reading_publications',
+  'reading_sources',
+  'reading_study_days',
+  'reading_texts',
+  'review_events',
+  'review_items',
+  'review_patterns',
+  'review_session_items',
+  'review_sessions',
+  'session_grammar',
+  'session_kanji',
+  'session_vocabulary',
+  'session_writings',
+  'story_review_links',
+  'study_sessions',
+  'tag_grammar',
+  'tag_kanji',
+  'tag_study_sessions',
+  'tag_vocabulary',
+  'tags',
+  'usage_examples',
+  'user_blocks',
+  'user_first_experience',
+  'user_follows',
+  'user_jlpt_target',
+  'user_profile',
+  'user_reading_progress',
+  'user_review_preferences',
+  'user_smart_goals',
+  'vocabulary',
+  'weekly_insights'
+]);
+
+// Pure schema-integrity check over the applicationTables rows
+// ({ relname }). Returns null when the live inventory exactly matches the
+// expected set, otherwise { missing, unexpected }. A missing table means a
+// migration did not apply; an unexpected table means unreviewed DDL.
+function checkSchemaIntegrity(tableRows) {
+  const actual = new Set((tableRows || []).map((row) => row.relname));
+  const missing = [...EXPECTED_APPLICATION_TABLES].filter((name) => !actual.has(name));
+  const unexpected = [...actual].filter((name) => !EXPECTED_APPLICATION_TABLES.has(name));
+  if (!missing.length && !unexpected.length) return null;
+  return { missing, unexpected };
+}
+
 // Tables where jlt_runtime has only SELECT (no writes permitted at runtime).
 const readOnlyRuntimeTables = new Set([
   'grammar_reference',
@@ -105,7 +189,12 @@ async function main() {
     const runtimeSequenceExtra = runtimeSequencePrivileges.rows.filter(({ privilege_type }) => !['USAGE', 'SELECT'].includes(privilege_type));
     const failures = [
       !role || !role.rolcanlogin || role.rolsuper || role.rolcreaterole || role.rolcreatedb || role.rolreplication || role.rolbypassrls || role.rolinherit ? 'jlt_runtime attributes are not least-privilege' : null,
-      tables.length !== 56 ? `expected 56 application tables, found ${tables.length}` : null,
+      (() => {
+        const drift = checkSchemaIntegrity(tables);
+        return drift
+          ? `application schema drift (missing: ${drift.missing.join(', ') || 'none'}; unexpected: ${drift.unexpected.join(', ') || 'none'})`
+          : null;
+      })(),
       tables.some(({ rls_enabled, rls_forced }) => !rls_enabled || !rls_forced) ? 'RLS is not enabled and forced on every application table' : null,
       actualMatchCount !== expectedPolicySet.length ? 'missing explicit least-privilege jlt_runtime policies' : null,
       unexpectedPolicies.length ? 'unexpected or broad RLS policies exist' : null,
@@ -128,4 +217,8 @@ async function main() {
   } finally { /* pool shutdown happens below */ }
 }
 
-main().catch((error) => { console.error('Runtime security verification failed.'); console.error(error.message); process.exitCode = 1; }).finally(() => pool.end());
+if (require.main === module) {
+  main().catch((error) => { console.error('Runtime security verification failed.'); console.error(error.message); process.exitCode = 1; }).finally(() => pool.end());
+}
+
+module.exports = { EXPECTED_APPLICATION_TABLES, checkSchemaIntegrity, expectedPolicies, expectedRuntimePrivileges };
