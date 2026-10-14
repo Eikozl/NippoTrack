@@ -396,6 +396,9 @@ test('Helmet CSP permits only external theme and frontend scripts without unsafe
 test('GET /api/sessions/:id includes optional structured writing with existing V1 relationships', async () => {
   await withPoolStubs({
     execute: async (sql) => {
+      if (sql.includes('FROM session_writings')) {
+        return [[{ id_session_writing: 4, title: 'Practice', content: '日本語を書きます。', notes: null }]];
+      }
       if (sql.includes('FROM study_sessions')) {
         return [[{
           id_session: 21,
@@ -405,9 +408,6 @@ test('GET /api/sessions/:id includes optional structured writing with existing V
           resource: 'Notebook',
           notes: null
         }]];
-      }
-      if (sql.includes('FROM session_writings')) {
-        return [[{ id_session_writing: 4, title: 'Practice', content: '日本語を書きます。', notes: null }]];
       }
       return [[]];
     }

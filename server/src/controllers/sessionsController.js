@@ -109,8 +109,8 @@ async function getSession(req, res) {
       [id, req.user.id]
     );
     const [writingRows] = await pool.execute(
-      'SELECT id_session_writing, title, content, notes FROM session_writings WHERE id_session = ?',
-      [id]
+      'SELECT w.id_session_writing, w.title, w.content, w.notes FROM session_writings w WHERE w.id_session = ? AND EXISTS (SELECT 1 FROM study_sessions s WHERE s.id_session = w.id_session AND s.user_id = ?)',
+      [id, req.user.id]
     );
     const [stories] = await pool.execute(
       'SELECT c.id_content_entry, c.title, c.content_type FROM content_entry_sessions l JOIN content_entries c ON c.id_content_entry = l.id_content_entry WHERE l.id_session = ? AND c.user_id = ? ORDER BY c.content_date DESC, c.id_content_entry DESC',

@@ -229,6 +229,7 @@ test('PUT /api/notes/:id/links batches inserts and rejects foreign ids', async (
     async beginTransaction() {},
     async execute(sql, params) {
       statements.push({ sql, params });
+      if (/FROM notes WHERE id_note/i.test(sql)) return [[{ id_note: 5 }]];
       if (/FROM study_sessions WHERE user_id/i.test(sql)) return [[{ id_session: 1 }, { id_session: 2 }]];
       if (/FROM vocabulary WHERE user_id/i.test(sql)) return [[{ id_vocabulary: 3 }]];
       return [{ affectedRows: 1 }];
@@ -275,6 +276,7 @@ test('PUT /api/notes/:id/links rejects ids owned by another user without writing
     async beginTransaction() {},
     async execute(sql, params) {
       statements.push({ sql, params });
+      if (/FROM notes WHERE id_note/i.test(sql)) return [[{ id_note: 5 }]];
       if (/FROM study_sessions WHERE user_id/i.test(sql)) return [[{ id_session: 1 }]];
       return [{ affectedRows: 1 }];
     },
