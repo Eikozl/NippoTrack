@@ -28,6 +28,7 @@ const { buildLexicalCandidates, candidateIdentity, matchOwnedVocabulary, reconst
 const { detectGrammar } = require('./grammarDetector');
 const { hydrateGrammarMatches } = require('./grammarReferenceStore');
 const { isValidDateString, validateTodayField } = require('../validation');
+const { withTransaction } = require('./transactions');
 
 const MAX_READING_TEXT_LENGTH = 100000;
 const MAX_READING_TITLE_LENGTH = 200;
@@ -1092,47 +1093,54 @@ async function upsertReadingProgress(executor, userId, textId, {
   // reading time counts toward dashboard minutes and streaks. Retries are
   // delta-safe (same total → delta 0); backwards totals clamp to 0.
   let previousSeconds = 0;
-  if (timeSpentSeconds !== undefined && timeSpentSeconds > 0) {
-    const [previousRows] = await executor.execute(
-      'SELECT time_spent_seconds FROM user_reading_progress WHERE user_id = ? AND text_id = ?',
+  // The read-compute-credit sequence below runs inside one transaction with
+  // the previous total row-locked: concurrent PUTs with the same accumulated
+  // total serialize, so the second one observes the first one's write and
+  // credits delta 0 instead of double-crediting the day row.
+  const outcome = await withTransaction(executor, async (connection) => {
+    if (timeSpentSeconds !== undefined && timeSpentSeconds > 0) {
+      const [previousRows] = await connection.execute(
+        'SELECT time_spent_seconds FROM user_reading_progress WHERE user_id = ? AND text_id = ? FOR UPDATE',
+        [userId, textId]
+      );
+      previousSeconds = Number(previousRows?.[0]?.time_spent_seconds || 0);
+    }
+    const [result] = await connection.execute(
+      `INSERT INTO user_reading_progress (user_id, text_id, position, time_spent_seconds, completed_at)
+       SELECT ?, rt.id_reading_text, ?, ?, CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END
+       FROM reading_texts rt
+       WHERE rt.id_reading_text = ? AND (rt.user_id IS NULL OR rt.user_id = ?)
+       ON CONFLICT (user_id, text_id) DO UPDATE SET
+         position = GREATEST(user_reading_progress.position, EXCLUDED.position),
+         time_spent_seconds = EXCLUDED.time_spent_seconds,
+         completed_at = EXCLUDED.completed_at
+       RETURNING id AS insertId`,
+      [userId, position, timeSpentSeconds ?? 0, completed ?? false, textId, userId]
+    );
+    if (!extractInsertId(result)) return null;
+    // Echo the stored position (post-GREATEST), never the submitted one: the
+    // request adapter only surfaces the insert id from RETURNING rows, so read
+    // the authoritative value back with one indexed lookup.
+    const [storedRows] = await connection.execute(
+      'SELECT position FROM user_reading_progress WHERE user_id = ? AND text_id = ?',
       [userId, textId]
     );
-    previousSeconds = Number(previousRows?.[0]?.time_spent_seconds || 0);
-  }
-  const [result] = await executor.execute(
-    `INSERT INTO user_reading_progress (user_id, text_id, position, time_spent_seconds, completed_at)
-     SELECT ?, rt.id_reading_text, ?, ?, CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END
-     FROM reading_texts rt
-     WHERE rt.id_reading_text = ? AND (rt.user_id IS NULL OR rt.user_id = ?)
-     ON CONFLICT (user_id, text_id) DO UPDATE SET
-       position = GREATEST(user_reading_progress.position, EXCLUDED.position),
-       time_spent_seconds = EXCLUDED.time_spent_seconds,
-       completed_at = EXCLUDED.completed_at
-     RETURNING id AS insertId`,
-    [userId, position, timeSpentSeconds ?? 0, completed ?? false, textId, userId]
-  );
-  if (!extractInsertId(result)) return null;
-  // Echo the stored position (post-GREATEST), never the submitted one: the
-  // request adapter only surfaces the insert id from RETURNING rows, so read
-  // the authoritative value back with one indexed lookup.
-  const [storedRows] = await executor.execute(
-    'SELECT position FROM user_reading_progress WHERE user_id = ? AND text_id = ?',
-    [userId, textId]
-  );
-  const storedPosition = Number(storedRows?.[0]?.position);
-  const credited = Math.max(0, (timeSpentSeconds ?? 0) - previousSeconds);
-  if (credited > 0) {
-    await executor.execute(
-      `INSERT INTO reading_study_days (user_id, day, seconds) VALUES (?, COALESCE(?::date, CURRENT_DATE), ?)
-       ON CONFLICT (user_id, day) DO UPDATE SET seconds = reading_study_days.seconds + EXCLUDED.seconds`,
-      [userId, creditDay, credited]
-    );
-  }
-  return {
-    position: Number.isSafeInteger(storedPosition) ? storedPosition : position,
-    timeSpentSeconds: timeSpentSeconds ?? 0,
-    completed: completed ?? false
-  };
+    const storedPosition = Number(storedRows?.[0]?.position);
+    const credited = Math.max(0, (timeSpentSeconds ?? 0) - previousSeconds);
+    if (credited > 0) {
+      await connection.execute(
+        `INSERT INTO reading_study_days (user_id, day, seconds) VALUES (?, COALESCE(?::date, CURRENT_DATE), ?)
+         ON CONFLICT (user_id, day) DO UPDATE SET seconds = reading_study_days.seconds + EXCLUDED.seconds`,
+        [userId, creditDay, credited]
+      );
+    }
+    return {
+      position: Number.isSafeInteger(storedPosition) ? storedPosition : position,
+      timeSpentSeconds: timeSpentSeconds ?? 0,
+      completed: completed ?? false
+    };
+  });
+  return outcome;
 }
 
 // Reading enroll (mirrors POST /api/stories/:id/enroll-srs): the client only

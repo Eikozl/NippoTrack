@@ -449,9 +449,12 @@ async function completeReviewSession(req, res) {
       return res.json({ id, completedAt: session.completed_at, ...summary });
     }
     await pool.execute(
-      'UPDATE review_sessions SET completed_at = CURRENT_TIMESTAMP WHERE id_review_session = ? AND user_id = ?',
+      'UPDATE review_sessions SET completed_at = CURRENT_TIMESTAMP WHERE id_review_session = ? AND user_id = ? AND completed_at IS NULL',
       [id, req.user.id]
     );
+    // The re-read below makes concurrent completes converge: the loser's
+    // UPDATE matches zero rows yet both callers return the winner's
+    // timestamp plus a fresh summary (idempotent, no double side effects).
     const [updatedRows] = await pool.execute(
       'SELECT completed_at FROM review_sessions WHERE id_review_session = ? AND user_id = ?',
       [id, req.user.id]

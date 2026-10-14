@@ -4,6 +4,7 @@
 // suggestions, collections and import telemetry can build on them.
 const { ValidationError } = require('../errors/http');
 const { ENTITY, fetchOwnedItems } = require('./deckSharing');
+const { withTransaction } = require('./transactions');
 
 const SNAPSHOT_COLUMNS = ['word', 'character_kanji', 'grammar_point', 'reading', 'meaning', 'onyomi', 'kunyomi', 'structure', 'example', 'jlpt_level', 'status'];
 
@@ -33,19 +34,24 @@ async function publishDeck(executor, ownerId, { entityType, ids, title, descript
   if (!rows.length) throw new ValidationError('No owned items match the requested ids.');
   const byId = new Map(rows.map((row) => [Number(row[ENTITY[entityType].idColumn]), row]));
   const ordered = cleanIds.map((id) => byId.get(id)).filter(Boolean);
-  const [inserted] = await executor.execute(
-    'INSERT INTO deck_publications (owner_id, title, description, entity_type, is_public) VALUES (?, ?, ?, ?, ?)',
-    [ownerId, cleanTitle, String(description || '').slice(0, 500), entityType, isPublic !== false]
-  );
-  const deckId = Number(inserted?.insertId);
-  if (!Number.isInteger(deckId) || deckId <= 0) throw new Error('Unable to publish the deck.');
-  let position = 0;
-  for (const row of ordered) {
-    await executor.execute(
-      'INSERT INTO deck_publication_items (id_deck_publication, position, item_json) VALUES (?, ?, ?::jsonb)',
-      [deckId, position++, JSON.stringify(snapshotItem(entityType, row))]
+  // Atomic publish: a mid-loop failure rolls back the deck row as well, so
+  // listPublicDecks never serves a deck with 0/k<n items.
+  const deckId = await withTransaction(executor, async (connection) => {
+    const [inserted] = await connection.execute(
+      'INSERT INTO deck_publications (owner_id, title, description, entity_type, is_public) VALUES (?, ?, ?, ?, ?)',
+      [ownerId, cleanTitle, String(description || '').slice(0, 500), entityType, isPublic !== false]
     );
-  }
+    const id = Number(inserted?.insertId);
+    if (!Number.isInteger(id) || id <= 0) throw new Error('Unable to publish the deck.');
+    let position = 0;
+    for (const row of ordered) {
+      await connection.execute(
+        'INSERT INTO deck_publication_items (id_deck_publication, position, item_json) VALUES (?, ?, ?::jsonb)',
+        [id, position++, JSON.stringify(snapshotItem(entityType, row))]
+      );
+    }
+    return id;
+  });
   return { id: deckId, itemCount: ordered.length };
 }
 

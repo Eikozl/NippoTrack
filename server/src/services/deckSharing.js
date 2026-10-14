@@ -3,6 +3,7 @@
 // HMAC-SHA256 over canonical JSON; the secret is injected (never stored).
 const { createHash, createHmac, timingSafeEqual } = require('node:crypto');
 const { ValidationError } = require('../errors/http');
+const { withTransaction } = require('./transactions');
 
 const DECK_VERSION = 1;
 const DECK_TTL_MS = 90 * 86400000;
@@ -123,37 +124,42 @@ function parseDeckShare(code, secret, now = Date.now()) {
 
 async function importDeckItems(executor, deck, userId) {
   const def = ENTITY[deck.entityType];
-  let imported = 0;
-  let skipped = 0;
-  for (const item of deck.items) {
-    const key = def.naturalKey(item);
-    if (!key[0]) { skipped += 1; continue; }
-    // Duplicate check in code: NULL readings never match with SQL equality,
-    // and per-user UNIQUEs differ per entity (vocabulary has none).
-    let dupe = false;
-    if (deck.entityType === 'vocabulary') {
-      const [all] = await executor.execute(
-        'SELECT word, reading FROM vocabulary WHERE word = ? AND user_id = ?',
-        [key[0], userId]
+  // Atomic import: a mid-loop failure rolls back every inserted row, so a
+  // retry reports a clean imported/skipped split instead of a misleading
+  // partial one. Duplicate detection below is unchanged.
+  return withTransaction(executor, async (connection) => {
+    let imported = 0;
+    let skipped = 0;
+    for (const item of deck.items) {
+      const key = def.naturalKey(item);
+      if (!key[0]) { skipped += 1; continue; }
+      // Duplicate check in code: NULL readings never match with SQL equality,
+      // and per-user UNIQUEs differ per entity (vocabulary has none).
+      let dupe = false;
+      if (deck.entityType === 'vocabulary') {
+        const [all] = await connection.execute(
+          'SELECT word, reading FROM vocabulary WHERE word = ? AND user_id = ?',
+          [key[0], userId]
+        );
+        dupe = (Array.isArray(all) ? all : []).some((row) => String(row.reading || '') === String(key[1] || ''));
+      } else {
+        const uniqueColumn = deck.entityType === 'kanji' ? 'character_kanji' : 'grammar_point';
+        const [rows] = await connection.execute(
+          `SELECT ${def.idColumn} FROM ${def.table} WHERE ${uniqueColumn} = ? AND user_id = ? LIMIT 1`,
+          [key[0], userId]
+        );
+        dupe = Array.isArray(rows) && rows.length > 0;
+      }
+      if (dupe) { skipped += 1; continue; }
+      const values = def.insertValues(userId, item);
+      await connection.execute(
+        `INSERT INTO ${def.table} (${def.insertColumns.join(', ')}) VALUES (${values.map(() => '?').join(', ')})`,
+        values
       );
-      dupe = (Array.isArray(all) ? all : []).some((row) => String(row.reading || '') === String(key[1] || ''));
-    } else {
-      const uniqueColumn = deck.entityType === 'kanji' ? 'character_kanji' : 'grammar_point';
-      const [rows] = await executor.execute(
-        `SELECT ${def.idColumn} FROM ${def.table} WHERE ${uniqueColumn} = ? AND user_id = ? LIMIT 1`,
-        [key[0], userId]
-      );
-      dupe = Array.isArray(rows) && rows.length > 0;
+      imported += 1;
     }
-    if (dupe) { skipped += 1; continue; }
-    const values = def.insertValues(userId, item);
-    await executor.execute(
-      `INSERT INTO ${def.table} (${def.insertColumns.join(', ')}) VALUES (${values.map(() => '?').join(', ')})`,
-      values
-    );
-    imported += 1;
-  }
-  return { imported, skipped };
+    return { imported, skipped };
+  });
 }
 
 function deckPreview(deck, ttlMs = DECK_TTL_MS) {
