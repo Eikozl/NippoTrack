@@ -1,4 +1,5 @@
 const postgresPool = require('./postgresRuntime');
+const { countSql } = require('../middleware/requestMetrics');
 
 const ID_COLUMNS = {
   vocabulary: 'id_vocabulary', kanji: 'id_kanji', grammar_points: 'id_grammar', study_sessions: 'id_session',
@@ -36,8 +37,8 @@ function prepare(sql) {
 
 function wrap(client, { release = false } = {}) {
   return {
-    async execute(sql, params = []) { const result = await client.query(convertSql(prepare(sql)), params); return mysqlLikeResult(result, sql); },
-    async query(sql, params = []) { const result = await client.query(convertSql(prepare(sql)), params); return mysqlLikeResult(result, sql); },
+    async execute(sql, params = []) { countSql(); const result = await client.query(convertSql(prepare(sql)), params); return mysqlLikeResult(result, sql); },
+    async query(sql, params = []) { countSql(); const result = await client.query(convertSql(prepare(sql)), params); return mysqlLikeResult(result, sql); },
     beginTransaction() { return client.query('BEGIN'); },
     commit() { return client.query('COMMIT'); },
     rollback() { return client.query('ROLLBACK'); },

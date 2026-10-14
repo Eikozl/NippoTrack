@@ -43,6 +43,28 @@ const { ENCOUNTER_SOURCE_TYPES, recordKanjiEncounters } = require('./kanjiEncoun
 const MAX_IMMERSION_TEXT_LENGTH = 5000;
 const LEVEL_BY_DIFFICULTY = ['N1', 'N2', 'N3', 'N4', 'N5']; // hardest first
 const LEVEL_UNKNOWN_THRESHOLD = 0.2;
+
+// Bulkhead for the synchronous morphological engine (japaneseParser
+// tokenizes on the event loop; ~4.5 s for 1000 dense characters locally).
+// At most MAX_CONCURRENT_IMMERSION_ANALYSES analyses may run at once PER
+// PROCESS INSTANCE, not globally: every Vercel function instance enforces
+// its own budget, so fleet-wide throughput is (instances x 2). Callers take
+// a slot after input validation and release it in a finally block; the
+// release is idempotent. A null return means busy: reject with 429 +
+// Retry-After instead of queueing behind a blocked loop.
+const MAX_CONCURRENT_IMMERSION_ANALYSES = 2;
+const IMMERSION_BUSY_RETRY_AFTER_SECONDS = 5;
+let activeImmersionAnalyses = 0;
+function acquireImmersionSlot() {
+  if (activeImmersionAnalyses >= MAX_CONCURRENT_IMMERSION_ANALYSES) return null;
+  activeImmersionAnalyses += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    activeImmersionAnalyses = Math.max(0, activeImmersionAnalyses - 1);
+  };
+}
 const LEVEL_CONFIDENCE_KANJI_SATURATION = 20;
 
 function normalizeImmersionText(text) {
@@ -621,6 +643,9 @@ async function listImmersionSessions(pool, userId, { from, to, level, page, limi
 
 module.exports = {
   MAX_IMMERSION_TEXT_LENGTH,
+  MAX_CONCURRENT_IMMERSION_ANALYSES,
+  IMMERSION_BUSY_RETRY_AFTER_SECONDS,
+  acquireImmersionSlot,
   analyzeTextForImmersion,
   // Reused by the graded-reading service (V5.3a Prompt 2A) so the kanji
   // level heuristic, JMdict gloss lookup, JLPT normalization, and code-point
