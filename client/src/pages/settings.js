@@ -9,6 +9,7 @@ import { smartGoalsSettingsSection } from '../smartGoals.js';
 import { enterPlacement, placementResultFromState, placementResultNode, selfReportResultNode } from '../firstExperience.js';
 import { targetLevelOptions } from '../jlptTarget.js';
 import { isReviewSoundOn, setReviewSoundOn } from '../reviewSounds.js';
+import { appVersion, checkForUpdate } from '../appUpdate.js';
 
 const SETTINGS_SECTIONS = [
   { key: 'profile', label: 'Profile' },
@@ -382,8 +383,30 @@ function renderAccountSection(slot) {  const profile = profileStore.get() || { e
   email.id = 'settings-account-email';
   slot.replaceChildren(sectionSurface('Account', 'Account identity and existing data actions.', [
     element('div', { className: 'mt-5 grid gap-1.5' }, [element('span', { className: 'text-sm font-semibold text-ink', text: 'Email' }), email]),
-    exportButton
+    exportButton,
+    appVersionBlock()
   ]));
+}
+
+function appVersionBlock() {
+  const block = element('div', { className: 'mt-5 grid gap-1.5' }, [
+    element('span', { className: 'text-sm font-semibold text-ink', text: 'App version' }),
+    element('p', { className: 'text-sm text-muted', text: `Installed: v${appVersion()}` })
+  ]);
+  // Update banner only inside the native shell: web deployments update
+  // themselves, so polling releases there would only add noise.
+  if (typeof window === 'undefined' || !window.Capacitor) return block;
+  // Fail-open: no banner when offline, rate-limited, or without releases.
+  checkForUpdate().then((update) => {
+    if (!update || !block.isConnected) return;
+    const link = element('a', {
+      className: 'button-secondary mt-2 w-fit px-3 py-1.5 text-xs',
+      text: `Update available: v${update.version} — Download`,
+      attrs: { href: update.url }
+    });
+    block.append(link);
+  }).catch(() => undefined);
+  return block;
 }
 
 export async function renderSettings(container) {

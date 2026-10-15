@@ -1,0 +1,100 @@
+name: Android release (sideload APK)
+
+# Builds the signed sideload APK when a GitHub Release is published.
+# Tags must be semver: v1.2.3 -> versionName 1.2.3, versionCode 10203.
+# Required repository secrets (Settings -> Secrets -> Actions):
+#   ANDROID_KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-signed-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Derive versions from tag
+        id: versions
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "$tag" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "::error::Release tag must be semver (vX.Y.Z), got: $tag"
+            exit 1
+          fi
+          code=$((10#${BASH_REMATCH[1]} * 10000 + 10#${BASH_REMATCH[2]} * 100 + 10#${BASH_REMATCH[3]}))
+          name="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version_name=$name" >> "$GITHUB_OUTPUT"
+          echo "version_code=$code" >> "$GITHUB_OUTPUT"
+          echo "apk=nippotrack-v${name}.apk" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install client dependencies
+        run: npm ci --prefix client
+
+      - name: Run client tests
+        run: npm --prefix client test
+
+      - name: Build production web bundle for the APK shell
+        run: npm --prefix client run build
+        env:
+          VITE_API_BASE_URL: https://nippotrack.vercel.app
+          APP_VERSION: ${{ steps.versions.outputs.version_name }}
+
+      - name: Sync web bundle into the Android shell
+        working-directory: client
+        run: npx cap sync android
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Decode release keystore
+        shell: bash
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+          test -s "$RUNNER_TEMP/release.keystore"
+
+      - name: Build signed release APK
+        working-directory: client/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          ANDROID_VERSION_CODE: ${{ steps.versions.outputs.version_code }}
+          ANDROID_VERSION_NAME: ${{ steps.versions.outputs.version_name }}
+
+      - name: Rename APK, hash it, attach to the release
+        shell: bash
+        run: |
+          cd client/android/app/build/outputs/apk/release
+          mv app-release.apk "${{ steps.versions.outputs.apk }}"
+          sha256sum "${{ steps.versions.outputs.apk }}" > "${{ steps.versions.outputs.apk }}.sha256"
+          cat "${{ steps.versions.outputs.apk }}.sha256"
+          gh release upload "${{ steps.versions.outputs.tag }}" \
+            "${{ steps.versions.outputs.apk }}" \
+            "${{ steps.versions.outputs.apk }}.sha256" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -4,6 +4,7 @@ import wordmarkDark from '../assets/Logo_Modo_Oscuro.png';
 import { createLandingMarkup } from './sections.js';
 import { initEstimateRotation, initHeroStreak, initKanjiSequence, initLandingInteractions } from './interactions.js';
 import { initLandingSmoothScroll } from './smoothScroll.js';
+import { initAndroidDownload } from './androidRelease.js';
 
 // Canonical Auth entry: public Sign in/up CTAs open the modal over the
 // Landing instead of navigating away. Anchors keep their /app?auth=… hrefs
@@ -82,6 +83,7 @@ if (root) {
   initEstimateRotation(root);
   initHeroStreak(root);
   initAuthModalTriggers(root);
+  try { initAndroidDownload(root)?.catch?.(() => {}); } catch { /* download skeleton stays static */ }
   // v5.1-E.3 Lenis: public landing only, fail-open, reduced-motion native.
   try { initLandingSmoothScroll(root)?.catch?.(() => {}); } catch { /* native scroll */ }
   const anchor = window.location.hash.slice(1);
