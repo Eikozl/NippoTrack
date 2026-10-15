@@ -36,6 +36,7 @@ async function getDashboard(req, res) {
         FROM (
           SELECT rs.completed_at::date AS completed_day, ${sessionActiveMinutes('rs')} AS active
           FROM review_sessions rs WHERE rs.user_id = ? AND rs.completed_at IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM study_sessions ss WHERE ss.id_review_session = rs.id_review_session)
         ) per_session
       )
       SELECT
@@ -114,6 +115,7 @@ async function getActivity(req, res) {
       pool.query(`SELECT to_char(completed_day, 'YYYY-MM-DD') AS date, SUM(active) AS minutes FROM (
           SELECT rs.completed_at::date AS completed_day, ${sessionActiveMinutes('rs')} AS active
           FROM review_sessions rs WHERE rs.user_id = ? AND rs.completed_at IS NOT NULL AND rs.completed_at::date BETWEEN ?::date AND ?::date
+            AND NOT EXISTS (SELECT 1 FROM study_sessions ss WHERE ss.id_review_session = rs.id_review_session)
         ) per_session GROUP BY completed_day ORDER BY completed_day ASC`, [req.user.id, shiftDays(today, -34), today]).catch(() => [[]])
     ]);
     const readingByDate = new Map((readingCalendarRows || []).map((row) => [isoDate(row.date), Number(row.minutes || 0)]));
@@ -171,7 +173,7 @@ async function getStudyNow(req, res) {
             AND g.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)) AS due_grammar,
         COALESCE((SELECT SUM(duration_minutes) FROM study_sessions WHERE user_id = ? AND session_date = COALESCE(?::date, CURRENT_DATE)), 0)
           + COALESCE((SELECT SUM(seconds) / 60 FROM reading_study_days WHERE user_id = ? AND day = COALESCE(?::date, CURRENT_DATE)), 0)
-          + COALESCE((SELECT SUM(active) FROM (SELECT ${sessionActiveMinutes('rs')} AS active FROM review_sessions rs WHERE rs.user_id = ? AND rs.completed_at IS NOT NULL AND rs.completed_at::date = COALESCE(?::date, CURRENT_DATE)) per_session), 0) AS minutes_today,
+          + COALESCE((SELECT SUM(active) FROM (SELECT ${sessionActiveMinutes('rs')} AS active FROM review_sessions rs WHERE rs.user_id = ? AND rs.completed_at IS NOT NULL AND rs.completed_at::date = COALESCE(?::date, CURRENT_DATE) AND NOT EXISTS (SELECT 1 FROM study_sessions ss WHERE ss.id_review_session = rs.id_review_session)) per_session), 0) AS minutes_today,
         (SELECT COUNT(*) FROM vocabulary WHERE user_id = ?) AS vocabulary_count,
         (SELECT COUNT(*) FROM kanji WHERE user_id = ?) AS kanji_count,
         (SELECT COUNT(*) FROM grammar_points WHERE user_id = ?) AS grammar_count,

@@ -204,9 +204,25 @@ async function createSession(req, res) {
 
     connection = await pool.getConnection();
     await connection.beginTransaction();
+    // Optional link to the review session this log was created from: the
+    // id must belong to the caller, otherwise the request is rejected. The
+    // dashboard excludes linked sessions' auto-counted minutes so manual
+    // logging never double-counts. Updates never change the link.
+    let reviewSessionId = null;
+    if (body.review_session_id !== undefined && body.review_session_id !== null) {
+      reviewSessionId = Number(body.review_session_id);
+      if (!Number.isInteger(reviewSessionId) || reviewSessionId <= 0) {
+        throw new ValidationError('review_session_id must be a positive integer.');
+      }
+      const [owned] = await connection.execute(
+        'SELECT 1 FROM review_sessions WHERE id_review_session = ? AND user_id = ?',
+        [reviewSessionId, req.user.id]
+      );
+      if (!owned[0]) throw new ValidationError('review_session_id must reference your own review session.');
+    }
     const [result] = await connection.execute(
-      'INSERT INTO study_sessions (session_date, duration_minutes, category, resource, notes, user_id) VALUES (?, ?, ?, ?, ?, ?)',
-      [values.sessionDate, values.durationMinutes, values.category, values.resource, values.notes, req.user.id]
+      'INSERT INTO study_sessions (session_date, duration_minutes, category, resource, notes, user_id, id_review_session) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [values.sessionDate, values.durationMinutes, values.category, values.resource, values.notes, req.user.id, reviewSessionId]
     );
     await insertRelationships(connection, result.insertId, relationships, req.user.id);
     await saveWriting(connection, result.insertId, writing);
