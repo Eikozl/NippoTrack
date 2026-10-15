@@ -19,6 +19,14 @@ test('sessions page shows a Reviewed today box fed by graded-today', () => {
   assert.ok(source.includes('Reviewed today'), 'sessions list renders the Reviewed today box');
 });
 
+test('session detail shows reviewed groups with each review result', () => {
+  const source = readSource('src/pages/sessions.js');
+  assert.ok(source.includes('graded-today${queryString({ today: day })}') || source.includes('/api/review/graded-today'), 'detail fetches graded items for the session date');
+  assert.ok(source.includes('reviewedGroups'), 'detail groups reviewed items by type');
+  assert.ok(source.includes('`reviewed`') || source.includes(' reviewed`'), 'reviewed groups carry a reviewed label');
+  assert.ok(source.includes('(item) => item.result'), 'each reviewed item surfaces its Good/Hard/Again result');
+});
+
 test('review completion relies on server timestamps, not client day', () => {
   const source = readSource('src/pages/review.js');
   assert.ok(source.includes('/api/review/sessions/${sessionId}/complete'), 'finish posts to the complete endpoint');

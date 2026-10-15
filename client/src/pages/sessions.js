@@ -678,8 +678,26 @@ export function renderSessions(container) {
           ])))
           : element('p', { className: 'mt-2 text-sm text-muted', text: 'None linked to this session.' })
       ]);
-      const details = element('div', { className: 'sm:col-span-2' }, [
-        element('dl', { className: 'grid gap-3 text-sm sm:grid-cols-2' }, [
+      // Reviewed-that-day box: items graded on the session's date, grouped
+      // by type with each review result attached. Fail-open: absent on
+      // error, on invalid dates, or when nothing was reviewed.
+      let reviewedGroups = [];
+      try {
+        const day = String(record.session_date || '').slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+          const graded = await apiRequest(`/api/review/graded-today${queryString({ today: day })}`);
+          const gradedItems = Array.isArray(graded?.items) ? graded.items : [];
+          reviewedGroups = [
+            ['Vocabulary', 'vocabulary'],
+            ['Kanji', 'kanji'],
+            ['Grammar', 'grammar']
+          ].map(([label, type]) => ({
+            label,
+            items: gradedItems.filter((item) => item && item.entityType === type)
+          })).filter((group) => group.items.length);
+        }
+      } catch { reviewedGroups = []; }
+      const details = element('div', { className: 'sm:col-span-2' }, [        element('dl', { className: 'grid gap-3 text-sm sm:grid-cols-2' }, [
           element('div', {}, [element('dt', { className: 'text-muted', text: 'Date' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatDate(record.session_date) })]),
           element('div', {}, [element('dt', { className: 'text-muted', text: 'Duration' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatDuration(record.duration_minutes) })]),
           element('div', {}, [element('dt', { className: 'text-muted', text: 'Category' }), element('dd', { className: 'mt-1 font-medium text-ink', text: record.category })]),
@@ -693,7 +711,8 @@ export function renderSessions(container) {
           relatedList('Kanji', record.kanji, (item) => item.character_kanji, (item) => item.meaning),
           relatedList('Grammar', record.grammar, (item) => item.grammar_point, (item) => item.meaning)
         ]),
-        ...((record.stories || []).length ? [relatedList('Content linked', record.stories, (item) => item.title, (item) => item.content_type, 'mt-5')] : [])
+        ...((record.stories || []).length ? [relatedList('Content linked', record.stories, (item) => item.title, (item) => item.content_type, 'mt-5')] : []),
+        ...reviewedGroups.map((group) => relatedList(`${group.label} reviewed`, group.items, (item) => item.title || group.label, (item) => item.result, 'mt-5'))
       ]);
       // View-only detail: the header X (openDialog showCloseButton) is the
       // sole dismiss — the footer held only Cancel/Close with no submit, so
