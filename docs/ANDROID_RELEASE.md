@@ -22,7 +22,8 @@ be installed over the current app** — Android rejects differently-signed
 updates and users would have to reinstall from scratch (losing nothing
 server-side, but losing the seamless path).
 
-On your own PC (needs Java installed):
+On your own PC (needs Java 21 installed — the Capacitor 8 libraries compile
+with source release 21, so JDK 17 is not enough):
 
 ```powershell
 keytool -genkeypair -v -keystore nippotrack-release.keystore `
