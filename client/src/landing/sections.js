@@ -306,6 +306,21 @@ function finalCta() {
     </section>`;
 }
 
+function androidDownload() {
+  // Sideloaded APK section: static skeleton works without JS; version,
+  // size and date hydrate from the latest GitHub release when reachable.
+  return `
+    <section class="landing-section tone-ivory" id="android-app" aria-labelledby="android-title">
+      <div class="landing-container">
+        <h2 id="android-title">Take NippoTrack on Android.</h2>
+        <p>Install the app directly — no Play Store needed. Your account and study data stay exactly the same.</p>
+        <div><a class="landing-button landing-button-primary" data-android-download href="https://github.com/Eikozl/NippoTrack/releases/latest">Download for Android</a></div>
+        <p class="android-release-meta" data-android-meta>Checking the latest version…</p>
+        <details class="android-sideload-help"><summary>How to install</summary><p>Open the downloaded file and allow installs from this source when Android asks. To update later, download the new version and install it over the current one — your data is kept.</p></details>
+      </div>
+    </section>`;
+}
+
 export function footer(wordmarkUrl, themeAssets = {}, options = {}) {
   const lightSrc = themeAssets.lightSrc || wordmarkUrl;
   const darkSrc = themeAssets.darkSrc || wordmarkUrl;
@@ -349,6 +364,7 @@ export function createLandingMarkup(wordmarkUrl, themeAssets = {}) {
         ${firstUseDashboard()}
         ${existingTools()}
         ${emotionalMoment()}
+        ${androidDownload()}
         ${finalCta()}
       </main>
       ${footer(initialSrc, resolved)}

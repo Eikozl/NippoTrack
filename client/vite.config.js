@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 const { assertSafeClientEnvironment } = require('../scripts/production-guard.js');
 const clientDir = dirname(fileURLToPath(import.meta.url));
+const clientPackage = require('./package.json');
 
 export default defineConfig(({ mode }) => {
   // Fail closed: a non-production Vite mode must never resolve Supabase Auth
@@ -16,6 +17,9 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [tailwindcss()],
+    define: {
+      __APP_VERSION__: JSON.stringify(process.env.APP_VERSION || clientPackage.version || 'dev')
+    },
     server: {
       port: 5173,
       strictPort: true,

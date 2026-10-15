@@ -7,9 +7,13 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "cd .. && node --test client/tests/*.test.mjs"
+    "test": "cd .. && node --test client/tests/*.test.mjs",
+    "icons": "node scripts/pwa-icons.mjs"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/cli": "^8.5.3",
+    "@capacitor/core": "^8.5.3",
     "@supabase/supabase-js": "^2.112.4",
     "chart.js": "^4.5.1",
     "lenis": "^1.3.26",
@@ -17,7 +21,9 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
+    "sharp": "^0.35.5",
     "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
     "vite": "^8.2.2"
   }
 }
