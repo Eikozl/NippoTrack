@@ -8,6 +8,8 @@ const { parsePagination, paginationPayload } = require('../pagination');
 const { JLPT_LEVELS } = require('../constants');
 const {
   MAX_IMMERSION_TEXT_LENGTH,
+  acquireImmersionSlot,
+  IMMERSION_BUSY_RETRY_AFTER_SECONDS,
   analyzeTextForImmersion,
   createImmersionSession,
   listImmersionSessions
@@ -54,8 +56,18 @@ async function analyzeImmersionText(req, res) {
     // compatibility but intentionally NEVER persists anything here: session
     // creation requires the user's reviewed candidate selection, which only
     // exists after this response. All writes live in /create-session.
-    const result = await analyzeTextForImmersion(pool, req.user.id, text);
-    return res.json(result);
+    // Bulkhead: reject before parsing when both engine slots are busy.
+    const releaseSlot = acquireImmersionSlot();
+    if (!releaseSlot) {
+      res.set('Retry-After', String(IMMERSION_BUSY_RETRY_AFTER_SECONDS));
+      return res.status(429).json({ error: 'Too many text analyses running. Please retry in a few seconds.' });
+    }
+    try {
+      const result = await analyzeTextForImmersion(pool, req.user.id, text);
+      return res.json(result);
+    } finally {
+      releaseSlot();
+    }
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to analyze text.' });
   }

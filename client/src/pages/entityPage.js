@@ -11,6 +11,7 @@ import {
   emptyState,
   errorState,
   field,
+  formatDuration,
   loadingState,
   openDetailModal,
   openDialog,
@@ -56,7 +57,7 @@ function fillWhereSeen(slot, url) {
     const rows = [
       ...sessions.map((entry) => ({
         pill: 'Session',
-        text: `Study session — ${entry.category || 'Study'}${entry.date ? ` · ${formatSrsDate(entry.date)}` : ''}${Number(entry.minutes) > 0 ? ` · ${entry.minutes} min` : ''}`
+        text: `Study session — ${entry.category || 'Study'}${entry.date ? ` · ${formatSrsDate(entry.date)}` : ''}${Number(entry.minutes) > 0 ? ` · ${formatDuration(entry.minutes)}` : ''}`
       })),
       ...immersion.map((entry) => ({
         pill: 'Immersion',

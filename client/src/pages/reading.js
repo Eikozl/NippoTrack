@@ -33,7 +33,7 @@ import { ownedIdFromSaveResponse } from '../deckSaveGate.js';
 import { localDayKey } from '../dashboardWelcome.js';
 import { icon } from '../icons';
 import { speakJapanese } from '../speech.js';
-import { element, pageHeader, showToast, withPendingAction, paginationControls, openDetailModal, openDialog, confirmDialog, emptyState, errorState, loadingState } from '../ui';
+import { element, formatDuration, pageHeader, showToast, withPendingAction, paginationControls, openDetailModal, openDialog, confirmDialog, emptyState, errorState, loadingState } from '../ui';
 
 const LIBRARY_PAGE_SIZE = 12;
 const LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1'];
@@ -1774,9 +1774,9 @@ async function renderProgressView(container) {
     }),
     element('div', { className: 'mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4' }, [
       statCard('Texts completed', String(completedItems.length)),
-      statCard('Time today', `${minutesToday} min`),
-      statCard('Time · last 30 days', `${minutes30Days} min`),
-      statCard('Time reading · total', `${minutesTotal} min`)
+      statCard('Time today', formatDuration(minutesToday)),
+      statCard('Time · last 30 days', formatDuration(minutes30Days)),
+      statCard('Time reading · total', formatDuration(minutesTotal))
     ]),
     element('div', { className: 'surface mt-4 p-5' }, [
       element('h2', { className: 'font-semibold text-ink', text: 'Last 8 weeks' }),
@@ -1786,7 +1786,7 @@ async function renderProgressView(container) {
         element('div', { className: 'h-2.5 flex-1 overflow-hidden rounded-full bg-ink/10' }, [
           element('div', { className: 'h-full rounded-full bg-ink', attrs: { style: `width:${Math.round((week.minutes / maxMinutes) * 100)}%` } })
         ]),
-        element('span', { className: 'w-16 shrink-0 text-right', text: `${Math.round(week.minutes)} min` })
+        element('span', { className: 'w-16 shrink-0 text-right', text: formatDuration(Math.round(week.minutes)) })
       ])))
     ]),
     element('p', { className: 'mt-4 text-xs text-muted' }, [

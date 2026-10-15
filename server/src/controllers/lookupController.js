@@ -7,7 +7,7 @@
 const pool = require('../config/db');
 const { ValidationError, sendRouteError } = require('../errors/http');
 const { rejectUnknownFields } = require('../validation');
-const { analyzeTextForImmersion } = require('../services/immersionPipeline');
+const { analyzeTextForImmersion, acquireImmersionSlot, IMMERSION_BUSY_RETRY_AFTER_SECONDS } = require('../services/immersionPipeline');
 
 const MAX_SENTENCE_CODE_POINTS = 2000;
 const MAX_LOOKUP_ITEMS = 120;
@@ -36,17 +36,28 @@ async function defineSentence(req, res) {
   try {
     rejectUnknownFields(req.body || {}, ['sentence']);
     const sentence = cleanSentence(req.body && req.body.sentence);
-    const analysis = await analyzeTextForImmersion(pool, req.user.id, sentence);
-    const candidates = (analysis && analysis.candidates) || {};
-    const vocabulary = (Array.isArray(candidates.vocabulary) ? candidates.vocabulary : [])
-      .filter((candidate) => candidate && candidate.display)
-      .slice(0, MAX_LOOKUP_ITEMS)
-      .map((candidate) => toLookupItem(candidate, 'vocabulary'));
-    const kanji = (Array.isArray(candidates.kanji) ? candidates.kanji : [])
-      .filter((candidate) => candidate && candidate.display)
-      .slice(0, MAX_LOOKUP_ITEMS)
-      .map((candidate) => toLookupItem(candidate, 'kanji'));
-    return res.json({ sentence, vocabulary, kanji });
+    // Same engine bulkhead as POST /api/immersion/analyze: reject before
+    // parsing when both slots are busy. Validation above still 400s first.
+    const releaseSlot = acquireImmersionSlot();
+    if (!releaseSlot) {
+      res.set('Retry-After', String(IMMERSION_BUSY_RETRY_AFTER_SECONDS));
+      return res.status(429).json({ error: 'Too many text analyses running. Please retry in a few seconds.' });
+    }
+    try {
+      const analysis = await analyzeTextForImmersion(pool, req.user.id, sentence);
+      const candidates = (analysis && analysis.candidates) || {};
+      const vocabulary = (Array.isArray(candidates.vocabulary) ? candidates.vocabulary : [])
+        .filter((candidate) => candidate && candidate.display)
+        .slice(0, MAX_LOOKUP_ITEMS)
+        .map((candidate) => toLookupItem(candidate, 'vocabulary'));
+      const kanji = (Array.isArray(candidates.kanji) ? candidates.kanji : [])
+        .filter((candidate) => candidate && candidate.display)
+        .slice(0, MAX_LOOKUP_ITEMS)
+        .map((candidate) => toLookupItem(candidate, 'kanji'));
+      return res.json({ sentence, vocabulary, kanji });
+    } finally {
+      releaseSlot();
+    }
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to define this sentence.' });
   }

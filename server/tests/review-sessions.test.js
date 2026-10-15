@@ -179,6 +179,7 @@ test('completeReviewSession success returns summary with correct math', async ()
     assert.deepEqual(body(), {
       id: 7,
       completedAt: '2026-09-06T10:00:00.000Z',
+      minutesLogged: 0,
       total: 4,
       byType: { kanji: 1, vocabulary: 2, grammar: 1 },
       byResult: { Again: 1, Hard: 1, Good: 2 }

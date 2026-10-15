@@ -43,6 +43,20 @@ function positiveCount(value) {
   return Number.isFinite(number) && number > 0 ? number : 0;
 }
 
+// Single canonical study-duration formatter (presentation only): minutes
+// below 60 stay compact (`45m`), 60+ collapse to hours (`1hr`, `1hr30m`,
+// `2hr`). Pure and DOM-free so sessionCardModel and every UI caller share
+// one implementation; ui.js re-exports it next to formatDate for callers
+// that already import from there. No backend logic is duplicated here.
+export function formatDuration(minutes) {
+  const total = Math.round(Number(minutes));
+  if (!Number.isFinite(total) || total <= 0) return '0m';
+  if (total < 60) return `${total}m`;
+  const hours = Math.floor(total / 60);
+  const rest = total % 60;
+  return rest === 0 ? `${hours}hr` : `${hours}hr${rest}m`;
+}
+
 export function sessionCardModel(session) {
   const record = session && typeof session === 'object' ? session : {};
   const resource = cleanText(record.resource);
@@ -61,7 +75,7 @@ export function sessionCardModel(session) {
   const minutes = Number(record.duration_minutes);
   return {
     badge: category || 'Session',
-    durationLabel: Number.isFinite(minutes) && minutes > 0 ? `${minutes} min` : null,
+    durationLabel: Number.isFinite(minutes) && minutes > 0 ? formatDuration(minutes) : null,
     // Raw YYYY-MM-DD; the card formats it for display.
     dateValue: cleanText(record.session_date) || '',
     title: cleanText(record.writing_title) || resource || `${category || 'Study'} session`,

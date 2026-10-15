@@ -13,6 +13,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readSource = (path) => readFileSync(join(root, path), 'utf8');
 const reviewSource = readSource('src/pages/review.js');
 import { applySessionContext as sharedApplySessionContext } from '../src/sessionContext.js';
+import { formatDuration as sharedFormatDuration } from '../src/sessionHistory.js';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // ---------------------------------------------------------------- Fake DOM
@@ -450,7 +451,7 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
       : null
   );
   const factory = new Function(
-    'apiRequest', 'queryString', 'kanjiReferenceRoute', 'icon', 'element', 'emptyState', 'errorState', 'loadingState', 'openDetailModal', 'openDialog', 'pageHeader', 'setActionPending', 'showToast', 'withPendingAction', 'document', 'window', 'mountKanjiWriting', 'confirmDialog', 'applySessionContext', 'isReviewSoundOn', 'playReviewSound', 'setReviewSoundOn',
+    'apiRequest', 'queryString', 'kanjiReferenceRoute', 'icon', 'element', 'emptyState', 'errorState', 'formatDuration', 'loadingState', 'openDetailModal', 'openDialog', 'pageHeader', 'setActionPending', 'showToast', 'withPendingAction', 'document', 'window', 'mountKanjiWriting', 'confirmDialog', 'applySessionContext', 'isReviewSoundOn', 'playReviewSound', 'setReviewSoundOn',
     code
   );
   const fakeWindow = {
@@ -476,7 +477,7 @@ function loadReviewModule({ candidatesPayload, sessionId = 99, gradeImpl, comple
     }
   };
   const { renderReview } = factory(
-    apiRequest, queryString, kanjiReferenceRoute, icon, ui.element, ui.emptyState, ui.errorState, ui.loadingState, openDetailModal, openDialog, ui.pageHeader, setActionPending, ui.showToast, ui.withPendingAction, doc, fakeWindow, (...args) => { mountCalls.push(args); return () => {}; }, confirmDialog, sharedApplySessionContext, () => true, (result) => { soundCalls.push(result); }, () => {}
+    apiRequest, queryString, kanjiReferenceRoute, icon, ui.element, ui.emptyState, ui.errorState, sharedFormatDuration, ui.loadingState, openDetailModal, openDialog, ui.pageHeader, setActionPending, ui.showToast, ui.withPendingAction, doc, fakeWindow, (...args) => { mountCalls.push(args); return () => {}; }, confirmDialog, sharedApplySessionContext, () => true, (result) => { soundCalls.push(result); }, () => {}
   );
   return { doc, toasts, apiCalls, dialogs, renderReview, ui, openDialogCalls, speechCalls, speechCancelCalls, speechListeners, fakeWindow, mountCalls, confirmCalls, soundCalls };
 }

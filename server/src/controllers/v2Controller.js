@@ -204,6 +204,14 @@ function linkHandlers(kind) {
       validateWriteFields(body, config.groups.map((group) => group.key));
       const supplied = config.groups.filter((group) => body[group.key] !== undefined).map((group) => ({ group, ids: linkIds(body[group.key], group.key) }));
       connection = await pool.getConnection(); await connection.beginTransaction();
+      // Re-verify ownership inside the transaction: the pre-check above ran
+      // outside of it, so an entity deleted or transferred concurrently
+      // could otherwise have its links rewritten. Same 404 contract.
+      const [stillOwned] = await connection.execute(`SELECT ${config.entity.idColumn} FROM ${config.entity.table} WHERE ${config.entity.idColumn} = ? AND user_id = ?`, [id, req.user.id]);
+      if (!stillOwned[0]) {
+        await connection.rollback(); connection.release(); connection = null;
+        return res.status(404).json({ error: `${config.entity.name} not found` });
+      }
       for (const { group, ids } of supplied) {
         const targetTable = LINK_TARGETS[group.targetColumn];
         if (ids.length) {

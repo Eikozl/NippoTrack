@@ -40,7 +40,7 @@ test('GET vocabulary detail exposes the owned SRS review row', async () => {
       return [[{ id_vocabulary: 7, word: '食べ物', reading: 'たべもの', meaning: 'food', jlpt_level: 'N5', status: 'Learning', notes: null }]];
     }
     if (/FROM kanji_vocabulary kv JOIN kanji k/i.test(sql)) return [[]];
-    if (/FROM usage_examples WHERE id_vocabulary/i.test(sql)) return [[]];
+    if (/FROM usage_examples(?: e)? WHERE (?:e\.)?id_vocabulary/i.test(sql)) return [[]];
     if (/FROM review_items ri\s+JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary/i.test(sql)) {
       assert.deepEqual(params, [7, USER_ID]);
       return [[{ id_review_item: 31, due_on: '2026-09-10', interval_days: 3, last_reviewed_at: '2026-09-01T10:00:00.000Z', last_result: 'Hard' }]];
@@ -68,7 +68,7 @@ test('GET vocabulary detail returns review null when never graded', async () => 
       return [[{ id_vocabulary: 8, word: 'ひらがな', reading: 'ひらがな', meaning: 'hiragana', jlpt_level: null, status: 'New', notes: null }]];
     }
     if (/FROM kanji_vocabulary kv JOIN kanji k/i.test(sql)) return [[]];
-    if (/FROM usage_examples WHERE id_vocabulary/i.test(sql)) return [[]];
+    if (/FROM usage_examples(?: e)? WHERE (?:e\.)?id_vocabulary/i.test(sql)) return [[]];
     if (/FROM review_items ri\s+JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary/i.test(sql)) return [[]];
     if (/FROM kanji k WHERE k.user_id/i.test(sql)) return [[]];
     if (/FROM kanji_reference WHERE character IN/i.test(sql)) return [[]];

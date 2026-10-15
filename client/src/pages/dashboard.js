@@ -1,7 +1,7 @@
 import { apiRequest } from '../api';
 import { destroyCharts } from '../chartRegistry';
 import { iconTile } from '../icons';
-import { element, errorState, formatDate, loadingState, openDialog, pageHeader, showToast, withPendingAction } from '../ui';
+import { element, errorState, formatDate, formatDuration, loadingState, openDialog, pageHeader, showToast, withPendingAction } from '../ui';
 import { profileStore } from '../accountProfile.js';
 import { dashboardWelcomeModel, localDayKey, readVisitRecord, recordDashboardVisit } from '../dashboardWelcome.js';
 import { smartGoalsWidget } from '../smartGoals.js';
@@ -210,7 +210,7 @@ function todayProgressSection(studyNow) {
     element('div', { className: 'flex items-center gap-3' }, [iconTile('today', { className: 'panel-icon' }), element('h2', { className: 'font-semibold text-ink', text: 'Today’s progress' })]),
     element('div', { className: 'mt-2 divide-y divide-stone' }, [
       row('Reviews', reviewsLine),
-      row('Study time', minutes > 0 ? `${minutes} min today` : 'Nothing logged yet'),
+      row('Study time', minutes > 0 ? `${formatDuration(minutes)} today` : 'Nothing logged yet'),
       ...(newItemsRow ? [newItemsRow] : [row('New items', 'Nothing added yet')])
     ])
   ]);
@@ -307,8 +307,8 @@ function activityCalendar(items) {
     const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
     const minutes = minutesByDate.get(value) || 0;
     const isToday = value === todayKey;
-    const label = `${formatDate(value)}: ${minutes ? `${minutes} minutes` : 'no study'}${isToday ? ' (today)' : ''}`;
-    const day = element('button', { className: `activity-calendar-day grid aspect-square place-items-center rounded-md text-xs font-semibold ${minutes ? 'bg-vermilion' : 'bg-paper'}${isToday ? ' is-today' : ''}`, text: date.getDate(), attrs: { type: 'button', title: `${formatDate(value)} · ${minutes} minutes`, 'aria-label': label } });
+    const label = `${formatDate(value)}: ${minutes ? formatDuration(minutes) : 'no study'}${isToday ? ' (today)' : ''}`;
+    const day = element('button', { className: `activity-calendar-day grid aspect-square place-items-center rounded-md text-xs font-semibold ${minutes ? 'bg-vermilion' : 'bg-paper'}${isToday ? ' is-today' : ''}`, text: date.getDate(), attrs: { type: 'button', title: `${formatDate(value)} · ${minutes ? formatDuration(minutes) : 'no study'}`, 'aria-label': label } });
     day.addEventListener('click', () => {
       dayDetail.replaceChildren(element('span', { text: label }));
     });
@@ -375,7 +375,7 @@ function reviewReminderSection() {
 
 function recentSessions(items) {  const body = items.length ? element('div', { className: 'divide-y divide-stone' }, items.map((session) => element('div', { className: 'flex items-center justify-between gap-4 py-4 first:pt-0 last:pb-0' }, [
     element('div', {}, [element('p', { className: 'text-sm font-semibold text-ink', text: session.category }), element('p', { className: 'mt-1 text-xs text-muted', text: formatDate(session.session_date) })]),
-    element('span', { className: 'status-pill', text: `${session.duration_minutes} min` })
+    element('span', { className: 'status-pill', text: formatDuration(session.duration_minutes) })
   ]))) : element('p', { className: 'py-10 text-center text-sm text-muted', text: 'No study sessions recorded yet.' });
   return element('article', { className: 'surface p-5 sm:p-6' }, [element('div', { className: 'flex items-center gap-3' }, [iconTile('recent', { className: 'panel-icon' }), element('h2', { className: 'font-semibold text-ink', text: 'Recent sessions' })]), element('p', { className: 'mt-1 text-sm text-muted', text: 'Your latest recorded study activity.' }), element('div', { className: 'mt-6' }, [body])]);
 }
@@ -574,7 +574,7 @@ export async function renderDashboard(container) {
         // V5.6 Completion Pass: the metrics grid no longer duplicates what
         // Study Now (due reviews → action) and Today's Progress (today's
         // minutes → done) already answer. It keeps week/streaks/collection.
-        element('div', { className: 'dashboard-metrics reveal-group grid gap-4 sm:grid-cols-2 xl:grid-cols-3' }, [metric('week', 'This week', data.minutesThisWeek, 'minutes studied'), metric('streak', 'Current streak', activity.currentStreak, 'consecutive active days'), metric('streak', 'Longest streak', activity.longestStreak, 'best run of active days'), metric('vocabulary', 'Vocabulary', data.vocabularyCount, 'saved words', 'vocabulary'), metric('kanji', 'Kanji', data.kanjiCount, 'tracked characters', 'kanji'), metric('grammar', 'Grammar', data.grammarCount, 'saved patterns', 'grammar')]),
+        element('div', { className: 'dashboard-metrics reveal-group grid gap-4 sm:grid-cols-2 xl:grid-cols-3' }, [metric('week', 'This week', formatDuration(data.minutesThisWeek), 'minutes studied'), metric('streak', 'Current streak', activity.currentStreak, 'consecutive active days'), metric('streak', 'Longest streak', activity.longestStreak, 'best run of active days'), metric('vocabulary', 'Vocabulary', data.vocabularyCount, 'saved words', 'vocabulary'), metric('kanji', 'Kanji', data.kanjiCount, 'tracked characters', 'kanji'), metric('grammar', 'Grammar', data.grammarCount, 'saved patterns', 'grammar')]),
         // Zero eligible goals: this section never renders — no empty card,
         // no placeholder, no reserved space.
         ...(previewGoals.length ? [goalsPreview(previewGoals, eligibleGoals.length > 3)] : []),

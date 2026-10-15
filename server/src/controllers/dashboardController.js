@@ -25,12 +25,20 @@ async function getDashboard(req, res) {
         SELECT COALESCE(SUM(seconds) FILTER (WHERE day = COALESCE(?::date, CURRENT_DATE)), 0) / 60 AS today,
                COALESCE(SUM(seconds) FILTER (WHERE day >= date_trunc('week', COALESCE(?::date, CURRENT_DATE))::date AND day <= COALESCE(?::date, CURRENT_DATE)), 0) / 60 AS week
         FROM reading_study_days WHERE user_id = ?
+      ),
+      -- Completed review sessions count too, with no session rows created:
+      -- elapsed minutes per completed session (minimum one), attributed to
+      -- the completion day so manual logging keeps its purpose.
+      review_minutes AS (
+        SELECT COALESCE(SUM(GREATEST(1, ROUND(EXTRACT(EPOCH FROM (completed_at - COALESCE(started_at, completed_at))) / 60))) FILTER (WHERE completed_at::date = COALESCE(?::date, CURRENT_DATE)), 0) AS today,
+               COALESCE(SUM(GREATEST(1, ROUND(EXTRACT(EPOCH FROM (completed_at - COALESCE(started_at, completed_at))) / 60))) FILTER (WHERE completed_at::date >= date_trunc('week', COALESCE(?::date, CURRENT_DATE))::date AND completed_at::date <= COALESCE(?::date, CURRENT_DATE)), 0) AS week
+        FROM review_sessions WHERE user_id = ? AND completed_at IS NOT NULL
       )
       SELECT
         COALESCE((SELECT SUM(duration_minutes) FROM user_sessions WHERE session_date = COALESCE(?::date, CURRENT_DATE)), 0)
-          + COALESCE((SELECT today FROM reading_minutes), 0) AS minutes_today,
+          + COALESCE((SELECT today FROM reading_minutes), 0) + COALESCE((SELECT today FROM review_minutes), 0) AS minutes_today,
         COALESCE((SELECT SUM(duration_minutes) FROM user_sessions WHERE session_date >= date_trunc('week', COALESCE(?::date, CURRENT_DATE))::date AND session_date <= COALESCE(?::date, CURRENT_DATE)), 0)
-          + COALESCE((SELECT week FROM reading_minutes), 0) AS minutes_week,
+          + COALESCE((SELECT week FROM reading_minutes), 0) + COALESCE((SELECT week FROM review_minutes), 0) AS minutes_week,
         (SELECT COUNT(*) FROM user_vocabulary) AS vocabulary_count,
         (SELECT COUNT(*) FROM user_kanji) AS kanji_count,
         (SELECT COUNT(*) FROM user_grammar) AS grammar_count,
@@ -47,7 +55,7 @@ async function getDashboard(req, res) {
           SELECT category, SUM(duration_minutes) AS minutes
           FROM user_sessions GROUP BY category ORDER BY minutes DESC
         ) distribution), '[]'::json) AS study_distribution
-    `, [req.user.id, req.user.id, req.user.id, req.user.id, today, today, today, req.user.id, today, today, today, today, today]);
+    `, [req.user.id, req.user.id, req.user.id, req.user.id, today, today, today, req.user.id, today, today, today, req.user.id, today, today, today, today, today]);
     const data = rows[0] || {};
 
     return res.json({
@@ -89,16 +97,21 @@ async function getActivity(req, res) {
       const [todayRows] = await pool.query("SELECT to_char(CURRENT_DATE, 'YYYY-MM-DD') AS today");
       today = isoDate(todayRows[0]?.today || new Date());
     }
-    const [[dateRows], [calendarRows], [readingDayRows], [readingCalendarRows]] = await Promise.all([
+    const [[dateRows], [calendarRows], [readingDayRows], [readingCalendarRows], [reviewDayRows], [reviewCalendarRows]] = await Promise.all([
       pool.query("SELECT to_char(session_date, 'YYYY-MM-DD') AS date FROM study_sessions WHERE user_id = ? GROUP BY session_date ORDER BY session_date ASC", [req.user.id]),
       pool.query("SELECT to_char(session_date, 'YYYY-MM-DD') AS date, SUM(duration_minutes) AS minutes FROM study_sessions WHERE user_id = ? AND session_date BETWEEN ?::date AND ?::date GROUP BY session_date ORDER BY session_date ASC", [req.user.id, shiftDays(today, -34), today]),
       // Reading counts toward streaks only on days with 5+ minutes (300s):
       // skimming for seconds must not keep a streak alive.
       pool.query("SELECT to_char(day, 'YYYY-MM-DD') AS date FROM reading_study_days WHERE user_id = ? AND seconds >= 300 GROUP BY day ORDER BY day ASC", [req.user.id]).catch(() => [[]]),
-      pool.query("SELECT to_char(day, 'YYYY-MM-DD') AS date, SUM(seconds) / 60 AS minutes FROM reading_study_days WHERE user_id = ? AND day BETWEEN ?::date AND ?::date GROUP BY day ORDER BY day ASC", [req.user.id, shiftDays(today, -34), today]).catch(() => [[]])
+      pool.query("SELECT to_char(day, 'YYYY-MM-DD') AS date, SUM(seconds) / 60 AS minutes FROM reading_study_days WHERE user_id = ? AND day BETWEEN ?::date AND ?::date GROUP BY day ORDER BY day ASC", [req.user.id, shiftDays(today, -34), today]).catch(() => [[]]),
+      // Any completed review session keeps the streak: finishing reviews is
+      // real study time even without a manually logged session.
+      pool.query("SELECT to_char(completed_at, 'YYYY-MM-DD') AS date FROM review_sessions WHERE user_id = ? AND completed_at IS NOT NULL GROUP BY date ORDER BY date ASC", [req.user.id]).catch(() => [[]]),
+      pool.query("SELECT to_char(completed_at, 'YYYY-MM-DD') AS date, SUM(GREATEST(1, ROUND(EXTRACT(EPOCH FROM (completed_at - COALESCE(started_at, completed_at))) / 60))) AS minutes FROM review_sessions WHERE user_id = ? AND completed_at IS NOT NULL AND completed_at::date BETWEEN ?::date AND ?::date GROUP BY date ORDER BY date ASC", [req.user.id, shiftDays(today, -34), today]).catch(() => [[]])
     ]);
     const readingByDate = new Map((readingCalendarRows || []).map((row) => [isoDate(row.date), Number(row.minutes || 0)]));
-    const dates = [...new Set([...dateRows.map((row) => isoDate(row.date)), ...readingDayRows.map((row) => isoDate(row.date))])].sort();
+    const reviewByDate = new Map((reviewCalendarRows || []).map((row) => [isoDate(row.date), Number(row.minutes || 0)]));
+    const dates = [...new Set([...dateRows.map((row) => isoDate(row.date)), ...readingDayRows.map((row) => isoDate(row.date)), ...reviewDayRows.map((row) => isoDate(row.date))])].sort();
     const active = new Set(dates);
     let currentStreak = 0;
     for (let day = dayNumber(today); active.has(new Date(day * 86400000).toISOString().slice(0, 10)); day -= 1) currentStreak += 1;
@@ -106,6 +119,9 @@ async function getActivity(req, res) {
     dates.forEach((date) => { running = previous !== null && dayNumber(date) === previous + 1 ? running + 1 : 1; longestStreak = Math.max(longestStreak, running); previous = dayNumber(date); });
     const sessionByDate = new Map((calendarRows || []).map((row) => [isoDate(row.date), Number(row.minutes || 0)]));
     for (const [date, minutes] of readingByDate) {
+      sessionByDate.set(date, (sessionByDate.get(date) || 0) + minutes);
+    }
+    for (const [date, minutes] of reviewByDate) {
       sessionByDate.set(date, (sessionByDate.get(date) || 0) + minutes);
     }
     return res.json({
@@ -147,7 +163,8 @@ async function getStudyNow(req, res) {
           WHERE ri.due_on <= CURRENT_DATE AND ri.id_grammar IS NOT NULL AND ri.id_vocabulary IS NULL AND ri.id_kanji IS NULL
             AND g.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)) AS due_grammar,
         COALESCE((SELECT SUM(duration_minutes) FROM study_sessions WHERE user_id = ? AND session_date = COALESCE(?::date, CURRENT_DATE)), 0)
-          + COALESCE((SELECT SUM(seconds) / 60 FROM reading_study_days WHERE user_id = ? AND day = COALESCE(?::date, CURRENT_DATE)), 0) AS minutes_today,
+          + COALESCE((SELECT SUM(seconds) / 60 FROM reading_study_days WHERE user_id = ? AND day = COALESCE(?::date, CURRENT_DATE)), 0)
+          + COALESCE((SELECT SUM(GREATEST(1, ROUND(EXTRACT(EPOCH FROM (completed_at - COALESCE(started_at, completed_at))) / 60))) FROM review_sessions WHERE user_id = ? AND completed_at IS NOT NULL AND completed_at::date = COALESCE(?::date, CURRENT_DATE)), 0) AS minutes_today,
         (SELECT COUNT(*) FROM vocabulary WHERE user_id = ?) AS vocabulary_count,
         (SELECT COUNT(*) FROM kanji WHERE user_id = ?) AS kanji_count,
         (SELECT COUNT(*) FROM grammar_points WHERE user_id = ?) AS grammar_count,
@@ -155,7 +172,7 @@ async function getStudyNow(req, res) {
         (SELECT COUNT(*) FROM kanji WHERE user_id = ? AND created_at::date = COALESCE(?::date, CURRENT_DATE)) +
         (SELECT COUNT(*) FROM grammar_points WHERE user_id = ? AND created_at::date = COALESCE(?::date, CURRENT_DATE))
         AS new_items_today
-    `, [userId, userId, userId, userId, today, userId, today, userId, userId, userId, userId, today, userId, today, userId, today]);
+    `, [userId, userId, userId, userId, today, userId, today, userId, today, userId, userId, userId, userId, today, userId, today, userId, today]);
     const [[difficultRows], [readingRows], [sampleRows], [gradedRows], [openRows]] = await Promise.all([
       pool.query(`
         SELECT ri.id_review_item FROM review_items ri

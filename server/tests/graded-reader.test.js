@@ -210,9 +210,19 @@ test('GET text hides foreign rows as 404 and returns annotations for readable ro
   });
 });
 
+function connectionFor(dispatch) {
+  return {
+    execute: dispatch,
+    async beginTransaction() {},
+    async commit() {},
+    async rollback() {},
+    release() {}
+  };
+}
+
 test('progress is user-scoped, validates bounds, and uses an upsert', async () => {
   const calls = [];
-  await withPoolStubs({ execute: async (sql, params = []) => {
+  const dispatch = async (sql, params = []) => {
     calls.push({ sql, params });
     if (/SELECT id_reading_text, text FROM reading_texts/i.test(sql)) {
       assert.ok(params.includes(USER_ID));
@@ -229,7 +239,15 @@ test('progress is user-scoped, validates bounds, and uses an upsert', async () =
       return [{ affectedRows: 1 }];
     }
     throw new Error(`Unexpected progress SQL: ${sql}`);
-  } }, async () => {
+  };
+  const connection = {
+    execute: dispatch,
+    async beginTransaction() {},
+    async commit() {},
+    async rollback() {},
+    release() {}
+  };
+  await withPoolStubs({ execute: dispatch, getConnection: async () => connection }, async () => {
     const invalid = mockRes();
     await controller.updateProgress({ params: { id: '31' }, body: { position: 4 }, user: { id: USER_ID } }, invalid.res);
     assert.equal(invalid.status(), 400);
@@ -253,7 +271,7 @@ test('progress is user-scoped, validates bounds, and uses an upsert', async () =
     assert.match(daily.sql, /ON CONFLICT \(user_id, day\) DO UPDATE/i);
   });
 
-  await withPoolStubs({ execute: async (sql, params = []) => {
+  const backwardsTotals = async (sql, params = []) => {
     if (/SELECT id_reading_text, text FROM reading_texts/i.test(sql)) {
       return [[{ id_reading_text: 31, text: '学生' }]];
     }
@@ -268,7 +286,8 @@ test('progress is user-scoped, validates bounds, and uses an upsert', async () =
       throw new Error('backwards totals must not credit anything');
     }
     throw new Error(`Unexpected progress SQL: ${sql}`);
-  } }, async () => {
+  };
+  await withPoolStubs({ execute: backwardsTotals, getConnection: async () => connectionFor(backwardsTotals) }, async () => {
     const response = mockRes();
     await controller.updateProgress({ params: { id: '31' }, body: { position: 1, timeSpentSeconds: 15 }, user: { id: USER_ID } }, response.res);
     assert.equal(response.status(), 200);
@@ -276,7 +295,7 @@ test('progress is user-scoped, validates bounds, and uses an upsert', async () =
   });
 
   const anchoredCalls = [];
-  await withPoolStubs({ execute: async (sql, params = []) => {
+  const anchoredDispatch = async (sql, params = []) => {
     anchoredCalls.push({ sql, params });
     if (/SELECT id_reading_text, text FROM reading_texts/i.test(sql)) {
       return [[{ id_reading_text: 31, text: '学生' }]];
@@ -288,7 +307,8 @@ test('progress is user-scoped, validates bounds, and uses an upsert', async () =
     if (/SELECT position FROM user_reading_progress/i.test(sql)) return [[{ position: '2' }]];
     if (/INSERT INTO reading_study_days/i.test(sql)) return [{ affectedRows: 1 }];
     throw new Error(`Unexpected progress SQL: ${sql}`);
-  } }, async () => {
+  };
+  await withPoolStubs({ execute: anchoredDispatch, getConnection: async () => connectionFor(anchoredDispatch) }, async () => {
     // Client local day anchors the credit row (UTC-4 evenings must not land
     // on tomorrow's UTC row, or "today" stats read 0).
     const anchored = mockRes();

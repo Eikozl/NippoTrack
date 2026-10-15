@@ -1,7 +1,7 @@
 import { apiRequest, queryString } from '../api';
 import { kanjiReferenceRoute } from '../kanjiReference';
 import { icon } from '../icons';
-import { element, emptyState, errorState, loadingState, openDetailModal, openDialog, confirmDialog, pageHeader, setActionPending, showToast, withPendingAction } from '../ui';
+import { element, emptyState, errorState, formatDuration, loadingState, openDetailModal, openDialog, confirmDialog, pageHeader, setActionPending, showToast, withPendingAction } from '../ui';
 import { mountKanjiWriting } from '../kanjiWriting.js';
 import { applySessionContext } from '../sessionContext.js';
 import { playReviewSound } from '../reviewSounds.js';
@@ -2404,7 +2404,8 @@ const CARD_TYPE_DESCRIPTIONS = {
       element('ul', { className: 'mt-4 grid gap-1.5 border-t border-stone pt-4 text-sm leading-6 text-muted' }, [
         element('li', { text: `${goodCount} felt comfortable` }),
         element('li', { text: `${hardCount} felt difficult` }),
-        element('li', { text: `${againCount} should be revisited` })
+        element('li', { text: `${againCount} should be revisited` }),
+        element('li', { text: `${formatDuration(summary?.minutesLogged || 0)} counted today` })
       ]),
       element('div', { className: 'mt-6 flex flex-col gap-2 sm:flex-row' }, [
         element('button', { className: 'button-primary', text: 'Back to Review', attrs: { type: 'button' } }),

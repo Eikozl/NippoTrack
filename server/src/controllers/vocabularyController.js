@@ -176,8 +176,8 @@ async function getVocabulary(req, res) {
       wordChars
     ) : Promise.resolve([[]]);
     const examplesPromise = pool.execute(
-      'SELECT id_usage_example, sentence, translation, notes FROM usage_examples WHERE id_vocabulary = ? ORDER BY id_usage_example DESC',
-      [id]
+      'SELECT e.id_usage_example, e.sentence, e.translation, e.notes FROM usage_examples e WHERE e.id_vocabulary = ? AND EXISTS (SELECT 1 FROM vocabulary v WHERE v.id_vocabulary = e.id_vocabulary AND v.user_id = ?) ORDER BY e.id_usage_example DESC',
+      [id, req.user.id]
     );
     // SRS state (same shape as kanji detail): owned review row if the entry
     // was ever graded, else null. Read-only, no lazy enrollment here.

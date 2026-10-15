@@ -707,12 +707,17 @@ async function toggleLike(executor, userId, postId) {
       // Unlike already succeeded; the stale inbox row is harmless.
     }
   } else {
-    await executor.execute(
-      'INSERT INTO post_likes (id_community_post, user_id) VALUES (?, ?) ON CONFLICT (id_community_post, user_id) DO NOTHING',
+    // Notify only when this request actually inserted the like row: under a
+    // like+like race both requests see an empty SELECT, but ON CONFLICT lets
+    // exactly one INSERT report affectedRows > 0, so the inbox gets one row.
+    const [likeResult] = await executor.execute(
+      'INSERT INTO post_likes (id_community_post, user_id) VALUES (?, ?) ON CONFLICT (id_community_post, user_id) DO NOTHING RETURNING id_community_post AS inserted',
       [id, userId]
     );
     liked = true;
-    await notifyUser(executor, { userId: visible.authorId, actorId: userId, kind: 'like', postId: id });
+    if (Number(likeResult?.affectedRows) > 0) {
+      await notifyUser(executor, { userId: visible.authorId, actorId: userId, kind: 'like', postId: id });
+    }
   }
   const post = await getPost(executor, userId, id);
   return post ? { ...post, liked } : null;
@@ -961,11 +966,14 @@ async function followUser(executor, followerId, username) {
     [followerId, target.user_id, target.user_id, followerId]
   );
   if (blocked[0]) return { notFound: true };
-  await executor.execute(
-    'INSERT INTO user_follows (follower_id, followed_id) VALUES (?, ?) ON CONFLICT (follower_id, followed_id) DO NOTHING',
+  const [followed] = await executor.execute(
+    'INSERT INTO user_follows (follower_id, followed_id) VALUES (?, ?) ON CONFLICT (follower_id, followed_id) DO NOTHING RETURNING follower_id AS inserted',
     [followerId, target.user_id]
   );
-  await notifyUser(executor, { userId: target.user_id, actorId: followerId, kind: 'follow' });
+  // Same race gate as likes: only the request that inserted the row notifies.
+  if (Number(followed?.affectedRows) > 0) {
+    await notifyUser(executor, { userId: target.user_id, actorId: followerId, kind: 'follow' });
+  }
   return { followed: String(target.user_id), username: name };
 }
 

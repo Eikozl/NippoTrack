@@ -72,7 +72,12 @@ test('GET /api/dashboard anchors all windows on ?today (local client date)', asy
     );
     assert.equal(params[7], USER_ID, 'reading CTE stays user-scoped');
     assert.deepEqual(
-      params.slice(8),
+      params.slice(8, 12),
+      [LOCAL_TODAY, LOCAL_TODAY, LOCAL_TODAY, USER_ID],
+      'review-minutes CTE uses the client date and stays user-scoped'
+    );
+    assert.deepEqual(
+      params.slice(12),
       [LOCAL_TODAY, LOCAL_TODAY, LOCAL_TODAY, LOCAL_TODAY, LOCAL_TODAY],
       'today / week / rolling windows all use the client date'
     );
@@ -99,6 +104,11 @@ test('GET /api/dashboard/activity anchors streak and calendar on ?today', async 
       // Today qualifies via reading (>= 300s); yesterday via sessions.
       return [[{ date: LOCAL_TODAY }]];
     }
+    if (/FROM review_sessions/i.test(sql)) {
+      // No completed reviews in this fixture: review days/minutes merge
+      // nothing and the streak math below is sessions+reading only.
+      return [[]];
+    }
     if (/BETWEEN \?::date AND \?::date/.test(sql)) {
       return [[{ date: '2026-10-03', minutes: 30 }]];
     }
@@ -109,7 +119,7 @@ test('GET /api/dashboard/activity anchors streak and calendar on ?today', async 
     assert.equal(status(), 200);
     const data = body();
     assert.equal(data.currentStreak, 2, 'reading day keeps today active next to session days');
-    assert.equal(calls.length, 4, 'sessions + reading queries, still bounded');
+    assert.equal(calls.length, 6, 'sessions + reading + review queries, still bounded');
     assert.ok(!calls.some(({ sql }) => /to_char\(CURRENT_DATE/.test(sql)), 'client today replaces the UTC anchor');
     const calendarCall = calls.find(({ sql }) => /BETWEEN/.test(sql) && !/reading_study_days/i.test(sql));
     assert.deepEqual(calendarCall.params, [USER_ID, shiftDays(LOCAL_TODAY, -34), LOCAL_TODAY], '35-day window anchored on client today');
@@ -120,8 +130,27 @@ test('GET /api/dashboard/activity anchors streak and calendar on ?today', async 
   });
 });
 
-test('GET /api/dashboard/activity without ?today keeps the UTC fallback', async () => {
-  const calls = [];
+test('GET /api/dashboard/activity counts a review-only day toward the streak', async () => {
+  await withPoolQuery(async (sql) => {
+    if (/FROM study_sessions/i.test(sql)) return [[]];
+    if (/FROM reading_study_days/i.test(sql)) return [[]];
+    if (/FROM review_sessions/i.test(sql) && /BETWEEN/i.test(sql)) {
+      return [[{ date: shiftDays(LOCAL_TODAY, -1), minutes: 12 }]];
+    }
+    if (/FROM review_sessions/i.test(sql)) {
+      return [[{ date: shiftDays(LOCAL_TODAY, -1) }, { date: LOCAL_TODAY }]];
+    }
+    return [[]];
+  }, async () => {
+    const { res, status, body } = mockRes();
+    await controller.getActivity({ user: { id: USER_ID }, query: { today: LOCAL_TODAY } }, res);
+    assert.equal(status(), 200);
+    assert.equal(body().currentStreak, 2, 'completed reviews keep the streak without manual sessions');
+    assert.equal(body().calendar.find((entry) => entry.date === shiftDays(LOCAL_TODAY, -1)).minutes, 12);
+  });
+});
+
+test('GET /api/dashboard/activity without ?today keeps the UTC fallback', async () => {  const calls = [];
   await withPoolQuery(async (sql, params = []) => {
     calls.push({ sql, params });
     if (/to_char\(CURRENT_DATE/.test(sql)) return [[{ today: '2026-10-05' }]];
