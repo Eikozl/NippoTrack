@@ -109,11 +109,6 @@ test('GET /api/dashboard/activity anchors streak and calendar on ?today', async 
       // nothing and the streak math below is sessions+reading only.
       return [[]];
     }
-    if (/FROM review_sessions/i.test(sql)) {
-      // No completed reviews in this fixture: review days/minutes merge
-      // nothing and the streak math below is sessions+reading only.
-      return [[]];
-    }
     if (/BETWEEN \?::date AND \?::date/.test(sql)) {
       return [[{ date: '2026-10-03', minutes: 30 }]];
     }
@@ -137,14 +132,17 @@ test('GET /api/dashboard/activity anchors streak and calendar on ?today', async 
 
 test('GET /api/dashboard/activity counts a review-only day toward the streak', async () => {
   await withPoolQuery(async (sql) => {
-    if (/FROM study_sessions/i.test(sql)) return [[]];
-    if (/FROM reading_study_days/i.test(sql)) return [[]];
+    // Review branches first: the review-minutes query embeds a
+    // NOT EXISTS (… study_sessions …) guard that would otherwise match
+    // the sessions branches below.
     if (/FROM review_sessions/i.test(sql) && /BETWEEN/i.test(sql)) {
       return [[{ date: shiftDays(LOCAL_TODAY, -1), minutes: 12 }]];
     }
     if (/FROM review_sessions/i.test(sql)) {
       return [[{ date: shiftDays(LOCAL_TODAY, -1) }, { date: LOCAL_TODAY }]];
     }
+    if (/FROM study_sessions/i.test(sql)) return [[]];
+    if (/FROM reading_study_days/i.test(sql)) return [[]];
     return [[]];
   }, async () => {
     const { res, status, body } = mockRes();

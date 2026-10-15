@@ -148,6 +148,43 @@ test('progress upsert locks the previous total and runs inside a transaction', a
   assert.ok(seen.some((sql) => sql.includes('FOR UPDATE')), 'previous total is row-locked');
 });
 
+test('createSession stores a review link only for owned sessions', async () => {
+  const calls = [];
+  const execute = async (sql, params) => {
+    calls.push(String(sql));
+    if (sql.includes('FROM review_sessions WHERE id_review_session')) {
+      return [params[0] === 9 ? [{ id_review_session: 9 }] : []];
+    }
+    if (sql.startsWith('INSERT INTO study_sessions')) {
+      assert.ok(sql.includes('id_review_session'), 'link column written on create');
+      return [{ insertId: 3 }];
+    }
+    return [[]];
+  };
+  const getConnection = async () => ({
+    execute,
+    async beginTransaction() {},
+    async commit() {},
+    async rollback() {},
+    release() {}
+  });
+  await withPoolStubs({ execute, getConnection }, async () => {
+    const sessionsController = require('../src/controllers/sessionsController');
+    const ok = mockRes();
+    await sessionsController.createSession({
+      user: { id: USER_ID },
+      body: { session_date: '2026-10-14', duration_minutes: 25, category: 'Mixed', review_session_id: 9 }
+    }, ok.res);
+    assert.equal(ok.status(), 201);
+    const bad = mockRes();
+    await sessionsController.createSession({
+      user: { id: USER_ID },
+      body: { session_date: '2026-10-14', duration_minutes: 25, category: 'Mixed', review_session_id: 999 }
+    }, bad.res);
+    assert.equal(bad.status(), 400);
+  });
+});
+
 // ------------------------------------------------------- graded-today box
 test('listGradedToday returns owned items graded on the requested day', async () => {
   const execute = async (sql, params) => {

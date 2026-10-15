@@ -36,12 +36,12 @@ test('review completion relies on server timestamps, not client day', () => {
   assert.ok(source.includes('counted today'), 'complete screen surfaces the counted time');
   assert.ok(source.includes('formatDuration'), 'counted time uses the shared duration formatter');
 });
-
 test('log study session carries auto-counted minutes into the dialog', () => {
   const review = readSource('src/pages/review.js');
-  assert.ok(review.includes('minutes=${Number(summary.minutesLogged)}') || review.includes('&minutes='), 'complete link forwards counted minutes');
+  assert.ok(review.includes('reviewSession=${sessionId}'), 'complete link forwards the review session id');
   const sessions = readSource('src/pages/sessions.js');
-  assert.ok(sessions.includes('autoMinutes'), 'dialog honors auto-counted minutes');
+  assert.ok(sessions.includes('autoReviewSessionId'), 'dialog keeps the review link separate from editable fields');
+  assert.ok(sessions.includes('payload.review_session_id = autoReviewSessionId'), 'link stored on create only');
   assert.ok(sessions.includes('readOnly = true') || sessions.includes('readOnly=true'), 'auto-counted duration starts read-only');
   assert.ok(sessions.includes('Override auto-counted minutes?'), 'overriding requires an explicit confirmation');
 });
@@ -50,4 +50,10 @@ test('weekly metric switches to hours studied past sixty minutes', () => {
   const dashboard = readSource('src/pages/dashboard.js');
   assert.ok(dashboard.includes(`'hours studied'`), 'hours label exists past sixty minutes');
   assert.ok(dashboard.includes(`'minutes studied'`), 'minutes label kept at or below sixty');
+});
+
+test('session dialog parameter is never shadowed by an inner binding', () => {
+  const source = readSource('src/pages/sessions.js');
+  assert.ok(source.includes('openSessionDialog(record = {}, options = {})'), 'dialog accepts options');
+  assert.ok(!source.includes('const options = await loadRelationshipOptions'), 'no shadowing const that traps options.minutes in TDZ');
 });

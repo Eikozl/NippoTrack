@@ -387,13 +387,19 @@ export function renderSessions(container) {
       // prefill Duration as read-only: overriding them requires an explicit
       // confirmation so the real calculated time is not changed by accident.
       const autoMinutes = Number.isInteger(options.minutes) && options.minutes > 0 ? options.minutes : null;
+      // Review session this log was created from (Log study session flow):
+      // stored so dashboards exclude the auto-counted minutes instead of
+      // counting them twice. Never editable, never sent on edit.
+      const autoReviewSessionId = Number.isInteger(options.reviewSessionId) && options.reviewSessionId > 0 && !record.id_session
+        ? options.reviewSessionId
+        : null;
       // Visible order: Basic → Linked material → Writing → Notes. Linking is
       // one compact collapsible with three small multi-pickers, honestly
       // labeled optional — nothing auto-links. Edit pre-selects the
       // record's current links so saving round-trips them; omitted arrays
       // would preserve, supplied arrays replace (backend partial-update
       // semantics). Writing notes stay hidden (backend keeps them on edit).
-      const options = await loadRelationshipOptions(record);
+      const relationshipOptions = await loadRelationshipOptions(record);
       let closeDialog;
       const goToLibrary = (page) => {
         closeDialog?.();
@@ -419,7 +425,7 @@ export function renderSessions(container) {
       const vocabPicker = searchableMultiSelect({
         name: 'vocabulary_ids',
         label: 'Related vocabulary',
-        options: options.vocabulary,
+        options: relationshipOptions.vocabulary,
         value: (record.vocabulary || []).map((item) => item.id_vocabulary),
         placeholder: 'Search vocabulary…',
         emptyMessage: 'No vocabulary records yet. Add vocabulary before linking it to this session.',
@@ -430,7 +436,7 @@ export function renderSessions(container) {
       const kanjiPicker = searchableMultiSelect({
         name: 'kanji_ids',
         label: 'Related kanji',
-        options: options.kanji,
+        options: relationshipOptions.kanji,
         value: (record.kanji || []).map((item) => item.id_kanji),
         placeholder: 'Search kanji…',
         emptyMessage: 'No kanji records yet. Add kanji before linking it to this session.',
@@ -441,7 +447,7 @@ export function renderSessions(container) {
       const grammarPicker = searchableMultiSelect({
         name: 'grammar_ids',
         label: 'Related grammar',
-        options: options.grammar,
+        options: relationshipOptions.grammar,
         value: (record.grammar || []).map((item) => item.id_grammar),
         placeholder: 'Search grammar…',
         emptyMessage: 'No grammar records yet. Add grammar before linking it to this session.',
@@ -476,9 +482,9 @@ export function renderSessions(container) {
           const vocabRecords = vocabPairs.map(({ id, label }) => ({ id_vocabulary: id, word: label }));
           const kanjiRecords = kanjiPairs.map(({ id, label }) => ({ id_kanji: id, character_kanji: label }));
           const grammarRecords = grammarPairs.map(({ id, label }) => ({ id_grammar: id, grammar_point: label }));
-          const mergedVocabOptions = mergeOptions(options.vocabulary, vocabRecords, vocabularyOption);
-          const mergedKanjiOptions = mergeOptions(options.kanji, kanjiRecords, kanjiOption);
-          const mergedGrammarOptions = mergeOptions(options.grammar, grammarRecords, grammarOption);
+          const mergedVocabOptions = mergeOptions(relationshipOptions.vocabulary, vocabRecords, vocabularyOption);
+          const mergedKanjiOptions = mergeOptions(relationshipOptions.kanji, kanjiRecords, kanjiOption);
+          const mergedGrammarOptions = mergeOptions(relationshipOptions.grammar, grammarRecords, grammarOption);
           const currentVocab = new Set(selectedNumbers(form.elements.vocabulary_ids).map(String));
           const currentKanji = new Set(selectedNumbers(form.elements.kanji_ids).map(String));
           const currentGrammar = new Set(selectedNumbers(form.elements.grammar_ids).map(String));
@@ -488,9 +494,9 @@ export function renderSessions(container) {
           vocabPicker.appendLinkedOptions(mergedVocabOptions, newVocabIds);
           kanjiPicker.appendLinkedOptions(mergedKanjiOptions, newKanjiIds);
           grammarPicker.appendLinkedOptions(mergedGrammarOptions, newGrammarIds);
-          options.vocabulary = mergedVocabOptions;
-          options.kanji = mergedKanjiOptions;
-          options.grammar = mergedGrammarOptions;
+          relationshipOptions.vocabulary = mergedVocabOptions;
+          relationshipOptions.kanji = mergedKanjiOptions;
+          relationshipOptions.grammar = mergedGrammarOptions;
           if (contentPairs.length) {
             dayContentNote.textContent = `${contentPairs.length} content ${contentPairs.length === 1 ? 'entry' : 'entries'} that day — link them from Content Log`;
           } else {
@@ -575,6 +581,7 @@ export function renderSessions(container) {
             writing_content: formData.get('writing_content'),
             notes: formData.get('notes')
           });
+          if (autoReviewSessionId !== null) payload.review_session_id = autoReviewSessionId;
           await apiRequest(record.id_session ? `/api/sessions/${record.id_session}` : '/api/sessions', {
             method: record.id_session ? 'PUT' : 'POST',
             body: payload
@@ -810,7 +817,11 @@ export function renderSessions(container) {
       if (params.get('new') === '1') {
         window.history.replaceState(null, '', '#sessions');
         const minutes = Number(params.get('minutes'));
-        openSessionDialog({}, Number.isInteger(minutes) && minutes > 0 ? { minutes } : {});
+        const reviewSession = Number(params.get('reviewSession'));
+        openSessionDialog({}, {
+          ...(Number.isInteger(minutes) && minutes > 0 ? { minutes } : {}),
+          ...(Number.isInteger(reviewSession) && reviewSession > 0 ? { reviewSessionId: reviewSession } : {})
+        });
       }
     }
   } catch { /* fail open to the plain list */ }

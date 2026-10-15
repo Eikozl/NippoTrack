@@ -5,6 +5,7 @@ const ALLOWED_FIELDS = {
     'category',
     'resource',
     'notes',
+    'review_session_id',
     'vocabulary_ids',
     'kanji_ids',
     'grammar_ids',
