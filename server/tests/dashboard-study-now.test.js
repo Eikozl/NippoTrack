@@ -67,13 +67,13 @@ async function withPoolQuery(stub, callback) {
 function stubPool({ due = null, difficult = 0, minutes = 0, vocab = 0, kanji = 0, grammar = 0, reading = null, sample = [], gradedToday = 0, newToday = 0, openSessions = [] } = {}) {
   const dueParts = due || { vocabulary: vocab, kanji, grammar };
   return async (sql) => {
-    if (/FROM review_sessions rs/i.test(sql)) {
+    if (/FROM review_sessions rs/i.test(sql) && /completed_at IS NULL/i.test(sql)) {
       return [openSessions];
     }
     if (/review_events/i.test(sql) && /GROUP BY ri\.id_review_item/i.test(sql)) {
       return [Array.from({ length: difficult }, (_, i) => ({ id_review_item: i + 1 }))];
     }
-    if (/FROM review_events re/i.test(sql)) {
+    if (/FROM review_events re/i.test(sql) && /graded_today/i.test(sql)) {
       return [[{ graded_today: gradedToday }]];
     }
     if (/user_reading_progress/i.test(sql)) {

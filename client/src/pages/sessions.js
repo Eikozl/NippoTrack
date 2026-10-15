@@ -380,9 +380,13 @@ export function renderSessions(container) {
     };
   }
 
-  async function openSessionDialog(record = {}) {
+  async function openSessionDialog(record = {}, options = {}) {
     if (!setActionPending(addButton, true, { pendingLabel: 'Loading…' })) return;
     try {
+      // Minutes auto-counted from a finished review arrive via options and
+      // prefill Duration as read-only: overriding them requires an explicit
+      // confirmation so the real calculated time is not changed by accident.
+      const autoMinutes = Number.isInteger(options.minutes) && options.minutes > 0 ? options.minutes : null;
       // Visible order: Basic → Linked material → Writing → Notes. Linking is
       // one compact collapsible with three small multi-pickers, honestly
       // labeled optional — nothing auto-links. Edit pre-selects the
@@ -512,10 +516,34 @@ export function renderSessions(container) {
       ]);
       const notesField = field({ name: 'notes', label: 'Notes', type: 'textarea', maxLength: 1500, value: record.notes || '', description: 'Reflections, observations, reminders.' });
       notesField.classList.add('sm:col-span-2');
+      const durationField = field({ name: 'duration_minutes', label: 'Duration (minutes)', type: 'number', required: true, value: autoMinutes ?? record.duration_minutes ?? 30 });
+      let autoMinutesNote = null;
+      if (autoMinutes !== null) {
+        const durationInput = durationField.querySelector('input');
+        if (durationInput) durationInput.readOnly = true;
+        autoMinutesNote = element('p', { className: 'mt-1 text-xs text-muted', text: `Auto-counted from your review (${autoMinutes} min).` });
+        const adjustButton = element('button', { className: 'button-secondary mt-2 min-h-9 px-3 py-1.5 text-xs', text: 'Adjust minutes', attrs: { type: 'button' } });
+        adjustButton.addEventListener('click', () => {
+          confirmDialog({
+            title: 'Override auto-counted minutes?',
+            description: `This session came with ${autoMinutes} minutes counted automatically from your review. Changing the value overrides the real calculated time.`,
+            confirmLabel: 'Edit anyway',
+            onConfirm: async () => {
+              if (durationInput) {
+                durationInput.readOnly = false;
+                durationInput.focus();
+              }
+              autoMinutesNote?.remove();
+              adjustButton.remove();
+            }
+          });
+        });
+        durationField.append(autoMinutesNote, adjustButton);
+      }
       const formFields = [
         field({ name: 'category', label: 'Session type', required: true, value: record.category || 'Vocabulary', options: CATEGORIES.map((value) => ({ value, label: value })) }),
         field({ name: 'session_date', label: 'Date', type: 'date', required: true, value: String(record.session_date || '').slice(0, 10) }),
-        field({ name: 'duration_minutes', label: 'Duration (minutes)', type: 'number', required: true, value: record.duration_minutes || 30 }),
+        durationField,
         field({ name: 'resource', label: 'Resource', maxLength: 255, value: record.resource || '', placeholder: 'Genki, NHK, conversation…', description: 'What you studied with. For a media diary, use Content Log.' }),
         linkedSection,
         element('section', { className: 'rounded-lg border border-stone bg-paper/40 p-4 sm:col-span-2' }, [
@@ -777,9 +805,13 @@ export function renderSessions(container) {
   try {
     const hash = typeof window !== 'undefined' && window.location ? window.location.hash || '' : '';
     const queryIndex = hash.indexOf('?');
-    if (queryIndex !== -1 && new URLSearchParams(hash.slice(queryIndex + 1)).get('new') === '1') {
-      window.history.replaceState(null, '', '#sessions');
-      openSessionDialog();
+    if (queryIndex !== -1) {
+      const params = new URLSearchParams(hash.slice(queryIndex + 1));
+      if (params.get('new') === '1') {
+        window.history.replaceState(null, '', '#sessions');
+        const minutes = Number(params.get('minutes'));
+        openSessionDialog({}, Number.isInteger(minutes) && minutes > 0 ? { minutes } : {});
+      }
     }
   } catch { /* fail open to the plain list */ }
 }

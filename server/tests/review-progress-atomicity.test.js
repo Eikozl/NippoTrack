@@ -62,11 +62,17 @@ test('concurrent completes converge on one timestamp without double effects', as
       updates.push(matched);
       return [{ affectedRows: matched }];
     }
+    if (sql.includes('AS active FROM review_sessions')) {
+      return [[{ active: 25 }]];
+    }
     if (sql.includes('FROM review_events re')) {
       return [[{ total: 0, kanji: 0, vocabulary: 0, grammar: 0, again: 0, hard: 0, good: 0 }]];
     }
     if (sql.startsWith('SELECT completed_at FROM review_sessions')) {
       return [[{ completed_at: store.completedAt }]];
+    }
+    if (sql.includes('AS active FROM review_sessions')) {
+      return [[{ active: 25 }]];
     }
     throw new Error(`Unexpected SQL: ${sql}`);
   };

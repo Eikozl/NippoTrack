@@ -462,12 +462,17 @@ async function completeReviewSession(req, res) {
     const completedAt = (updatedRows && updatedRows[0] && updatedRows[0].completed_at) || null;
     const summary = await getSessionSummary(pool, id, req.user.id);
     // Review time counts toward the day without creating session rows: the
-    // elapsed minutes are derived from the winner's timestamps, so manual
-    // "Log study session" keeps its purpose and repeated completions can
-    // never flood the session list. Minimum one minute.
+    // session's active grading minutes (gaps capped, see reviewMinutes), so
+    // manual "Log study session" keeps its purpose and repeats can never
+    // flood the session list. Minimum one minute on a real transition.
     let minutesLogged = 0;
-    if (Number(updateResult?.affectedRows) > 0 && completedAt && session.started_at) {
-      minutesLogged = Math.max(1, Math.round((new Date(completedAt) - new Date(session.started_at)) / 60000));
+    if (Number(updateResult?.affectedRows) > 0) {
+      const { sessionActiveMinutes } = require('../services/reviewMinutes');
+      const [activeRows] = await pool.execute(
+        `SELECT ${sessionActiveMinutes('rs')} AS active FROM review_sessions rs WHERE rs.id_review_session = ? AND rs.user_id = ?`,
+        [id, req.user.id]
+      );
+      minutesLogged = Math.max(1, Math.round(Number(activeRows?.[0]?.active || 0)));
     }
     return res.json({ id, completedAt, minutesLogged, ...summary });
   } catch (error) {
