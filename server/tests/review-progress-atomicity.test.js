@@ -46,8 +46,9 @@ test.after(async () => {
 test('concurrent completes converge on one timestamp without double effects', async () => {
   const store = { completedAt: null };
   const updates = [];
-  const studyInserts = [];
+  const queries = [];
   const execute = async (sql, params) => {
+    queries.push(String(sql));
     if (sql.startsWith('SELECT id_review_session')) {
       return [[store.completedAt
         ? { id_review_session: 1, completed_at: store.completedAt, started_at: '2026-10-13T09:35:00.000Z' }
@@ -67,16 +68,12 @@ test('concurrent completes converge on one timestamp without double effects', as
     if (sql.startsWith('SELECT completed_at FROM review_sessions')) {
       return [[{ completed_at: store.completedAt }]];
     }
-    if (sql.startsWith('INSERT INTO study_sessions')) {
-      studyInserts.push(params);
-      return [{ affectedRows: 1 }];
-    }
     throw new Error(`Unexpected SQL: ${sql}`);
   };
   await withPoolStubs({ execute }, async () => {
     const first = mockRes();
     const second = mockRes();
-    await reviewController.completeReviewSession({ params: { id: '1' }, body: { today: '2026-10-13' }, user: { id: USER_ID } }, first.res);
+    await reviewController.completeReviewSession({ params: { id: '1' }, body: {}, user: { id: USER_ID } }, first.res);
     await reviewController.completeReviewSession({ params: { id: '1' }, user: { id: USER_ID } }, second.res);
     assert.equal(first.status(), 200);
     assert.equal(second.status(), 200);
@@ -85,22 +82,12 @@ test('concurrent completes converge on one timestamp without double effects', as
     // First call performs the guarded UPDATE; the second sees completed_at
     // set and takes the idempotent early return without a second UPDATE.
     assert.deepEqual(updates, [1]);
-    // 25 elapsed minutes logged once as a Mixed study session on the
-    // requester's day; the repeat logs nothing.
-    assert.equal(studyInserts.length, 1);
-    assert.deepEqual(studyInserts[0].slice(0, 3), [USER_ID, '2026-10-13', 25]);
-    assert.match(studyInserts[0][3], /Review session/);
+    // 25 elapsed minutes derived from the winner's timestamps, with no
+    // study_sessions row created: manual logging keeps its purpose and
+    // repeats can never flood the session list.
     assert.equal(first.body().minutesLogged, 25);
     assert.equal(second.body().minutesLogged, 0);
-  });
-});
-
-test('completeReviewSession rejects a malformed today without writing', async () => {
-  const execute = async () => { throw new Error('DB must not be hit on validation failure'); };
-  await withPoolStubs({ execute }, async () => {
-    const { res, status } = mockRes();
-    await reviewController.completeReviewSession({ params: { id: '1' }, body: { today: 'yesterday' }, user: { id: USER_ID } }, res);
-    assert.equal(status(), 400);
+    assert.ok(!queries.some((sql) => sql.startsWith('INSERT INTO study_sessions')), 'no session row auto-created');
   });
 });
 

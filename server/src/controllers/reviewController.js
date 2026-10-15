@@ -438,7 +438,6 @@ async function createReviewSession(req, res) {
 async function completeReviewSession(req, res) {
   try {
     const id = parseIdParam(req, 'review session');
-    const today = req.body?.today !== undefined ? validateTodayField(req.body.today) : null;
     const [rows] = await pool.execute(
       'SELECT id_review_session, completed_at, started_at FROM review_sessions WHERE id_review_session = ? AND user_id = ?',
       [id, req.user.id]
@@ -462,20 +461,13 @@ async function completeReviewSession(req, res) {
     );
     const completedAt = (updatedRows && updatedRows[0] && updatedRows[0].completed_at) || null;
     const summary = await getSessionSummary(pool, id, req.user.id);
-    // Review time counts toward the day: on the transition only, log the
-    // elapsed session minutes as a Mixed study session so dashboards,
-    // streaks and distribution pick it up. Minimum one minute; repeats and
-    // concurrent losers log nothing.
+    // Review time counts toward the day without creating session rows: the
+    // elapsed minutes are derived from the winner's timestamps, so manual
+    // "Log study session" keeps its purpose and repeated completions can
+    // never flood the session list. Minimum one minute.
     let minutesLogged = 0;
     if (Number(updateResult?.affectedRows) > 0 && completedAt && session.started_at) {
       minutesLogged = Math.max(1, Math.round((new Date(completedAt) - new Date(session.started_at)) / 60000));
-      const good = Number(summary?.byResult?.Good || 0);
-      const hard = Number(summary?.byResult?.Hard || 0);
-      const again = Number(summary?.byResult?.Again || 0);
-      await pool.execute(
-        'INSERT INTO study_sessions (user_id, session_date, duration_minutes, category, notes) VALUES (?, COALESCE(?::date, CURRENT_DATE), ?, \'Mixed\', ?)',
-        [req.user.id, today, minutesLogged, `Review session: ${summary?.total || 0} graded · ${good} Good · ${hard} Hard · ${again} Again`]
-      );
     }
     return res.json({ id, completedAt, minutesLogged, ...summary });
   } catch (error) {

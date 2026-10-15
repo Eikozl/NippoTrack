@@ -303,12 +303,6 @@ function suggestedGradeForMistakes(mistakes) {
   return 'Again';
 }
 
-// Browser-local YYYY-MM-DD for anchoring server-side day buckets
-// (dashboard minutes, reviewed-today) on the learner's date, not UTC.
-function localTodayKey(date = new Date()) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
 // Relative day label for honest history ("Last failed 4 days ago").
 // Unparseable input yields null and the line is hidden — never "NaN days".
 function daysAgoText(iso) {
@@ -2374,7 +2368,7 @@ const CARD_TYPE_DESCRIPTIONS = {
   async function finishReview() {
     reviewingBlock.replaceChildren(loadingState('Wrapping up…'));
     try {
-      const summary = await apiRequest(`/api/review/sessions/${sessionId}/complete`, { method: 'POST', body: { today: localTodayKey() } });
+      const summary = await apiRequest(`/api/review/sessions/${sessionId}/complete`, { method: 'POST' });
       renderComplete(summary);
     } catch (error) {
       reviewingBlock.replaceChildren(errorState(error, finishReview));

@@ -19,10 +19,10 @@ test('sessions page shows a Reviewed today box fed by graded-today', () => {
   assert.ok(source.includes('Reviewed today'), 'sessions list renders the Reviewed today box');
 });
 
-test('review completion anchors the day and surfaces counted time', () => {
+test('review completion relies on server timestamps, not client day', () => {
   const source = readSource('src/pages/review.js');
   assert.ok(source.includes('/api/review/sessions/${sessionId}/complete'), 'finish posts to the complete endpoint');
-  assert.ok(source.includes('today: localTodayKey()'), 'finish sends the browser-local day');
+  assert.ok(!source.includes('localTodayKey'), 'no client-day parameter: completion day derives from the completed session');
   assert.ok(source.includes('counted today'), 'complete screen surfaces the counted time');
   assert.ok(source.includes('formatDuration'), 'counted time uses the shared duration formatter');
 });
