@@ -1,7 +1,7 @@
 import { apiRequest, queryString } from '../api';
 import { kanjiReferenceRoute } from '../kanjiReference';
 import { icon } from '../icons';
-import { element, emptyState, errorState, loadingState, openDetailModal, openDialog, confirmDialog, pageHeader, setActionPending, showToast, withPendingAction } from '../ui';
+import { element, emptyState, errorState, formatDuration, loadingState, openDetailModal, openDialog, confirmDialog, pageHeader, setActionPending, showToast, withPendingAction } from '../ui';
 import { mountKanjiWriting } from '../kanjiWriting.js';
 import { applySessionContext } from '../sessionContext.js';
 import { playReviewSound } from '../reviewSounds.js';
@@ -301,6 +301,12 @@ function suggestedGradeForMistakes(mistakes) {
   if (mistakes <= 1) return 'Good';
   if (mistakes === 2) return 'Hard';
   return 'Again';
+}
+
+// Browser-local YYYY-MM-DD for anchoring server-side day buckets
+// (dashboard minutes, reviewed-today) on the learner's date, not UTC.
+function localTodayKey(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 // Relative day label for honest history ("Last failed 4 days ago").
@@ -2368,7 +2374,7 @@ const CARD_TYPE_DESCRIPTIONS = {
   async function finishReview() {
     reviewingBlock.replaceChildren(loadingState('Wrapping up…'));
     try {
-      const summary = await apiRequest(`/api/review/sessions/${sessionId}/complete`, { method: 'POST' });
+      const summary = await apiRequest(`/api/review/sessions/${sessionId}/complete`, { method: 'POST', body: { today: localTodayKey() } });
       renderComplete(summary);
     } catch (error) {
       reviewingBlock.replaceChildren(errorState(error, finishReview));
@@ -2404,7 +2410,8 @@ const CARD_TYPE_DESCRIPTIONS = {
       element('ul', { className: 'mt-4 grid gap-1.5 border-t border-stone pt-4 text-sm leading-6 text-muted' }, [
         element('li', { text: `${goodCount} felt comfortable` }),
         element('li', { text: `${hardCount} felt difficult` }),
-        element('li', { text: `${againCount} should be revisited` })
+        element('li', { text: `${againCount} should be revisited` }),
+        element('li', { text: `${formatDuration(summary?.minutesLogged || 0)} counted today` })
       ]),
       element('div', { className: 'mt-6 flex flex-col gap-2 sm:flex-row' }, [
         element('button', { className: 'button-primary', text: 'Back to Review', attrs: { type: 'button' } }),

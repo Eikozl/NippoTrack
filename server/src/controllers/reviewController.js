@@ -1,6 +1,6 @@
 const pool = require('../config/db');
 const { ValidationError, sendRouteError } = require('../errors/http');
-const { parseIdParam, isValidDateString, rejectUnknownFields, validateAllowedValues } = require('../validation');
+const { parseIdParam, isValidDateString, rejectUnknownFields, validateAllowedValues, validateTodayField } = require('../validation');
 const { parsePagination, paginationPayload } = require('../pagination');
 const { getReviewCandidates, toIsoDate } = require('../services/reviewCandidates');
 const { getReviewItemContext, hasMeaningfulContext } = require('../services/reviewItemContext');
@@ -438,17 +438,18 @@ async function createReviewSession(req, res) {
 async function completeReviewSession(req, res) {
   try {
     const id = parseIdParam(req, 'review session');
+    const today = req.body?.today !== undefined ? validateTodayField(req.body.today) : null;
     const [rows] = await pool.execute(
-      'SELECT id_review_session, completed_at FROM review_sessions WHERE id_review_session = ? AND user_id = ?',
+      'SELECT id_review_session, completed_at, started_at FROM review_sessions WHERE id_review_session = ? AND user_id = ?',
       [id, req.user.id]
     );
     const session = rows && rows[0];
     if (!session) return res.status(404).json({ error: 'review session not found' });
     if (session.completed_at) {
       const summary = await getSessionSummary(pool, id, req.user.id);
-      return res.json({ id, completedAt: session.completed_at, ...summary });
+      return res.json({ id, completedAt: session.completed_at, minutesLogged: 0, ...summary });
     }
-    await pool.execute(
+    const [updateResult] = await pool.execute(
       'UPDATE review_sessions SET completed_at = CURRENT_TIMESTAMP WHERE id_review_session = ? AND user_id = ? AND completed_at IS NULL',
       [id, req.user.id]
     );
@@ -461,9 +462,63 @@ async function completeReviewSession(req, res) {
     );
     const completedAt = (updatedRows && updatedRows[0] && updatedRows[0].completed_at) || null;
     const summary = await getSessionSummary(pool, id, req.user.id);
-    return res.json({ id, completedAt, ...summary });
+    // Review time counts toward the day: on the transition only, log the
+    // elapsed session minutes as a Mixed study session so dashboards,
+    // streaks and distribution pick it up. Minimum one minute; repeats and
+    // concurrent losers log nothing.
+    let minutesLogged = 0;
+    if (Number(updateResult?.affectedRows) > 0 && completedAt && session.started_at) {
+      minutesLogged = Math.max(1, Math.round((new Date(completedAt) - new Date(session.started_at)) / 60000));
+      const good = Number(summary?.byResult?.Good || 0);
+      const hard = Number(summary?.byResult?.Hard || 0);
+      const again = Number(summary?.byResult?.Again || 0);
+      await pool.execute(
+        'INSERT INTO study_sessions (user_id, session_date, duration_minutes, category, notes) VALUES (?, COALESCE(?::date, CURRENT_DATE), ?, \'Mixed\', ?)',
+        [req.user.id, today, minutesLogged, `Review session: ${summary?.total || 0} graded · ${good} Good · ${hard} Hard · ${again} Again`]
+      );
+    }
+    return res.json({ id, completedAt, minutesLogged, ...summary });
   } catch (error) {
     return sendRouteError(res, error, { defaultStatus: 500, defaultMessage: 'Unable to complete review session.' });
+  }
+}
+
+// Items graded on the requester's day, newest first, for the "Reviewed
+// today" box. Same ownership JOIN pattern as the due listing; ?today=
+// anchors on the client's local date like the dashboard.
+const GRADED_TODAY_LIMIT = 50;
+async function listGradedToday(req, res) {
+  try {
+    const today = req.query?.today !== undefined ? validateTodayField(req.query.today) : null;
+    const [rows] = await pool.execute(
+      `SELECT ri.id_review_item AS id,
+        CASE WHEN ri.id_kanji IS NOT NULL THEN 'kanji'
+             WHEN ri.id_vocabulary IS NOT NULL THEN 'vocabulary'
+             ELSE 'grammar' END AS "entityType",
+        COALESCE(v.word, k.character_kanji, g.grammar_point) AS title,
+        re.result AS result, re.reviewed_at AS "reviewedAt"
+       FROM review_events re
+       JOIN review_items ri ON ri.id_review_item = re.id_review_item
+       LEFT JOIN vocabulary v ON v.id_vocabulary = ri.id_vocabulary AND v.user_id = ?
+       LEFT JOIN kanji k ON k.id_kanji = ri.id_kanji AND k.user_id = ?
+       LEFT JOIN grammar_points g ON g.id_grammar = ri.id_grammar AND g.user_id = ?
+       WHERE re.reviewed_at::date = COALESCE(?::date, CURRENT_DATE)
+         AND (v.user_id = ? OR k.user_id = ? OR g.user_id = ?)
+       ORDER BY re.reviewed_at DESC, re.id_review_event DESC
+       LIMIT ${GRADED_TODAY_LIMIT}`,
+      [req.user.id, req.user.id, req.user.id, today, req.user.id, req.user.id, req.user.id]
+    );
+    return res.json({
+      items: (rows || []).map((row) => ({
+        id: Number(row.id),
+        entityType: row.entityType,
+        title: row.title,
+        result: row.result,
+        reviewedAt: row.reviewedAt || null
+      }))
+    });
+  } catch (error) {
+    return sendRouteError(res, error, { defaultStatus: 503, defaultMessage: 'Unable to load reviewed items.' });
   }
 }
 
@@ -983,4 +1038,4 @@ async function clearReviewSessions(req, res) {
   }
 }
 
-module.exports = { createReviewItem, listDueReviews, listDueReviewCards, recordReview, createReviewSession, completeReviewSession, gradeEntity, listCandidates, listReviewSessions, getReviewSession, getReviewSessionItems, deleteReviewSession, clearReviewSessions, listDifficultItems, listReviewReminders, getReviewTypes, putReviewPreferences, getReviewPatterns };
+module.exports = { createReviewItem, listDueReviews, listDueReviewCards, listGradedToday, recordReview, createReviewSession, completeReviewSession, gradeEntity, listCandidates, listReviewSessions, getReviewSession, getReviewSessionItems, deleteReviewSession, clearReviewSessions, listDifficultItems, listReviewReminders, getReviewTypes, putReviewPreferences, getReviewPatterns };

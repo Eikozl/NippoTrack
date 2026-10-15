@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   buildSessionSubmitPayload,
+  formatDuration,
   SESSION_FORM_FIELD_ORDER,
   sessionCardModel,
   submitPayloadOmitsHiddenFields
@@ -29,11 +30,19 @@ test('Session UX: card with writing title/content shows a useful preview', () =>
     grammar_count: 0
   });
   assert.equal(model.badge, 'Writing');
-  assert.equal(model.durationLabel, '30 min');
+  assert.equal(model.durationLabel, '30m');
   assert.equal(model.title, 'My weekend');
   assert.equal(model.preview, '今日は学校に行く。とても楽しかったです。');
   assert.deepEqual(model.meta.map((row) => row.label), ['Resource', 'Vocabulary', 'Kanji']);
   assert.ok(model.meta.find((row) => row.label === 'Resource').text.includes('Genki'));
+});
+
+test('Session UX: durations collapse to hours from 60 minutes', () => {
+  assert.equal(formatDuration(45), '45m');
+  assert.equal(formatDuration(60), '1hr');
+  assert.equal(formatDuration(90), '1hr30m');
+  assert.equal(formatDuration(120), '2hr');
+  assert.equal(sessionCardModel({ duration_minutes: 90, category: 'Reading' }).durationLabel, '1hr30m');
 });
 
 test('Session UX: missing resource renders no placeholder and falls back cleanly', () => {

@@ -46,9 +46,12 @@ test.after(async () => {
 test('concurrent completes converge on one timestamp without double effects', async () => {
   const store = { completedAt: null };
   const updates = [];
+  const studyInserts = [];
   const execute = async (sql, params) => {
     if (sql.startsWith('SELECT id_review_session')) {
-      return [[store.completedAt ? { id_review_session: 1, completed_at: store.completedAt } : { id_review_session: 1, completed_at: null }]];
+      return [[store.completedAt
+        ? { id_review_session: 1, completed_at: store.completedAt, started_at: '2026-10-13T09:35:00.000Z' }
+        : { id_review_session: 1, completed_at: null, started_at: '2026-10-13T09:35:00.000Z' }]];
     }
     if (sql.startsWith('UPDATE review_sessions')) {
       assert.ok(sql.includes('completed_at IS NULL'), 'complete guards against re-completing');
@@ -64,12 +67,16 @@ test('concurrent completes converge on one timestamp without double effects', as
     if (sql.startsWith('SELECT completed_at FROM review_sessions')) {
       return [[{ completed_at: store.completedAt }]];
     }
+    if (sql.startsWith('INSERT INTO study_sessions')) {
+      studyInserts.push(params);
+      return [{ affectedRows: 1 }];
+    }
     throw new Error(`Unexpected SQL: ${sql}`);
   };
   await withPoolStubs({ execute }, async () => {
     const first = mockRes();
     const second = mockRes();
-    await reviewController.completeReviewSession({ params: { id: '1' }, user: { id: USER_ID } }, first.res);
+    await reviewController.completeReviewSession({ params: { id: '1' }, body: { today: '2026-10-13' }, user: { id: USER_ID } }, first.res);
     await reviewController.completeReviewSession({ params: { id: '1' }, user: { id: USER_ID } }, second.res);
     assert.equal(first.status(), 200);
     assert.equal(second.status(), 200);
@@ -78,6 +85,22 @@ test('concurrent completes converge on one timestamp without double effects', as
     // First call performs the guarded UPDATE; the second sees completed_at
     // set and takes the idempotent early return without a second UPDATE.
     assert.deepEqual(updates, [1]);
+    // 25 elapsed minutes logged once as a Mixed study session on the
+    // requester's day; the repeat logs nothing.
+    assert.equal(studyInserts.length, 1);
+    assert.deepEqual(studyInserts[0].slice(0, 3), [USER_ID, '2026-10-13', 25]);
+    assert.match(studyInserts[0][3], /Review session/);
+    assert.equal(first.body().minutesLogged, 25);
+    assert.equal(second.body().minutesLogged, 0);
+  });
+});
+
+test('completeReviewSession rejects a malformed today without writing', async () => {
+  const execute = async () => { throw new Error('DB must not be hit on validation failure'); };
+  await withPoolStubs({ execute }, async () => {
+    const { res, status } = mockRes();
+    await reviewController.completeReviewSession({ params: { id: '1' }, body: { today: 'yesterday' }, user: { id: USER_ID } }, res);
+    assert.equal(status(), 400);
   });
 });
 
@@ -130,4 +153,38 @@ test('progress upsert locks the previous total and runs inside a transaction', a
   assert.equal(begins, 2);
   assert.equal(commits, 2);
   assert.ok(seen.some((sql) => sql.includes('FOR UPDATE')), 'previous total is row-locked');
+});
+
+// ------------------------------------------------------- graded-today box
+test('listGradedToday returns owned items graded on the requested day', async () => {
+  const execute = async (sql, params) => {
+    assert.ok(sql.includes('v.user_id = ? OR k.user_id = ? OR g.user_id = ?'), 'ownership JOIN present');
+    assert.ok(params.includes(USER_ID));
+    assert.ok(params.includes('2026-10-13'));
+    return [[
+      { id: 11, entityType: 'vocabulary', title: 'taberu', result: 'Good', reviewedAt: '2026-10-13T10:00:00.000Z' },
+      { id: 12, entityType: 'kanji', title: '食', result: 'Again', reviewedAt: '2026-10-13T09:00:00.000Z' }
+    ]];
+  };
+  await withPoolStubs({ execute }, async () => {
+    const { res, status, body } = mockRes();
+    await reviewController.listGradedToday({ query: { today: '2026-10-13' }, user: { id: USER_ID } }, res);
+    assert.equal(status(), 200);
+    assert.equal(body().items.length, 2);
+    assert.equal(body().items[0].title, 'taberu');
+  });
+});
+
+test('listGradedToday is empty without rows and rejects a bad today', async () => {
+  await withPoolStubs({ execute: async () => [[]] }, async () => {
+    const { res, status, body } = mockRes();
+    await reviewController.listGradedToday({ query: {}, user: { id: USER_ID } }, res);
+    assert.equal(status(), 200);
+    assert.deepEqual(body().items, []);
+  });
+  await withPoolStubs({ execute: async () => { throw new Error('DB must not be hit'); } }, async () => {
+    const { res, status } = mockRes();
+    await reviewController.listGradedToday({ query: { today: 'tomorrow' }, user: { id: USER_ID } }, res);
+    assert.equal(status(), 400);
+  });
 });

@@ -20,6 +20,7 @@ import {
   errorState,
   field,
   formatDate,
+  formatDuration,
   isActionPending,
   loadingState,
   openDialog,
@@ -250,6 +251,7 @@ export function renderSessions(container) {
     ])
   ]);
   const results = element('div');
+  const reviewedTodayBox = element('div');
 
   container.replaceChildren(element('section', {}, [
     pageHeader({
@@ -271,8 +273,33 @@ export function renderSessions(container) {
       ]),
       customRange
     ]),
+    reviewedTodayBox,
     results
   ]));
+
+  // "Reviewed today" box: what the learner graded today, refreshed with the
+  // list. Fail-open: hidden on error or when nothing was reviewed.
+  async function loadReviewedToday() {
+    reviewedTodayBox.replaceChildren();
+    try {
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const data = await apiRequest(`/api/review/graded-today${queryString({ today })}`);
+      const items = Array.isArray(data?.items) ? data.items : [];
+      if (!items.length) return;
+      reviewedTodayBox.replaceChildren(
+        element('section', { className: 'surface mb-5 p-4', attrs: { 'aria-label': 'Reviewed today' } }, [
+          element('h2', { className: 'font-semibold text-ink', text: `Reviewed today (${items.length})` }),
+          element('ul', { className: 'mt-3 grid gap-1.5 sm:grid-cols-2' }, items.slice(0, 20).map((item) => (
+            element('li', { className: 'flex items-baseline justify-between gap-3 text-sm' }, [
+              element('span', { className: 'min-w-0 truncate font-medium text-ink', text: item.title || item.entityType }),
+              element('span', { className: 'status-pill shrink-0 text-xs', text: item.result || '' })
+            ])
+          )))
+        ])
+      );
+    } catch { reviewedTodayBox.replaceChildren(); }
+  }
 
   function updateCustomRangeVisibility() {
     const visible = period.value === 'custom';
@@ -283,6 +310,7 @@ export function renderSessions(container) {
 
   async function load() {
     results.replaceChildren(loadingState('Loading study sessions…'));
+    loadReviewedToday();
     try {
       const dates = periodQuery(period.value, fromDate.value, toDate.value);
       const data = await apiRequest(`/api/sessions${queryString({
@@ -641,7 +669,7 @@ export function renderSessions(container) {
           addSelectedButton
         ])] : [])
       ]);
-      const relatedList = (title, items, primary, secondary) => element('section', { className: 'rounded-lg border border-stone p-4' }, [
+      const relatedList = (title, items, primary, secondary, extraClass = '') => element('section', { className: `rounded-lg border border-stone p-4${extraClass ? ` ${extraClass}` : ''}` }, [
         element('h3', { className: 'font-semibold text-ink', text: title }),
         items.length
           ? element('ul', { className: 'mt-3 grid gap-2' }, items.map((item) => element('li', { className: 'text-sm text-ink/80' }, [
@@ -653,7 +681,7 @@ export function renderSessions(container) {
       const details = element('div', { className: 'sm:col-span-2' }, [
         element('dl', { className: 'grid gap-3 text-sm sm:grid-cols-2' }, [
           element('div', {}, [element('dt', { className: 'text-muted', text: 'Date' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatDate(record.session_date) })]),
-          element('div', {}, [element('dt', { className: 'text-muted', text: 'Duration' }), element('dd', { className: 'mt-1 font-medium text-ink', text: `${record.duration_minutes} minutes` })]),
+          element('div', {}, [element('dt', { className: 'text-muted', text: 'Duration' }), element('dd', { className: 'mt-1 font-medium text-ink', text: formatDuration(record.duration_minutes) })]),
           element('div', {}, [element('dt', { className: 'text-muted', text: 'Category' }), element('dd', { className: 'mt-1 font-medium text-ink', text: record.category })]),
           element('div', {}, [element('dt', { className: 'text-muted', text: 'Resource' }), element('dd', { className: 'mt-1 font-medium text-ink', text: record.resource || 'Not recorded' })])
         ]),
@@ -665,7 +693,7 @@ export function renderSessions(container) {
           relatedList('Kanji', record.kanji, (item) => item.character_kanji, (item) => item.meaning),
           relatedList('Grammar', record.grammar, (item) => item.grammar_point, (item) => item.meaning)
         ]),
-        ...((record.stories || []).length ? [relatedList('Stories', record.stories, (item) => item.title, (item) => item.content_type)] : [])
+        ...((record.stories || []).length ? [relatedList('Content linked', record.stories, (item) => item.title, (item) => item.content_type, 'mt-5')] : [])
       ]);
       // View-only detail: the header X (openDialog showCloseButton) is the
       // sole dismiss — the footer held only Cancel/Close with no submit, so

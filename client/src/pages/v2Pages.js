@@ -2,7 +2,7 @@ import { apiRequest, queryString } from '../api';
 import { attachDigitGuard, isValidTargetAmount, TARGET_AMOUNT_ERROR } from '../goalValidation';
 import { t } from '../i18n';
 import { iconForTitle, iconTile } from '../icons';
-import { confirmDialog, debounce, element, emptyState, errorState, field, formatDate,
+import { confirmDialog, debounce, element, emptyState, errorState, field, formatDate, formatDuration,
 loadingState, openDialog, pageHeader, paginationControls, searchableMultiSelect, showToast, withGlobalLoading } from '../ui';
 import { openEnrollDialog } from './stories.js';
 
@@ -125,7 +125,7 @@ function selectedNumbers(select) {
 }
 
 function linkOption(kind, item) {
-  if (kind === 'sessions') return { value: item.id_session, label: `${item.category} · ${formatDate(item.session_date)}`, chipLabel: `${item.category} · ${formatDate(item.session_date)}`, meta: `${item.duration_minutes} min`, description: item.resource || 'No resource recorded' };
+  if (kind === 'sessions') return { value: item.id_session, label: `${item.category} · ${formatDate(item.session_date)}`, chipLabel: `${item.category} · ${formatDate(item.session_date)}`, meta: formatDuration(item.duration_minutes), description: item.resource || 'No resource recorded' };
   if (kind === 'vocabulary') return { value: item.id_vocabulary, label: item.word, chipLabel: item.word, meta: item.reading || '', description: item.meaning };
   if (kind === 'kanji') return { value: item.id_kanji, label: item.character_kanji, chipLabel: item.character_kanji, description: item.meaning };
   return { value: item.id_grammar, label: item.grammar_point, chipLabel: item.grammar_point, description: item.meaning };

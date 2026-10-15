@@ -646,6 +646,11 @@ export function formatDate(value) {
     : new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(date);
 }
 
+// Study-duration display lives in sessionHistory.js (pure, DOM-free) so the
+// card model and every UI caller share one implementation. Re-exported here
+// next to formatDate so pages keep importing display helpers from '../ui'.
+export { formatDuration } from './sessionHistory';
+
 export function debounce(callback, delay = 250) {
   let timer;
   return (...args) => {

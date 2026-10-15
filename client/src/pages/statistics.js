@@ -4,7 +4,7 @@ import { distributionChart, weeklyChart } from '../charts';
 import { iconTile } from '../icons';
 import { jlptProgressModel } from '../jlptProgress';
 import { estimateTargetLine, targetContextLine, targetLevelOptions } from '../jlptTarget';
-import { element, errorState, loadingState, pageHeader } from '../ui';
+import { element, errorState, formatDuration, loadingState, pageHeader } from '../ui';
 
 export async function renderStatistics(container) {
   destroyCharts();
@@ -36,7 +36,7 @@ export async function renderStatistics(container) {
 
       content.replaceChildren(
         element('div', { className: 'grid gap-4 sm:grid-cols-3' }, [
-          summary('week', 'Weekly minutes', data.minutesThisWeek, 'Total recorded this week'),
+          summary('week', 'Weekly minutes', formatDuration(data.minutesThisWeek), 'Total recorded this week'),
           summary('sessions', 'Active days', activeDays, 'Days with recorded study'),
           summary('distribution', 'Categories', categories, 'Categories represented')
         ]),

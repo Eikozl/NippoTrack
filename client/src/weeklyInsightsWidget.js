@@ -6,7 +6,7 @@
 
 import { apiRequest } from './api';
 import { localDayKey } from './dashboardWelcome.js';
-import { element } from './ui';
+import { element, formatDuration } from './ui';
 
 export function weeklyInsightsWidget() {
   const wrap = element('section', { className: 'surface mt-5 p-5 sm:p-6', attrs: { 'aria-label': 'Weekly insights' } });
@@ -28,7 +28,7 @@ export function weeklyInsightsWidget() {
         element('h2', { className: 'font-semibold text-ink', text: 'Weekly insights' }),
         element('p', {
           className: 'mt-1 text-sm text-muted',
-          text: `${Number(summary.totalReviews || 0)} reviews · ${Number(summary.totalMinutes || 0)} minutes · run of ${Number(summary.streak || 0)} day(s)`
+          text: `${Number(summary.totalReviews || 0)} reviews · ${formatDuration(summary.totalMinutes || 0)} · run of ${Number(summary.streak || 0)} day(s)`
         }),
         ...(weaknesses.length ? [element('ul', { className: 'mt-3 grid gap-1 text-sm text-ink', attrs: { role: 'list' } }, weaknesses.map((weakness) => element('li', { text: `Focus: ${weakness.label}` })))] : []),
         ...(strengths.length ? [element('ul', { className: 'mt-2 grid gap-1 text-sm text-muted', attrs: { role: 'list' } }, strengths.map((strength) => element('li', { text: `Strong: ${strength.label}` })))] : []),
