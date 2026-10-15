@@ -17,6 +17,8 @@ test('sessions page shows a Reviewed today box fed by graded-today', () => {
   const source = readSource('src/pages/sessions.js');
   assert.ok(source.includes('/api/review/graded-today'), 'sessions list fetches the graded-today endpoint');
   assert.ok(source.includes('Reviewed today'), 'sessions list renders the Reviewed today box');
+  assert.ok(source.includes('countByResult'), 'box summarizes Good/Hard/Again counts');
+  assert.ok(source.includes("element('details'") && source.includes("element('summary'"), 'box collapses with details/summary');
 });
 
 test('session detail shows reviewed groups with each review result', () => {

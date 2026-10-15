@@ -287,15 +287,25 @@ export function renderSessions(container) {
       const data = await apiRequest(`/api/review/graded-today${queryString({ today })}`);
       const items = Array.isArray(data?.items) ? data.items : [];
       if (!items.length) return;
+      const countByResult = (result) => items.filter((item) => item && item.result === result).length;
+      const summary = [
+        `${items.length} item${items.length === 1 ? '' : 's'}`,
+        `${countByResult('Good')} Good`,
+        `${countByResult('Hard')} Hard`,
+        `${countByResult('Again')} Again`
+      ].join(' · ');
       reviewedTodayBox.replaceChildren(
         element('section', { className: 'surface mb-5 p-4', attrs: { 'aria-label': 'Reviewed today' } }, [
-          element('h2', { className: 'font-semibold text-ink', text: `Reviewed today (${items.length})` }),
-          element('ul', { className: 'mt-3 grid gap-1.5 sm:grid-cols-2' }, items.slice(0, 20).map((item) => (
-            element('li', { className: 'flex items-baseline justify-between gap-3 text-sm' }, [
-              element('span', { className: 'min-w-0 truncate font-medium text-ink', text: item.title || item.entityType }),
-              element('span', { className: 'status-pill shrink-0 text-xs', text: item.result || '' })
-            ])
-          )))
+          element('details', {}, [
+            element('summary', { className: 'cursor-pointer font-semibold text-ink', text: `Reviewed today (${items.length})` }),
+            element('p', { className: 'mt-1 text-sm text-muted', text: summary }),
+            element('ul', { className: 'mt-3 grid gap-1.5 sm:grid-cols-2' }, items.slice(0, 20).map((item) => (
+              element('li', { className: 'flex items-baseline justify-between gap-3 text-sm' }, [
+                element('span', { className: 'min-w-0 truncate font-medium text-ink', text: item.title || item.entityType }),
+                element('span', { className: 'status-pill shrink-0 text-xs', text: item.result || '' })
+              ])
+            )))
+          ])
         ])
       );
     } catch { reviewedTodayBox.replaceChildren(); }
