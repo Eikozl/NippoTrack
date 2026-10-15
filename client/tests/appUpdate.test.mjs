@@ -11,7 +11,7 @@ import {
   isNewerRelease,
   parseVersionTag
 } from '../src/appUpdate.js';
-import { initAndroidDownload } from '../src/landing/androidRelease.js';
+import { downloadApk, initAndroidDownload, resolveApkUrl } from '../src/landing/androidRelease.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readSource = (path) => readFileSync(join(root, path), 'utf8');
@@ -47,30 +47,53 @@ test('checkForUpdate fails open on network and shape surprises', async () => {
 });
 
 function fakeScope() {
-  const link = { href: null, setAttribute(name, value) { this[name] = value; } };
-  const meta = { textContent: '' };
+  const listeners = {};
+  const link = {
+    href: null,
+    textContent: 'Download on Android',
+    dataset: {},
+    setAttribute(name, value) { this[name] = value; },
+    addEventListener(type, handler) { (listeners[type] ||= []).push(handler); },
+    fire(type, event) { return Promise.all((listeners[type] || []).map((handler) => handler(event))); }
+  };
   return {
     link,
-    meta,
+    listeners,
     querySelector(selector) {
-      if (selector === '#android-app') return this;
+      if (selector === '.landing-hero') return null;
       if (selector === '[data-android-download]') return link;
-      if (selector === '[data-android-meta]') return meta;
       return null;
     }
   };
 }
 
-test('landing download hydrates from the latest release, static otherwise', async () => {
-  const release = {
+function apkRelease() {
+  return {
     tag_name: 'v1.2.0',
-    assets: [{ name: 'app.apk', browser_download_url: 'https://example.invalid/app.apk', size: 10485760, updated_at: '2026-10-20T00:00:00Z' }]
+    assets: [{ name: 'nippotrack-v1.2.0.apk', browser_download_url: 'https://example.invalid/app.apk', size: 10485760, updated_at: '2026-10-20T00:00:00Z' }]
   };
+}
+
+function fakeDom() {
+  const created = [];
+  return {
+    created,
+    createObjectURL() { return 'blob:fake-apk'; },
+    revoked: [],
+    revokeObjectURL(url) { this.revoked.push(url); },
+    createAnchor() {
+      const anchor = { href: null, download: null, rel: null, clicked: false, click() { this.clicked = true; } };
+      created.push(anchor);
+      return anchor;
+    }
+  };
+}
+
+test('hero button resolves to the direct APK asset URL', async () => {
   const scope = fakeScope();
-  await initAndroidDownload(scope, async () => ({ ok: true, json: async () => release }));
+  await initAndroidDownload(scope, async () => ({ ok: true, json: async () => apkRelease() }));
   assert.equal(scope.link.href, 'https://example.invalid/app.apk');
-  assert.match(scope.meta.textContent, /v1\.2\.0/);
-  assert.match(scope.meta.textContent, /10\.0 MB/);
+  assert.ok(!('meta' in scope), 'no meta line: button only');
 
   const offline = fakeScope();
   const before = offline.link.href;
@@ -78,11 +101,51 @@ test('landing download hydrates from the latest release, static otherwise', asyn
   assert.equal(offline.link.href, before, 'static skeleton link untouched');
 });
 
-test('landing download ignores releases without an APK', async () => {
+test('hero button without any release keeps its static href', async () => {
   const scope = fakeScope();
   await initAndroidDownload(scope, async () => ({ ok: true, json: async () => ({ tag_name: 'v9.9.9', assets: [] }) }));
   assert.equal(scope.link.href, null);
-  assert.equal(scope.meta.textContent, '');
+});
+
+test('click downloads the APK in place without leaving the page', async () => {
+  const scope = fakeScope();
+  await initAndroidDownload(scope, async () => ({ ok: true, json: async () => apkRelease() }));
+  const dom = fakeDom();
+  const realFetch = async () => ({ ok: true, blob: async () => ({ size: 10 }) });
+  // Rebind the click path with injectable DOM primitives.
+  const { downloadApk: direct } = await import('../src/landing/androidRelease.js');
+  const ok = await direct('https://example.invalid/nippotrack-v1.2.0.apk', {
+    fetch: realFetch,
+    createObjectURL: dom.createObjectURL,
+    revokeObjectURL: (url) => dom.revokeObjectURL(url),
+    createAnchor: () => dom.createAnchor()
+  });
+  assert.equal(ok, true);
+  assert.equal(dom.created.length, 1);
+  assert.equal(dom.created[0].href, 'blob:fake-apk');
+  assert.equal(dom.created[0].download, 'nippotrack-v1.2.0.apk');
+  assert.equal(dom.created[0].clicked, true);
+  assert.deepEqual(dom.revoked, ['blob:fake-apk']);
+});
+
+test('failed download throws so the caller can fall back to navigation', async () => {
+  const dom = fakeDom();
+  const { downloadApk: direct } = await import('../src/landing/androidRelease.js');
+  await assert.rejects(
+    direct('https://example.invalid/app.apk', {
+      fetch: async () => ({ ok: false, status: 404 }),
+      createObjectURL: dom.createObjectURL,
+      revokeObjectURL: (url) => dom.revokeObjectURL(url),
+      createAnchor: () => dom.createAnchor()
+    }),
+    /download failed/
+  );
+  assert.equal(dom.created.length, 0, 'no anchor on failure');
+});
+
+test('resolveApkUrl is null without releases or network', async () => {
+  assert.equal(await resolveApkUrl(async () => ({ ok: true, json: async () => ({ assets: [] }) })), null);
+  assert.equal(await resolveApkUrl(async () => { throw new Error('offline'); }), null);
 });
 
 test('update banner only renders inside the native shell', () => {
