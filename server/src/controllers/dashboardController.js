@@ -31,8 +31,8 @@ async function getDashboard(req, res) {
       -- active grading minutes (gaps capped, see reviewMinutes) attributed
       -- to the completion day, so manual logging keeps its purpose.
       review_minutes AS (
-        SELECT COALESCE(SUM(active), 0) FILTER (WHERE completed_day = COALESCE(?::date, CURRENT_DATE)) AS today,
-               COALESCE(SUM(active), 0) FILTER (WHERE completed_day >= date_trunc('week', COALESCE(?::date, CURRENT_DATE))::date AND completed_day <= COALESCE(?::date, CURRENT_DATE)) AS week
+        SELECT COALESCE(SUM(active) FILTER (WHERE completed_day = COALESCE(?::date, CURRENT_DATE)), 0) AS today,
+               COALESCE(SUM(active) FILTER (WHERE completed_day >= date_trunc('week', COALESCE(?::date, CURRENT_DATE))::date AND completed_day <= COALESCE(?::date, CURRENT_DATE)), 0) AS week
         FROM (
           SELECT rs.completed_at::date AS completed_day, ${sessionActiveMinutes('rs')} AS active
           FROM review_sessions rs WHERE rs.user_id = ? AND rs.completed_at IS NOT NULL
