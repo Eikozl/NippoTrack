@@ -66,7 +66,7 @@ function hero() {
           </div>
           <p class="landing-lede">Organize what you learn, understand Japanese in context, and keep a clear view of your progress.</p>
           <div class="landing-hero-actions">
-            <a class="landing-button landing-button-primary" href="/app?auth=sign-up" data-auth-open="sign-up">Start free</a>
+            <a class="landing-button landing-button-primary" href="/app?auth=sign-up" data-auth-open="sign-up">Register</a>
             <a class="landing-button" data-android-download href="https://github.com/Eikozl/NippoTrack/releases/latest">Download on Android</a>
             <a class="landing-text-link landing-arrow-link" href="/how-it-works">See how it works <span aria-hidden="true">→</span></a>
           </div>
