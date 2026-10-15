@@ -35,6 +35,14 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            storeFile file(System.getenv('ANDROID_KEYSTORE_PATH') ?: 'release.keystore')
+            storePassword System.getenv('KEYSTORE_PASSWORD')
+            keyAlias System.getenv('KEY_ALIAS')
+            keyPassword System.getenv('KEY_PASSWORD')
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
@@ -42,14 +50,6 @@ android {
             // Sideload signing: credentials come from CI secrets, never the repo.
             // ANDROID_KEYSTORE_PATH points at the decoded keystore file.
             signingConfig signingConfigs.release
-        }
-    }
-    signingConfigs {
-        release {
-            storeFile file(System.getenv('ANDROID_KEYSTORE_PATH') ?: 'release.keystore')
-            storePassword System.getenv('KEYSTORE_PASSWORD')
-            keyAlias System.getenv('KEY_ALIAS')
-            keyPassword System.getenv('KEY_PASSWORD')
         }
     }
 }
