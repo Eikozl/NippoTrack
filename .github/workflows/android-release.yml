@@ -80,7 +80,10 @@ jobs:
           # elsewhere would install packages into the wrong SDK).
           export PATH="$SDK/cmdline-tools/latest/bin:$PATH"
           sdkmanager --version
-          yes | sdkmanager --licenses > /dev/null
+          # `yes` always dies with SIGPIPE (141) once sdkmanager exits; the
+          # subshell neutralizes only that, so a real sdkmanager failure
+          # still fails the step under pipefail.
+          ( yes || true ) | sdkmanager --licenses > /dev/null
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
           sdkmanager --list_installed
 
