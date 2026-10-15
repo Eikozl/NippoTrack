@@ -1,6 +1,7 @@
 const pool = require('../config/db');
 const { ValidationError, sendRouteError } = require('../errors/http');
 const { validateTodayField } = require('../validation');
+const { sessionActiveMinutes } = require('../services/reviewMinutes');
 
 // Sessions are stored with the browser's LOCAL date (native date inputs),
 // while the DB clock is UTC: after ~20:00 local in UTC-4 the dashboard's
@@ -27,12 +28,15 @@ async function getDashboard(req, res) {
         FROM reading_study_days WHERE user_id = ?
       ),
       -- Completed review sessions count too, with no session rows created:
-      -- elapsed minutes per completed session (minimum one), attributed to
-      -- the completion day so manual logging keeps its purpose.
+      -- active grading minutes (gaps capped, see reviewMinutes) attributed
+      -- to the completion day, so manual logging keeps its purpose.
       review_minutes AS (
-        SELECT COALESCE(SUM(GREATEST(1, ROUND(EXTRACT(EPOCH FROM (completed_at - COALESCE(started_at, completed_at))) / 60))) FILTER (WHERE completed_at::date = COALESCE(?::date, CURRENT_DATE)), 0) AS today,
-               COALESCE(SUM(GREATEST(1, ROUND(EXTRACT(EPOCH FROM (completed_at - COALESCE(started_at, completed_at))) / 60))) FILTER (WHERE completed_at::date >= date_trunc('week', COALESCE(?::date, CURRENT_DATE))::date AND completed_at::date <= COALESCE(?::date, CURRENT_DATE)), 0) AS week
-        FROM review_sessions WHERE user_id = ? AND completed_at IS NOT NULL
+        SELECT COALESCE(SUM(active), 0) FILTER (WHERE completed_day = COALESCE(?::date, CURRENT_DATE)) AS today,
+               COALESCE(SUM(active), 0) FILTER (WHERE completed_day >= date_trunc('week', COALESCE(?::date, CURRENT_DATE))::date AND completed_day <= COALESCE(?::date, CURRENT_DATE)) AS week
+        FROM (
+          SELECT rs.completed_at::date AS completed_day, ${sessionActiveMinutes('rs')} AS active
+          FROM review_sessions rs WHERE rs.user_id = ? AND rs.completed_at IS NOT NULL
+        ) per_session
       )
       SELECT
         COALESCE((SELECT SUM(duration_minutes) FROM user_sessions WHERE session_date = COALESCE(?::date, CURRENT_DATE)), 0)
@@ -107,7 +111,10 @@ async function getActivity(req, res) {
       // Any completed review session keeps the streak: finishing reviews is
       // real study time even without a manually logged session.
       pool.query("SELECT to_char(completed_at, 'YYYY-MM-DD') AS date FROM review_sessions WHERE user_id = ? AND completed_at IS NOT NULL GROUP BY date ORDER BY date ASC", [req.user.id]).catch(() => [[]]),
-      pool.query("SELECT to_char(completed_at, 'YYYY-MM-DD') AS date, SUM(GREATEST(1, ROUND(EXTRACT(EPOCH FROM (completed_at - COALESCE(started_at, completed_at))) / 60))) AS minutes FROM review_sessions WHERE user_id = ? AND completed_at IS NOT NULL AND completed_at::date BETWEEN ?::date AND ?::date GROUP BY date ORDER BY date ASC", [req.user.id, shiftDays(today, -34), today]).catch(() => [[]])
+      pool.query(`SELECT to_char(completed_day, 'YYYY-MM-DD') AS date, SUM(active) AS minutes FROM (
+          SELECT rs.completed_at::date AS completed_day, ${sessionActiveMinutes('rs')} AS active
+          FROM review_sessions rs WHERE rs.user_id = ? AND rs.completed_at IS NOT NULL AND rs.completed_at::date BETWEEN ?::date AND ?::date
+        ) per_session GROUP BY completed_day ORDER BY completed_day ASC`, [req.user.id, shiftDays(today, -34), today]).catch(() => [[]])
     ]);
     const readingByDate = new Map((readingCalendarRows || []).map((row) => [isoDate(row.date), Number(row.minutes || 0)]));
     const reviewByDate = new Map((reviewCalendarRows || []).map((row) => [isoDate(row.date), Number(row.minutes || 0)]));
@@ -164,7 +171,7 @@ async function getStudyNow(req, res) {
             AND g.user_id = ? AND NOT (ri.interval_days = 0 AND ri.last_reviewed_at IS NULL)) AS due_grammar,
         COALESCE((SELECT SUM(duration_minutes) FROM study_sessions WHERE user_id = ? AND session_date = COALESCE(?::date, CURRENT_DATE)), 0)
           + COALESCE((SELECT SUM(seconds) / 60 FROM reading_study_days WHERE user_id = ? AND day = COALESCE(?::date, CURRENT_DATE)), 0)
-          + COALESCE((SELECT SUM(GREATEST(1, ROUND(EXTRACT(EPOCH FROM (completed_at - COALESCE(started_at, completed_at))) / 60))) FROM review_sessions WHERE user_id = ? AND completed_at IS NOT NULL AND completed_at::date = COALESCE(?::date, CURRENT_DATE)), 0) AS minutes_today,
+          + COALESCE((SELECT SUM(active) FROM (SELECT ${sessionActiveMinutes('rs')} AS active FROM review_sessions rs WHERE rs.user_id = ? AND rs.completed_at IS NOT NULL AND rs.completed_at::date = COALESCE(?::date, CURRENT_DATE)) per_session), 0) AS minutes_today,
         (SELECT COUNT(*) FROM vocabulary WHERE user_id = ?) AS vocabulary_count,
         (SELECT COUNT(*) FROM kanji WHERE user_id = ?) AS kanji_count,
         (SELECT COUNT(*) FROM grammar_points WHERE user_id = ?) AS grammar_count,

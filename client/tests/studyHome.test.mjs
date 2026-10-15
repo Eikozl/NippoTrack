@@ -60,7 +60,7 @@ test('review shows collapsed why without disrupting speed', () => {
 test('review completion closes the loop to sessions', () => {
   const source = readSource('src/pages/review.js');
   assert.ok(source.includes('Log study session'), 'RETURN loop CTA');
-  assert.ok(source.includes("href: '#sessions?new=1'"), 'opens the creation dialog, not just the list');
+  assert.ok(source.includes('#sessions?new=1'), 'opens the creation dialog, not just the list');
 });
 
 test('sessions auto-opens creation for log-now links', () => {

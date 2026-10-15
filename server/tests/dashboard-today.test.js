@@ -109,6 +109,11 @@ test('GET /api/dashboard/activity anchors streak and calendar on ?today', async 
       // nothing and the streak math below is sessions+reading only.
       return [[]];
     }
+    if (/FROM review_sessions/i.test(sql)) {
+      // No completed reviews in this fixture: review days/minutes merge
+      // nothing and the streak math below is sessions+reading only.
+      return [[]];
+    }
     if (/BETWEEN \?::date AND \?::date/.test(sql)) {
       return [[{ date: '2026-10-03', minutes: 30 }]];
     }

@@ -115,6 +115,7 @@ const translations = {
     'Longest streak': 'Racha más larga',
     'Due reviews': 'Repasos pendientes',
     'minutes studied': 'minutos estudiados',
+    'hours studied': 'horas estudiadas',
     'consecutive active days': 'días activos consecutivos',
     'best run of active days': 'mejor racha de días activos',
     'items ready to recall': 'elementos listos para recordar',

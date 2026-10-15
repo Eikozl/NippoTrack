@@ -167,9 +167,10 @@ test('completeReviewSession success returns summary with correct math', async ()
   const original = pool.execute;
   pool.execute = async (sql, params) => {
     calls.push({ sql, params });
-    if (calls.length === 1) return [[{ id_review_session: 7, completed_at: null }]];
+    if (calls.length === 1) return [[{ id_review_session: 7, completed_at: null, started_at: '2026-09-06T09:50:00.000Z' }]];
     if (calls.length === 2) return [{ affectedRows: 1 }];
     if (calls.length === 3) return [[{ completed_at: '2026-09-06T10:00:00.000Z' }]];
+    if (/AS active FROM review_sessions/i.test(sql)) return [[{ active: 9 }]];
     return [[{ total: '4', kanji: '1', vocabulary: '2', grammar: '1', again: '1', hard: '1', good: '2' }]];
   };
   try {
@@ -179,12 +180,12 @@ test('completeReviewSession success returns summary with correct math', async ()
     assert.deepEqual(body(), {
       id: 7,
       completedAt: '2026-09-06T10:00:00.000Z',
-      minutesLogged: 0,
+      minutesLogged: 9,
       total: 4,
       byType: { kanji: 1, vocabulary: 2, grammar: 1 },
       byResult: { Again: 1, Hard: 1, Good: 2 }
     });
-    assert.equal(calls.length, 4);
+    assert.equal(calls.length, 5);
     assert.match(calls[1].sql, /UPDATE review_sessions/i);
     // Ownership-scoped statements carry the requesting user id, including the
     // defense-in-depth session-ownership predicate inside the summary aggregate.
@@ -192,6 +193,7 @@ test('completeReviewSession success returns summary with correct math', async ()
     assert.deepEqual(calls[1].params, [7, USER_ID]);
     assert.deepEqual(calls[2].params, [7, USER_ID]);
     assert.deepEqual(calls[3].params, [7, USER_ID]);
+    assert.deepEqual(calls[4].params, [7, USER_ID]);
   } finally { pool.execute = original; }
 });
 
