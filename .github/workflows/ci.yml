@@ -38,6 +38,10 @@ jobs:
       - name: Build frontend
         run: npm --prefix client run build
 
+      - name: Weight budget (fail over 45MB / 8000 files in dist)
+        run: |
+          node -e "const fs=require('fs');let n=0,s=0;const walk=(d)=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=d+'/'+e.name;if(e.isDirectory())walk(p);else{n++;s+=fs.statSync(p).size}}};walk('client/dist');console.log('dist files='+n+' bytes='+s);if(s>47185920||n>8000){console.error('WEIGHT BUDGET EXCEEDED');process.exit(1)}"
+
       - name: UI identity lint (informational, non-blocking)
         run: |
           matches=$(grep -rn -E "from-(indigo|blue|violet)-[0-9]+.*via-(purple|fuchsia)|via-purple.*to-pink|background-clip:text" client/src || true)

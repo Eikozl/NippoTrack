@@ -8,10 +8,10 @@ const root = path.resolve(__dirname, '../..');
 test('Vercel topology serves the Vite SPA and preserves every Express API path', () => {
   const app = require('../src/app');
   const rootApiHandler = require(path.join(root, 'api/index.js'));
-  const nestedApiHandler = require(path.join(root, 'api/[...path].js'));
   assert.equal(typeof rootApiHandler, 'function');
-  assert.equal(typeof nestedApiHandler, 'function');
-  assert.equal(nestedApiHandler, app);
+  // Single entrypoint: /api/:path* rewrites to /api?__jlt_path= first, so no
+  // catch-all function is bundled (saves a full duplicate ~36MB per deploy).
+  assert.ok(!fs.existsSync(path.join(root, 'api/[...path].js')), 'no duplicate catch-all function');
 
   const config = JSON.parse(fs.readFileSync(path.join(root, 'vercel.json'), 'utf8'));
   assert.equal(config.buildCommand, 'npm --prefix client run build');
