@@ -208,10 +208,6 @@
   box-shadow: 0 5px 14px rgba(0, 0, 0, 0.32);
 }
 
-[data-nippotrack-theme="dark"] .landing-page .hanko-stamp {
-  color: #1c1a18;
-}
-
 [data-nippotrack-theme="dark"] .landing-page .landing-skip-link {
   color: #1c1a18;
   background: var(--landing-accent);
@@ -400,9 +396,9 @@
 .landing-hero-grid {
   display: grid;
   min-height: 562px;
-  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr) 28px;
+  grid-template-columns: minmax(0, 0.86fr) minmax(520px, 1fr);
   align-items: center;
-  gap: 48px;
+  gap: 64px;
 }
 
 .landing-hero-copy {
@@ -547,11 +543,7 @@
   width: 172px;
 }
 
-/* V6 restored: desktop constellation (floating product cards). Scoped
-   under .hero-ecosystem so the mobile ledger strip styles never collide.
-   Hidden at tablet widths where the simple ledger takes over. */
 .hero-ecosystem {
-  grid-column: 2;
   position: relative;
   width: min(100%, 560px);
   height: 520px;
@@ -568,7 +560,7 @@
   transform: rotate(-8deg);
 }
 
-.hero-ecosystem .hero-card {
+.hero-card {
   position: absolute;
   border: 1px solid var(--landing-border);
   border-radius: 16px;
@@ -576,7 +568,7 @@
   box-shadow: var(--landing-shadow-float);
 }
 
-.hero-ecosystem .hero-vocabulary {
+.hero-vocabulary {
   top: 112px;
   left: 86px;
   z-index: 3;
@@ -586,24 +578,24 @@
   transform: rotate(-1deg);
 }
 
-.hero-ecosystem .hero-japanese {
+.hero-japanese {
   margin-top: 11px !important;
   font-size: 42px;
   font-weight: 600;
   line-height: 1.25;
 }
 
-.hero-ecosystem .hero-reading {
+.hero-reading {
   color: var(--landing-text-secondary);
   font-size: 17px;
   font-weight: 500;
 }
 
-.hero-ecosystem .hero-meaning {
+.hero-meaning {
   color: var(--landing-text-secondary);
 }
 
-.hero-ecosystem .hero-context {
+.hero-context {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -614,15 +606,15 @@
   font-size: 13px;
 }
 
-.hero-ecosystem .hero-context span {
+.hero-context span {
   color: var(--landing-text-muted);
 }
 
-.hero-ecosystem .hero-context b {
+.hero-context b {
   font-weight: 500;
 }
 
-.hero-ecosystem .hero-kanji {
+.hero-kanji {
   top: 42px;
   right: 18px;
   z-index: 2;
@@ -632,40 +624,40 @@
   transform: rotate(1.2deg);
 }
 
-.hero-ecosystem .hero-kanji-glyph {
+.hero-kanji-glyph {
   margin-top: 5px !important;
   font-size: 54px;
   font-weight: 600;
   line-height: 1.1;
 }
 
-.hero-ecosystem .hero-kanji > p:last-child {
+.hero-kanji > p:last-child {
   color: var(--landing-text-secondary);
   font-size: 13px;
 }
 
-.hero-ecosystem .hero-level,
-.hero-ecosystem .hero-streak {
+.hero-level,
+.hero-streak {
   width: 150px;
   min-height: 92px;
   padding: 17px 18px;
 }
 
-.hero-ecosystem .hero-level {
+.hero-level {
   top: 14px;
   left: 30px;
   transform: rotate(-1.4deg);
 }
 
-.hero-ecosystem .hero-streak {
+.hero-streak {
   right: 2px;
   bottom: 76px;
   z-index: 4;
   transform: rotate(1deg);
 }
 
-.hero-ecosystem .hero-level strong,
-.hero-ecosystem .hero-streak strong {
+.hero-level strong,
+.hero-streak strong {
   display: inline-block;
   margin-top: 5px;
   font-family: var(--landing-font-display), sans-serif;
@@ -673,13 +665,13 @@
   line-height: 1.2;
 }
 
-.hero-ecosystem .hero-level > span:last-child,
-.hero-ecosystem .hero-streak > span:last-child {
+.hero-level > span:last-child,
+.hero-streak > span:last-child {
   color: var(--landing-text-secondary);
   font-size: 13px;
 }
 
-.hero-ecosystem .hero-review {
+.hero-review {
   bottom: 25px;
   left: 43px;
   z-index: 2;
@@ -689,160 +681,17 @@
   transform: rotate(1.2deg);
 }
 
-.hero-ecosystem .hero-review p {
+.hero-review p {
   margin-top: 9px !important;
   font-size: 23px;
   font-weight: 600;
 }
 
-.hero-ecosystem .hero-review p span,
-.hero-ecosystem .hero-review small {
+.hero-review p span,
+.hero-review small {
   color: var(--landing-text-muted);
   font-size: 12px;
   font-weight: 500;
-}
-
-/* V6 hero: one live analyzer panel + vocabulary strip + ledger refrain,
-   with a tategaki margin rail. No floats, no orbit, no count-ups. */
-.hero-ledger {
-  display: none;
-  grid-column: 2;
-  width: min(100%, 560px);
-  min-width: 0;
-  justify-self: end;
-  align-content: center;
-  gap: 18px;
-}
-
-.hero-panel {
-  border: 1px solid var(--landing-border);
-  border-radius: 20px;
-  background: var(--landing-surface);
-  box-shadow: var(--landing-shadow-float);
-  padding: 24px 26px;
-  min-width: 0;
-}
-
-.hero-analyzer-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.hero-live-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 999px;
-  background: var(--landing-accent);
-}
-
-.hero-typing-sentence {
-  margin-top: 12px !important;
-  font-size: 27px;
-  font-weight: 600;
-  line-height: 1.4;
-}
-
-.hero-candidates {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 12px;
-  font-size: 16px;
-}
-
-.hero-candidates .candidate-active {
-  border-bottom: 2px solid var(--landing-accent);
-  font-weight: 600;
-}
-
-.hero-result {
-  display: flex;
-  flex-wrap: wrap;
-  row-gap: 8px;
-  gap: 14px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--landing-border-subtle);
-  font-size: 15px;
-}
-
-.hero-result strong {
-  font-size: 18px;
-}
-
-.hero-stamp-row {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 14px;
-}
-
-/* Hanko verdict stamp: vermilion seal, slight press rotation. Meaning
-   always rides along as text (Good / N4 range), never color alone. */
-.hanko-stamp {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border-radius: 8px;
-  background: var(--landing-accent);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 700;
-  padding: 8px 16px 8px 12px;
-  transform: rotate(-1.5deg);
-  box-shadow: 0 2px 8px rgb(179 64 46 / 0.28);
-}
-
-.landing-page img.hanko-seal {
-  width: 22px;
-  height: 22px;
-  border-radius: 5px;
-}
-
-/* Brand refrain: same string, same style, under every data panel. */
-.ledger-refrain {
-  display: flex;
-  flex-wrap: wrap;
-  row-gap: 6px;
-  align-items: baseline;
-  justify-content: center;
-  gap: 10px;
-  color: var(--landing-text-secondary);
-  font-family: var(--landing-font-mono);
-  font-size: 13px;
-  letter-spacing: 0.06em;
-}
-
-.ledger-refrain b {
-  color: var(--landing-accent);
-  font-weight: 600;
-}
-
-/* Tategaki margin rail: vertical Japanese gloss, ornament only
-   (aria-hidden in markup, real text for JP readers). */
-.tategaki-rail {
-  align-self: stretch;
-  justify-self: end;
-  margin: 0;
-  padding-top: 6px;
-  color: var(--landing-text-muted);
-  font-size: 15px;
-  letter-spacing: 0.32em;
-  writing-mode: vertical-rl;
-}
-
-.hero-eyebrow {
-  color: var(--landing-text-muted);
-  font-family: var(--landing-font-mono);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.hero-vocabulary {
-  padding: 20px 26px;
 }
 
 .demo-label {
@@ -876,42 +725,6 @@
 
 .estimate-value.is-switching {
   opacity: 0;
-}
-
-.hero-japanese {
-  margin-top: 11px !important;
-  font-size: 30px;
-  font-weight: 600;
-  line-height: 1.25;
-}
-
-.hero-reading {
-  color: var(--landing-text-secondary);
-  font-size: 17px;
-  font-weight: 500;
-}
-
-.hero-meaning {
-  color: var(--landing-text-secondary);
-}
-
-.hero-context {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  margin-top: 17px;
-  padding-top: 14px;
-  border-top: 1px solid var(--landing-border-subtle);
-  font-size: 13px;
-}
-
-.hero-context span {
-  color: var(--landing-text-muted);
-}
-
-.hero-context b {
-  font-weight: 500;
 }
 
 .landing-section {
@@ -2067,11 +1880,11 @@
   50% { transform: rotate(1.2deg) translate3d(4px, 4px, 0); }
 }
 
-.hero-ecosystem .hero-card[data-float="one"] { animation: heroDriftOne 8.8s ease-in-out infinite; }
-.hero-ecosystem .hero-card[data-float="two"] { animation: heroDriftTwo 9.6s ease-in-out -2s infinite; }
-.hero-ecosystem .hero-card[data-float="three"] { animation: heroDriftThree 8.2s ease-in-out -4s infinite; }
-.hero-ecosystem .hero-card[data-float="four"] { animation: heroDriftFour 9s ease-in-out -1s infinite; }
-.hero-ecosystem .hero-card[data-float="five"] { animation: heroDriftFive 9.8s ease-in-out -5s infinite; }
+.hero-card[data-float="one"] { animation: heroDriftOne 8.8s ease-in-out infinite; }
+.hero-card[data-float="two"] { animation: heroDriftTwo 9.6s ease-in-out -2s infinite; }
+.hero-card[data-float="three"] { animation: heroDriftThree 8.2s ease-in-out -4s infinite; }
+.hero-card[data-float="four"] { animation: heroDriftFour 9s ease-in-out -1s infinite; }
+.hero-card[data-float="five"] { animation: heroDriftFive 9.8s ease-in-out -5s infinite; }
 
 @keyframes stepReveal {
   to { opacity: 1; transform: translateY(0); }
@@ -2216,7 +2029,7 @@
   }
 
   .landing-hero-grid {
-    grid-template-columns: minmax(0, 0.9fr) minmax(430px, 1.1fr) 28px;
+    grid-template-columns: minmax(0, 0.9fr) minmax(450px, 1.1fr);
     gap: 28px;
   }
 
@@ -2225,21 +2038,17 @@
     font-size: 51px;
   }
 
-  .hero-ledger {
-    width: min(100%, 520px);
-  }
-
   .hero-ecosystem {
     width: min(100%, 520px);
     transform: scale(0.88);
     transform-origin: center right;
   }
 
-  .hero-ecosystem .hero-kanji {
+  .hero-kanji {
     right: 22px;
   }
 
-  .hero-ecosystem .hero-streak {
+  .hero-streak {
     right: 8px;
   }
 
@@ -2276,7 +2085,7 @@
   }
 
   .landing-hero-grid {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: 1fr;
     gap: 30px;
   }
 
@@ -2289,18 +2098,9 @@
     font-size: 48px;
   }
 
-  .hero-ledger {
-    display: grid;
-    justify-self: stretch;
-    width: 100%;
-  }
-
   .hero-ecosystem {
-    display: none;
-  }
-
-  .tategaki-rail {
-    display: none;
+    justify-self: center;
+    transform: none;
   }
 
   .landing-section {
@@ -2468,17 +2268,52 @@
     margin-top: 18px !important;
   }
 
-  .hero-ledger {
+  .hero-ecosystem {
     width: 100%;
-    margin-top: 8px;
+    height: 430px;
+    margin-top: 16px;
   }
 
-  .hero-panel {
-    padding: 20px;
+  .hero-ecosystem::before {
+    inset: 88px 8px 45px 12px;
   }
 
-  .hero-typing-sentence {
-    font-size: 24px;
+  .hero-vocabulary {
+    top: 105px;
+    left: 0;
+    width: min(310px, calc(100% - 30px));
+    min-height: 215px;
+    padding: 22px;
+  }
+
+  .hero-kanji {
+    top: 32px;
+    right: 0;
+    width: 145px;
+    min-height: 145px;
+    padding: 17px;
+  }
+
+  .hero-kanji-glyph {
+    font-size: 47px;
+  }
+
+  .hero-level {
+    top: 8px;
+    left: 8px;
+    width: 137px;
+  }
+
+  .hero-streak {
+    right: 0;
+    bottom: 52px;
+    width: 140px;
+  }
+
+  .hero-review {
+    bottom: 3px;
+    left: 20px;
+    width: 200px;
   }
 
   .landing-section {
@@ -2653,14 +2488,106 @@
   }
 }
 
-/* Mobile hero: the ledger stacks plainly (panel, strip, refrain). Desktop
-   motion and reduced-motion are unchanged. */
 @media (max-width: 640px) {
-  /* V6 hero is a plain vertical stack at mobile widths: one live panel,
-     one vocab strip, one refrain. No layering, no staging, no motion. */
-  .hero-ledger {
-    gap: 14px;
-    margin-top: 4px;
+  .hero-ecosystem {
+    display: grid;
+    grid-template-columns: 1.08fr 1fr;
+    column-gap: 12px;
+    row-gap: 0;
+    width: 100%;
+    height: auto;
+    margin-top: 20px;
+  }
+
+  /* Orbit stays hidden on mobile: it would bleed past the container. */
+  .hero-ecosystem::before {
+    display: none;
+  }
+
+  .hero-ecosystem .hero-card {
+    position: relative;
+    /* Reset the desktop/≤767 absolute coordinates: under position:relative
+       they would act as visual offsets (this leaked +105px under the
+       vocabulary card and +32px under kanji). All staging deltas below are
+       transforms only. */
+    top: auto;
+    left: auto;
+    bottom: auto;
+    right: auto;
+    width: auto;
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    animation: none;
+  }
+
+  /* Satellite labels shrink a step so "STARTING ESTIMATE" fits its column
+     without wrapping into the value; copy itself is unchanged. */
+  .hero-ecosystem .demo-label {
+    font-size: 11px;
+    letter-spacing: 0.09em;
+  }
+
+  /* Dominant vocabulary row: full-row span, centered, ~92% of the row.
+     It is the static anchor — neighbors translate toward it, so it always
+     reads visually highest. z3 above everything. */
+  .hero-vocabulary {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: center;
+    width: 92%;
+    z-index: 3;
+    padding: 20px;
+    transform: rotate(-1deg);
+  }
+
+  /* Top satellite pair: estimate top-left, kanji top-right. They translate
+     down 18px so their bottom edges slide under vocabulary's top edge.
+     Both sit middle (z2) below vocabulary (z3). */
+  .hero-level {
+    grid-column: 1;
+    grid-row: 1;
+    z-index: 2;
+    padding: 14px;
+    transform: translateY(18px) rotate(-1deg);
+  }
+
+  .hero-kanji {
+    grid-column: 2;
+    grid-row: 1;
+    z-index: 2;
+    padding: 14px;
+    transform: translateY(18px) rotate(1deg);
+  }
+
+  /* Bottom satellite pair, asymmetric and peripheral: review shifts left
+     and tucks lightly under vocabulary so READY TO REVIEW + 約束 stay
+     readable; streak shifts left and tucks deeper so its top sits behind
+     vocabulary's bottom padding while "30 days" stays clear. Both sit
+     lower (z1) below vocabulary (z3). Review stays unrotated so the bottom
+     row does not look scrapbooked. */
+  .hero-review {
+    grid-column: 1;
+    grid-row: 3;
+    z-index: 1;
+    padding: 14px;
+    transform: translate(-10px, -10px);
+  }
+
+  .hero-streak {
+    grid-column: 2;
+    grid-row: 3;
+    z-index: 1;
+    padding: 14px;
+    transform: translate(-12px, -20px) rotate(1deg);
+  }
+
+  .hero-japanese {
+    font-size: 34px;
+  }
+
+  .hero-kanji-glyph {
+    font-size: 44px;
   }
 
   .hero-context {
@@ -2673,24 +2600,44 @@
   }
 }
 
-/* Very small widths: keep the layered constellation (no single-column
-   fallback) — just ease it: smaller translate staging (~50-60% of the 640px
-   offsets), tighter satellite padding, and a real row gap so 320px
-   never covers content. transform:none would also kill the staging
-   translates, so each card carries its own explicit (unrotated) transform.
-   Vocabulary dominance survives via the full-row span + ~92% width. */
 @media (max-width: 380px) {
-  /* Narrowest widths keep the plain ledger stack: only tighten type. */
-  .hero-panel {
+  .hero-ecosystem {
+    grid-template-columns: 1fr 1fr;
+    column-gap: 10px;
+    row-gap: 10px;
+  }
+
+  .hero-ecosystem .hero-vocabulary {
+    width: 92%;
     padding: 18px;
+    transform: none;
   }
 
-  .hero-typing-sentence {
-    font-size: 22px;
+  .hero-ecosystem .hero-level,
+  .hero-ecosystem .hero-kanji {
+    transform: translateY(8px);
   }
 
-  .hero-japanese {
-    font-size: 28px;
+  .hero-ecosystem .hero-review {
+    transform: translate(-4px, -4px);
+  }
+
+  .hero-ecosystem .hero-streak {
+    transform: translate(-6px, -10px);
+  }
+
+  .hero-ecosystem .hero-level,
+  .hero-ecosystem .hero-streak,
+  .hero-ecosystem .hero-kanji,
+  .hero-ecosystem .hero-review {
+    padding: 12px;
+  }
+
+  /* Longest satellite labels ("Starting estimate") wrap safely at 320px
+     with a 1px-size guard; copy itself is unchanged. */
+  .hero-ecosystem .hero-level .demo-label,
+  .hero-ecosystem .hero-review .demo-label {
+    font-size: 11px;
   }
 }
 
@@ -2704,12 +2651,25 @@
      (animation: none inherited): only tighten type and padding here. Row
      gap stays 0 — staging overlap is transforms, exactly as above. No
      absolute offsets or fixed widths. */
-  .hero-ledger {
-    gap: 12px;
+  .hero-ecosystem {
+    gap: 0 10px;
+  }
+
+  .hero-vocabulary {
+    padding: 19px;
   }
 
   .hero-japanese {
-    font-size: 28px;
+    font-size: 37px;
+  }
+
+  .hero-level,
+  .hero-streak,
+  .hero-kanji,
+  .hero-review {
+    /* 14px matches the constellation base so padding never fights the
+       transform staging in the 381-479px range. */
+    padding: 14px;
   }
 
   .analyzer-demo,
@@ -2884,8 +2844,7 @@
     display: none;
   }
 
-  .landing-page .hero-panel,
-  .landing-page .hero-ecosystem .hero-card {
+  .landing-page .hero-card {
     animation: none !important;
   }
 }

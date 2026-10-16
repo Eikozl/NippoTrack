@@ -31,14 +31,16 @@ export const CUSTOM_GLYPHS = {
     ['line', { x1: '9', y1: '12', x2: '16', y2: '12' }],
     ['line', { x1: '9', y1: '18', x2: '19', y2: '18' }]
   ],
-  // Flashcard deck: vocabulary as collected cards — front card carries
-  // a ruby line over its word line, back card peeks behind.
-  vocabulary: [
-    ['rect', { x: '9', y: '3', width: '11', height: '11', rx: '2' }],
-    ['rect', { x: '4', y: '10', width: '11', height: '11', rx: '2' }],
-    ['line', { x1: '8', y1: '15', x2: '11.5', y2: '15' }],
-    ['line', { x1: '6.5', y1: '18', x2: '12.5', y2: '18', 'stroke-width': '2.2' }]
-  ],
+  // あ (hiragana A): the real character as a text glyph — first sound,
+  // first word. Rendered by the brand renderer below (lucide IconNodes
+  // cannot carry text children), in Mincho serif like the kanji panels.
+  vocabulary: {
+    __text: 'あ',
+    x: '12',
+    y: '17.5',
+    fontSize: '16.5',
+    fontFamily: '"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif'
+  },
   // 字 (character): roof radical over the child — the written character
   // itself, still geometric enough to read at 20px.
   kanji: [
@@ -139,7 +141,42 @@ const TITLES = {
   settings: 'settings'
 };
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+// Brand text glyphs (currently あ only): real characters need a <text>
+// element, which lucide IconNodes cannot carry (string children crash
+// createSVGElement). Built by hand on the same 24-grid so size, class,
+// and labels behave exactly like every other glyph.
+function textGlyph(spec, { className = '', size = 20, label } = {}) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('xmlns', SVG_NS);
+  svg.setAttribute('width', String(size));
+  svg.setAttribute('height', String(size));
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'currentColor');
+  svg.setAttribute('stroke', 'none');
+  svg.setAttribute('class', `jlt-icon ${className}`.trim());
+  if (label) {
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', label);
+  } else {
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+  }
+  const text = document.createElementNS(SVG_NS, 'text');
+  text.setAttribute('x', spec.x);
+  text.setAttribute('y', spec.y);
+  text.setAttribute('text-anchor', 'middle');
+  text.setAttribute('font-size', spec.fontSize);
+  text.setAttribute('font-family', spec.fontFamily);
+  text.textContent = spec.__text;
+  svg.appendChild(text);
+  return svg;
+}
+
 export function icon(name, { className = '', size = 20, label } = {}) {
+  const custom = CUSTOM_GLYPHS[name];
+  if (custom && custom.__text) return textGlyph(custom, { className, size, label });
   const node = createElement(ICONS[name] || Circle, {
     width: size,
     height: size,

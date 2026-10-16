@@ -19,6 +19,14 @@ test('bespoke set covers the eight primary modules', () => {
 
 test('glyphs use only grid primitives inside the 24-box', () => {
   for (const [name, nodes] of Object.entries(CUSTOM_GLYPHS)) {
+    if (nodes && nodes.__text) {
+      assert.equal(typeof nodes.__text, 'string', `${name}: text glyph carries a character`);
+      assert.ok(Number(nodes.x) >= 0 && Number(nodes.x) <= 24, `${name}: text centered on grid`);
+      assert.ok(Number(nodes.y) >= 0 && Number(nodes.y) <= 24, `${name}: text baseline on grid`);
+      assert.ok(Number(nodes.fontSize) >= 10 && Number(nodes.fontSize) <= 20, `${name}: text sized for 20px rendering`);
+      assert.ok(String(nodes.fontFamily).length > 0, `${name}: text declares its serif stack`);
+      continue;
+    }
     assert.ok(Array.isArray(nodes) && nodes.length >= 2, `${name} composes at least two primitives`);
     for (const [tag, attrs] of nodes) {
       assert.ok(TAGS.has(tag), `${name}: known primitive ${tag}`);
@@ -54,8 +62,15 @@ test('glyphs serialize through the shared renderer with stub DOM', () => {
       assert.ok(svg.tag.endsWith('|svg'), `${name} renders an svg root`);
       assert.equal(svg.attrs.width, '20', `${name} honors size`);
       assert.equal(svg.attrs.viewBox, '0 0 24 24', `${name} keeps the 24 grid`);
+      const spec = CUSTOM_GLYPHS[name];
+      if (spec && spec.__text) {
+        assert.equal(svg.children.length, 1, `${name} emits its character`);
+        assert.ok(svg.children[0].tag.endsWith('|text'), `${name} uses a real text element`);
+        assert.equal(svg.children[0].textContent, spec.__text, `${name} carries the requested character`);
+        continue;
+      }
       assert.equal(svg.attrs['stroke-width'], '1.75', `${name} inherits the monoline`);
-      assert.equal(svg.children.length, CUSTOM_GLYPHS[name].length, `${name} emits every primitive`);
+      assert.equal(svg.children.length, spec.length, `${name} emits every primitive`);
     }
   } finally {
     globalThis.document = previous;

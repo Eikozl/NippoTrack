@@ -406,9 +406,7 @@
 .metric-label { font-family: var(--font-mono); }
 .icon-tile { border-radius: 10px; background: transparent; border: 1px solid var(--jlt-border); box-shadow: none; color: var(--jlt-ink); }
 .table-header { font-family: var(--font-mono); }
-.nav-item.is-active { background: transparent; border-color: transparent; box-shadow: inset 3px 0 0 var(--jlt-primary); }
 .nav-group-label { font-family: var(--font-mono); }
-.nav-index { color: var(--jlt-primary); margin-right: 2px; }
 .review-grades [data-grade="Again"], .review-grades [data-grade="Hard"] { background: transparent; border-color: transparent; box-shadow: none; color: var(--jlt-muted); }
 .review-grades [data-grade="Again"]:hover, .review-grades [data-grade="Hard"]:hover { background: var(--jlt-surface); border-color: var(--jlt-border); color: var(--jlt-ink); }
 

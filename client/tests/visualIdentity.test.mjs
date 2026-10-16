@@ -19,7 +19,6 @@ test('hanko seal exists as a vermilion square with a washi N', () => {
 test('masthead seal keeps stamp size against the brand image rule', () => {
   const css = readSource('src/landing/landing.css');
   assert.match(css, /\.landing-brand img\.masthead-seal \{[^}]*width:\s*30px/, 'specificity beats .landing-brand img');
-  assert.match(css, /\.landing-page img\.hanko-seal \{[^}]*width:\s*22px/, 'verdict seal scoped');
   const sections = readSource('src/landing/sections.js');
   assert.ok(sections.includes('class="masthead-seal"'), 'masthead seal slot present');
   assert.ok(sections.includes('src="/seal.svg"'), 'seal served from public root');
@@ -88,17 +87,17 @@ test('V6 app-shell: sidebar stays wordmark-only, streak value sets mono', () => 
   assert.match(css, /\.streak-value \{[^}]*var\(--font-mono\)/, 'tally numerals tabular');
 });
 
-test('V6 ledger structure: ruled metrics, hairline tiles, indexed nav, quiet grades', () => {
+test('V6 ledger structure: ruled metrics, hairline tiles, calm nav, quiet grades', () => {
   const css = readSource('src/styles.css');
   assert.match(css, /\.dashboard-metrics \{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/, 'metrics ruled, not carded');
   assert.match(css, /\.dashboard-metrics \.metric-card \+ \.metric-card \{[^}]*border-top/, 'hairline dividers');
   assert.match(css, /\.icon-tile \{[^}]*border-radius:\s*10px/, 'square-er tiles');
   assert.match(css, /\.table-header \{[^}]*var\(--font-mono\)/, 'mono table headers');
-  assert.match(css, /\.nav-item\.is-active \{[^}]*inset 3px 0 0 var\(--jlt-primary\)/, 'hanko active bar');
-  assert.match(css, /\.nav-group-label \{[^}]*var\(--font-mono\)/, 'mono index groups');
+  assert.ok(!css.includes('inset 3px 0 0'), 'selected sidebar keeps its calm wash, no orange bar');
+  assert.match(css, /\.nav-group-label \{[^}]*var\(--font-mono\)/, 'mono group labels');
   assert.match(css, /\.review-grades \[data-grade="Again"\]/, 'Again quieted');
   const html = readSource('index.html');
-  for (const n of ['01', '02', '03', '04']) assert.ok(html.includes('>' + n + '<'), 'index number ' + n);
+  assert.ok(!html.includes('nav-index'), 'no enumeration in the sidebar');
   const icons = readSource('src/icons.js');
   assert.ok(icons.includes('quickAdd: Plus'), 'quick-add honest, not Zap');
   assert.ok(!icons.includes('Zap'), 'slop icon retired from the set');

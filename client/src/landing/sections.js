@@ -59,7 +59,6 @@ function hero() {
     <section class="landing-hero tone-hero" aria-labelledby="hero-title">
       <div class="landing-container landing-hero-grid">
         <div class="landing-hero-copy">
-          <p class="hero-eyebrow">Study ledger — N5–N1</p>
           <div class="hero-title-stack" data-hero-title-stack>
             <h1 id="hero-title">${HERO_HEADLINE_MAIN}</h1>
             <p class="hero-typing" aria-hidden="true" data-hero-typing>
@@ -101,24 +100,6 @@ function hero() {
             <small>Your collection, in motion</small>
           </article>
         </div>
-        <div class="hero-ledger" aria-hidden="true">
-          <article class="hero-panel hero-analyzer">
-            <div class="hero-analyzer-head"><span class="demo-label">Text Analyzer</span><span class="hero-live-dot"></span></div>
-            <p class="hero-typing-sentence" lang="ja">雨が降っている。</p>
-            <div class="hero-candidates"><span class="candidate-active" lang="ja">雨</span><span lang="ja">降っている</span></div>
-            <div class="hero-result"><strong lang="ja">雨</strong><span lang="ja">あめ</span><span>rain</span></div>
-            <p class="hero-stamp-row"><span class="hanko-stamp"><img class="hanko-seal" src="/seal.svg" alt="" width="22" height="22">Add to Vocabulary</span></p>
-          </article>
-          <article class="hero-panel hero-vocabulary">
-            <span class="demo-label">Vocabulary</span>
-            <p class="hero-japanese" lang="ja">旅行</p>
-            <p class="hero-reading" lang="ja">りょこう</p>
-            <p class="hero-meaning">travel</p>
-            <div class="hero-context"><span>Context</span><b lang="ja">来年、日本へ旅行します。</b></div>
-          </article>
-          <p class="ledger-refrain"><span>Collected</span><b>≠</b><span>Reviewed</span><b>≠</b><span>Known</span></p>
-        </div>
-        <p class="tategaki-rail" lang="ja" aria-hidden="true">日本語の学びを、ひとつに。</p>
       </div>
     </section>`;
 }

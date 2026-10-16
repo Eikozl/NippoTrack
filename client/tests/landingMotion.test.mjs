@@ -156,27 +156,46 @@ test('how-it-works 料理 flow stages content with internal stagger', () => {
   assert.ok(!sectionsSource.includes('cursor-dot'));
 });
 
-test('desktop constellation drifts while the mobile ledger stays static', () => {
-  // Desktop float system intact and scoped to the constellation.
-  for (const drift of ['heroDriftOne', 'heroDriftTwo', 'heroDriftThree', 'heroDriftFour', 'heroDriftFive']) {
-    assert.ok(cssSource.includes('@keyframes ' + drift), 'drift present: ' + drift);
-  }
-  assert.ok(cssSource.includes('.hero-ecosystem::before'), 'orbit ring present');
-  // Mobile (≤900px): constellation hides, ledger shows, typing untouched.
-  const start = cssSource.indexOf('@media (max-width: 900px)');
+test('mobile hero constellation is static while headline typing is untouched', () => {
+  const start = cssSource.indexOf('@media (max-width: 640px)');
   assert.ok(start > -1);
   const next = cssSource.indexOf('@media', start + 1);
-  const tablet = cssSource.slice(start, next === -1 ? undefined : next);
-  assert.ok(tablet.includes('.hero-ecosystem'), 'swap lives in the 900 band');
-  assert.ok(tablet.includes('display: none'), 'constellation hides');
-  assert.ok(tablet.includes('.hero-ledger'), 'ledger shows');
+  const mobile = cssSource.slice(start, next === -1 ? undefined : next);
+  // Every hero card is static at mobile widths — no ambient drift.
+  assert.ok(mobile.includes('.hero-card'));
+  assert.ok(mobile.includes('animation: none'));
+  // Constellation posture (not a plain stack): vocabulary spans the full
+  // row while satellites pair around it, and the narrow breakpoint keeps
+  // the layered 2-col grid instead of collapsing to one column.
+  assert.ok(mobile.includes('grid-column: 1 / -1'));
+  // Asymmetric staging contract: vocabulary is the static anchor while
+  // neighbors translate toward it (top pair down, bottom pair up-left),
+  // with z-order doing the layering. No negative vertical margins: they
+  // sized grid tracks unpredictably (phantom gaps, colliding rows).
+  assert.ok(mobile.includes('translateY(18px)'));
+  assert.ok(mobile.includes('translate(-10px, -10px)'));
+  assert.ok(mobile.includes('translate(-12px, -20px)'));
+  assert.ok(mobile.includes('top: auto'));
+  assert.ok(!mobile.includes('margin-bottom: -14px'));
+  assert.ok(!mobile.includes('margin-top: -14px'));
+  assert.ok(mobile.includes('z-index: 3'));
+  assert.ok(mobile.includes('z-index: 2'));
+  assert.ok(mobile.includes('z-index: 1'));
+  assert.ok(sectionsSource.includes('data-hero-streak="30"'));
+  const narrowStart = cssSource.indexOf('@media (max-width: 380px)');
+  const narrowNext = cssSource.indexOf('@media', narrowStart + 1);
+  const narrow = cssSource.slice(narrowStart, narrowNext === -1 ? undefined : narrowNext);
+  assert.ok(narrow.includes('grid-template-columns: 1fr 1fr'));
+  assert.ok(!/grid-template-columns:\s*1fr\s*;/.test(narrow));
+  // Desktop float and the typing chain are untouched by the mobile freeze.
+  for (const keyframes of ['heroDriftOne', 'heroDriftTwo', 'heroDriftThree', 'heroDriftFour', 'heroDriftFive']) {
+    assert.ok(cssSource.includes('@keyframes ' + keyframes));
+  }
   assert.ok(interactionsSource.includes('initHeroTyping'));
   assert.ok(sectionsSource.includes('data-hero-typing'));
-  assert.ok(sectionsSource.includes('data-hero-streak="30"'), 'streak target lives with the card');
-  // Reduced motion freezes both systems to readable final states.
+  // Reduced motion still resolves the hero to a readable final state.
   const reduced = cssSource.slice(cssSource.indexOf('@media (prefers-reduced-motion: reduce)'));
-  assert.ok(reduced.includes('.hero-ecosystem .hero-card'));
-  assert.ok(reduced.includes('.hero-panel'));
+  assert.ok(reduced.includes('.hero-card'));
   assert.ok(reduced.includes('animation: none'));
   assert.ok(reduced.includes('.hero-title-stack > h1'));
   assert.ok(reduced.includes('visibility: visible !important'));
