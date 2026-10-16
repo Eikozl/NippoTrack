@@ -1,6 +1,16 @@
 import { resolveExperience } from './landing/routing.js';
 import { initNativeAuth } from './nativeAuth.js';
 import { supabase } from './authClient.js';
+import { requestPersistentStorage } from './storagePersist.js';
+
+// Ask the platform to exclude our origin from automatic website-data
+// eviction (keeps the stored session alive under storage pressure).
+// Fire-and-forget: boot never waits on it and denial changes nothing.
+try {
+  if (typeof window !== 'undefined' && window.navigator) {
+    requestPersistentStorage(window.navigator).catch(() => undefined);
+  }
+} catch { /* storage hardening is best-effort */ }
 
 // Production-web PWA only: never inside Capacitor (the native shell manages
 // its own lifecycle) and never over insecure origins.
