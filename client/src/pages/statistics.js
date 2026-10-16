@@ -208,6 +208,13 @@ function referenceKanjiProgressPanel(model, targetState = {}) {
     // Permanent honesty line: the essential meaning stays visible next to
     // the coverage data; the longer explanation collapses below.
     element('p', { className: 'mt-1 text-sm text-muted', text: 'Reference Kanji coverage only — not official JLPT exam readiness.' }),
+    element('p', { className: 'ledger-refrain-app', attrs: { 'aria-hidden': 'true' } }, [
+      element('span', { text: 'Collected' }),
+      element('b', { text: '≠' }),
+      element('span', { text: 'Reviewed' }),
+      element('b', { text: '≠' }),
+      element('span', { text: 'Known' })
+    ]),
     element('div', { className: 'mt-4 grid gap-4' }, rows),
     element('details', { className: 'jlpt-progress-details' }, [
       element('summary', { text: 'How this coverage is calculated' }),

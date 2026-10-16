@@ -69,10 +69,38 @@ function hero() {
           </div>
           <p class="landing-lede">Organize what you learn, understand Japanese in context, and keep a clear view of your progress.</p>
           <div class="landing-hero-actions">
-            <a class="landing-button landing-button-primary" href="/app?auth=sign-up" data-auth-open="sign-up">Start your ledger</a>
+            <a class="landing-button landing-button-primary" href="/app?auth=sign-up" data-auth-open="sign-up">Register</a>
+            <a class="landing-button" data-android-download href="https://github.com/Eikozl/NippoTrack/releases/latest">Download on Android</a>
             <a class="landing-text-link landing-arrow-link" href="/how-it-works">See how it works <span aria-hidden="true">→</span></a>
           </div>
           <p class="landing-supporting">Built for the way you already study Japanese.</p>
+        </div>
+        <div class="hero-ecosystem" aria-hidden="true">
+          <article class="hero-card hero-vocabulary" data-float="one">
+            <span class="demo-label">Vocabulary</span>
+            <p class="hero-japanese" lang="ja">旅行</p>
+            <p class="hero-reading" lang="ja">りょこう</p>
+            <p class="hero-meaning">travel</p>
+            <div class="hero-context"><span>Context</span><b lang="ja">来年、日本へ旅行します。</b></div>
+          </article>
+          <article class="hero-card hero-kanji" data-float="two">
+            <span class="demo-label">Kanji</span>
+            <p class="hero-kanji-glyph" lang="ja">殻</p>
+            <p>shell · husk</p>
+          </article>
+          <article class="hero-card hero-level" data-float="three">
+            <span class="demo-label">Starting estimate</span>
+            <strong class="estimate-value" data-estimate-value data-estimate-delay="0" aria-hidden="true">N4</strong><span aria-hidden="true"> range</span><span class="visually-hidden">Starting estimate, for example N4 range</span>
+          </article>
+          <article class="hero-card hero-streak" data-float="four">
+            <span class="demo-label">Study streak</span>
+            <strong data-hero-streak="30">30</strong><span> days</span>
+          </article>
+          <article class="hero-card hero-review" data-float="five">
+            <span class="demo-label">Ready to review</span>
+            <p lang="ja">約束 <span lang="ja">やくそく</span></p>
+            <small>Your collection, in motion</small>
+          </article>
         </div>
         <div class="hero-ledger" aria-hidden="true">
           <article class="hero-panel hero-analyzer">

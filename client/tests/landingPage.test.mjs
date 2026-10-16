@@ -36,7 +36,7 @@ test('landing demos remain presentation-only and make no application requests', 
 });
 
 test('Japanese examples declare their language', () => {
-  for (const text of ['旅行', 'りょこう', '約束', 'やくそく', '雨', 'あめ', '降っている', '図書館', 'としょかん', '日', '料理', 'りょうり']) {
+  for (const text of ['旅行', 'りょこう', '殻', '約束', 'やくそく', '雨', 'あめ', '降っている', '図書館', 'としょかん', '日', '料理', 'りょうり']) {
     assert.ok(source.includes('lang="ja">' + text), 'missing lang=ja for ' + text);
   }
   assert.ok(source.includes('<b lang="ja">来年、日本へ旅行します。</b>'), 'hero context keeps lang=ja');
@@ -50,7 +50,7 @@ test('navigation, hero, and final CTA use their frozen labels', () => {
   const navigation = source.slice(source.indexOf('landing-nav-actions'), source.indexOf('landing-menu-button'));
   assert.ok(navigation.indexOf('Log in') < navigation.indexOf('Get started'));
   assert.ok(source.includes('href="/app?auth=sign-up"'), 'sign-up fallback destinations kept');
-  assert.ok(source.includes('data-auth-open="sign-up">Start your ledger</a>'), 'hero CTA opens the modal in place');
+  assert.ok(source.includes('data-auth-open="sign-up">Register</a>'), 'hero CTA opens the modal in place');
   assert.ok(source.includes('data-auth-open="sign-up">Start with NippoTrack</a>'), 'final CTA opens the modal in place');
   assert.ok(source.includes('Already have an account? Log in'));
 });
@@ -86,7 +86,9 @@ test('per-section curated examples stay exact and word-level', () => {
   assert.ok(source.includes('<p class="hero-reading" lang="ja">りょこう</p>'));
   assert.ok(source.includes('<p class="hero-meaning">travel</p>'));
   assert.ok(source.includes('<b lang="ja">来年、日本へ旅行します。</b>'));
-  // HERO analyzer panel reuses the curated 雨 set (same strings, ledger panel).
+  // HERO review tile foreshadows the Review showcase; kanji identity is kept.
+  assert.ok(source.includes('<p lang="ja">約束 <span lang="ja">やくそく</span></p>'));
+  assert.ok(source.includes('<p class="hero-kanji-glyph" lang="ja">殻</p>'));
   // ANALYZER demo keeps the same structure with new strings.
   assert.ok(source.includes('<p class="analyzer-sentence" lang="ja">雨が降っている。</p>'));
   assert.ok(source.includes('<span class="candidate-active" lang="ja">雨</span>'));
@@ -147,31 +149,40 @@ function ruleBody(block, selector) {
   return match[1];
 }
 
-test('mobile hero is a static vertical ledger: no constellation, no floats, no count-ups', () => {
+test('hero splits by viewport: constellation on desktop, simple ledger on mobile', () => {
+  // Desktop: the floating constellation owns the hero visual column.
+  assert.ok(source.includes('class="hero-ecosystem"'), 'constellation markup present');
+  assert.equal((source.match(/data-float="/g) || []).length, 5, 'five floating cards');
+  assert.ok(source.includes('data-hero-streak="30"'), 'streak counts to its final value');
+  assert.ok(cssSource.includes('@keyframes heroDriftOne'), 'drift system present');
+  assert.ok(cssSource.includes('.hero-ecosystem .hero-card[data-float="one"]'), 'float hooks scoped');
+  assert.ok(cssSource.includes('.hero-ecosystem::before'), 'orbit ring present');
+  // Mobile (≤900px): constellation hides, the plain ledger stack shows.
+  const band900 = mediaBlock('@media (max-width: 900px)');
+  assert.ok(band900.includes('.hero-ecosystem'), 'swap lives in the 900 band');
+  const eco900 = ruleBody(band900, '\\.hero-ecosystem');
+  assert.ok(eco900.includes('display: none'), 'constellation hides on mobile');
+  const ledger900 = ruleBody(band900, '\\.hero-ledger');
+  assert.ok(ledger900.includes('display: grid'), 'ledger shows on mobile');
+  // Base (desktop-first): ledger hides, constellation flows.
+  assert.match(cssSource, /\.hero-ledger\s*\{[^}]*display:\s*none/, 'ledger hidden on desktop');
+  // The ledger stack itself stays plain flow with safe wrapping.
   const mobile = mediaBlock('@media (max-width: 640px)');
-  assert.ok(mobile.includes('.hero-ledger'), 'ledger owns the mobile hero');
-  assert.ok(!cssSource.includes('.hero-ecosystem'), 'constellation retired everywhere');
-  assert.ok(!cssSource.includes('data-float'), 'no float hooks remain');
-  assert.ok(!cssSource.includes('heroDrift'), 'drift keyframes retired');
-  assert.ok(!source.includes('data-hero-streak'), 'hero count-up removed from markup');
-  // The stack is plain flow: panel, strip, refrain. Wrapping stays safe.
+  assert.ok(mobile.includes('.hero-ledger'), 'ledger owns the small hero');
   assert.ok(mobile.includes('.hero-context'), 'context wraps instead of clipping');
-  // Type sizes are frozen for the new stack (regex: sources are CRLF).
-  assert.match(cssSource, /\.hero-japanese\s*\{\s*margin-top:\s*11px !important;\s*font-size:\s*30px;/, 'strip word size frozen');
+  // Type sizes are frozen for both systems.
+  assert.match(cssSource, /\.hero-ecosystem \.hero-japanese\s*\{[^}]*font-size:\s*42px/, 'constellation word size frozen');
+  assert.match(cssSource, /\.hero-japanese\s*\{[^}]*font-size:\s*30px/, 'strip word size frozen');
   assert.ok(cssSource.includes('.hero-typing-sentence'), 'analyzer sentence styled');
-  // Narrowest widths keep the plain stack — never a layered grid.
+  assert.ok(cssSource.includes('.tategaki-rail'), 'margin rail present');
+  assert.ok(cssSource.includes('.hanko-stamp'), 'stamp system present');
+  // Narrowest widths keep the plain stack — no satellite grid returns.
   const narrow = mediaBlock('@media (max-width: 380px)');
   assert.ok(narrow.includes('.hero-panel'), 'panels only tighten padding');
   assert.ok(!/grid-template-columns:\s*1fr 1fr/.test(narrow), 'no satellite grid returns');
   // No new breakpoints were introduced for this pass.
   const breakpoints = [...cssSource.matchAll(/@media\s*\(max-width:\s*(\d+)px\)/g)].map((m) => m[1]);
   assert.deepEqual([...new Set(breakpoints)].sort(), ['1100', '380', '479', '640', '767', '900']);
-  // Desktop hero is static panels: typing cursor is the only motion.
-  assert.ok(cssSource.includes('@keyframes heroCursorBlink'), 'typing cursor is the only hero motion');
-  assert.ok(cssSource.includes('.hero-ledger'));
-  assert.ok(cssSource.includes('.tategaki-rail'));
-  assert.ok(cssSource.includes('.hanko-stamp'));
-  assert.ok(cssSource.includes('.hero-vocabulary'));
 });
 
 test('section rhythm uses explicit tonal chapters without alternating washes', () => {
@@ -224,6 +235,7 @@ test('large-screen containment reuses the 1100 band with no mobile changes', () 
   const band1100 = mediaBlock('@media (max-width: 1100px)');
   assert.ok(band1100.includes('.hero-ledger'), 'ledger stays inside its column');
   assert.ok(band1100.includes('width: min(100%, 520px)'), 'ledger narrows before the stack');
+  assert.ok(band1100.includes('.hero-ecosystem'), 'constellation scales before the swap');
   assert.ok(band1100.includes('.core-flow article'), 'flow columns breathe at tablet');
   assert.ok(band1100.includes('padding: 0 28px'), 'flow rhythm eases without new breakpoints');
   assert.ok(band1100.includes('.analyzer-result'), 'dense panel eases at tablet');

@@ -813,6 +813,13 @@ export async function renderReview(container) {
 
   container.replaceChildren(element('section', {}, [
     pageHeader({ title: 'Review', description: 'Choose recent activity and review it at a steady pace.' }),
+    element('p', { className: 'ledger-refrain-app', attrs: { 'aria-hidden': 'true' } }, [
+      element('span', { text: 'Collected' }),
+      element('b', { text: '≠' }),
+      element('span', { text: 'Reviewed' }),
+      element('b', { text: '≠' }),
+      element('span', { text: 'Known' })
+    ]),
     heroSurface,
     summaryBar,
     candidatesBlock,

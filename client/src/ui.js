@@ -35,10 +35,58 @@ export function pageHeader({ eyebrow: _eyebrow, title, description, action }) {
     element('h1', { className: 'font-display text-2xl font-semibold tracking-tight text-ink sm:text-3xl', text: title })
   ]);
   const copy = element('div', {}, [
+    ledgerKicker(title),
     element('div', { className: 'mt-2' }, [heading]),
     element('p', { className: 'mt-2 max-w-2xl text-sm leading-6 text-muted', text: description })
   ]);
   return element('header', { className: 'mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between' }, [copy, action]);
+}
+
+// V6 identity: ledger running-heads (hashira). Every page header opens
+// with a mono kicker — STUDY LEDGER plus a Japanese gloss for the section
+// — closed by a hairline rule. One map, one file: all pages inherit it
+// through pageHeader, no per-page edits, no new imports for callers.
+const LEDGER_GLOSS = {
+  dashboard: 'ダッシュボード',
+  review: '復習',
+  sessions: '学習記録',
+  goals: '目標',
+  vocabulary: '語彙',
+  kanji: '漢字',
+  'kanji reference': '漢字',
+  grammar: '文法',
+  community: 'コミュニティ',
+  notes: 'メモ',
+  'content log': 'コンテンツ',
+  tags: 'タグ',
+  analyzer: '解析',
+  'text analyzer': '解析',
+  immersion: 'イマージョン',
+  reading: '読解',
+  statistics: '統計',
+  settings: '設定'
+};
+
+export function ledgerKicker(title) {
+  const gloss = LEDGER_GLOSS[String(title || '').toLowerCase()];
+  const children = [element('span', { text: 'Study ledger' })];
+  if (gloss) {
+    children.push(element('span', { text: '·', attrs: { 'aria-hidden': 'true' } }));
+    children.push(element('span', { text: gloss, attrs: { lang: 'ja' } }));
+  }
+  return element('p', { className: 'ledger-kicker', attrs: { 'aria-label': gloss ? `Study ledger, ${title}` : 'Study ledger' } }, children);
+}
+
+// V6 identity: brand refrain for data panels (statistics, review hub).
+// Same string, same style as the landing — meaning rides as text.
+export function ledgerRefrain() {
+  return element('p', { className: 'ledger-refrain-app', attrs: { 'aria-hidden': 'true' } }, [
+    element('span', { text: 'Collected' }),
+    element('b', { text: '≠' }),
+    element('span', { text: 'Reviewed' }),
+    element('b', { text: '≠' }),
+    element('span', { text: 'Known' })
+  ]);
 }
 
 export function loadingState(label = 'Loading data…') {
@@ -112,7 +160,7 @@ export function skeleton({ rows = 3, variant = 'cards', label = 'Loading…' } =
   ]);
 }
 
-export function emptyState({ title = 'Nothing here yet', description = 'Create your first record to get started.', icon = null, action = null } = {}) {
+export function emptyState({ title = 'A blank page in the ledger', description = 'The ledger starts with a single entry — log your first one.', icon = null, action = null } = {}) {
   return element('div', { className: 'surface empty-state grid min-h-52 place-items-center p-8 text-center' }, [
     element('div', { className: 'grid max-w-md justify-items-center' }, [
       ...(icon ? [iconTile(icon, { className: 'panel-icon' })] : []),

@@ -55,3 +55,45 @@ test('V6 app-shell: review Good stamps hanko while Again/Hard stay quiet', () =>
   assert.ok(review.includes('review-grades'), 'grades row hook present');
   assert.ok(review.includes("'data-grade': result"), 'verdict rides as data, never color alone');
 });
+
+test('V6 app-shell: every page opens with a ledger running-head', () => {
+  const ui = readSource('src/ui.js');
+  assert.ok(ui.includes('ledger-kicker'), 'kicker hook rendered by pageHeader');
+  assert.ok(ui.includes('LEDGER_GLOSS'), 'single gloss map, no per-page edits');
+  for (const gloss of ['ダッシュボード', '復習', '学習記録', '語彙', '漢字', '統計']) {
+    assert.ok(ui.includes(gloss), 'gloss present: ' + gloss);
+  }
+  assert.ok(!ui.includes("className: 'eyebrow'"), 'kicker never reuses the retired eyebrow');
+  const css = readSource('src/styles.css');
+  assert.match(css, /\.ledger-kicker \{[^}]*var\(--font-mono\)/, 'mono kicker voice');
+  assert.match(css, /\.ledger-kicker::after \{[^}]*var\(--jlt-border\)/, 'hairline rule closes the kicker');
+});
+
+test('V6 app-shell: brand refrain rides data panels in statistics and review', () => {
+  for (const path of ['src/pages/statistics.js', 'src/pages/review.js']) {
+    const source = readSource(path);
+    assert.ok(source.includes('ledger-refrain-app'), `refrain present in ${path}`);
+    assert.ok(source.includes("text: '≠'"), `refrain marks carry meaning as text in ${path}`);
+  }
+  const css = readSource('src/styles.css');
+  assert.match(css, /\.ledger-refrain-app \{[^}]*var\(--font-mono\)/, 'refrain speaks mono');
+  assert.match(css, /\.ledger-refrain-app b \{[^}]*var\(--jlt-primary\)/, 'marks sign hanko');
+});
+
+test('V6 app-shell: sidebar carries the seal, streak value sets mono', () => {
+  const html = readSource('index.html');
+  assert.ok(html.includes('class="brand-seal"'), 'sidebar seal slot present');
+  assert.ok(html.includes('src="/seal.svg"'), 'seal served from public root');
+  const css = readSource('src/styles.css');
+  assert.match(css, /\.brand-seal \{[^}]*width:\s*26px/, 'stamp-sized seal');
+  assert.match(css, /\.streak-value \{[^}]*var\(--font-mono\)/, 'tally numerals tabular');
+});
+
+test('V6 app-shell: empty states speak ledger voice in both languages', () => {
+  const ui = readSource('src/ui.js');
+  assert.ok(ui.includes("title = 'A blank page in the ledger'"), 'ledger empty title');
+  assert.ok(ui.includes('The ledger starts with a single entry'), 'ledger empty description');
+  const i18n = readSource('src/i18n.js');
+  assert.ok(i18n.includes("'A blank page in the ledger':"), 'ES key for the title');
+  assert.ok(i18n.includes("'The ledger starts with a single entry"), 'ES key for the description');
+});

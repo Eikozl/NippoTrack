@@ -523,6 +523,14 @@
 #sidebar nav { gap: .45rem; }
 #sidebar-streak { min-height: 6.2rem; }
 .streak-value { color: var(--jlt-primary); }
+/* V6 identity: ledger running-heads + brand refrain + sidebar seal. */
+.ledger-kicker { display:flex; align-items:center; gap:10px; margin:0; color:var(--jlt-muted); font-family:var(--font-mono); font-size:11px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; }
+.ledger-kicker::after { content:""; flex:1 1 auto; height:1px; background:var(--jlt-border); }
+.ledger-kicker [lang="ja"] { letter-spacing:0; }
+.ledger-refrain-app { display:flex; align-items:baseline; justify-content:center; gap:10px; margin-top:18px; color:var(--jlt-muted); font-family:var(--font-mono); font-size:12px; letter-spacing:0.06em; }
+.ledger-refrain-app b { color:var(--jlt-primary); font-weight:600; }
+.brand-seal { width:26px; height:26px; border-radius:6px; transform:rotate(-1.5deg); flex-shrink:0; }
+.streak-value { font-family:var(--font-mono); letter-spacing:0; }
 .streak-fire-icon { display:inline-grid; width:1.1rem; height:1.1rem; place-items:center; color:#e03145; transform-origin:50% 85%; animation: streak-fire-pulse 1s cubic-bezier(.4,0,.2,1) infinite; }
 :root[data-theme="dark"] .streak-fire-icon { color:#ff6475; }
 .streak-fire-icon .jlt-icon { width:1.1rem; height:1.1rem; stroke-width:2.6; filter:drop-shadow(0 0 3px color-mix(in srgb,#e03145 42%,transparent)); }

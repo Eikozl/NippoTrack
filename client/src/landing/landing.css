@@ -188,6 +188,10 @@
   box-shadow: 0 1px 10px rgba(0, 0, 0, 0.28);
 }
 
+[data-nippotrack-theme="dark"] .landing-page .hero-ecosystem::before {
+  border-color: rgba(58, 53, 48, 0.9);
+}
+
 [data-nippotrack-theme="dark"] .landing-page .landing-button-primary {
   color: #1c1a18 !important;
   background: #f5f0e8;
@@ -543,10 +547,166 @@
   width: 172px;
 }
 
+/* V6 restored: desktop constellation (floating product cards). Scoped
+   under .hero-ecosystem so the mobile ledger strip styles never collide.
+   Hidden at tablet widths where the simple ledger takes over. */
+.hero-ecosystem {
+  grid-column: 2;
+  position: relative;
+  width: min(100%, 560px);
+  height: 520px;
+  justify-self: end;
+}
+
+.hero-ecosystem::before {
+  position: absolute;
+  inset: 84px 26px 42px 48px;
+  border: 1px solid rgba(220, 212, 202, 0.7);
+  border-radius: 50%;
+  content: "";
+  opacity: 0.62;
+  transform: rotate(-8deg);
+}
+
+.hero-ecosystem .hero-card {
+  position: absolute;
+  border: 1px solid var(--landing-border);
+  border-radius: 16px;
+  background: var(--landing-surface);
+  box-shadow: var(--landing-shadow-float);
+}
+
+.hero-ecosystem .hero-vocabulary {
+  top: 112px;
+  left: 86px;
+  z-index: 3;
+  width: 322px;
+  min-height: 224px;
+  padding: 25px 28px;
+  transform: rotate(-1deg);
+}
+
+.hero-ecosystem .hero-japanese {
+  margin-top: 11px !important;
+  font-size: 42px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.hero-ecosystem .hero-reading {
+  color: var(--landing-text-secondary);
+  font-size: 17px;
+  font-weight: 500;
+}
+
+.hero-ecosystem .hero-meaning {
+  color: var(--landing-text-secondary);
+}
+
+.hero-ecosystem .hero-context {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 17px;
+  padding-top: 14px;
+  border-top: 1px solid var(--landing-border-subtle);
+  font-size: 13px;
+}
+
+.hero-ecosystem .hero-context span {
+  color: var(--landing-text-muted);
+}
+
+.hero-ecosystem .hero-context b {
+  font-weight: 500;
+}
+
+.hero-ecosystem .hero-kanji {
+  top: 42px;
+  right: 18px;
+  z-index: 2;
+  width: 178px;
+  min-height: 162px;
+  padding: 21px;
+  transform: rotate(1.2deg);
+}
+
+.hero-ecosystem .hero-kanji-glyph {
+  margin-top: 5px !important;
+  font-size: 54px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.hero-ecosystem .hero-kanji > p:last-child {
+  color: var(--landing-text-secondary);
+  font-size: 13px;
+}
+
+.hero-ecosystem .hero-level,
+.hero-ecosystem .hero-streak {
+  width: 150px;
+  min-height: 92px;
+  padding: 17px 18px;
+}
+
+.hero-ecosystem .hero-level {
+  top: 14px;
+  left: 30px;
+  transform: rotate(-1.4deg);
+}
+
+.hero-ecosystem .hero-streak {
+  right: 2px;
+  bottom: 76px;
+  z-index: 4;
+  transform: rotate(1deg);
+}
+
+.hero-ecosystem .hero-level strong,
+.hero-ecosystem .hero-streak strong {
+  display: inline-block;
+  margin-top: 5px;
+  font-family: var(--landing-font-display), sans-serif;
+  font-size: 26px;
+  line-height: 1.2;
+}
+
+.hero-ecosystem .hero-level > span:last-child,
+.hero-ecosystem .hero-streak > span:last-child {
+  color: var(--landing-text-secondary);
+  font-size: 13px;
+}
+
+.hero-ecosystem .hero-review {
+  bottom: 25px;
+  left: 43px;
+  z-index: 2;
+  width: 212px;
+  min-height: 128px;
+  padding: 19px 21px;
+  transform: rotate(1.2deg);
+}
+
+.hero-ecosystem .hero-review p {
+  margin-top: 9px !important;
+  font-size: 23px;
+  font-weight: 600;
+}
+
+.hero-ecosystem .hero-review p span,
+.hero-ecosystem .hero-review small {
+  color: var(--landing-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
 /* V6 hero: one live analyzer panel + vocabulary strip + ledger refrain,
    with a tategaki margin rail. No floats, no orbit, no count-ups. */
 .hero-ledger {
-  display: grid;
+  display: none;
+  grid-column: 2;
   width: min(100%, 560px);
   justify-self: end;
   align-content: center;
@@ -1872,8 +2032,39 @@
   max-width: 650px;
 }
 
-/* V6: hero floats retired with the card cluster. The ledger panels are
-   static; only the headline typing cursor keeps ambient motion. */
+/* Constellation drift: gentle ambient float on desktop only. The mobile
+   ledger panels stay static; only the headline typing cursor moves there. */
+
+@keyframes heroDriftOne {
+  0%, 100% { transform: rotate(-1deg) translate3d(0, 0, 0); }
+  50% { transform: rotate(-1deg) translate3d(4px, -6px, 0); }
+}
+
+@keyframes heroDriftTwo {
+  0%, 100% { transform: rotate(1.2deg) translate3d(0, 0, 0); }
+  50% { transform: rotate(1.2deg) translate3d(-4px, 5px, 0); }
+}
+
+@keyframes heroDriftThree {
+  0%, 100% { transform: rotate(-1.4deg) translate3d(0, 0, 0); }
+  50% { transform: rotate(-1.4deg) translate3d(3px, 4px, 0); }
+}
+
+@keyframes heroDriftFour {
+  0%, 100% { transform: rotate(1deg) translate3d(0, 0, 0); }
+  50% { transform: rotate(1deg) translate3d(-3px, -5px, 0); }
+}
+
+@keyframes heroDriftFive {
+  0%, 100% { transform: rotate(1.2deg) translate3d(0, 0, 0); }
+  50% { transform: rotate(1.2deg) translate3d(4px, 4px, 0); }
+}
+
+.hero-ecosystem .hero-card[data-float="one"] { animation: heroDriftOne 8.8s ease-in-out infinite; }
+.hero-ecosystem .hero-card[data-float="two"] { animation: heroDriftTwo 9.6s ease-in-out -2s infinite; }
+.hero-ecosystem .hero-card[data-float="three"] { animation: heroDriftThree 8.2s ease-in-out -4s infinite; }
+.hero-ecosystem .hero-card[data-float="four"] { animation: heroDriftFour 9s ease-in-out -1s infinite; }
+.hero-ecosystem .hero-card[data-float="five"] { animation: heroDriftFive 9.8s ease-in-out -5s infinite; }
 
 @keyframes stepReveal {
   to { opacity: 1; transform: translateY(0); }
@@ -2031,6 +2222,20 @@
     width: min(100%, 520px);
   }
 
+  .hero-ecosystem {
+    width: min(100%, 520px);
+    transform: scale(0.88);
+    transform-origin: center right;
+  }
+
+  .hero-ecosystem .hero-kanji {
+    right: 22px;
+  }
+
+  .hero-ecosystem .hero-streak {
+    right: 8px;
+  }
+
   .showcase-grid,
   .progress-copy {
     gap: 48px;
@@ -2078,8 +2283,13 @@
   }
 
   .hero-ledger {
+    display: grid;
     justify-self: stretch;
     width: 100%;
+  }
+
+  .hero-ecosystem {
+    display: none;
   }
 
   .tategaki-rail {
@@ -2667,7 +2877,8 @@
     display: none;
   }
 
-  .landing-page .hero-panel {
+  .landing-page .hero-panel,
+  .landing-page .hero-ecosystem .hero-card {
     animation: none !important;
   }
 }
