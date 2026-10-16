@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { authRedirectUrl } = require('../src/auth/supabase');
+const { authRedirectForRequest, authRedirectUrl, nativeAuthRedirectUrl } = require('../src/auth/supabase');
 
 function request(host) {
   return { get(name) { return name.toLowerCase() === 'host' ? host : ''; } };
@@ -57,5 +57,18 @@ test('explicit redirect configuration still wins (F correctness)', () => {
     assert.equal(authRedirectUrl(request('anything-else.example')), 'https://example.com/auth/callback');
   } finally {
     delete process.env.SUPABASE_AUTH_REDIRECT_URL;
+  }
+});
+
+test('native opt-in returns the fixed app callback, never caller input', () => {
+  delete process.env.SUPABASE_AUTH_REDIRECT_URL;
+  assert.equal(nativeAuthRedirectUrl, 'nippotrack://auth/callback');
+  assert.equal(
+    authRedirectForRequest(request('nippotrack.vercel.app'), { nativeApp: true }),
+    'nippotrack://auth/callback'
+  );
+  // Anything but boolean true falls back to the web redirect (no open redirect).
+  for (const body of [undefined, null, {}, { nativeApp: 'nippotrack://evil' }, { nativeApp: 1 }, { redirectTo: 'https://evil.com' }]) {
+    assert.equal(authRedirectForRequest(request('nippotrack.vercel.app'), body), 'https://nippotrack.vercel.app/app');
   }
 });

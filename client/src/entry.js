@@ -1,4 +1,24 @@
 import { resolveExperience } from './landing/routing.js';
+import { initNativeAuth } from './nativeAuth.js';
+import { supabase } from './authClient.js';
+
+// Production-web PWA only: never inside Capacitor (the native shell manages
+// its own lifecycle) and never over insecure origins.
+try {
+  if (!window.Capacitor && window.location.protocol === 'https:' && 'serviceWorker' in navigator) {
+    window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js'); });
+  }
+} catch { /* best-effort enhancement */ }
+
+// Sideloaded APK: email confirm/recovery links return via the
+// nippotrack:// scheme instead of the browser. Registered before the app
+// bundle loads so a cold start from a link still establishes the session.
+initNativeAuth({
+  supabase,
+  onAuthenticated: () => {
+    try { window.location.hash = '#dashboard'; } catch { /* navigation is best-effort */ }
+  }
+});
 
 // Email links minted before the /app redirect (or pasted anywhere) still
 // land on / or /how-it-works with Supabase tokens in the URL. Only the app

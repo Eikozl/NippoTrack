@@ -69,7 +69,10 @@ export function mountTutorialVideo(host, { onDone = null } = {}) {
   });
   const video = doc.createElement('video');
   video.src = pickTutorialSource(useMobile);
-  video.className = 'absolute inset-0 h-full w-full object-cover';
+  // The handset cut shows the whole frame (contain): cover-cropping the
+  // vertical video hides its baked-in edges and reads as an unwanted zoom.
+  // The desktop/tablet cut keeps fullscreen cover.
+  video.className = `absolute inset-0 h-full w-full ${useMobile ? 'object-contain' : 'object-cover'}`;
   video.setAttribute('autoplay', '');
   video.setAttribute('muted', '');
   video.setAttribute('playsinline', '');
