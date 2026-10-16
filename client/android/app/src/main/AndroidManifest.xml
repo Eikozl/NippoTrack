@@ -22,6 +22,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- Auth return for email confirm/recovery links minted with
+                 { nativeApp: true } (nippotrack://auth/callback). Delivered
+                 to the WebView via the Capacitor App plugin (appUrlOpen). -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="nippotrack" android:host="auth" android:path="/callback" />
+            </intent-filter>
+
         </activity>
 
         <provider

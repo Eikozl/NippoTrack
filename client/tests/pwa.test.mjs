@@ -46,7 +46,9 @@ test('index.html wires PWA without touching the native shell', () => {
   const html = readSource('index.html');
   assert.ok(html.includes('rel="manifest"'), 'manifest linked');
   assert.ok(html.includes('apple-touch-icon'), 'iOS icon linked');
-  assert.ok(html.includes('serviceWorker'), 'registration snippet present');
-  assert.ok(html.includes('window.Capacitor'), 'Capacitor builds skip registration');
-  assert.ok(html.includes("https:"), 'insecure origins skipped');
+  assert.ok(!/<script>(?![^>]*\bsrc=)[\s\S]*?serviceWorker[\s\S]*?<\/script>/.test(html), 'no inline registration script (CSP)');
+  const entry = readSource('src/entry.js');
+  assert.ok(entry.includes('serviceWorker'), 'registration lives in the module bundle');
+  assert.ok(entry.includes('window.Capacitor'), 'native shell excluded from SW registration');
+  assert.ok(entry.includes("https:"), 'insecure origins skipped');
 });

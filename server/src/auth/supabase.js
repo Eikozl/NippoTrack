@@ -5,6 +5,22 @@ const verifiedUsers = new Map();
 const verificationTtlMs = 15_000;
 const verificationTimeoutMs = 5_000;
 const productionAuthRedirectUrl = 'https://nippotrack.vercel.app/app';
+// Native-shell return address for email confirm/recovery links tapped from
+// the sideloaded APK. Fixed constant (never user input): no open redirect.
+// Must also be allowlisted in the Supabase dashboard (URL Configuration).
+const nativeAuthRedirectUrl = 'nippotrack://auth/callback';
+
+function nativeAuthRequested(body) {
+  return body != null && body.nativeApp === true;
+}
+
+// Email-link destination for sign-up/recovery: the native callback only
+// when the caller explicitly opts in with { nativeApp: true }; every other
+// caller keeps the existing host-derived web redirect.
+function authRedirectForRequest(req, body) {
+  if (nativeAuthRequested(body)) return nativeAuthRedirectUrl;
+  return authRedirectUrl(req);
+}
 const defaultSupabaseUrl = 'https://milayuvlajmgrcxmrxdg.supabase.co';
 const defaultSupabasePublishableKey = 'sb_publishable_UJQwQKZge3SKbj-j-BfVkg_2QmvbX4O';
 const localDevelopmentToken = 'jlt-local-development';
@@ -100,4 +116,4 @@ async function verifiedUserFromRequest(req) {
   return data.user;
 }
 
-module.exports = { authClient, authRedirectUrl, isTestBypass, localBypassUserFromRequest, verifiedUserFromRequest };
+module.exports = { authClient, authRedirectUrl, authRedirectForRequest, isTestBypass, localBypassUserFromRequest, nativeAuthRedirectUrl, verifiedUserFromRequest };

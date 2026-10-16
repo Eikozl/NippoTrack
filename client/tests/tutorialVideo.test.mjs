@@ -54,6 +54,8 @@ test('no zoom transform on either cut (both render unscaled)', () => {
   assert.ok(!source.includes('tutorial-video--zoom'), 'no zoom class applied to any cut');
   assert.ok(!css.includes('tutorial-video--zoom'), 'no zoom rule remains');
   assert.ok(!/scale\(1\.12\)/.test(css), 'no leftover 1.12 scale');
+  assert.ok(source.includes('object-contain'), 'handset cut shows the whole frame');
+  assert.ok(source.includes('object-cover'), 'desktop cut keeps fullscreen cover');
 });
 
 test('video plays muted inline; end and load failure both complete (fail-open)', () => {

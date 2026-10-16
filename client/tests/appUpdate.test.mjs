@@ -159,8 +159,8 @@ test('vite build injects the app version', () => {
 });
 
 test('capacitor shell points at production and skips the service worker', () => {
-  const html = readSource('index.html');
-  assert.ok(html.includes('window.Capacitor'), 'native shell excluded from SW registration');
+  const entry = readSource('src/entry.js');
+  assert.ok(entry.includes('window.Capacitor'), 'native shell excluded from SW registration');
   const capConfig = readSource('capacitor.config.ts');
   assert.ok(capConfig.includes('app.nippotrack.tracker'), 'stable application id');
   assert.ok(capConfig.includes('https'), 'secure scheme for the WebView origin');

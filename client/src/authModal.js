@@ -261,12 +261,18 @@ export function openAuthModal({
           return;
         }
         if (view === 'sign-up') {
-          await apiRequest('/api/auth/sign-up', { method: 'POST', body: { email: email.value, password: password.value }, notifyAuth: false });
-          showView('sign-in', { notice: 'Check your email to confirm your account before signing in.', noticeKind: 'notice' });
+          // Native shell: ask for email links that return to the app
+          // (nippotrack://auth/callback) instead of the browser.
+          const nativeApp = typeof window !== 'undefined' && Boolean(window.Capacitor);
+          await apiRequest('/api/auth/sign-up', { method: 'POST', body: { email: email.value, password: password.value, ...(nativeApp ? { nativeApp: true } : {}) }, notifyAuth: false });
+          showView('sign-in', { notice: nativeApp
+            ? 'Check your email to confirm your account, then come back here and sign in.'
+            : 'Check your email to confirm your account before signing in.', noticeKind: 'notice' });
           return;
         }
         if (view === 'forgot') {
-          await apiRequest('/api/auth/forgot-password', { method: 'POST', body: { email: email.value }, notifyAuth: false });
+          const nativeApp = typeof window !== 'undefined' && Boolean(window.Capacitor);
+          await apiRequest('/api/auth/forgot-password', { method: 'POST', body: { email: email.value, ...(nativeApp ? { nativeApp: true } : {}) }, notifyAuth: false });
           showView('sign-in', { notice: 'If an account exists, recovery instructions have been sent.', noticeKind: 'notice' });
           return;
         }
