@@ -1,0 +1,92 @@
+ffmpeg started on 2026-10-16 at 14:57:03
+Report written to "C"
+Log level: 48
+Command line:
+"C:\\Users\\luiss\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-9.0.2-full_build\\bin\\ffmpeg.exe" -v info -i client/src/assets/Logo_Modo_Claro.png -vf signalstats -f null -
+ffmpeg version 9.0.2-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers
+  built with gcc 16.2.0 (Rev3, Built by MSYS2 project)
+  configuration: --enable-gpl --enable-version3 --enable-static --disable-w32threads --disable-autodetect --enable-cairo --enable-fontconfig --enable-iconv --enable-gnutls --enable-lcms2 --enable-libxml2 --enable-gmp --enable-bzlib --enable-lzma --enable-libsnappy --enable-zlib --enable-librist --enable-libsrt --enable-libssh --enable-libzmq --enable-avisynth --enable-libbluray --enable-libcaca --enable-libdvdnav --enable-libdvdread --enable-sdl2 --enable-libaribb24 --enable-libaribcaption --enable-libdav1d --enable-libdavs2 --enable-libopenjpeg --enable-libquirc --enable-libuavs3d --enable-libxevd --enable-libzvbi --enable-liboapv --enable-libqrencode --enable-librav1e --enable-libsvtav1 --enable-libvvenc --enable-libwebp --enable-libx264 --enable-libx265 --enable-libxavs2 --enable-libxeve --enable-libxvid --enable-libaom --enable-libjxl --enable-libsvtjpegxs --enable-libvpx --enable-mediafoundation --enable-libass --enable-frei0r --enable-libfreetype --enable-libfribidi --enable-libharfbuzz --enable-liblen  libavutil      61.  1.102 / 61.  1.102
+  libavcodec     63.  1.102 / 63.  1.102
+  libavformat    63.  1.102 / 63.  1.102
+  libavdevice    63.  1.102 / 63.  1.102
+  libavfilter    12.  1.102 / 12.  1.102
+  libswscale     10.  1.102 / 10.  1.102
+  libswresample   7.  1.102 /  7.  1.102
+Splitting the commandline.
+Reading option '-v' ... matched as option 'v' (set logging level) with argument 'info'.
+Reading option '-i' ... matched as input url with argument 'client/src/assets/Logo_Modo_Claro.png'.
+Reading option '-vf' ... matched as option 'vf' (alias for -filter:v (apply filters to video streams)) with argument 'signalstats'.
+Reading option '-f' ... matched as option 'f' (force container format (auto-detected otherwise)) with argument 'null'.
+Reading option '-' ... matched as output url.
+Finished splitting the commandline.
+Parsing a group of options: global .
+Applying option v (set logging level) with argument info.
+Successfully parsed a group of options.
+Parsing a group of options: input url client/src/assets/Logo_Modo_Claro.png.
+Successfully parsed a group of options.
+Opening an input file: client/src/assets/Logo_Modo_Claro.png.
+[in#0 @ 000001ebfc4e9200] Opening 'client/src/assets/Logo_Modo_Claro.png' for reading
+[file @ 000001ebfc4ee500] Setting default whitelist 'file,crypto,data'
+[in#0 @ 000001ebfc4e9200] Format png_pipe probed with size=2048 and score=99
+[in#0/png_pipe @ 000001ebfc4e9200] Before avformat_find_stream_info() pos: 0 bytes read:32768 seeks:0 nb_streams:1
+[in#0/png_pipe @ 000001ebfc4e9200] After avformat_find_stream_info() pos: 106363 bytes read:106363 seeks:0 frames:1
+Input #0, png_pipe, from 'client/src/assets/Logo_Modo_Claro.png':
+  Duration: N/A, bitrate: N/A
+  Stream #0:0, 1, 1/25: Video: png, rgba(pc, gbr/unknown/unknown), 1774x887 [SAR 2834:2834 DAR 2:1], 25 fps, 25 tbr, 25 tbn
+Successfully opened the file.
+Parsing a group of options: output url -.
+Applying option vf (alias for -filter:v (apply filters to video streams)) with argument signalstats.
+Applying option f (force container format (auto-detected otherwise)) with argument null.
+Successfully parsed a group of options.
+Opening an output file: -.
+[out#0/null @ 000001ebfc469b80] No explicit maps, mapping streams automatically...
+[vost#0:0/wrapped_avframe @ 000001ebfc4f6c00] Created video stream from input stream 0:0
+detected 2 logical cores
+Successfully opened the file.
+Stream mapping:
+  Stream #0:0 -> #0:0 (png (native) -> wrapped_avframe (native))
+[vost#0:0/wrapped_avframe @ 000001ebfc4f6c00] Starting thread...
+[vf#0:0 @ 000001ebfc57a940] Starting thread...
+[vist#0:0/png @ 000001ebfc4f66c0] [dec:png @ 000001ebfc57bd80] Starting thread...
+[in#0/png_pipe @ 000001ebfc4e8e80] Starting thread...
+Press [q] to stop, [?] for help
+[in#0/png_pipe @ 000001ebfc4e8e80] EOF while reading input
+[in#0/png_pipe @ 000001ebfc4e8e80] Terminating thread with return code 0 (success)
+[vist#0:0/png @ 000001ebfc4f66c0] [dec:png @ 000001ebfc57bd80] Decoder thread received EOF packet
+[vist#0:0/png @ 000001ebfc4f66c0] [dec:png @ 000001ebfc57bd80] Decoder returned EOF, finishing
+[graph -1 input from stream 0:0 @ 000001ebfc4f5900] w:1774 h:887 pixfmt:rgba tb:1/25 fr:25/1 sar:2834/2834 csp:gbr range:pc alpha:straight
+[auto_scale_0 @ 000001ebfc4f2b80] w:iw h:ih flags:'' interl:0
+[Parsed_signalstats_0 @ 000001ebfc526bc0] auto-inserting filter 'auto_scale_0' between the filter 'graph -1 input from stream 0:0' and the filter 'Parsed_signalstats_0'
+[AVFilterGraph @ 000001ebfc52e180] query_formats: 3 queried, 12 merged, 6 already done, 0 delayed
+[auto_scale_0 @ 000001ebfc4f2b80] picking yuv444p out of 27 ref:rgba alpha:1
+[auto_scale_0 @ 000001ebfc4f2b80] w:1774 h:887 fmt:rgba csp:gbr range:pc sar:2834/2834 -> w:1774 h:887 fmt:yuv444p csp:unknown range:unknown sar:1/1 flags:0x00000004
+[auto_scale_0 @ 000001ebfc4f2b80] [framesync @ 000001ebfc525b90] Selected 1/25 time base
+[auto_scale_0 @ 000001ebfc4f2b80] [framesync @ 000001ebfc525b90] Sync level 1
+[vist#0:0/png @ 000001ebfc4f66c0] [dec:png @ 000001ebfc57bd80] Terminating thread with return code 0 (success)
+Output #0, null, to 'pipe:':
+  Metadata:
+    encoder         : Lavf63.1.102
+  Stream #0:0, 0, 1/25: Video: wrapped_avframe, yuv444p(progressive), 1774x887 [SAR 1:1 DAR 2:1], q=2-31, 200 kb/s, 25 fps, 25 tbn
+    Metadata:
+      encoder         : Lavc63.1.102 wrapped_avframe
+[out#0/null @ 000001ebfc469b80] Starting thread...
+[auto_scale_0 @ 000001ebfc4f2b80] [framesync @ 000001ebfc525b90] Sync level 0
+[out_#0:0 @ 000001ebfc4f2740] EOF on sink link out_#0:0:default.
+[vost#0:0/wrapped_avframe @ 000001ebfc4f6c00] [enc:wrapped_avframe @ 000001ebfc4ecf80] Encoder thread received EOF
+[vf#0:0 @ 000001ebfc57a940] Filtergraph returned EOF, finishing
+[vost#0:0/wrapped_avframe @ 000001ebfc4f6c00] Terminating thread with return code 0 (success)
+[vf#0:0 @ 000001ebfc57a940] All consumers returned EOF
+[out#0/null @ 000001ebfc469b80] All streams finished
+[out#0/null @ 000001ebfc469b80] Terminating thread with return code 0 (success)
+[vf#0:0 @ 000001ebfc57a940] Terminating thread with return code 0 (success)
+[out#0/null @ 000001ebfc469b80] Output file #0 (pipe:):
+[out#0/null @ 000001ebfc469b80]   Output stream #0:0 (video): 1 frames encoded; 1 packets muxed (424 bytes); 
+[out#0/null @ 000001ebfc469b80]   Total: 1 packets (424 bytes) muxed
+[out#0/null @ 000001ebfc469b80] video:0KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown
+frame=    1 fps=0.0 q=-0.0 Lsize=N/A time=00:00:00.04 bitrate=N/A speed=0.122x elapsed=0:00:00.32    
+[in#0/png_pipe @ 000001ebfc4e8e80] Input file #0 (client/src/assets/Logo_Modo_Claro.png):
+[in#0/png_pipe @ 000001ebfc4e8e80]   Input stream #0:0 (video): 1 packets read (106363 bytes); 1 frames decoded; 0 decode errors; 
+[in#0/png_pipe @ 000001ebfc4e8e80]   Total: 1 packets (106363 bytes) demuxed
+[AVIOContext @ 000001ebfc4f6f00] Statistics: 106363 bytes read, 0 seeks
+
+Exiting with exit code 0

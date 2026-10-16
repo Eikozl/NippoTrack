@@ -526,23 +526,6 @@
   padding-block: 7px;
 }
 
-.landing-brand {
-  gap: 10px;
-  width: auto;
-}
-
-.landing-brand img.masthead-seal {
-  width: 30px;
-  height: 30px;
-  border-radius: 7px;
-  transform: rotate(-1.5deg);
-  flex-shrink: 0;
-}
-
-.landing-brand img[data-landing-wordmark] {
-  width: 172px;
-}
-
 .hero-ecosystem {
   position: relative;
   width: min(100%, 560px);

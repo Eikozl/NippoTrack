@@ -1,7 +1,9 @@
-// Generates PWA icons from client/src/assets/Logo_Simple.png.
+// Generates PWA icons from client/src/assets/logo-mark.png (brand brush mark).
 // Run: npm --prefix client run icons (writes client/public/icons/*.png).
 // Source of truth stays the logo asset; generated files are committed so
 // offline/Capacitor builds never depend on this script at build time.
+// Artwork flattens onto the washi paper tone to match the manifest
+// background; the mark itself stays pure ink.
 import { mkdir, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,7 +13,7 @@ const require = createRequire(import.meta.url);
 const sharp = require('sharp');
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const source = join(root, 'src', 'assets', 'Logo_Simple.png');
+const source = join(root, 'src', 'assets', 'logo-mark.png');
 const outDir = join(root, 'public', 'icons');
 const PAPER = '#F5F0E8';
 

@@ -14,6 +14,8 @@ import { profileStore } from './accountProfile.js';
 import { isSafeAvatarUrl } from './avatarPolicy.js';
 import { getLocale, setLocale, t, translateDocument } from './i18n';
 import { authViewFromSearch } from './landing/routing';
+import { createBootSplash, dismissBootSplash, isReducedMotion, runBootSplash } from './bootSplash.js';
+import logoMarkUrl from './assets/logo-mark.png';
 
 const content = document.getElementById('app-content');
 const authRoot = document.getElementById('auth-root');
@@ -176,8 +178,15 @@ async function bootstrapApp() {
   // cold boot (then swapped it away once the stored session verified), which
   // read as "logged out again". The modal now opens only when no session
   // exists; a valid stored session goes straight to the shell.
-  authRoot.replaceChildren(element('p', { className: 'auth-boot-note', text: 'Checking your session…', attrs: { role: 'status' } }));
+  // Brand boot: the brush mark draws in black, then draws over in hanko
+  // orange while the stored session verifies. The modal still opens only
+  // when no session exists; a valid stored session goes straight to shell.
+  const reducedMotion = isReducedMotion(window.matchMedia?.bind(window));
+  const boot = createBootSplash(document, { markUrl: logoMarkUrl, reducedMotion });
+  authRoot.replaceChildren(boot.root);
+  const bootRun = runBootSplash({ ...boot, reducedMotion });
   const openGate = () => {
+    bootRun.cancel();
     authRoot.replaceChildren();
     renderAuthGate('', initialAuthView);
   };
@@ -190,6 +199,9 @@ async function bootstrapApp() {
     if (!session.authenticated) { openGate(); return; }
     currentAuthEmail = session.user?.email || localAuthBypassEmail || null;
     profileStore.setEmail(currentAuthEmail);
+    // Brand beat first: even an instant session waits out the stroke draw.
+    await bootRun.done;
+    await dismissBootSplash(boot.root);
     authRoot.replaceChildren();
     appShell.hidden = false;
     // Profile identity is presentation-only and never blocks the shell. The

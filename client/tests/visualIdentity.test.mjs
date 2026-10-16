@@ -1,35 +1,66 @@
-// V6 identity: hanko seal asset contract. Static source assertions only.
+// V6 identity: brand brush-mark asset contract. Static source assertions.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readSource = (path) => readFileSync(join(root, path), 'utf8');
 
-test('hanko seal exists as a vermilion square with a washi N', () => {
-  const seal = readSource('public/seal.svg');
-  assert.ok(seal.includes('<svg'), 'valid SVG');
-  assert.ok(seal.includes('#B3402E'), 'shu-vermilion face');
-  assert.ok(seal.includes('>N<'), 'brush N glyph');
-  assert.ok(seal.includes('aria-label="NippoTrack seal"'), 'screen-reader labeled');
+function pngSize(path) {
+  const buffer = readFileSync(join(root, path));
+  assert.equal(buffer.subarray(1, 4).toString(), 'PNG');
+  return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+}
+
+test('brand brush mark ships in both ink directions', () => {
+  for (const asset of ['src/assets/logo-mark.png', 'src/assets/logo-mark-light.png']) {
+    assert.ok(existsSync(join(root, asset)), `mark asset present: ${asset}`);
+    const { width, height } = pngSize(asset);
+    assert.equal(width, height, `${asset} is square`);
+    assert.ok(width >= 256, `${asset} has icon-grade resolution`);
+  }
 });
 
-test('masthead seal keeps stamp size against the brand image rule', () => {
-  const css = readSource('src/landing/landing.css');
-  assert.match(css, /\.landing-brand img\.masthead-seal \{[^}]*width:\s*30px/, 'specificity beats .landing-brand img');
+test('landing masthead stays wordmark-only beside the issue line', () => {
   const sections = readSource('src/landing/sections.js');
-  assert.ok(sections.includes('class="masthead-seal"'), 'masthead seal slot present');
-  assert.ok(sections.includes('src="/seal.svg"'), 'seal served from public root');
+  assert.ok(!sections.includes('masthead-seal'), 'no seal competes with the wordmark');
+  assert.ok(sections.includes('landing-issue'), 'masthead issue line kept');
 });
 
-test('shell prefers the SVG seal with PNG fallback', () => {
+test('shell favicon carries the brand mark', () => {
   const html = readSource('index.html');
-  const svgAt = html.indexOf('href="/seal.svg"');
-  const pngAt = html.indexOf('href="/favicon.png"');
-  assert.ok(svgAt > -1 && pngAt > -1, 'both icons linked');
-  assert.ok(svgAt < pngAt, 'SVG seal wins where supported');
+  assert.ok(html.includes('href="/favicon.png"'), 'favicon linked from public root');
+  const { width } = pngSize('public/favicon.png');
+  assert.ok(width >= 64, 'favicon has tab-grade resolution');
+});
+
+test('boot stroke-draw videos ship preloaded', () => {
+  for (const video of ['public/videos/logo-draw-black.mp4', 'public/videos/logo-draw-orange.mp4']) {
+    const buffer = readFileSync(join(root, video));
+    assert.ok(buffer.includes('ftyp'), `${video} is a valid MP4`);
+    assert.ok(buffer.length > 10000, `${video} carries the full pass`);
+  }
+  const html = readSource('index.html');
+  assert.ok(html.includes('href="/videos/logo-draw-black.mp4"'), 'black pass preloaded');
+  assert.ok(html.includes('href="/videos/logo-draw-orange.mp4"'), 'orange pass preloaded');
+});
+
+test('brand raster glyphs resolve through the icon API with dark support', () => {
+  const icons = readSource('src/icons.js');
+  assert.ok(icons.includes('RASTER_ICONS'), 'raster registry present');
+  assert.ok(icons.includes('icon-vocabulary.png'), 'vocabulary art bundled');
+  assert.ok(icons.includes('icon-grammar.png'), 'grammar art bundled');
+  assert.ok(icons.includes("vocabulary: 'raster:vocabulary'"), 'vocabulary wired raster');
+  assert.ok(icons.includes("grammar: 'raster:grammar'"), 'grammar wired raster');
+  assert.ok(icons.includes('jlt-icon-img'), 'raster class hook present');
+  const css = readSource('src/styles.css');
+  assert.match(css, /\.jlt-icon-img \{[^}]*object-fit:\s*contain/, 'raster scales inside tiles');
+  assert.match(css, /:root\[data-theme="dark"\] \.jlt-icon-img \{[^}]*filter:\s*invert\(1\)/, 'dark restores paper ink');
+  for (const asset of ['src/assets/icon-vocabulary.png', 'src/assets/icon-grammar.png']) {
+    assert.ok(existsSync(join(root, asset)), `glyph asset present: ${asset}`);
+  }
 });
 
 test('V6 app-shell: JLPT pills are mini-hanko, streak is a brush tally', () => {

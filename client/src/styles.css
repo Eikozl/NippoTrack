@@ -545,6 +545,10 @@
 .ledger-refrain-app { display:flex; align-items:baseline; justify-content:center; gap:10px; margin-top:18px; color:var(--jlt-muted); font-family:var(--font-mono); font-size:12px; letter-spacing:0.06em; }
 .ledger-refrain-app b { color:var(--jlt-primary); font-weight:600; }
 .streak-value { font-family:var(--font-mono); letter-spacing:0; }
+/* Brand raster glyphs (hand-drawn あ / 文): monochrome threshold art, so
+   the dark theme restores paper ink with an exact invert. */
+.jlt-icon-img { object-fit: contain; }
+:root[data-theme="dark"] .jlt-icon-img { filter: invert(1); }
 .streak-fire-icon { display:inline-grid; width:1.1rem; height:1.1rem; place-items:center; color:#e03145; transform-origin:50% 85%; animation: streak-fire-pulse 1s cubic-bezier(.4,0,.2,1) infinite; }
 :root[data-theme="dark"] .streak-fire-icon { color:#ff6475; }
 .streak-fire-icon .jlt-icon { width:1.1rem; height:1.1rem; stroke-width:2.6; filter:drop-shadow(0 0 3px color-mix(in srgb,#e03145 42%,transparent)); }
@@ -855,6 +859,27 @@ nav .nav-group-label:first-child { margin-top: 0; }
   .first-use-screen, .first-use-card { animation: none; }
 }
 
+/* Boot splash: neutral session check shown instead of the sign-in form while
+   the stored session verifies, so returning learners never see a login flash. */
+.auth-boot-note { display: grid; min-height: 40vh; place-items: center; margin: 0; font-size: 0.875rem; color: var(--jlt-muted); }
+
+/* Brand boot stage: the brush mark draws in black, then draws over in hanko
+   orange. Both passes are white-background video (no alpha), so they
+   composite with multiply over the warm canvas — white turns transparent,
+   ink stays ink. Same 480px geometry in both files, orange traces black. */
+.boot-splash { min-height: 62vh; }
+.boot-stage { position: relative; width: min(68vw, 280px); aspect-ratio: 1; }
+.boot-stage .boot-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; mix-blend-mode: multiply; }
+/* Blank white frames multiply to invisible, so the orange pass only shows
+   once it starts drawing; black then hands over beneath it. */
+.boot-stage.boot-handover .boot-black { opacity: 0; transition: opacity 700ms ease; }
+.boot-mark { display: block; width: min(56vw, 200px); height: auto; margin-inline: auto; }
+.boot-splash.is-leaving { opacity: 0; transition: opacity 260ms ease; }
+@media (prefers-reduced-motion: reduce) {
+  .boot-stage.boot-handover .boot-black { transition: none; }
+  .boot-splash.is-leaving { transition: none; }
+}
+
 /* v5.1-B.1 Kanji Detail identity — ONE shared composition for the reference
    page and the owned dialog (see client/src/kanjiDetail.js). Additive only:
    existing glyph/panel rules above are untouched; the selectors below refine
@@ -930,7 +955,3 @@ body.placement-fullscreen #mobile-search-bar { display: none !important; }
 /* Deck example sentences clamp to two lines; the Define button opens
    tap-to-define instead of stretching item cards. */
 .example-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-
-/* Boot splash: neutral session check shown instead of the sign-in form while
-   the stored session verifies, so returning learners never see a login flash. */
-.auth-boot-note { display: grid; min-height: 40vh; place-items: center; margin: 0; font-size: 0.875rem; color: var(--jlt-muted); }

@@ -22,7 +22,6 @@ export function navbar(wordmarkUrl, themeAssets = {}, options = {}) {
       <p class="landing-issue"><span class="landing-container">NippoTrack — Study ledger · N5–N1 · <span lang="ja">日本語</span></span></p>
       <div class="landing-container landing-nav">
         <a class="landing-brand" href="/" aria-label="NippoTrack home">
-          <img class="masthead-seal" src="/seal.svg" alt="" aria-hidden="true" width="30" height="30">
           <img src="${wordmarkUrl}" data-landing-wordmark data-light-src="${lightSrc}" data-dark-src="${darkSrc}" alt="NippoTrack" width="260" height="88" fetchpriority="high">
         </a>
         <nav class="landing-desktop-nav" aria-label="Main navigation">
