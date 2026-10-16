@@ -708,6 +708,7 @@
   display: none;
   grid-column: 2;
   width: min(100%, 560px);
+  min-width: 0;
   justify-self: end;
   align-content: center;
   gap: 18px;
@@ -719,6 +720,7 @@
   background: var(--landing-surface);
   box-shadow: var(--landing-shadow-float);
   padding: 24px 26px;
+  min-width: 0;
 }
 
 .hero-analyzer-head {
@@ -744,6 +746,7 @@
 
 .hero-candidates {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 12px;
   font-size: 16px;
@@ -756,6 +759,8 @@
 
 .hero-result {
   display: flex;
+  flex-wrap: wrap;
+  row-gap: 8px;
   gap: 14px;
   margin-top: 12px;
   padding-top: 12px;
@@ -798,6 +803,8 @@
 /* Brand refrain: same string, same style, under every data panel. */
 .ledger-refrain {
   display: flex;
+  flex-wrap: wrap;
+  row-gap: 6px;
   align-items: baseline;
   justify-content: center;
   gap: 10px;
@@ -2269,7 +2276,7 @@
   }
 
   .landing-hero-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 30px;
   }
 

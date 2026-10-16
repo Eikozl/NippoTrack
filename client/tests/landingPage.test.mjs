@@ -185,6 +185,26 @@ test('hero splits by viewport: constellation on desktop, simple ledger on mobile
   assert.deepEqual([...new Set(breakpoints)].sort(), ['1100', '380', '479', '640', '767', '900']);
 });
 
+test('Android download lives only at the close (final CTA + footer), never in the hero', () => {
+  const heroStart = source.indexOf('<section class="landing-hero');
+  const heroBlock = source.slice(heroStart, source.indexOf('</section>', heroStart));
+  assert.ok(!heroBlock.includes('data-android-download'), 'no download hook in hero');
+  assert.ok(!heroBlock.includes('Download on Android'), 'no download copy in hero');
+  const ctaStart = source.indexOf('id="final-cta"');
+  assert.ok(source.slice(ctaStart, ctaStart + 1200).includes('Download on Android'), 'final CTA keeps the download');
+  assert.ok(source.includes('data-android-download'), 'download hook survives at the close');
+});
+
+test('mobile ledger cannot force horizontal overflow', () => {
+  const band900 = mediaBlock('@media (max-width: 900px)');
+  assert.ok(band900.includes('minmax(0, 1fr)'), 'grid track yields instead of bleeding');
+  assert.match(cssSource, /\.hero-ledger\s*\{[^}]*min-width:\s*0/, 'ledger shrinks');
+  assert.match(cssSource, /\.hero-panel\s*\{[^}]*min-width:\s*0/, 'panels shrink');
+  assert.match(cssSource, /\.ledger-refrain\s*\{[^}]*flex-wrap:\s*wrap/, 'refrain wraps');
+  assert.match(cssSource, /\.hero-result\s*\{[^}]*flex-wrap:\s*wrap/, 'result wraps');
+  assert.match(cssSource, /\.hero-candidates\s*\{[^}]*flex-wrap:\s*wrap/, 'candidates wrap');
+});
+
 test('section rhythm uses explicit tonal chapters without alternating washes', () => {
   assert.ok(!cssSource.includes('.showcase-section:nth-of-type(even)::before'));
   for (const tone of ['tone-ivory', 'tone-muted', 'tone-mist', 'tone-canvas', 'tone-hero']) {
