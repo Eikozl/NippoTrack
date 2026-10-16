@@ -76,7 +76,7 @@ export function icon(name, { className = '', size = 20, label } = {}) {
     width: size,
     height: size,
     class: `jlt-icon ${className}`.trim(),
-    'stroke-width': 1.9,
+    'stroke-width': 1.75,
     ...(label ? { role: 'img', 'aria-label': label } : { 'aria-hidden': 'true', focusable: 'false' })
   });
   return node;

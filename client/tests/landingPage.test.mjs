@@ -17,8 +17,6 @@ test('landing source follows the approved narrative order', () => {
     'See your learning take shape.',
     'Start from where you are.',
     'Know what to do next.',
-    'Keep the tools you already love.',
-    'Your Japanese journey is already yours.',
     'Ready to bring your Japanese study together?'
   ];
 
@@ -38,7 +36,7 @@ test('landing demos remain presentation-only and make no application requests', 
 });
 
 test('Japanese examples declare their language', () => {
-  for (const text of ['旅行', 'りょこう', '殻', '約束', 'やくそく', '雨', 'あめ', '降っている', '図書館', 'としょかん', '日', '料理', 'りょうり']) {
+  for (const text of ['旅行', 'りょこう', '約束', 'やくそく', '雨', 'あめ', '降っている', '図書館', 'としょかん', '日', '料理', 'りょうり']) {
     assert.ok(source.includes('lang="ja">' + text), 'missing lang=ja for ' + text);
   }
   assert.ok(source.includes('<b lang="ja">来年、日本へ旅行します。</b>'), 'hero context keeps lang=ja');
@@ -52,7 +50,7 @@ test('navigation, hero, and final CTA use their frozen labels', () => {
   const navigation = source.slice(source.indexOf('landing-nav-actions'), source.indexOf('landing-menu-button'));
   assert.ok(navigation.indexOf('Log in') < navigation.indexOf('Get started'));
   assert.ok(source.includes('href="/app?auth=sign-up"'), 'sign-up fallback destinations kept');
-  assert.ok(source.includes('data-auth-open="sign-up">Register</a>'), 'hero CTA opens the modal in place');
+  assert.ok(source.includes('data-auth-open="sign-up">Start your ledger</a>'), 'hero CTA opens the modal in place');
   assert.ok(source.includes('data-auth-open="sign-up">Start with NippoTrack</a>'), 'final CTA opens the modal in place');
   assert.ok(source.includes('Already have an account? Log in'));
 });
@@ -88,9 +86,7 @@ test('per-section curated examples stay exact and word-level', () => {
   assert.ok(source.includes('<p class="hero-reading" lang="ja">りょこう</p>'));
   assert.ok(source.includes('<p class="hero-meaning">travel</p>'));
   assert.ok(source.includes('<b lang="ja">来年、日本へ旅行します。</b>'));
-  // HERO review tile foreshadows the Review showcase; kanji identity is kept.
-  assert.ok(source.includes('<p lang="ja">約束 <span lang="ja">やくそく</span></p>'));
-  assert.ok(source.includes('<p class="hero-kanji-glyph" lang="ja">殻</p>'));
+  // HERO analyzer panel reuses the curated 雨 set (same strings, ledger panel).
   // ANALYZER demo keeps the same structure with new strings.
   assert.ok(source.includes('<p class="analyzer-sentence" lang="ja">雨が降っている。</p>'));
   assert.ok(source.includes('<span class="candidate-active" lang="ja">雨</span>'));
@@ -151,84 +147,30 @@ function ruleBody(block, selector) {
   return match[1];
 }
 
-test('mobile hero is a compact layered constellation, static with bounded overlap', () => {
+test('mobile hero is a static vertical ledger: no constellation, no floats, no count-ups', () => {
   const mobile = mediaBlock('@media (max-width: 640px)');
-  assert.ok(mobile.includes('.hero-ecosystem'));
-  assert.ok(mobile.includes('display: grid'));
-  assert.ok(mobile.includes('grid-template-columns: 1.08fr 1fr'));
-  // Vocabulary dominates: full-row span, centered, ~88-94% of the row.
-  const vocab = ruleBody(mobile, '\\.hero-vocabulary');
-  assert.ok(vocab.includes('grid-column: 1 / -1'));
-  assert.ok(vocab.includes('justify-self: center'));
-  const vocabWidth = vocab.match(/width:\s*([\d.]+)%/);
-  assert.ok(vocabWidth, 'vocabulary needs an explicit dominant width');
-  const vocabPct = Number(vocabWidth[1]);
-  assert.ok(vocabPct >= 88 && vocabPct <= 94, 'vocabulary width out of range: ' + vocabPct);
-  assert.ok(vocab.includes('z-index: 3'));
-  // Satellites pair around it: estimate|kanji top row, review|streak bottom row.
-  const level = ruleBody(mobile, '\\.hero-level');
-  const kanji = ruleBody(mobile, '\\.hero-kanji');
-  const review = ruleBody(mobile, '\\.hero-review');
-  const streak = ruleBody(mobile, '\\.hero-streak');
-  assert.ok(level.includes('grid-column: 1') && level.includes('grid-row: 1'));
-  assert.ok(kanji.includes('grid-column: 2') && kanji.includes('grid-row: 1'));
-  assert.ok(review.includes('grid-column: 1') && review.includes('grid-row: 3'));
-  assert.ok(streak.includes('grid-column: 2') && streak.includes('grid-row: 3'));
-  // Overlap is transform staging, never negative margins.
-  // (visual-only translates; negative vertical margins sized tracks badly).
-  // Anchor model: vocab static, neighbors translate toward it (all ≤20px).
-  for (const [name, body] of [['level', level], ['kanji', kanji], ['review', review], ['streak', streak]]) {
-    assert.ok(!/margin-(?:top|bottom):\s*-\d+px/.test(body), name + ' must not use negative vertical margins');
-    for (const nudge of body.match(/translate\([^)]*\)/g) || []) {
-      for (const px of nudge.match(/-?[\d.]+px/g) || []) {
-        assert.ok(Math.abs(Number(px.replace('px', ''))) <= 20, 'staging shift too far in ' + name + ': ' + nudge);
-      }
-    }
-  }
-  assert.ok(!/translate/.test(vocab.replace(/rotate\([^)]*\)/, '')), 'vocabulary stays put apart from its tilt');
-  assert.ok(level.includes('translateY(18px)'));
-  assert.ok(kanji.includes('translateY(18px)'));
-  assert.ok(review.includes('translate(-10px, -10px)'));
-  assert.ok(streak.includes('translate(-12px, -20px)'));
-  // Z-hierarchy: vocab highest, estimate/kanji middle, review/streak lower.
-  assert.ok(level.includes('z-index: 2'));
-  assert.ok(kanji.includes('z-index: 2'));
-  assert.ok(review.includes('z-index: 1'));
-  assert.ok(streak.includes('z-index: 1'));
-  // Streak sits behind vocab (z1 < z3) with only padding overlapped, so the
-  // "12" value stays exposed.
-  assert.ok(source.includes('data-hero-streak="30"'), 'streak counts to its final value');
-  // Rotation stays subtle: nothing beyond +/-1deg on mobile.
-  for (const match of mobile.matchAll(/rotate\((-?[\d.]+)deg\)/g)) {
-    assert.ok(Math.abs(Number(match[1])) <= 1, 'rotation too strong: ' + match[0]);
-  }
-  // Cards stay in flow with z-index layering, and the whole set is static.
-  const cards = ruleBody(mobile, '\\.hero-ecosystem \\.hero-card');
-  assert.ok(cards.includes('position: relative'));
-  assert.ok(cards.includes('animation: none'));
-  assert.ok(mobile.includes('.hero-ecosystem::before'));
-  assert.ok(mobile.includes('display: none'));
-  // Type sizes are frozen from the prior pass.
-  assert.ok(ruleBody(mobile, '\\.hero-japanese').includes('font-size: 34px'));
-  assert.ok(ruleBody(mobile, '\\.hero-kanji-glyph').includes('font-size: 44px'));
-  // Narrowest widths keep the layered posture — never a single-column stack.
+  assert.ok(mobile.includes('.hero-ledger'), 'ledger owns the mobile hero');
+  assert.ok(!cssSource.includes('.hero-ecosystem'), 'constellation retired everywhere');
+  assert.ok(!cssSource.includes('data-float'), 'no float hooks remain');
+  assert.ok(!cssSource.includes('heroDrift'), 'drift keyframes retired');
+  assert.ok(!source.includes('data-hero-streak'), 'hero count-up removed from markup');
+  // The stack is plain flow: panel, strip, refrain. Wrapping stays safe.
+  assert.ok(mobile.includes('.hero-context'), 'context wraps instead of clipping');
+  // Type sizes are frozen for the new stack (regex: sources are CRLF).
+  assert.match(cssSource, /\.hero-japanese\s*\{\s*margin-top:\s*11px !important;\s*font-size:\s*30px;/, 'strip word size frozen');
+  assert.ok(cssSource.includes('.hero-typing-sentence'), 'analyzer sentence styled');
+  // Narrowest widths keep the plain stack — never a layered grid.
   const narrow = mediaBlock('@media (max-width: 380px)');
-  assert.ok(narrow.includes('grid-template-columns: 1fr 1fr'));
-  assert.ok(!/grid-template-columns:\s*1fr\s*;/.test(narrow), 'must not collapse to a single column');
-  assert.ok(narrow.includes('translateY(8px)'), 'top pair eases toward vocab at tiny widths');
-  assert.ok(narrow.includes('translate(-4px, -4px)'));
-  assert.ok(narrow.includes('translate(-6px, -10px)'));
-  // Scaled easing (~50-60%): review stays peripheral, streak holds behind
-  // vocab with a smaller shift, all inside the card paddings.
-  assert.ok(ruleBody(narrow, '\\.hero-ecosystem \\.hero-review').includes('translate(-4px, -4px)'));
-  assert.ok(ruleBody(narrow, '\\.hero-ecosystem \\.hero-streak').includes('translate(-6px, -10px)'));
-  // No new breakpoints were introduced for this fix.
+  assert.ok(narrow.includes('.hero-panel'), 'panels only tighten padding');
+  assert.ok(!/grid-template-columns:\s*1fr 1fr/.test(narrow), 'no satellite grid returns');
+  // No new breakpoints were introduced for this pass.
   const breakpoints = [...cssSource.matchAll(/@media\s*\(max-width:\s*(\d+)px\)/g)].map((m) => m[1]);
   assert.deepEqual([...new Set(breakpoints)].sort(), ['1100', '380', '479', '640', '767', '900']);
-  // Desktop layered composition is untouched (absolute overlap outside the breakpoint).
-  assert.ok(cssSource.includes('@keyframes heroDriftOne'));
-  assert.ok(cssSource.includes('.hero-card[data-float="one"]'));
-  assert.ok(cssSource.includes('position: absolute') || cssSource.includes('.hero-card'));
+  // Desktop hero is static panels: typing cursor is the only motion.
+  assert.ok(cssSource.includes('@keyframes heroCursorBlink'), 'typing cursor is the only hero motion');
+  assert.ok(cssSource.includes('.hero-ledger'));
+  assert.ok(cssSource.includes('.tategaki-rail'));
+  assert.ok(cssSource.includes('.hanko-stamp'));
   assert.ok(cssSource.includes('.hero-vocabulary'));
 });
 
@@ -244,10 +186,10 @@ test('section rhythm uses explicit tonal chapters without alternating washes', (
   assert.ok(cssSource.includes('background: #fffcf7'));
   assert.ok(cssSource.includes('.tone-muted'));
   assert.ok(cssSource.includes('.tone-mist'));
-  // Emotional stays a dark charcoal chapter in both themes.
-  assert.ok(cssSource.includes('.emotional-section'));
-  assert.ok(cssSource.includes('background: #1c1a18'));
-  assert.ok(cssSource.includes('background: #24211e'));
+  // V6: tools wall + emotional slab retired; the final CTA carries the close.
+  assert.ok(!source.includes('tools-section'), 'tools wall removed from markup');
+  assert.ok(!source.includes('emotional-section'), 'emotional slab removed from markup');
+  assert.ok(!cssSource.includes('.tools-list'), 'tools styles retired');
 });
 
 test('dark theme remaps land on tokens with no pure black or pure-white text', () => {
@@ -269,7 +211,7 @@ test('dark theme remaps land on tokens with no pure black or pure-white text', (
 
 test('only approved Japanese examples appear and keep lang="ja"', () => {
   const runs = source.match(/[\u3040-\u30ff\u4e00-\u9faf]+/g) || [];
-  const allowed = new Set(['旅行', 'りょこう', '来年', '日本へ旅行します', '殻', '約束', 'やくそく', '料理', '昨日', '日本', 'を作った', 'りょうり', '日本料理を作った', '雨が降っている', '雨', '降っている', 'あめ', '図書館', 'としょかん', '日', 'ニチ・ジツ', 'ひ・か', '毎朝', '新聞を', '読みます', '読んだ']);
+  const allowed = new Set(['旅行', 'りょこう', '来年', '日本へ旅行します', '殻', '約束', 'やくそく', '料理', '昨日', '日本', 'を作った', 'りょうり', '日本料理を作った', '雨が降っている', '雨', '降っている', 'あめ', '図書館', 'としょかん', '日', 'ニチ・ジツ', 'ひ・か', '毎朝', '新聞を', '読みます', '読んだ', '日本語', '日本語の学びを', 'ひとつに']);
   for (const run of runs) {
     assert.ok(allowed.has(run), 'unexpected Japanese: ' + run);
   }
@@ -280,10 +222,8 @@ test('only approved Japanese examples appear and keep lang="ja"', () => {
 
 test('large-screen containment reuses the 1100 band with no mobile changes', () => {
   const band1100 = mediaBlock('@media (max-width: 1100px)');
-  assert.ok(band1100.includes('.hero-ecosystem'), 'hero stays inside its column');
-  assert.ok(band1100.includes('width: min(100%, 520px)'), 'ecosystem narrows before the stack');
-  assert.ok(band1100.includes('right: 8px'), 'streak keeps container clearance');
-  assert.ok(band1100.includes('right: 22px'), 'kanji keeps container clearance');
+  assert.ok(band1100.includes('.hero-ledger'), 'ledger stays inside its column');
+  assert.ok(band1100.includes('width: min(100%, 520px)'), 'ledger narrows before the stack');
   assert.ok(band1100.includes('.core-flow article'), 'flow columns breathe at tablet');
   assert.ok(band1100.includes('padding: 0 28px'), 'flow rhythm eases without new breakpoints');
   assert.ok(band1100.includes('.analyzer-result'), 'dense panel eases at tablet');

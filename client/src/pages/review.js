@@ -2080,9 +2080,9 @@ const CARD_TYPE_DESCRIPTIONS = {
       if (item.meaning) answerWrap.appendChild(element('p', { className: 'mt-2 text-base leading-7 text-ink', text: item.meaning }));
       answerWrap.appendChild(answerResult);
       answerWrap.appendChild(element('p', { className: 'mt-5 text-sm font-semibold text-ink', text: 'How did recall feel?' }));
-      const grades = element('div', { className: 'mt-3 grid gap-2 sm:grid-cols-3' });
+      const grades = element('div', { className: 'review-grades mt-3 grid gap-2 sm:grid-cols-3' });
       GRADES.forEach(({ result, hint }, gradeIndex) => {
-        const button = element('button', { className: 'button-secondary flex-col gap-1 px-4 py-3 text-center', attrs: { type: 'button', 'aria-keyshortcuts': String(gradeIndex + 1) } }, [
+        const button = element('button', { className: 'button-secondary flex-col gap-1 px-4 py-3 text-center', attrs: { type: 'button', 'aria-keyshortcuts': String(gradeIndex + 1), 'data-grade': result } }, [
           element('span', { className: 'block text-sm font-semibold', text: result }),
           element('span', { className: 'block text-xs font-normal leading-5 text-muted', text: hint })
         ]);

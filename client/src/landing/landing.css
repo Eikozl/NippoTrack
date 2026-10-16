@@ -157,13 +157,13 @@
 
 [data-nippotrack-theme="dark"] .landing-page .tone-mist {
   background:
-    radial-gradient(640px 300px at 78% 18%, rgba(146, 146, 200, 0.13), rgba(146, 146, 200, 0) 70%),
+    radial-gradient(640px 300px at 78% 18%, rgba(217, 138, 111, 0.13), rgba(217, 138, 111, 0) 70%),
     #1c1a18;
 }
 
 [data-nippotrack-theme="dark"] .landing-page .tone-hero {
   background:
-    radial-gradient(760px 420px at 72% 42%, rgba(146, 146, 200, 0.13), rgba(146, 146, 200, 0) 68%),
+    radial-gradient(760px 420px at 72% 42%, rgba(217, 138, 111, 0.13), rgba(217, 138, 111, 0) 68%),
     radial-gradient(520px 320px at 88% 78%, rgba(196, 164, 132, 0.08), rgba(196, 164, 132, 0) 70%),
     #1c1a18;
 }
@@ -174,7 +174,7 @@
 
 [data-nippotrack-theme="dark"] .landing-page .tone-analyzer .analyzer-demo {
   background:
-    radial-gradient(420px 220px at 82% 12%, rgba(146, 146, 200, 0.14), rgba(146, 146, 200, 0) 70%),
+    radial-gradient(420px 220px at 82% 12%, rgba(217, 138, 111, 0.14), rgba(217, 138, 111, 0) 70%),
     #24211e;
 }
 
@@ -188,19 +188,24 @@
   box-shadow: 0 1px 10px rgba(0, 0, 0, 0.28);
 }
 
-[data-nippotrack-theme="dark"] .landing-page .hero-ecosystem::before {
-  border-color: rgba(58, 53, 48, 0.9);
+[data-nippotrack-theme="dark"] .landing-page .landing-button-primary {
+  color: #1c1a18 !important;
+  background: #f5f0e8;
+  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.32);
 }
 
-[data-nippotrack-theme="dark"] .landing-page .landing-button-primary,
+[data-nippotrack-theme="dark"] .landing-page .landing-button-primary:hover {
+  background: #e8e1d8;
+}
+
 [data-nippotrack-theme="dark"] .landing-page .demo-action {
   color: #1c1a18 !important;
   background: var(--landing-accent);
   box-shadow: 0 5px 14px rgba(0, 0, 0, 0.32);
 }
 
-[data-nippotrack-theme="dark"] .landing-page .landing-button-primary:hover {
-  background: var(--landing-accent-hover);
+[data-nippotrack-theme="dark"] .landing-page .hanko-stamp {
+  color: #1c1a18;
 }
 
 [data-nippotrack-theme="dark"] .landing-page .landing-skip-link {
@@ -219,23 +224,16 @@
 }
 
 [data-nippotrack-theme="dark"] .landing-page .chart-area {
-  fill: rgba(146, 146, 200, 0.14);
+  fill: rgba(217, 138, 111, 0.14);
 }
 
 [data-nippotrack-theme="dark"] .landing-page .review-rating .rating-good,
 [data-nippotrack-theme="dark"] .landing-page .flow-rating .rating-good {
-  border-color: #56567a;
+  color: #1c1a18;
 }
 
 [data-nippotrack-theme="dark"] .landing-page .flow-chips li {
   background: #1c1a18;
-}
-
-[data-nippotrack-theme="dark"] .landing-page .emotional-section {
-  color: #f5f0e8;
-  background: #24211e;
-  border-top: 1px solid #3a3530;
-  border-bottom: 1px solid #3a3530;
 }
 
 [data-nippotrack-theme="dark"] .has-landing {
@@ -369,14 +367,14 @@
 }
 
 .landing-button-primary {
-  color: #fff !important;
-  background: var(--landing-accent);
-  box-shadow: 0 5px 14px rgba(90, 90, 141, 0.17);
+  color: #fffcf7 !important;
+  background: #1c1a18;
+  box-shadow: 0 5px 14px rgba(17, 17, 17, 0.17);
 }
 
 .landing-button-primary:hover {
-  background: var(--landing-accent-hover);
-  box-shadow: 0 7px 18px rgba(77, 77, 125, 0.2);
+  background: #38332d;
+  box-shadow: 0 7px 18px rgba(17, 17, 17, 0.2);
   transform: translateY(-1px);
 }
 
@@ -398,9 +396,9 @@
 .landing-hero-grid {
   display: grid;
   min-height: 562px;
-  grid-template-columns: minmax(0, 0.86fr) minmax(520px, 1fr);
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr) 28px;
   align-items: center;
-  gap: 64px;
+  gap: 48px;
 }
 
 .landing-hero-copy {
@@ -511,44 +509,188 @@
   font-size: 14px;
 }
 
-.hero-ecosystem {
-  position: relative;
+/* V6 masthead: newspaper issue line + hanko seal beside the wordmark. */
+.landing-issue {
+  margin: 0;
+  border-bottom: 1px solid var(--landing-border-subtle);
+  color: var(--landing-text-muted);
+  font-family: var(--landing-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.landing-issue .landing-container {
+  display: flex;
+  justify-content: flex-start;
+  padding-block: 7px;
+}
+
+.landing-brand {
+  gap: 10px;
+  width: auto;
+}
+
+.masthead-seal {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  transform: rotate(-1.5deg);
+  flex-shrink: 0;
+}
+
+.landing-brand img[data-landing-wordmark] {
+  width: 172px;
+}
+
+/* V6 hero: one live analyzer panel + vocabulary strip + ledger refrain,
+   with a tategaki margin rail. No floats, no orbit, no count-ups. */
+.hero-ledger {
+  display: grid;
   width: min(100%, 560px);
-  height: 520px;
   justify-self: end;
+  align-content: center;
+  gap: 18px;
 }
 
-.hero-ecosystem::before {
-  position: absolute;
-  inset: 84px 26px 42px 48px;
-  border: 1px solid rgba(220, 212, 202, 0.7);
-  border-radius: 50%;
-  content: "";
-  opacity: 0.62;
-  transform: rotate(-8deg);
-}
-
-.hero-card {
-  position: absolute;
+.hero-panel {
   border: 1px solid var(--landing-border);
-  border-radius: 16px;
+  border-radius: 20px;
   background: var(--landing-surface);
   box-shadow: var(--landing-shadow-float);
+  padding: 24px 26px;
+}
+
+.hero-analyzer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hero-live-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--landing-accent);
+}
+
+.hero-typing-sentence {
+  margin-top: 12px !important;
+  font-size: 27px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.hero-candidates {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  font-size: 16px;
+}
+
+.hero-candidates .candidate-active {
+  border-bottom: 2px solid var(--landing-accent);
+  font-weight: 600;
+}
+
+.hero-result {
+  display: flex;
+  gap: 14px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--landing-border-subtle);
+  font-size: 15px;
+}
+
+.hero-result strong {
+  font-size: 18px;
+}
+
+.hero-stamp-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+/* Hanko verdict stamp: vermilion seal, slight press rotation. Meaning
+   always rides along as text (Good / N4 range), never color alone. */
+.hanko-stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 8px;
+  background: var(--landing-accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 8px 16px 8px 12px;
+  transform: rotate(-1.5deg);
+  box-shadow: 0 2px 8px rgb(179 64 46 / 0.28);
+}
+
+.hanko-seal {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+}
+
+/* Brand refrain: same string, same style, under every data panel. */
+.ledger-refrain {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 10px;
+  color: var(--landing-text-secondary);
+  font-family: var(--landing-font-mono);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+}
+
+.ledger-refrain b {
+  color: var(--landing-accent);
+  font-weight: 600;
+}
+
+/* Tategaki margin rail: vertical Japanese gloss, ornament only
+   (aria-hidden in markup, real text for JP readers). */
+.tategaki-rail {
+  align-self: stretch;
+  justify-self: end;
+  margin: 0;
+  padding-top: 6px;
+  color: var(--landing-text-muted);
+  font-size: 15px;
+  letter-spacing: 0.32em;
+  writing-mode: vertical-rl;
+}
+
+.hero-eyebrow {
+  color: var(--landing-text-muted);
+  font-family: var(--landing-font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
 .hero-vocabulary {
-  top: 112px;
-  left: 86px;
-  z-index: 3;
-  width: 322px;
-  min-height: 224px;
-  padding: 25px 28px;
-  transform: rotate(-1deg);
+  padding: 20px 26px;
 }
 
-.demo-label,
+.demo-label {
+  color: var(--landing-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+/* Section eyebrows speak in mono: the cheapest ledger voice. */
 .landing-eyebrow {
   color: var(--landing-text-muted);
+  font-family: var(--landing-font-mono);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.14em;
@@ -571,7 +713,7 @@
 
 .hero-japanese {
   margin-top: 11px !important;
-  font-size: 42px;
+  font-size: 30px;
   font-weight: 600;
   line-height: 1.25;
 }
@@ -605,86 +747,6 @@
   font-weight: 500;
 }
 
-.hero-kanji {
-  top: 42px;
-  right: 18px;
-  z-index: 2;
-  width: 178px;
-  min-height: 162px;
-  padding: 21px;
-  transform: rotate(1.2deg);
-}
-
-.hero-kanji-glyph {
-  margin-top: 5px !important;
-  font-size: 54px;
-  font-weight: 600;
-  line-height: 1.1;
-}
-
-.hero-kanji > p:last-child {
-  color: var(--landing-text-secondary);
-  font-size: 13px;
-}
-
-.hero-level,
-.hero-streak {
-  width: 150px;
-  min-height: 92px;
-  padding: 17px 18px;
-}
-
-.hero-level {
-  top: 14px;
-  left: 30px;
-  transform: rotate(-1.4deg);
-}
-
-.hero-streak {
-  right: 2px;
-  bottom: 76px;
-  z-index: 4;
-  transform: rotate(1deg);
-}
-
-.hero-level strong,
-.hero-streak strong {
-  display: inline-block;
-  margin-top: 5px;
-  font-family: var(--landing-font-display), sans-serif;
-  font-size: 26px;
-  line-height: 1.2;
-}
-
-.hero-level > span:last-child,
-.hero-streak > span:last-child {
-  color: var(--landing-text-secondary);
-  font-size: 13px;
-}
-
-.hero-review {
-  bottom: 25px;
-  left: 43px;
-  z-index: 2;
-  width: 212px;
-  min-height: 128px;
-  padding: 19px 21px;
-  transform: rotate(1.2deg);
-}
-
-.hero-review p {
-  margin-top: 9px !important;
-  font-size: 23px;
-  font-weight: 600;
-}
-
-.hero-review p span,
-.hero-review small {
-  color: var(--landing-text-muted);
-  font-size: 12px;
-  font-weight: 500;
-}
-
 .landing-section {
   padding-block: 128px;
 }
@@ -701,8 +763,6 @@
 .editorial-content h2,
 .showcase-copy h2,
 .progress-copy h2,
-.tools-heading h2,
-.emotional-section h2,
 .final-cta h2 {
   font-size: clamp(42px, 4.1vw, 48px);
   font-weight: 650;
@@ -728,16 +788,6 @@
   color: var(--landing-text-secondary);
   font-size: 18px;
   line-height: 1.65;
-}
-
-.editorial-statement {
-  max-width: 890px;
-  margin-top: 84px !important;
-  font-family: var(--landing-font-display), sans-serif;
-  font-size: clamp(28px, 3.2vw, 39px);
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.32;
 }
 
 .flow-section {
@@ -843,7 +893,7 @@
 
 @keyframes flowWordBeat {
   0% { background-size: 0% 2px; background-color: transparent; }
-  35% { background-size: 100% 2px; background-color: rgba(90, 90, 141, 0.14); }
+  35% { background-size: 100% 2px; background-color: rgba(179, 64, 46, 0.14); }
   100% { background-size: 100% 2px; background-color: transparent; }
 }
 
@@ -891,8 +941,8 @@
 
 @keyframes flowHitBeat {
   0% { background-color: transparent; }
-  35% { background-color: rgba(90, 90, 141, 0.26); }
-  100% { background-color: rgba(90, 90, 141, 0.14); }
+  35% { background-color: rgba(179, 64, 46, 0.26); }
+  100% { background-color: rgba(179, 64, 46, 0.14); }
 }
 
 .flow-reveal {
@@ -963,20 +1013,22 @@
 }
 
 .flow-rating .rating-good {
-  border-color: #c8c6dd;
-  color: var(--landing-accent-hover);
-  background: var(--landing-accent-soft);
+  border: 1px solid transparent;
+  color: #fff;
+  background: var(--landing-accent);
+  transform: rotate(-1.5deg);
+  box-shadow: 0 2px 8px rgb(179 64 46 / 0.28);
 }
 
-/* Review Good beat: one brief muted-Indigo ring after the rating appears. */
+/* Review Good beat: one brief hanko ring after the rating appears. */
 .landing-js .landing-page [data-demo="flow"].is-playing .flow-good {
   animation: flowGoodBeat 500ms ease-out var(--step-delay, 2200ms) forwards;
 }
 
 @keyframes flowGoodBeat {
-  0% { box-shadow: 0 0 0 0 rgba(90, 90, 141, 0); }
-  35% { box-shadow: 0 0 0 3px rgba(90, 90, 141, 0.25); }
-  100% { box-shadow: 0 0 0 0 rgba(90, 90, 141, 0); }
+  0% { box-shadow: 0 0 0 0 rgba(179, 64, 46, 0); }
+  35% { box-shadow: 0 0 0 3px rgba(179, 64, 46, 0.25); }
+  100% { box-shadow: 0 0 0 0 rgba(179, 64, 46, 0); }
 }
 
 .flow-connector {
@@ -1019,13 +1071,13 @@
 
 .tone-mist {
   background:
-    radial-gradient(640px 300px at 78% 18%, rgba(90, 90, 141, 0.08), rgba(90, 90, 141, 0) 70%),
+    radial-gradient(640px 300px at 78% 18%, rgba(179, 64, 46, 0.08), rgba(179, 64, 46, 0) 70%),
     var(--landing-canvas);
 }
 
 .tone-hero {
   background:
-    radial-gradient(760px 420px at 72% 42%, rgba(90, 90, 141, 0.09), rgba(90, 90, 141, 0) 68%),
+    radial-gradient(760px 420px at 72% 42%, rgba(179, 64, 46, 0.09), rgba(179, 64, 46, 0) 68%),
     radial-gradient(520px 320px at 88% 78%, rgba(196, 164, 132, 0.1), rgba(196, 164, 132, 0) 70%),
     var(--landing-canvas);
 }
@@ -1037,7 +1089,7 @@
 
 .tone-analyzer .analyzer-demo {
   background:
-    radial-gradient(420px 220px at 82% 12%, rgba(90, 90, 141, 0.1), rgba(90, 90, 141, 0) 70%),
+    radial-gradient(420px 220px at 82% 12%, rgba(179, 64, 46, 0.1), rgba(179, 64, 46, 0) 70%),
     var(--landing-surface);
 }
 
@@ -1063,8 +1115,7 @@
 }
 
 .showcase-copy > p,
-.progress-copy > p,
-.tools-heading > p {
+.progress-copy > p {
   max-width: 530px;
   margin-top: 24px !important;
   color: var(--landing-text-secondary);
@@ -1434,9 +1485,11 @@
 }
 
 .review-rating .rating-good {
-  border-color: #c8c6dd;
-  color: var(--landing-accent-hover);
-  background: var(--landing-accent-soft);
+  border: 1px solid transparent;
+  color: #fff;
+  background: var(--landing-accent);
+  transform: rotate(-1.5deg);
+  box-shadow: 0 2px 8px rgb(179 64 46 / 0.28);
 }
 
 .progress-section {
@@ -1532,7 +1585,7 @@
 }
 
 .chart-area {
-  fill: rgba(90, 90, 141, 0.08);
+  fill: rgba(179, 64, 46, 0.08);
   stroke: none;
 }
 
@@ -1740,64 +1793,7 @@
   text-decoration: none;
 }
 
-.tools-section {
-  padding-block: 150px;
-  border-top: 1px solid var(--landing-border-subtle);
-}
-
-.tools-heading {
-  display: grid;
-  grid-template-columns: 1fr 0.9fr;
-  align-items: end;
-  gap: 72px;
-}
-
-.tools-heading > p {
-  margin-top: 0 !important;
-}
-
-.tools-list {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  margin: 70px 0 0;
-  padding: 0;
-  border-top: 1px solid var(--landing-border);
-  list-style: none;
-}
-
-.tools-list li {
-  min-height: 92px;
-  padding: 28px 20px 20px 0;
-  border-bottom: 1px solid var(--landing-border);
-  color: var(--landing-text-secondary);
-  font-family: var(--landing-font-display), sans-serif;
-  font-size: 23px;
-  font-weight: 600;
-}
-
-.emotional-section {
-  display: grid;
-  min-height: 540px;
-  place-items: center;
-  padding-block: 120px;
-  color: #f5f0e8;
-  background: #1c1a18;
-  text-align: center;
-}
-
-.emotional-section h2 {
-  max-width: 900px;
-  margin-inline: auto;
-  color: #f5f0e8;
-}
-
-.emotional-section p {
-  margin-top: 24px !important;
-  color: #b8aea4;
-  font-family: var(--landing-font-display), sans-serif;
-  font-size: clamp(23px, 2.8vw, 32px);
-  line-height: 1.35;
-}
+/* V6: tools wall + emotional slab retired from the narrative. */
 
 .final-cta {
   padding-block: 136px;
@@ -1810,10 +1806,20 @@
 
 .final-cta > div > div {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: 25px;
   margin-top: 35px;
+}
+
+.final-cta-micro {
+  margin-top: 26px !important;
+  color: var(--landing-text-muted);
+  font-family: var(--landing-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .landing-footer {
@@ -1866,36 +1872,8 @@
   max-width: 650px;
 }
 
-@keyframes heroDriftOne {
-  0%, 100% { transform: rotate(-1deg) translate3d(0, 0, 0); }
-  50% { transform: rotate(-1deg) translate3d(4px, -6px, 0); }
-}
-
-@keyframes heroDriftTwo {
-  0%, 100% { transform: rotate(1.2deg) translate3d(0, 0, 0); }
-  50% { transform: rotate(1.2deg) translate3d(-4px, 5px, 0); }
-}
-
-@keyframes heroDriftThree {
-  0%, 100% { transform: rotate(-1.4deg) translate3d(0, 0, 0); }
-  50% { transform: rotate(-1.4deg) translate3d(3px, 4px, 0); }
-}
-
-@keyframes heroDriftFour {
-  0%, 100% { transform: rotate(1deg) translate3d(0, 0, 0); }
-  50% { transform: rotate(1deg) translate3d(-3px, -5px, 0); }
-}
-
-@keyframes heroDriftFive {
-  0%, 100% { transform: rotate(1.2deg) translate3d(0, 0, 0); }
-  50% { transform: rotate(1.2deg) translate3d(4px, 4px, 0); }
-}
-
-.hero-card[data-float="one"] { animation: heroDriftOne 8.8s ease-in-out infinite; }
-.hero-card[data-float="two"] { animation: heroDriftTwo 9.6s ease-in-out -2s infinite; }
-.hero-card[data-float="three"] { animation: heroDriftThree 8.2s ease-in-out -4s infinite; }
-.hero-card[data-float="four"] { animation: heroDriftFour 9s ease-in-out -1s infinite; }
-.hero-card[data-float="five"] { animation: heroDriftFive 9.8s ease-in-out -5s infinite; }
+/* V6: hero floats retired with the card cluster. The ledger panels are
+   static; only the headline typing cursor keeps ambient motion. */
 
 @keyframes stepReveal {
   to { opacity: 1; transform: translateY(0); }
@@ -2040,7 +2018,7 @@
   }
 
   .landing-hero-grid {
-    grid-template-columns: minmax(0, 0.9fr) minmax(450px, 1.1fr);
+    grid-template-columns: minmax(0, 0.9fr) minmax(430px, 1.1fr) 28px;
     gap: 28px;
   }
 
@@ -2049,23 +2027,12 @@
     font-size: 51px;
   }
 
-  .hero-ecosystem {
+  .hero-ledger {
     width: min(100%, 520px);
-    transform: scale(0.88);
-    transform-origin: center right;
-  }
-
-  .hero-kanji {
-    right: 22px;
-  }
-
-  .hero-streak {
-    right: 8px;
   }
 
   .showcase-grid,
-  .progress-copy,
-  .tools-heading {
+  .progress-copy {
     gap: 48px;
   }
 
@@ -2110,17 +2077,20 @@
     font-size: 48px;
   }
 
-  .hero-ecosystem {
-    justify-self: center;
-    transform: none;
+  .hero-ledger {
+    justify-self: stretch;
+    width: 100%;
+  }
+
+  .tategaki-rail {
+    display: none;
   }
 
   .landing-section {
     padding-block: 96px;
   }
 
-  .editorial-section,
-  .tools-section {
+  .editorial-section {
     padding-block: 112px;
   }
 
@@ -2129,8 +2099,7 @@
   }
 
   .showcase-copy > p,
-  .progress-copy > p,
-  .tools-heading > p {
+  .progress-copy > p {
     font-size: 17px;
   }
 
@@ -2282,68 +2251,30 @@
     margin-top: 18px !important;
   }
 
-  .hero-ecosystem {
+  .hero-ledger {
     width: 100%;
-    height: 430px;
-    margin-top: 16px;
+    margin-top: 8px;
   }
 
-  .hero-ecosystem::before {
-    inset: 88px 8px 45px 12px;
+  .hero-panel {
+    padding: 20px;
   }
 
-  .hero-vocabulary {
-    top: 105px;
-    left: 0;
-    width: min(310px, calc(100% - 30px));
-    min-height: 215px;
-    padding: 22px;
-  }
-
-  .hero-kanji {
-    top: 32px;
-    right: 0;
-    width: 145px;
-    min-height: 145px;
-    padding: 17px;
-  }
-
-  .hero-kanji-glyph {
-    font-size: 47px;
-  }
-
-  .hero-level {
-    top: 8px;
-    left: 8px;
-    width: 137px;
-  }
-
-  .hero-streak {
-    right: 0;
-    bottom: 52px;
-    width: 140px;
-  }
-
-  .hero-review {
-    bottom: 3px;
-    left: 20px;
-    width: 200px;
+  .hero-typing-sentence {
+    font-size: 24px;
   }
 
   .landing-section {
     padding-block: 72px;
   }
 
-  .editorial-section,
-  .tools-section {
+  .editorial-section {
     padding-block: 88px;
   }
 
   .editorial-content h2,
   .showcase-copy h2,
   .progress-copy h2,
-  .tools-heading h2,
-  .emotional-section h2,
   .final-cta h2 {
     font-size: 32px;
     line-height: 1.15;
@@ -2359,11 +2290,6 @@
   .editorial-bridge {
     margin-top: 51px !important;
     font-size: 17px;
-  }
-
-  .editorial-statement {
-    margin-top: 62px !important;
-    font-size: 27px;
   }
 
   .flow-section {
@@ -2420,8 +2346,7 @@
   }
 
   .showcase-grid,
-  .progress-copy,
-  .tools-heading {
+  .progress-copy {
     grid-template-columns: 1fr;
     gap: 34px;
   }
@@ -2432,8 +2357,7 @@
   }
 
   .showcase-copy > p,
-  .progress-copy > p,
-  .tools-heading > p {
+  .progress-copy > p {
     margin-top: 19px !important;
     font-size: 17px;
   }
@@ -2487,22 +2411,6 @@
     inset: 22px;
   }
 
-  .tools-list {
-    grid-template-columns: repeat(2, 1fr);
-    margin-top: 46px;
-  }
-
-  .tools-list li {
-    min-height: 78px;
-    padding: 22px 12px 16px 0;
-    font-size: 19px;
-  }
-
-  .emotional-section {
-    min-height: 430px;
-    padding-block: 88px;
-  }
-
   .final-cta {
     padding-block: 84px;
   }
@@ -2528,118 +2436,14 @@
   }
 }
 
-/* Mobile hero: desktop layered composition stays untouched above this
-   breakpoint. At ~640px the absolute overlap becomes a compact layered
-   constellation grid so Japanese never clips and the page never scrolls
-   horizontally: Starting-estimate | Kanji on the top row, vocabulary
-   dominant full-row in the middle, then Review | Study-streak.
-   Staging rule: the grid owns responsive columns/rows ONLY (no negative
-   vertical margins anywhere — they size tracks unpredictably). All overlap
-   is translate transforms (visual only, deterministic): the top pair slides
-   down under vocabulary's top edge while review/streak rise under its
-   bottom edge, with z-order doing the layering. Cards stay in flow with
-   position: relative. Ambient float is disabled so the constellation stays
-   static. Desktop motion and reduced-motion are unchanged. */
+/* Mobile hero: the ledger stacks plainly (panel, strip, refrain). Desktop
+   motion and reduced-motion are unchanged. */
 @media (max-width: 640px) {
-  .hero-ecosystem {
-    display: grid;
-    grid-template-columns: 1.08fr 1fr;
-    column-gap: 12px;
-    row-gap: 0;
-    width: 100%;
-    height: auto;
-    margin-top: 20px;
-  }
-
-  /* Orbit stays hidden on mobile: it would bleed past the container. */
-  .hero-ecosystem::before {
-    display: none;
-  }
-
-  .hero-ecosystem .hero-card {
-    position: relative;
-    /* Reset the desktop/≤767 absolute coordinates: under position:relative
-       they would act as visual offsets (this leaked +105px under the
-       vocabulary card and +32px under kanji). All staging deltas below are
-       transforms only. */
-    top: auto;
-    left: auto;
-    bottom: auto;
-    right: auto;
-    width: auto;
-    min-width: 0;
-    min-height: 0;
-    margin: 0;
-    animation: none;
-  }
-
-  /* Satellite labels shrink a step so "STARTING ESTIMATE" fits its column
-     without wrapping into the value; copy itself is unchanged. */
-  .hero-ecosystem .demo-label {
-    font-size: 11px;
-    letter-spacing: 0.09em;
-  }
-
-  /* Dominant vocabulary row: full-row span, centered, ~92% of the row.
-     It is the static anchor — neighbors translate toward it, so it always
-     reads visually highest. z3 above everything. */
-  .hero-vocabulary {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    justify-self: center;
-    width: 92%;
-    z-index: 3;
-    padding: 20px;
-    transform: rotate(-1deg);
-  }
-
-  /* Top satellite pair: estimate top-left, kanji top-right. They translate
-     down 18px so their bottom edges slide under vocabulary's top edge.
-     Both sit middle (z2) below vocabulary (z3). */
-  .hero-level {
-    grid-column: 1;
-    grid-row: 1;
-    z-index: 2;
-    padding: 14px;
-    transform: translateY(18px) rotate(-1deg);
-  }
-
-  .hero-kanji {
-    grid-column: 2;
-    grid-row: 1;
-    z-index: 2;
-    padding: 14px;
-    transform: translateY(18px) rotate(1deg);
-  }
-
-  /* Bottom satellite pair, asymmetric and peripheral: review shifts left
-     and tucks lightly under vocabulary so READY TO REVIEW + 約束 stay
-     readable; streak shifts left and tucks deeper so its top sits behind
-     vocabulary's bottom padding while "30 days" stays clear. Both sit
-     lower (z1) below vocabulary (z3). Review stays unrotated so the bottom
-     row does not look scrapbooked. */
-  .hero-review {
-    grid-column: 1;
-    grid-row: 3;
-    z-index: 1;
-    padding: 14px;
-    transform: translate(-10px, -10px);
-  }
-
-  .hero-streak {
-    grid-column: 2;
-    grid-row: 3;
-    z-index: 1;
-    padding: 14px;
-    transform: translate(-12px, -20px) rotate(1deg);
-  }
-
-  .hero-japanese {
-    font-size: 34px;
-  }
-
-  .hero-kanji-glyph {
-    font-size: 44px;
+  /* V6 hero is a plain vertical stack at mobile widths: one live panel,
+     one vocab strip, one refrain. No layering, no staging, no motion. */
+  .hero-ledger {
+    gap: 14px;
+    margin-top: 4px;
   }
 
   .hero-context {
@@ -2659,43 +2463,17 @@
    translates, so each card carries its own explicit (unrotated) transform.
    Vocabulary dominance survives via the full-row span + ~92% width. */
 @media (max-width: 380px) {
-  .hero-ecosystem {
-    grid-template-columns: 1fr 1fr;
-    column-gap: 10px;
-    row-gap: 10px;
-  }
-
-  .hero-ecosystem .hero-vocabulary {
-    width: 92%;
+  /* Narrowest widths keep the plain ledger stack: only tighten type. */
+  .hero-panel {
     padding: 18px;
-    transform: none;
   }
 
-  .hero-ecosystem .hero-level,
-  .hero-ecosystem .hero-kanji {
-    transform: translateY(8px);
+  .hero-typing-sentence {
+    font-size: 22px;
   }
 
-  .hero-ecosystem .hero-review {
-    transform: translate(-4px, -4px);
-  }
-
-  .hero-ecosystem .hero-streak {
-    transform: translate(-6px, -10px);
-  }
-
-  .hero-ecosystem .hero-level,
-  .hero-ecosystem .hero-streak,
-  .hero-ecosystem .hero-kanji,
-  .hero-ecosystem .hero-review {
-    padding: 12px;
-  }
-
-  /* Longest satellite labels ("Starting estimate") wrap safely at 320px
-     with a 1px-size guard; copy itself is unchanged. */
-  .hero-ecosystem .hero-level .demo-label,
-  .hero-ecosystem .hero-review .demo-label {
-    font-size: 11px;
+  .hero-japanese {
+    font-size: 28px;
   }
 }
 
@@ -2709,25 +2487,12 @@
      (animation: none inherited): only tighten type and padding here. Row
      gap stays 0 — staging overlap is transforms, exactly as above. No
      absolute offsets or fixed widths. */
-  .hero-ecosystem {
-    gap: 0 10px;
-  }
-
-  .hero-vocabulary {
-    padding: 19px;
+  .hero-ledger {
+    gap: 12px;
   }
 
   .hero-japanese {
-    font-size: 37px;
-  }
-
-  .hero-level,
-  .hero-streak,
-  .hero-kanji,
-  .hero-review {
-    /* 14px matches the constellation base so padding never fights the
-       transform staging in the 381-479px range. */
-    padding: 14px;
+    font-size: 28px;
   }
 
   .analyzer-demo,
@@ -2822,10 +2587,6 @@
     min-height: 500px;
   }
 
-  .tools-list li {
-    font-size: 17px;
-  }
-
   .footer-grid {
     grid-template-columns: 1fr 1fr;
   }
@@ -2858,7 +2619,7 @@
   }
 
   .landing-js .landing-page [data-demo="flow"] .flow-sentence-hit {
-    background-color: rgba(90, 90, 141, 0.14);
+    background-color: rgba(179, 64, 46, 0.14);
   }
 
   .landing-js .landing-page [data-demo="flow"] .flow-good {
@@ -2906,7 +2667,7 @@
     display: none;
   }
 
-  .landing-page .hero-card {
+  .landing-page .hero-panel {
     animation: none !important;
   }
 }

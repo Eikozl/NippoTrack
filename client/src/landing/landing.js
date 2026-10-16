@@ -2,7 +2,7 @@ import './landing.css';
 import wordmarkLight from '../assets/Logo_Modo_Claro.png';
 import wordmarkDark from '../assets/Logo_Modo_Oscuro.png';
 import { createLandingMarkup } from './sections.js';
-import { initEstimateRotation, initHeroStreak, initKanjiSequence, initLandingInteractions } from './interactions.js';
+import { initEstimateRotation, initKanjiSequence, initLandingInteractions } from './interactions.js';
 import { ensureFonts } from '../fonts.js';
 import { initLandingSmoothScroll } from './smoothScroll.js';
 import { initAndroidDownload } from './androidRelease.js';
@@ -79,7 +79,6 @@ if (root) {
   initLandingInteractions(root);
   initKanjiSequence(root);
   initEstimateRotation(root);
-  initHeroStreak(root);
   initAuthModalTriggers(root);
   try { initAndroidDownload(root)?.catch?.(() => {}); } catch { /* download skeleton stays static */ }
   // v5.1-E.3 Lenis: public landing only, fail-open, reduced-motion native.

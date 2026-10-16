@@ -11,13 +11,11 @@ import {
   HERO_HOLD_ALT_ONE,
   HERO_HOLD_MAIN,
   HERO_HOLD_MAIN_FIRST,
-  HERO_STREAK_MS,
   HERO_TYPE_MS_PER_CHAR,
   ONBOARDING_STAGED_TOTAL_MS,
   counterValue,
   heroHoldForLine,
   initEstimateRotation,
-  initHeroStreak,
   initHeroTyping,
   shuffledEstimateLevels,
 } from '../src/landing/interactions.js';
@@ -156,46 +154,25 @@ test('how-it-works 料理 flow stages content with internal stagger', () => {
   assert.ok(!sectionsSource.includes('cursor-dot'));
 });
 
-test('mobile hero constellation is static while headline typing is untouched', () => {
+test('mobile hero is a static stack: no constellation, no drifts, typing untouched', () => {
   const start = cssSource.indexOf('@media (max-width: 640px)');
   assert.ok(start > -1);
   const next = cssSource.indexOf('@media', start + 1);
   const mobile = cssSource.slice(start, next === -1 ? undefined : next);
-  // Every hero card is static at mobile widths — no ambient drift.
-  assert.ok(mobile.includes('.hero-card'));
-  assert.ok(mobile.includes('animation: none'));
-  // Constellation posture (not a plain stack): vocabulary spans the full
-  // row while satellites pair around it, and the narrow breakpoint keeps
-  // the layered 2-col grid instead of collapsing to one column.
-  assert.ok(mobile.includes('grid-column: 1 / -1'));
-  // Asymmetric staging contract: vocabulary is the static anchor while
-  // neighbors translate toward it (top pair down, bottom pair up-left),
-  // with z-order doing the layering. No negative vertical margins: they
-  // sized grid tracks unpredictably (phantom gaps, colliding rows).
-  assert.ok(mobile.includes('translateY(18px)'));
-  assert.ok(mobile.includes('translate(-10px, -10px)'));
-  assert.ok(mobile.includes('translate(-12px, -20px)'));
-  assert.ok(mobile.includes('top: auto'));
-  assert.ok(!mobile.includes('margin-bottom: -14px'));
-  assert.ok(!mobile.includes('margin-top: -14px'));
-  assert.ok(mobile.includes('z-index: 3'));
-  assert.ok(mobile.includes('z-index: 2'));
-  assert.ok(mobile.includes('z-index: 1'));
-  assert.ok(sectionsSource.includes('data-hero-streak="30"'));
-  const narrowStart = cssSource.indexOf('@media (max-width: 380px)');
-  const narrowNext = cssSource.indexOf('@media', narrowStart + 1);
-  const narrow = cssSource.slice(narrowStart, narrowNext === -1 ? undefined : narrowNext);
-  assert.ok(narrow.includes('grid-template-columns: 1fr 1fr'));
-  assert.ok(!/grid-template-columns:\s*1fr\s*;/.test(narrow));
-  // Desktop float and the typing chain are untouched by the mobile freeze.
-  for (const keyframes of ['heroDriftOne', 'heroDriftTwo', 'heroDriftThree', 'heroDriftFour', 'heroDriftFive']) {
-    assert.ok(cssSource.includes('@keyframes ' + keyframes));
+  // The ledger owns mobile: panels stack in flow, zero ambient motion.
+  assert.ok(mobile.includes('.hero-ledger'));
+  assert.ok(!cssSource.includes('.hero-ecosystem'), 'constellation retired everywhere');
+  assert.ok(!cssSource.includes('data-float'), 'no float hooks remain');
+  assert.ok(!sectionsSource.includes('data-hero-streak'), 'hero count-up removed');
+  // Desktop float system is gone; the typing chain is untouched.
+  for (const retired of ['heroDriftOne', 'heroDriftTwo', 'heroDriftThree', 'heroDriftFour', 'heroDriftFive']) {
+    assert.ok(!cssSource.includes('@keyframes ' + retired), 'retired: ' + retired);
   }
   assert.ok(interactionsSource.includes('initHeroTyping'));
   assert.ok(sectionsSource.includes('data-hero-typing'));
   // Reduced motion still resolves the hero to a readable final state.
   const reduced = cssSource.slice(cssSource.indexOf('@media (prefers-reduced-motion: reduce)'));
-  assert.ok(reduced.includes('.hero-card'));
+  assert.ok(reduced.includes('.hero-panel'));
   assert.ok(reduced.includes('animation: none'));
   assert.ok(reduced.includes('.hero-title-stack > h1'));
   assert.ok(reduced.includes('visibility: visible !important'));
@@ -240,48 +217,16 @@ test('starting-estimate rotation shuffles without repeats on a restrained interv
   assert.ok(!cssSource.toLowerCase().includes('slot-machine'));
 });
 
-test('hero streak counts 0 to 30 once on reveal, final by default', () => {
-  assert.equal(HERO_STREAK_MS, 2000, 'calm ~2s arc inside the 1.6–2.3s band');
-  assert.equal(typeof initHeroStreak, 'function');
-  // Reduced motion (and no-JS): the markup final stands untouched.
-  const untouched = { textContent: '30', querySelector() { return null; } };
-  const scope = { querySelector() { return untouched; }, querySelectorAll() { return []; } };
-  assert.equal(typeof initHeroStreak(scope, { reducedMotion: true }), 'function');
-  assert.equal(untouched.textContent, '30', 'reduced motion never rewrites the final');
-  // Full run with a stub observer + manual frame clock: starts at 0,
-  // climbs monotonically, lands exactly on target, then rests.
-  const node = { textContent: '30', getAttribute: () => '30' };
-  const frames = [];
-  let observed = null;
-  const observerClass = function (callback) {
-    this.callback = callback;
-    observed = this;
-    this.observe = () => {};
-    this.disconnect = () => {};
-  };
-  const cleanup = initHeroStreak({ querySelector: () => node }, {
-    reducedMotion: false,
-    observerClass,
-    raf: (fn) => { frames.push(fn); return frames.length; }
-  });
-  assert.equal(typeof cleanup, 'function');
-  observed.callback([{ isIntersecting: true }]);
-  assert.equal(node.textContent, '0', 'count starts at zero on reveal');
-  let now = 0;
-  const seen = new Set();
-  while (frames.length) {
-    now += 100;
-    frames.shift()(now);
-    seen.add(node.textContent);
-    if (frames.length > 500) throw new Error('streak animation never settles');
-  }
-  assert.equal(node.textContent, '30', 'lands exactly on the final value');
-  assert.ok(seen.size > 5, 'visibly climbs instead of jumping');
-  assert.ok([...seen].every((value) => Number(value) >= 0 && Number(value) <= 30), 'never overshoots');
-  // Wiring + markup contract.
-  assert.ok(sectionsSource.includes('data-hero-streak="30"'), 'target lives with the card');
-  assert.ok(interactionsSource.includes('HERO_STREAK_MS'), 'timing is a named constant');
-  cleanup();
+test('hero carries no count-ups: ledger panels render final copy with zero JS', () => {
+  assert.ok(!sectionsSource.includes('data-hero-streak'), 'no streak hook in markup');
+  assert.ok(!interactionsSource.includes('initHeroStreak'), 'streak initializer removed');
+  assert.ok(!interactionsSource.includes('HERO_STREAK_MS'), 'streak timing removed');
+  // Wiring contract: typing chain intact, ledger hooks present.
+  assert.ok(interactionsSource.includes('initHeroTyping'), 'typing chain untouched');
+  assert.ok(sectionsSource.includes('data-hero-typing'), 'typing layer intact');
+  assert.ok(sectionsSource.includes('hero-ledger'), 'ledger container present');
+  assert.ok(sectionsSource.includes('ledger-refrain'), 'brand refrain present');
+  assert.ok(sectionsSource.includes('tategaki-rail'), 'margin rail present');
 });
 
 test('quick assessment stages to ~5.5s with a preparing beat and untouched neighbors', () => {
