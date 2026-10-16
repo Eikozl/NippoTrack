@@ -80,13 +80,31 @@ test('V6 app-shell: brand refrain rides data panels in statistics and review', (
   assert.match(css, /\.ledger-refrain-app b \{[^}]*var\(--jlt-primary\)/, 'marks sign hanko');
 });
 
-test('V6 app-shell: sidebar carries the seal, streak value sets mono', () => {
+test('V6 app-shell: sidebar stays wordmark-only, streak value sets mono', () => {
   const html = readSource('index.html');
-  assert.ok(html.includes('class="brand-seal"'), 'sidebar seal slot present');
-  assert.ok(html.includes('src="/seal.svg"'), 'seal served from public root');
+  assert.ok(!html.includes('brand-seal'), 'no seal competes with the wordmark in the sidebar');
+  assert.ok(html.includes('id="brand-logo"'), 'wordmark hook intact');
   const css = readSource('src/styles.css');
-  assert.match(css, /\.brand-seal \{[^}]*width:\s*26px/, 'stamp-sized seal');
   assert.match(css, /\.streak-value \{[^}]*var\(--font-mono\)/, 'tally numerals tabular');
+});
+
+test('V6 ledger structure: ruled metrics, hairline tiles, indexed nav, quiet grades', () => {
+  const css = readSource('src/styles.css');
+  assert.match(css, /\.dashboard-metrics \{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/, 'metrics ruled, not carded');
+  assert.match(css, /\.dashboard-metrics \.metric-card \+ \.metric-card \{[^}]*border-top/, 'hairline dividers');
+  assert.match(css, /\.icon-tile \{[^}]*border-radius:\s*10px/, 'square-er tiles');
+  assert.match(css, /\.table-header \{[^}]*var\(--font-mono\)/, 'mono table headers');
+  assert.match(css, /\.nav-item\.is-active \{[^}]*inset 3px 0 0 var\(--jlt-primary\)/, 'hanko active bar');
+  assert.match(css, /\.nav-group-label \{[^}]*var\(--font-mono\)/, 'mono index groups');
+  assert.match(css, /\.review-grades \[data-grade="Again"\]/, 'Again quieted');
+  const html = readSource('index.html');
+  for (const n of ['01', '02', '03', '04']) assert.ok(html.includes('>' + n + '<'), 'index number ' + n);
+  const icons = readSource('src/icons.js');
+  assert.ok(icons.includes('quickAdd: Plus'), 'quick-add honest, not Zap');
+  assert.ok(!icons.includes('Zap'), 'slop icon retired from the set');
+  const dashboard = readSource('src/pages/dashboard.js');
+  assert.ok(dashboard.includes('metric-label'), 'metric labels carry the hook');
+  assert.ok(dashboard.includes('metric-card p-5'), 'card shape contract kept');
 });
 
 test('V6 app-shell: empty states speak ledger voice in both languages', () => {

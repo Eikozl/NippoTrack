@@ -395,6 +395,23 @@
 :root[data-theme="dark"] .jlpt-progress-fill { background: var(--jlt-primary-strong); }
 @media (prefers-reduced-motion: reduce) { .jlpt-progress-fill { transition: none; } }
 
+/* V6 ledger overrides (unlayered: these beat Tailwind utilities on purpose).
+   Self-critique applied: swapping hues 1:1 and calling it identity is the
+   agent-default mistake. Identity lives in structure — ruled rows instead
+   of card grids, index numbers instead of plain groups, stamps instead of
+   equal buttons, hairlines instead of wash tiles. */
+.dashboard-metrics { grid-template-columns: minmax(0, 1fr); gap: 0; background: var(--jlt-surface); border: 1px solid var(--nt-border-subtle); border-radius: 16px; overflow: hidden; }
+.dashboard-metrics .metric-card { background: transparent; border: 0; border-radius: 0; box-shadow: none; }
+.dashboard-metrics .metric-card + .metric-card { border-top: 1px solid var(--nt-border-subtle); }
+.metric-label { font-family: var(--font-mono); }
+.icon-tile { border-radius: 10px; background: transparent; border: 1px solid var(--jlt-border); box-shadow: none; color: var(--jlt-ink); }
+.table-header { font-family: var(--font-mono); }
+.nav-item.is-active { background: transparent; border-color: transparent; box-shadow: inset 3px 0 0 var(--jlt-primary); }
+.nav-group-label { font-family: var(--font-mono); }
+.nav-index { color: var(--jlt-primary); margin-right: 2px; }
+.review-grades [data-grade="Again"], .review-grades [data-grade="Hard"] { background: transparent; border-color: transparent; box-shadow: none; color: var(--jlt-muted); }
+.review-grades [data-grade="Again"]:hover, .review-grades [data-grade="Hard"]:hover { background: var(--jlt-surface); border-color: var(--jlt-border); color: var(--jlt-ink); }
+
 /* V3 overlays legacy utility surfaces so every existing V1/V2 module follows the same theme. */
 :root[data-theme="dark"] .bg-white,
 :root[data-theme="dark"] .bg-white\/70,
@@ -495,7 +512,7 @@
 .panel-icon { width:2.4rem; height:2.4rem; border-radius:13px; flex:none; }
 .preview-icon { width:2.55rem; height:2.55rem; border-radius:13px; flex:none; }
 .icon-tile .jlt-icon, .page-header-icon .jlt-icon, .metric-icon .jlt-icon, .panel-icon .jlt-icon, .preview-icon .jlt-icon { flex:none; }
-:root[data-theme="dark"] .icon-tile { color: var(--jlt-primary); }
+:root[data-theme="dark"] .icon-tile { color: var(--jlt-ink); }
 #app-content .text-ink { color: var(--jlt-ink) !important; }
 #app-content .text-muted { color: var(--jlt-muted) !important; }
 #app-content .text-vermilion { color: var(--jlt-primary) !important; }
@@ -529,7 +546,6 @@
 .ledger-kicker [lang="ja"] { letter-spacing:0; }
 .ledger-refrain-app { display:flex; align-items:baseline; justify-content:center; gap:10px; margin-top:18px; color:var(--jlt-muted); font-family:var(--font-mono); font-size:12px; letter-spacing:0.06em; }
 .ledger-refrain-app b { color:var(--jlt-primary); font-weight:600; }
-.brand-seal { width:26px; height:26px; border-radius:6px; transform:rotate(-1.5deg); flex-shrink:0; }
 .streak-value { font-family:var(--font-mono); letter-spacing:0; }
 .streak-fire-icon { display:inline-grid; width:1.1rem; height:1.1rem; place-items:center; color:#e03145; transform-origin:50% 85%; animation: streak-fire-pulse 1s cubic-bezier(.4,0,.2,1) infinite; }
 :root[data-theme="dark"] .streak-fire-icon { color:#ff6475; }
