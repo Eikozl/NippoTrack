@@ -89,6 +89,22 @@ const DICT_FILES = [
 
 const DICT_DOWNLOAD_TIMEOUT_MS = 30000;
 const DICT_MAX_REDIRECTS = 3;
+const DICT_DOWNLOAD_RETRIES = 3;
+
+// Cold starts fail as a unit on any transient reset without this: one
+// failed blob out of twelve must not poison the whole boot.
+async function downloadWithRetry(url, dest, attempts = DICT_DOWNLOAD_RETRIES) {
+  let lastError = null;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      await downloadFile(url, dest);
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
 
 // Public, version-pinned CDN copy of the exact vendored blobs. Overridable
 // via KUROMOJI_DICT_URL (trailing slash optional) for air-gapped mirrors;
@@ -156,7 +172,7 @@ async function ensureDictionaryPath() {
     try {
       if (fs.statSync(dest).isFile() && fs.statSync(dest).size > 0) continue;
     } catch (_) { /* missing: download below */ }
-    await downloadFile(`${base}/${file}`, dest);
+    await downloadWithRetry(`${base}/${file}`, dest);
   }
   if (!dictComplete(dir)) throw new ParserError('PARSER_INIT_FAILED', 'Japanese parser dictionary unavailable.');
   return dir;
