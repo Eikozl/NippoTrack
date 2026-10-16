@@ -36,15 +36,15 @@ test('shell favicon carries the brand mark', () => {
   assert.ok(width >= 64, 'favicon has tab-grade resolution');
 });
 
-test('boot stroke-draw videos ship preloaded', () => {
-  for (const video of ['public/videos/logo-draw-black.mp4', 'public/videos/logo-draw-orange.mp4']) {
-    const buffer = readFileSync(join(root, video));
-    assert.ok(buffer.includes('ftyp'), `${video} is a valid MP4`);
-    assert.ok(buffer.length > 10000, `${video} carries the full pass`);
-  }
+test('boot stroke-draw video ships preloaded', () => {
+  const black = readFileSync(join(root, 'public/videos/logo-draw-black.mp4'));
+  assert.ok(black.includes('ftyp'), 'black pass archived as valid MP4');
+  const orange = readFileSync(join(root, 'public/videos/logo-draw-orange.mp4'));
+  assert.ok(orange.includes('ftyp'), 'ember pass is a valid MP4');
+  assert.ok(orange.length > 10000, 'ember pass carries the full draw');
   const html = readSource('index.html');
-  assert.ok(html.includes('href="/videos/logo-draw-black.mp4"'), 'black pass preloaded');
-  assert.ok(html.includes('href="/videos/logo-draw-orange.mp4"'), 'orange pass preloaded');
+  assert.ok(html.includes('href="/videos/logo-draw-orange.mp4"'), 'ember pass preloaded');
+  assert.ok(!html.includes('logo-draw-black.mp4'), 'unused pass not preloaded');
 });
 
 test('brand raster glyphs resolve through the icon API with dark support', () => {

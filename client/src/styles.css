@@ -863,20 +863,20 @@ nav .nav-group-label:first-child { margin-top: 0; }
    the stored session verifies, so returning learners never see a login flash. */
 .auth-boot-note { display: grid; min-height: 40vh; place-items: center; margin: 0; font-size: 0.875rem; color: var(--jlt-muted); }
 
-/* Brand boot stage: the brush mark draws in black, then draws over in hanko
-   orange. Both passes are white-background video (no alpha), so they
-   composite with multiply over the warm canvas — white turns transparent,
-   ink stays ink. Same 480px geometry in both files, orange traces black. */
+/* Brand boot stage v2: the hanko-orange pass draws alone on the warm canvas
+   (white-background video composited with multiply — white turns
+   transparent, ember stays visible), then resolves into the crisp static
+   ink mark. No stacked passes, no muddy overlap. */
 .boot-splash { min-height: 62vh; }
 .boot-stage { position: relative; width: min(68vw, 280px); aspect-ratio: 1; }
 .boot-stage .boot-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; mix-blend-mode: multiply; }
-/* Blank white frames multiply to invisible, so the orange pass only shows
-   once it starts drawing; black then hands over beneath it. */
-.boot-stage.boot-handover .boot-black { opacity: 0; transition: opacity 700ms ease; }
-.boot-mark { display: block; width: min(56vw, 200px); height: auto; margin-inline: auto; }
+.boot-stage .boot-mark { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; }
+.boot-stage.boot-resolved .boot-video { opacity: 0; transition: opacity 500ms ease; }
+.boot-stage.boot-resolved .boot-mark { opacity: 1; transition: opacity 500ms ease; }
 .boot-splash.is-leaving { opacity: 0; transition: opacity 260ms ease; }
 @media (prefers-reduced-motion: reduce) {
-  .boot-stage.boot-handover .boot-black { transition: none; }
+  .boot-stage.boot-resolved .boot-video,
+  .boot-stage.boot-resolved .boot-mark { transition: none; }
   .boot-splash.is-leaving { transition: none; }
 }
 

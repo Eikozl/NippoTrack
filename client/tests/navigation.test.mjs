@@ -113,7 +113,8 @@ test('boot shows a neutral splash, never the login form, while verifying', () =>
 test('boot splash keeps the session status for screen readers', () => {
   const splash = readSource('src/bootSplash.js');
   assert.ok(splash.includes('Checking your session'), 'sr-only status copy');
-  assert.ok(splash.includes('logo-draw-black') && splash.includes('logo-draw-orange'), 'both stroke passes referenced');
+  assert.ok(splash.includes('logo-draw-orange'), 'ember pass referenced');
+  assert.ok(!splash.includes('logo-draw-black'), 'single visible pass');
   assert.ok(splash.includes('prefers-reduced-motion'), 'reduced-motion path present');
 });
 
