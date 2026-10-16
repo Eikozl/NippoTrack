@@ -8,7 +8,6 @@ const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
 const landing = readFileSync(new URL('../src/landing/landing.js', import.meta.url), 'utf8');
 const hiw = readFileSync(new URL('../src/landing/howItWorks.js', import.meta.url), 'utf8');
 const sections = readFileSync(new URL('../src/landing/sections.js', import.meta.url), 'utf8');
-const splash = readFileSync(new URL('../src/bootSplash.js', import.meta.url), 'utf8');
 
 test('auth architecture frozen: same endpoints, same Supabase calls, same guards', () => {
   for (const endpoint of ['/api/auth/sign-in', '/api/auth/sign-up', '/api/auth/forgot-password', '/api/auth/logout', '/api/auth/session']) {
@@ -102,9 +101,8 @@ test('legacy /app route reuses the same modal without diverging', () => {
 
 test('session restore never flashes the login form (neutral splash first)', () => {
   const boot = main.slice(main.indexOf('async function bootstrapApp()'));
-  assert.ok(boot.includes('createBootSplash'), 'brand splash renders while verifying');
-  assert.ok(splash.includes('Checking your session'), 'splash copy while verifying');
-  assert.ok(boot.indexOf('createBootSplash') < boot.indexOf('renderAuthGate'), 'splash renders before any gate');
+  assert.ok(boot.includes('Checking your session'), 'splash copy while verifying');
+  assert.ok(boot.indexOf('Checking your session') < boot.indexOf('renderAuthGate'), 'splash renders before any gate');
   assert.ok(!boot.includes('const closeGate = renderAuthGate('), 'no instant modal on cold boot');
   assert.ok(boot.includes('openGate()'), 'gate opens only when the session check fails');
 });

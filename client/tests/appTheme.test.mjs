@@ -177,8 +177,8 @@ test('shell brand is wordmark-only with normalized bounds, no duplicated label',
   assert.ok(html.includes('id="close-navigation"'), 'mobile close button preserved');
   assert.ok(!html.includes('JLT_logo-png.png'), 'legacy mark gone from shell');
   assert.ok(html.includes('fonts.googleapis.com'), 'app fonts load statically');
-  assert.ok(html.includes('Fraunces'), 'V6 display family present');
-  assert.ok(html.includes('Newsreader'), 'preview alternate present');
+  assert.ok(html.includes('Newsreader'), 'V6 display family present');
+  assert.ok(!html.includes('Fraunces'), 'losing family removed from the set');
   assert.ok(html.includes('IBM+Plex+Mono'), 'mono label family present');
   assert.ok(html.includes('Noto+Sans+JP'), 'Japanese family present');
 });

@@ -17,17 +17,10 @@
   --color-accent-dark: var(--jlt-primary-strong);
   --color-accent-soft: var(--jlt-primary-soft);
   --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  /* V6 display: Fraunces editorial serif (TEMP preview alternates with
-     Newsreader via data-display-preview="newsreader"; see displayPreview.js,
-     remove before merge to master). */
-  --font-display: "Fraunces", "Newsreader", Georgia, "Times New Roman", serif;
+  /* V6 display: Newsreader editorial serif. */
+  --font-display: "Newsreader", Georgia, "Times New Roman", serif;
   --font-jp: "Noto Sans JP", Inter, ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-
-/* TEMP-DISPLAY-PREVIEW — remove before merge to master. */
-:root[data-display-preview="newsreader"] {
-  --font-display: "Newsreader", Georgia, "Times New Roman", serif;
 }
 
 @layer base {
@@ -866,18 +859,6 @@ nav .nav-group-label:first-child { margin-top: 0; }
 /* Boot splash: neutral session check shown instead of the sign-in form while
    the stored session verifies, so returning learners never see a login flash. */
 .auth-boot-note { display: grid; min-height: 40vh; place-items: center; margin: 0; font-size: 0.875rem; color: var(--jlt-muted); }
-
-/* Brand boot stage v3: the hanko-orange pass draws alone on the warm canvas
-   (white-background video composited with multiply — white turns
-   transparent, ember stays fully visible) carrying its ink-wash audio. */
-.boot-splash { min-height: 62vh; }
-.boot-stage { position: relative; display: grid; place-items: center; width: min(68vw, 280px); aspect-ratio: 1; }
-.boot-stage .boot-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; mix-blend-mode: multiply; }
-.boot-mark { display: block; width: min(56vw, 200px); height: auto; margin-inline: auto; }
-.boot-splash.is-leaving { opacity: 0; transition: opacity 260ms ease; }
-@media (prefers-reduced-motion: reduce) {
-  .boot-splash.is-leaving { transition: none; }
-}
 
 /* v5.1-B.1 Kanji Detail identity — ONE shared composition for the reference
    page and the owned dialog (see client/src/kanjiDetail.js). Additive only:

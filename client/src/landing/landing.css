@@ -12,9 +12,8 @@
   --landing-surface: #fffcf7;
   --landing-surface-muted: #eee7dc;
   /* V6 display stack (self-contained: the landing bundle never loads the
-     app stylesheet). TEMP preview alternates Newsreader via
-     data-display-preview="newsreader" (see displayPreview.js). */
-  --landing-font-display: "Fraunces", "Newsreader", Georgia, "Times New Roman", serif;
+     app stylesheet). */
+  --landing-font-display: "Newsreader", Georgia, "Times New Roman", serif;
   --landing-font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --landing-text: #111111;
   --landing-text-secondary: #5c5853;
@@ -119,11 +118,6 @@
 
 .landing-skip-link:focus {
   transform: translateY(0);
-}
-
-/* TEMP-DISPLAY-PREVIEW — remove before merge to master. */
-:root[data-display-preview="newsreader"] .landing-page {
-  --landing-font-display: "Newsreader", Georgia, "Times New Roman", serif;
 }
 
 /* Dark theme remap: no pure black, no pure-white text. Muted/secondary

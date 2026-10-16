@@ -103,19 +103,16 @@ test('auth email links and token URLs forward to /app', () => {
 
 test('boot shows a neutral splash, never the login form, while verifying', () => {
   const main = readSource('src/main.js');
-  assert.ok(main.includes('createBootSplash'), 'brand splash module wired');
-  const splash = readSource('src/bootSplash.js');
-  assert.ok(splash.includes('auth-boot-note'), 'splash styling hook');
+  assert.ok(main.includes('Checking your session'), 'splash copy');
+  assert.ok(main.includes('auth-boot-note'), 'splash styling hook');
   const boot = main.slice(main.indexOf('async function bootstrapApp'));
-  assert.ok(boot.indexOf('createBootSplash') < boot.indexOf('renderAuthGate'), 'splash renders before any gate');
+  assert.ok(boot.indexOf('Checking your session') < boot.indexOf('renderAuthGate'), 'splash renders before any gate');
 });
 
-test('boot splash keeps the session status for screen readers', () => {
-  const splash = readSource('src/bootSplash.js');
-  assert.ok(splash.includes('Checking your session'), 'sr-only status copy');
-  assert.ok(splash.includes('logo-draw-orange'), 'ember pass referenced');
-  assert.ok(!splash.includes('logo-draw-black'), 'single visible pass');
-  assert.ok(splash.includes('prefers-reduced-motion'), 'reduced-motion path present');
+test('boot splash keeps video out of the critical path', () => {
+  const main = readSource('src/main.js');
+  assert.ok(!main.includes('bootSplash'), 'no animation module in boot');
+  assert.ok(!main.includes('logo-draw'), 'no stroke-draw video in boot');
 });
 
 test('auth emails carry branded buttons and working Supabase variables', () => {

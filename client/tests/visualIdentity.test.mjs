@@ -14,13 +14,13 @@ function pngSize(path) {
   return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
 }
 
-test('brand brush mark ships in both ink directions', () => {
-  for (const asset of ['src/assets/logo-mark.png', 'src/assets/logo-mark-light.png']) {
-    assert.ok(existsSync(join(root, asset)), `mark asset present: ${asset}`);
-    const { width, height } = pngSize(asset);
-    assert.equal(width, height, `${asset} is square`);
-    assert.ok(width >= 256, `${asset} has icon-grade resolution`);
-  }
+test('brand brush mark ships as the icon source', () => {
+  assert.ok(existsSync(join(root, 'src/assets/logo-mark-light.png')), 'white mark feeds the icon generator');
+  const { width, height } = pngSize('src/assets/logo-mark-light.png');
+  assert.equal(width, height, 'mark is square');
+  assert.ok(width >= 256, 'mark has icon-grade resolution');
+  assert.ok(!existsSync(join(root, 'src/assets/logo-mark.png')), 'unused black mark retired');
+  assert.ok(!existsSync(join(root, 'public/seal.svg')), 'legacy seal retired');
 });
 
 test('landing masthead stays wordmark-only beside the issue line', () => {
@@ -36,15 +36,13 @@ test('shell favicon carries the brand mark', () => {
   assert.ok(width >= 64, 'favicon has tab-grade resolution');
 });
 
-test('boot stroke-draw video ships preloaded', () => {
-  const black = readFileSync(join(root, 'public/videos/logo-draw-black.mp4'));
-  assert.ok(black.includes('ftyp'), 'black pass archived as valid MP4');
-  const orange = readFileSync(join(root, 'public/videos/logo-draw-orange.mp4'));
-  assert.ok(orange.includes('ftyp'), 'ember pass is a valid MP4');
-  assert.ok(orange.length > 10000, 'ember pass carries the full draw');
+test('tutorial videos ship as valid MP4s', () => {
+  for (const video of ['public/videos/tutorial-horizontal.mp4', 'public/videos/tutorial-vertical.mp4']) {
+    const buffer = readFileSync(join(root, video));
+    assert.ok(buffer.includes('ftyp'), `${video} is a valid MP4`);
+  }
   const html = readSource('index.html');
-  assert.ok(html.includes('href="/videos/logo-draw-orange.mp4"'), 'ember pass preloaded');
-  assert.ok(!html.includes('logo-draw-black.mp4'), 'unused pass not preloaded');
+  assert.ok(!html.includes('logo-draw-'), 'no boot animation preloaded');
 });
 
 test('brand raster glyphs resolve through the icon API with dark support', () => {
