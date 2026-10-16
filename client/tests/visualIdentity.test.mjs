@@ -16,6 +16,15 @@ test('hanko seal exists as a vermilion square with a washi N', () => {
   assert.ok(seal.includes('aria-label="NippoTrack seal"'), 'screen-reader labeled');
 });
 
+test('masthead seal keeps stamp size against the brand image rule', () => {
+  const css = readSource('src/landing/landing.css');
+  assert.match(css, /\.landing-brand img\.masthead-seal \{[^}]*width:\s*30px/, 'specificity beats .landing-brand img');
+  assert.match(css, /\.landing-page img\.hanko-seal \{[^}]*width:\s*22px/, 'verdict seal scoped');
+  const sections = readSource('src/landing/sections.js');
+  assert.ok(sections.includes('class="masthead-seal"'), 'masthead seal slot present');
+  assert.ok(sections.includes('src="/seal.svg"'), 'seal served from public root');
+});
+
 test('shell prefers the SVG seal with PNG fallback', () => {
   const html = readSource('index.html');
   const svgAt = html.indexOf('href="/seal.svg"');

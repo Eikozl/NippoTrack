@@ -531,7 +531,7 @@
   width: auto;
 }
 
-.masthead-seal {
+.landing-brand img.masthead-seal {
   width: 30px;
   height: 30px;
   border-radius: 7px;
@@ -629,7 +629,7 @@
   box-shadow: 0 2px 8px rgb(179 64 46 / 0.28);
 }
 
-.hanko-seal {
+.landing-page img.hanko-seal {
   width: 22px;
   height: 22px;
   border-radius: 5px;

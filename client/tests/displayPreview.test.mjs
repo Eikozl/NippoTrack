@@ -31,8 +31,13 @@ test('resolveDisplayChoice prefers URL over storage, rejects unknown', () => {
   assert.equal(resolveDisplayChoice('newsreader', 'fraunces'), 'newsreader');
   assert.equal(resolveDisplayChoice('', 'newsreader'), 'newsreader');
   assert.equal(resolveDisplayChoice(null, null), null);
+  assert.equal(resolveDisplayChoice(undefined, null), null);
+  assert.equal(resolveDisplayChoice(undefined, 'newsreader'), 'newsreader');
   assert.equal(resolveDisplayChoice('comic-sans', 'newsreader'), 'newsreader');
   assert.equal(resolveDisplayChoice('FRAUNCES', null), 'fraunces');
+  // Bare ?display (empty or unknown value) activates with the default.
+  assert.equal(resolveDisplayChoice('', null), 'fraunces');
+  assert.equal(resolveDisplayChoice('1', null), 'fraunces');
 });
 
 test('applyDisplayChoice toggles the dataset attribute fail-open', () => {
@@ -76,6 +81,13 @@ test('initDisplayPreview activates from ?display= and renders the toggle', () =>
   const choice = initDisplayPreview({ doc, location: { search: '?display=newsreader' }, storage: { getItem: () => null } });
   assert.equal(choice, 'newsreader');
   assert.equal(doc.documentElement.dataset.displayPreview, 'newsreader');
+  assert.ok(doc._appended.some(([where]) => where === 'body'), 'toggle bar rendered');
+});
+
+test('initDisplayPreview activates from bare ?display with the default family', () => {
+  const doc = fakeDocument();
+  const choice = initDisplayPreview({ doc, location: { search: '?display' }, storage: { getItem: () => null } });
+  assert.equal(choice, 'fraunces');
   assert.ok(doc._appended.some(([where]) => where === 'body'), 'toggle bar rendered');
 });
 

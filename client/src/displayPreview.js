@@ -17,6 +17,9 @@ export function resolveDisplayChoice(search, stored) {
   if (DISPLAY_PREVIEW_CHOICES.includes(fromUrl)) return fromUrl;
   const fromStored = String(stored || '').toLowerCase();
   if (DISPLAY_PREVIEW_CHOICES.includes(fromStored)) return fromStored;
+  // Bare ?display (empty/unknown value) still activates the preview with
+  // the default family so the toggle renders and the user can switch.
+  if (search !== null && search !== undefined) return DISPLAY_PREVIEW_DEFAULT;
   return null;
 }
 
@@ -24,9 +27,11 @@ function readParam(location) {
   try {
     const search = location?.search || '';
     const params = new URLSearchParams(search);
+    // null = absent (stay dormant); anything else = preview requested.
+    if (!params.has(DISPLAY_PREVIEW_PARAM)) return undefined;
     return params.get(DISPLAY_PREVIEW_PARAM);
   } catch {
-    return null;
+    return undefined;
   }
 }
 
