@@ -43,7 +43,7 @@ test('V6 app-shell: kanji panel carries washi grain, icons use restrained stroke
   const css = readSource('src/styles.css');
   assert.match(css, /\.kanji-glyph-panel-large \{[^}]*repeating-linear-gradient/, 'ruled-paper grain, no image');
   const icons = readSource('src/icons.js');
-  assert.ok(icons.includes("'stroke-width': 1.75"), 'monoline locked at 1.75');
+  assert.ok(icons.includes("'stroke-width': 1.9"), 'library stroke untouched by the revert');
 });
 
 test('V6 app-shell: review Good stamps hanko while Again/Hard stay quiet', () => {
@@ -99,8 +99,9 @@ test('V6 ledger structure: ruled metrics, hairline tiles, calm nav, quiet grades
   const html = readSource('index.html');
   assert.ok(!html.includes('nav-index'), 'no enumeration in the sidebar');
   const icons = readSource('src/icons.js');
-  assert.ok(icons.includes('quickAdd: Plus'), 'quick-add honest, not Zap');
-  assert.ok(!icons.includes('Zap'), 'slop icon retired from the set');
+  assert.ok(icons.includes('quickAdd: Zap'), 'previous icon set fully restored');
+  assert.ok(icons.includes('from \'lucide\''), 'single library, no bespoke leftovers');
+  assert.ok(!icons.includes('CUSTOM_GLYPHS'), 'bespoke set fully removed');
   const dashboard = readSource('src/pages/dashboard.js');
   assert.ok(dashboard.includes('metric-label'), 'metric labels carry the hook');
   assert.ok(dashboard.includes('metric-card p-5'), 'card shape contract kept');
