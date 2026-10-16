@@ -31,25 +31,30 @@ export const CUSTOM_GLYPHS = {
     ['line', { x1: '9', y1: '12', x2: '16', y2: '12' }],
     ['line', { x1: '9', y1: '18', x2: '19', y2: '18' }]
   ],
-  // Word card with furigana: the ruby line above the word line.
+  // Flashcard deck: vocabulary as collected cards — front card carries
+  // a ruby line over its word line, back card peeks behind.
   vocabulary: [
-    ['rect', { x: '4', y: '7', width: '16', height: '13', rx: '2' }],
-    ['line', { x1: '9.5', y1: '11', x2: '14.5', y2: '11' }],
-    ['line', { x1: '7', y1: '15.5', x2: '17', y2: '15.5', 'stroke-width': '2.2' }]
+    ['rect', { x: '9', y: '3', width: '11', height: '11', rx: '2' }],
+    ['rect', { x: '4', y: '10', width: '11', height: '11', rx: '2' }],
+    ['line', { x1: '8', y1: '15', x2: '11.5', y2: '15' }],
+    ['line', { x1: '6.5', y1: '18', x2: '12.5', y2: '18', 'stroke-width': '2.2' }]
   ],
-  // 日 (sun/day): the practice character — study days, legible at any size.
+  // 字 (character): roof radical over the child — the written character
+  // itself, still geometric enough to read at 20px.
   kanji: [
-    ['rect', { x: '7', y: '3', width: '10', height: '18', rx: '1' }],
-    ['line', { x1: '7', y1: '12', x2: '17', y2: '12' }]
+    ['circle', { cx: '12', cy: '3.4', r: '1', fill: 'currentColor', stroke: 'none' }],
+    ['polyline', { points: '5 8.5 12 5.5 19 8.5' }],
+    ['line', { x1: '7.5', y1: '8.5', x2: '7.5', y2: '11.5' }],
+    ['line', { x1: '7', y1: '14.5', x2: '17', y2: '14.5' }],
+    ['polyline', { points: '11 14.5 11 19 8.8 19.6' }]
   ],
-  // Parse tree: grammar as structure, trunk with two branches.
+  // 文 (sentence): from 文法 (grammar) — dot, cap, and two falling
+  // strokes, still geometric enough to read at 20px.
   grammar: [
-    ['line', { x1: '3.5', y1: '19', x2: '20.5', y2: '19' }],
-    ['line', { x1: '9', y1: '19', x2: '9', y2: '6' }],
-    ['line', { x1: '9', y1: '10.5', x2: '15', y2: '10.5' }],
-    ['line', { x1: '9', y1: '6', x2: '18', y2: '6' }],
-    ['circle', { cx: '15', cy: '10.5', r: '1.1', fill: 'currentColor', stroke: 'none' }],
-    ['circle', { cx: '18', cy: '6', r: '1.1', fill: 'currentColor', stroke: 'none' }]
+    ['circle', { cx: '12', cy: '3.2', r: '1', fill: 'currentColor', stroke: 'none' }],
+    ['line', { x1: '7', y1: '7.5', x2: '17', y2: '7.5' }],
+    ['line', { x1: '12', y1: '7.5', x2: '7.5', y2: '20' }],
+    ['line', { x1: '12', y1: '7.5', x2: '16.5', y2: '20' }]
   ],
   // Lens over text lines: inspect the real sentence.
   analyzer: [
