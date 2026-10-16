@@ -98,3 +98,25 @@ test('dictionary path resolves inside the installed package', () => {
   assert.ok(dicPath.includes('@sglkc'), 'resolves within the pinned package');
   assert.ok(fs.existsSync(require('path').join(dicPath, 'base.dat.gz')), 'IPADIC base dictionary present');
 });
+
+test('remote dictionary contract: pinned CDN default, env override, complete-dir short-circuit', async () => {
+  assert.ok(Array.isArray(parser.DICT_FILES) && parser.DICT_FILES.length >= 12, 'full blob manifest');
+  assert.ok(parser.DICT_FILES.includes('base.dat.gz') && parser.DICT_FILES.includes('tid_pos.dat.gz'), 'key blobs listed');
+  const previous = process.env.KUROMOJI_DICT_URL;
+  try {
+    delete process.env.KUROMOJI_DICT_URL;
+    const base = parser.dictBaseUrl();
+    assert.ok(base.startsWith('https://cdn.jsdelivr.net/npm/@sglkc/kuromoji@'), 'pinned public default');
+    assert.ok(!base.endsWith('/'), 'no trailing slash');
+    process.env.KUROMOJI_DICT_URL = 'https://mirror.example/dict/';
+    assert.equal(parser.dictBaseUrl(), 'https://mirror.example/dict', 'env override wins, slash trimmed');
+  } finally {
+    if (previous === undefined) delete process.env.KUROMOJI_DICT_URL;
+    else process.env.KUROMOJI_DICT_URL = previous;
+  }
+  // Local blobs present: zero network, resolves to the vendored dir.
+  const local = parser.resolveDictionaryPath();
+  assert.equal(parser.dictComplete(local), true, 'vendored blobs complete');
+  assert.equal(await parser.ensureDictionaryPath(), local, 'local short-circuit, no download');
+  assert.equal(parser.dictComplete('/definitely/not/a/dict'), false, 'missing dir reads incomplete');
+});
