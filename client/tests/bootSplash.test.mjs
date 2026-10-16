@@ -13,6 +13,7 @@ import {
   createBootSplash,
   dismissBootSplash,
   isReducedMotion,
+  playBootPass,
   runBootSplash,
 } from '../src/bootSplash.js';
 
@@ -35,15 +36,15 @@ function fakeDoc() {
   return { createElement: (tag) => fakeNode(tag) };
 }
 
-test('boot pass references the bundled ember draw', () => {
+test('boot pass references the bundled ember draw with sound', () => {
   assert.equal(BOOT_ORANGE_SRC, '/videos/logo-draw-orange.mp4');
-  assert.ok(!bootSource.includes('logo-draw-black'), 'single visible pass, no muddy overlap');
-  assert.ok(BOOT_DRAW_MS >= 1900, 'resolve waits out the full draw');
+  assert.ok(!bootSource.includes('logo-draw-black'), 'single visible pass');
+  assert.ok(bootSource.includes('muted = true'), 'autoplay-block fallback mutes and continues');
+  assert.ok(BOOT_DRAW_MS >= 1900, 'hold waits out the full draw');
   assert.ok(BOOT_MIN_MS >= BOOT_DRAW_MS + BOOT_HOLD_MS, 'floor covers draw plus hold');
   assert.ok(BOOT_MAX_MS > BOOT_MIN_MS, 'fail-open cap above the floor');
   assert.ok(BOOT_RATE > 1, 'pass runs faster than real time');
   assert.ok(BOOT_HOLD_MS > 0 && BOOT_FADE_MS > 0, 'hold and fade staged');
-  assert.ok(bootSource.includes('multiply'), 'compositing documented with the module');
 });
 
 test('reduced-motion probe is injectable and fail-open', () => {
@@ -55,7 +56,7 @@ test('reduced-motion probe is injectable and fail-open', () => {
 
 test('splash keeps the session status for screen readers', () => {
   const doc = fakeDoc();
-  const { root, stage, orange, mark } = createBootSplash(doc, { markUrl: '/logo-mark.png', reducedMotion: false });
+  const { root, stage, orange } = createBootSplash(doc, { markUrl: '/logo-mark.png', reducedMotion: false });
   assert.equal(root.attrs.role, 'status');
   assert.ok(root.attrs.class.includes('auth-boot-note'), 'styling hook kept');
   const sr = root.children[0];
@@ -63,11 +64,8 @@ test('splash keeps the session status for screen readers', () => {
   assert.equal(stage.attrs['aria-hidden'], 'true', 'decorative stage hidden from AT');
   assert.ok(orange, 'ember pass staged');
   assert.equal(orange.attrs.src, BOOT_ORANGE_SRC);
-  assert.equal(orange.attrs.muted, '', 'muted for autoplay policy');
+  assert.ok(!('muted' in orange.attrs), 'sound attempted first, not pre-muted');
   assert.equal(orange.attrs.playsinline, '', 'inline on iOS');
-  assert.ok(mark, 'ink resolve staged');
-  assert.equal(mark.attrs.src, '/logo-mark.png');
-  assert.ok(!stage.children.some((c) => String(c.attrs.class || '').includes('boot-black')), 'no second pass');
 });
 
 test('reduced motion renders the static mark, never video', () => {
@@ -78,57 +76,60 @@ test('reduced motion renders the static mark, never video', () => {
   assert.equal(stage.children[0].tag, 'img');
 });
 
-test('run draws ember, resolves to ink, honoring draw plus floor', async () => {
+test('loud attempt first, muted fallback on autoplay block', async () => {
+  const loud = { play() { return Promise.resolve(); } };
+  assert.equal(await playBootPass(loud, BOOT_RATE), 'loud');
+  assert.equal(loud.playbackRate, BOOT_RATE, 'pass runs fast');
+  let muted = false;
+  const blocked = {
+    play() {
+      if (!muted) return Promise.reject(new Error('autoplay denied'));
+      return Promise.resolve();
+    },
+  };
+  Object.defineProperty(blocked, 'muted', { set(v) { muted = v; }, get() { return muted; } });
+  assert.equal(await playBootPass(blocked, BOOT_RATE), 'muted');
+  assert.equal(muted, true, 'fallback mutes and retries');
+  assert.equal(await playBootPass(null, BOOT_RATE), 'blocked');
+  assert.equal(await playBootPass({}, BOOT_RATE), 'blocked');
+});
+
+test('run draws ember with sound, holds, honoring the floor', async () => {
   const events = [];
   const orange = {
     played: 0, paused: 0,
     play() { this.played += 1; events.push('play:orange'); return Promise.resolve(); },
     pause() { this.paused += 1; },
   };
-  const stage = fakeNode('div');
   const run = runBootSplash({
-    stage, orange, mark: fakeNode('img'), reducedMotion: false,
+    orange, reducedMotion: false,
     delay: (ms) => { events.push(`wait:${ms}`); return Promise.resolve(); },
     now: () => 0,
   });
   await run.done;
-  const playAt = events.indexOf('play:orange');
-  const drawAt = events.indexOf(`wait:${BOOT_DRAW_MS}`);
-  const maxAt = events.indexOf(`wait:${BOOT_MAX_MS}`);
-  assert.ok(playAt > -1 && drawAt > playAt, 'draw waits out the full pass');
-  assert.ok(maxAt > -1, 'fail-open cap armed');
-  assert.equal(orange.playbackRate, BOOT_RATE, 'pass runs fast');
-  assert.ok(stage.classList.added.includes('boot-resolved'), 'ink resolves beneath ember');
+  // Drain: the race settles first, the done chain lands right after.
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(events, [
+    'play:orange',
+    `wait:${BOOT_MAX_MS}`,
+    `wait:${BOOT_DRAW_MS}`,
+    `wait:${BOOT_HOLD_MS}`,
+    `wait:${BOOT_MIN_MS}`,
+  ]);
   assert.equal(orange.played, 1);
 });
 
-test('blocked autoplay resolves straight to the static mark', async () => {
-  const stage = fakeNode('div');
-  let resolved = false;
-  const run = runBootSplash({
-    stage,
-    orange: { play() { throw new Error('blocked'); }, pause() {} },
-    mark: fakeNode('img'),
-    reducedMotion: false,
-    delay: () => Promise.resolve(),
-    now: () => 0,
-  });
-  await run.done;
-  resolved = stage.classList.added.includes('boot-resolved');
-  assert.equal(resolved, true, 'mark shows without video');
-});
-
-test('cancel pauses the pass and skips the resolve', async () => {
+test('cancel pauses the pass and skips the waits', async () => {
   const orange = { paused: 0, play() { return new Promise(() => {}); }, pause() { this.paused += 1; } };
-  const stage = fakeNode('div');
   const run = runBootSplash({
-    stage, orange, reducedMotion: false,
+    orange, reducedMotion: false,
     delay: () => Promise.resolve(), now: () => 0,
   });
   run.cancel();
   await run.done;
   assert.equal(orange.paused, 1, 'pass stopped');
-  assert.ok(!stage.classList.added.includes('boot-resolved'), 'cancelled boot never resolves');
 });
 
 test('dismiss fades then detaches, tolerating a replaced host', async () => {

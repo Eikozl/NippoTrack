@@ -545,9 +545,13 @@
 .ledger-refrain-app { display:flex; align-items:baseline; justify-content:center; gap:10px; margin-top:18px; color:var(--jlt-muted); font-family:var(--font-mono); font-size:12px; letter-spacing:0.06em; }
 .ledger-refrain-app b { color:var(--jlt-primary); font-weight:600; }
 .streak-value { font-family:var(--font-mono); letter-spacing:0; }
-/* Brand raster glyphs (hand-drawn あ / 文): monochrome threshold art, so
-   the dark theme restores paper ink with an exact invert. */
-.jlt-icon-img { object-fit: contain; }
+/* Brand raster glyphs (hand-drawn あ / 文): pure-ink threshold art runs
+   darker than 1.9px Lucide monoline, so each context dims it to its own
+   muted voice. Dark theme restores paper ink with an exact invert. */
+.jlt-icon-img { object-fit: contain; opacity: 0.82; }
+.nav-item .jlt-icon-img { opacity: 0.72; }
+.nav-item.is-active .jlt-icon-img { opacity: 1; }
+.icon-tile .jlt-icon-img { opacity: 0.88; }
 :root[data-theme="dark"] .jlt-icon-img { filter: invert(1); }
 .streak-fire-icon { display:inline-grid; width:1.1rem; height:1.1rem; place-items:center; color:#e03145; transform-origin:50% 85%; animation: streak-fire-pulse 1s cubic-bezier(.4,0,.2,1) infinite; }
 :root[data-theme="dark"] .streak-fire-icon { color:#ff6475; }
@@ -863,20 +867,15 @@ nav .nav-group-label:first-child { margin-top: 0; }
    the stored session verifies, so returning learners never see a login flash. */
 .auth-boot-note { display: grid; min-height: 40vh; place-items: center; margin: 0; font-size: 0.875rem; color: var(--jlt-muted); }
 
-/* Brand boot stage v2: the hanko-orange pass draws alone on the warm canvas
+/* Brand boot stage v3: the hanko-orange pass draws alone on the warm canvas
    (white-background video composited with multiply — white turns
-   transparent, ember stays visible), then resolves into the crisp static
-   ink mark. No stacked passes, no muddy overlap. */
+   transparent, ember stays fully visible) carrying its ink-wash audio. */
 .boot-splash { min-height: 62vh; }
-.boot-stage { position: relative; width: min(68vw, 280px); aspect-ratio: 1; }
+.boot-stage { position: relative; display: grid; place-items: center; width: min(68vw, 280px); aspect-ratio: 1; }
 .boot-stage .boot-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; mix-blend-mode: multiply; }
-.boot-stage .boot-mark { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; }
-.boot-stage.boot-resolved .boot-video { opacity: 0; transition: opacity 500ms ease; }
-.boot-stage.boot-resolved .boot-mark { opacity: 1; transition: opacity 500ms ease; }
+.boot-mark { display: block; width: min(56vw, 200px); height: auto; margin-inline: auto; }
 .boot-splash.is-leaving { opacity: 0; transition: opacity 260ms ease; }
 @media (prefers-reduced-motion: reduce) {
-  .boot-stage.boot-resolved .boot-video,
-  .boot-stage.boot-resolved .boot-mark { transition: none; }
   .boot-splash.is-leaving { transition: none; }
 }
 

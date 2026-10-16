@@ -184,7 +184,7 @@ async function bootstrapApp() {
   const reducedMotion = isReducedMotion(window.matchMedia?.bind(window));
   const boot = createBootSplash(document, { markUrl: logoMarkUrl, reducedMotion });
   authRoot.replaceChildren(boot.root);
-  const bootRun = runBootSplash({ ...boot, reducedMotion });
+  const bootRun = runBootSplash({ orange: boot.orange, reducedMotion });
   const openGate = () => {
     bootRun.cancel();
     authRoot.replaceChildren();
