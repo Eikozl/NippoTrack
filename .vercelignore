@@ -1,0 +1,23 @@
+# Vercel source-upload guard (P1 weight diet). Git deployments upload tracked
+# files; this file keeps runtime-irrelevant weight out of every deployment.
+# NEVER exclude /scripts/: client/vite.config.js requires
+# ../scripts/production-guard.js at build time (a past revision broke
+# previews this way). Runtime code (server/src, client/src, client/public,
+# api/, server/data) is untouched by every pattern below.
+/client/android/
+/docs/
+/supabase/.temp/
+/server/.cache-jmdict/
+/client/scripts/
+/server/tests/
+/client/tests/
+brag-output-*/
+backups/
+coverage/
+*.docx
+*.log
+*.apk
+*.aab
+*.keystore
+*.jks
+local.properties
