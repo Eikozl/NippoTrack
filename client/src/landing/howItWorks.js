@@ -4,6 +4,7 @@ import wordmarkLight from '../assets/Logo_Modo_Claro.png';
 import wordmarkDark from '../assets/Logo_Modo_Oscuro.png';
 import { footer, navbar } from './sections.js';
 import { initEstimateRotation, initLandingInteractions } from './interactions.js';
+import { ensureFonts } from '../fonts.js';
 import { initHowItWorksMotion } from './howItWorksMotion.js';
 import { initLandingSmoothScroll } from './smoothScroll.js';
 
@@ -369,10 +370,7 @@ if (root) {
   // Same pre-paint theme sync as the landing boot: dataset + colorScheme +
   // meta theme-color. Pre-paint dataset is also set by theme-init.js.
   applyLandingTheme(initialTheme, themeAssets);
-  const fontStylesheet = document.createElement('link');
-  fontStylesheet.rel = 'stylesheet';
-  fontStylesheet.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700&display=swap';
-  document.head.append(fontStylesheet);
+  ensureFonts(document);
   document.title = 'NippoTrack — How it works';
   document.querySelector('meta[name="description"]')?.setAttribute(
     'content',

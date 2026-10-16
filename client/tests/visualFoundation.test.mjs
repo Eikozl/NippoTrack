@@ -33,11 +33,11 @@ test('Part B tokens extend the canonical layer without duplicates', () => {
 
 // --- buttons -----------------------------------------------------------------
 
-test('Part B buttons: Indigo primary / warm secondary / muted danger, 12px, states', () => {
+test('Part B buttons: sumi primary / warm secondary / muted danger, 12px, states', () => {
   const source = css();
   assert.match(source, /\.button-primary \{[^}]*rounded-\[12px\]/);
-  assert.match(source, /\.button-primary \{[^}]*bg-vermilion/);
-  assert.match(source, /\.button-primary:hover \{[^}]*var\(--jlt-primary-strong\)/);
+  assert.match(source, /\.button-primary \{[^}]*background:\s*var\(--jlt-sumi\)/);
+  assert.match(source, /\.button-primary:hover \{[^}]*var\(--jlt-sumi\)/);
   assert.match(source, /\.button-primary:focus-visible \{[^}]*var\(--nt-focus-ring\)/);
   assert.match(source, /\.button-secondary \{[^}]*rounded-\[12px\]/);
   assert.match(source, /\.button-secondary \{[^}]*background:\s*var\(--jlt-surface\)/);
@@ -53,7 +53,7 @@ test('Part B buttons: Indigo primary / warm secondary / muted danger, 12px, stat
 
 // --- forms -------------------------------------------------------------------
 
-test('Part B forms: warm surfaces, subtle borders, 12px, Indigo focus', () => {
+test('Part B forms: warm surfaces, subtle borders, 12px, hanko focus', () => {
   const source = css();
   assert.match(source, /\.field-control \{[^}]*background:\s*var\(--jlt-surface\)/);
   assert.match(source, /\.field-control \{[^}]*border:\s*1px solid var\(--jlt-border\)/);
@@ -84,7 +84,7 @@ test('Part B badges: muted semantic pills, text labels preserved', () => {
   assert.ok(source.includes('.status-pill--success') && source.includes('var(--jlt-success-soft)'), 'success muted');
   assert.ok(source.includes('.status-pill--warning') && source.includes('var(--jlt-warning-soft)'), 'warning muted');
   assert.ok(source.includes('.status-pill--error') && source.includes('var(--jlt-error-soft)'), 'error muted');
-  assert.ok(source.includes('.status-pill.status-jlpt'), 'JLPT badge muted Indigo');
+  assert.ok(source.includes('.status-pill.status-jlpt'), 'JLPT badge hanko wash');
   assert.ok(source.includes('.status-pill.bg-emerald'), 'saturated chips neutralized via tokens');
   const entity = readSource('src/pages/entityPage.js');
   assert.ok(entity.includes('bg-emerald'), 'entity status strings preserved (CSS mutes them)');
@@ -136,7 +136,8 @@ test('Part B charts: token palette, mechanism kept, no reddish bars', () => {
   assert.ok(charts.includes('chartPalette') && charts.includes('--jlt-chart-'), 'palette reads canonical tokens');
   assert.ok(charts.includes('--nt-chart-') && charts.includes('--nt-accent'), 'canonical fallback path');
   assert.ok(!charts.includes('#c5533f') && !charts.includes('#d8876d'), 'reddish hexes removed');
-  assert.ok(charts.includes('#5A5A8D'), 'muted Indigo fallback only');
+  assert.ok(charts.includes('#B3402E'), 'hanko fallback only');
+  assert.ok(charts.includes('#1C1A18'), 'sumi fallback present');
   assert.ok(charts.includes('prefersReducedMotion') && charts.includes('animation: false'), 'reduced motion kept');
 });
 

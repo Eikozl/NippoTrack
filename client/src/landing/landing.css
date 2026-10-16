@@ -11,6 +11,10 @@
   --landing-canvas: #f5f0e8;
   --landing-surface: #fffcf7;
   --landing-surface-muted: #eee7dc;
+  /* V6 display stack (self-contained: the landing bundle never loads the
+     app stylesheet). */
+  --landing-font-display: "Newsreader", Georgia, "Times New Roman", serif;
+  --landing-font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --landing-text: #111111;
   --landing-text-secondary: #5c5853;
   /* The approved #7B756F remains the source value; this small darkening keeps
@@ -18,9 +22,9 @@
   --landing-text-muted: #726c66;
   --landing-border: #dcd4ca;
   --landing-border-subtle: #e8e1d8;
-  --landing-accent: #5a5a8d;
-  --landing-accent-hover: #4d4d7d;
-  --landing-accent-soft: #e8e7f2;
+  --landing-accent: #b3402e;
+  --landing-accent-hover: #93331f;
+  --landing-accent-soft: #f3ddd6;
   --landing-success: #4e775e;
   /* Reserved counterparts keep the token vocabulary ready for a future dark theme. */
   --landing-canvas-dark: #1c1a18;
@@ -29,7 +33,7 @@
   --landing-text-dark: #f5f0e8;
   --landing-text-secondary-dark: #b8aea4;
   --landing-border-dark: #3a3530;
-  --landing-accent-dark: #9292c8;
+  --landing-accent-dark: #d98a6f;
   --landing-shadow: 0 4px 16px rgba(17, 17, 17, 0.035);
   --landing-shadow-float: 0 12px 36px rgba(17, 17, 17, 0.07);
   --landing-shadow-large: 0 18px 50px rgba(17, 17, 17, 0.055);
@@ -64,7 +68,7 @@
 .landing-page h2,
 .landing-page h3,
 .landing-page h4 {
-  font-family: "Plus Jakarta Sans", Inter, sans-serif;
+  font-family: var(--landing-font-display);
   text-wrap: balance;
 }
 
@@ -81,7 +85,7 @@
 .landing-page a:focus-visible,
 .landing-page button:focus-visible,
 .landing-skip-link:focus-visible {
-  outline: 2px solid var(--landing-accent, #5a5a8d);
+  outline: 2px solid var(--landing-accent, #b3402e);
   outline-offset: 2px;
 }
 
@@ -107,7 +111,7 @@
   padding: 10px 14px;
   border-radius: 8px;
   color: #fff;
-  background: #5a5a8d;
+  background: #1c1a18;
   font: 600 14px/1.4 Inter, sans-serif;
   transform: translateY(-160%);
 }
@@ -127,9 +131,9 @@
   --landing-text-muted: #a89e93;
   --landing-border: #3a3530;
   --landing-border-subtle: #2f2b27;
-  --landing-accent: #9292c8;
-  --landing-accent-hover: #a9a9d6;
-  --landing-accent-soft: rgba(146, 146, 200, 0.16);
+  --landing-accent: #d98a6f;
+  --landing-accent-hover: #e5a183;
+  --landing-accent-soft: rgba(217, 138, 111, 0.16);
   --landing-success: #9ac3a8;
   --landing-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
   --landing-shadow-float: 0 12px 36px rgba(0, 0, 0, 0.32);
@@ -147,13 +151,13 @@
 
 [data-nippotrack-theme="dark"] .landing-page .tone-mist {
   background:
-    radial-gradient(640px 300px at 78% 18%, rgba(146, 146, 200, 0.13), rgba(146, 146, 200, 0) 70%),
+    radial-gradient(640px 300px at 78% 18%, rgba(217, 138, 111, 0.13), rgba(217, 138, 111, 0) 70%),
     #1c1a18;
 }
 
 [data-nippotrack-theme="dark"] .landing-page .tone-hero {
   background:
-    radial-gradient(760px 420px at 72% 42%, rgba(146, 146, 200, 0.13), rgba(146, 146, 200, 0) 68%),
+    radial-gradient(760px 420px at 72% 42%, rgba(217, 138, 111, 0.13), rgba(217, 138, 111, 0) 68%),
     radial-gradient(520px 320px at 88% 78%, rgba(196, 164, 132, 0.08), rgba(196, 164, 132, 0) 70%),
     #1c1a18;
 }
@@ -164,7 +168,7 @@
 
 [data-nippotrack-theme="dark"] .landing-page .tone-analyzer .analyzer-demo {
   background:
-    radial-gradient(420px 220px at 82% 12%, rgba(146, 146, 200, 0.14), rgba(146, 146, 200, 0) 70%),
+    radial-gradient(420px 220px at 82% 12%, rgba(217, 138, 111, 0.14), rgba(217, 138, 111, 0) 70%),
     #24211e;
 }
 
@@ -182,15 +186,20 @@
   border-color: rgba(58, 53, 48, 0.9);
 }
 
-[data-nippotrack-theme="dark"] .landing-page .landing-button-primary,
-[data-nippotrack-theme="dark"] .landing-page .demo-action {
+[data-nippotrack-theme="dark"] .landing-page .landing-button-primary {
   color: #1c1a18 !important;
-  background: var(--landing-accent);
+  background: #f5f0e8;
   box-shadow: 0 5px 14px rgba(0, 0, 0, 0.32);
 }
 
 [data-nippotrack-theme="dark"] .landing-page .landing-button-primary:hover {
-  background: var(--landing-accent-hover);
+  background: #e8e1d8;
+}
+
+[data-nippotrack-theme="dark"] .landing-page .demo-action {
+  color: #1c1a18 !important;
+  background: var(--landing-accent);
+  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.32);
 }
 
 [data-nippotrack-theme="dark"] .landing-page .landing-skip-link {
@@ -209,23 +218,16 @@
 }
 
 [data-nippotrack-theme="dark"] .landing-page .chart-area {
-  fill: rgba(146, 146, 200, 0.14);
+  fill: rgba(217, 138, 111, 0.14);
 }
 
 [data-nippotrack-theme="dark"] .landing-page .review-rating .rating-good,
 [data-nippotrack-theme="dark"] .landing-page .flow-rating .rating-good {
-  border-color: #56567a;
+  color: #1c1a18;
 }
 
 [data-nippotrack-theme="dark"] .landing-page .flow-chips li {
   background: #1c1a18;
-}
-
-[data-nippotrack-theme="dark"] .landing-page .emotional-section {
-  color: #f5f0e8;
-  background: #24211e;
-  border-top: 1px solid #3a3530;
-  border-bottom: 1px solid #3a3530;
 }
 
 [data-nippotrack-theme="dark"] .has-landing {
@@ -359,14 +361,14 @@
 }
 
 .landing-button-primary {
-  color: #fff !important;
-  background: var(--landing-accent);
-  box-shadow: 0 5px 14px rgba(90, 90, 141, 0.17);
+  color: #fffcf7 !important;
+  background: #1c1a18;
+  box-shadow: 0 5px 14px rgba(17, 17, 17, 0.17);
 }
 
 .landing-button-primary:hover {
-  background: var(--landing-accent-hover);
-  box-shadow: 0 7px 18px rgba(77, 77, 125, 0.2);
+  background: #38332d;
+  box-shadow: 0 7px 18px rgba(17, 17, 17, 0.2);
   transform: translateY(-1px);
 }
 
@@ -422,7 +424,7 @@
   position: absolute;
   inset: 0;
   margin: 0;
-  font-family: "Plus Jakarta Sans", Inter, sans-serif;
+  font-family: var(--landing-font-display);
   font-size: clamp(56px, 5vw, 64px);
   font-weight: 700;
   letter-spacing: -0.035em;
@@ -501,6 +503,23 @@
   font-size: 14px;
 }
 
+/* V6 masthead: newspaper issue line + hanko seal beside the wordmark. */
+.landing-issue {
+  margin: 0;
+  border-bottom: 1px solid var(--landing-border-subtle);
+  color: var(--landing-text-muted);
+  font-family: var(--landing-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.landing-issue .landing-container {
+  display: flex;
+  justify-content: flex-start;
+  padding-block: 7px;
+}
+
 .hero-ecosystem {
   position: relative;
   width: min(100%, 560px);
@@ -534,29 +553,6 @@
   min-height: 224px;
   padding: 25px 28px;
   transform: rotate(-1deg);
-}
-
-.demo-label,
-.landing-eyebrow {
-  color: var(--landing-text-muted);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  line-height: 1.4;
-  text-transform: uppercase;
-}
-
-/* Starting-estimate rotation stays width-locked so cycling N5–N1 never
-   shifts layout; only a subtle fade settles each example swap. */
-.estimate-value {
-  display: inline-block;
-  min-width: 2.2ch;
-  font-variant-numeric: tabular-nums;
-  transition: opacity 240ms ease;
-}
-
-.estimate-value.is-switching {
-  opacity: 0;
 }
 
 .hero-japanese {
@@ -641,7 +637,7 @@
 .hero-streak strong {
   display: inline-block;
   margin-top: 5px;
-  font-family: "Plus Jakarta Sans", sans-serif;
+  font-family: var(--landing-font-display), sans-serif;
   font-size: 26px;
   line-height: 1.2;
 }
@@ -675,6 +671,39 @@
   font-weight: 500;
 }
 
+.demo-label {
+  color: var(--landing-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+/* Section eyebrows speak in mono: the cheapest ledger voice. */
+.landing-eyebrow {
+  color: var(--landing-text-muted);
+  font-family: var(--landing-font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+/* Starting-estimate rotation stays width-locked so cycling N5–N1 never
+   shifts layout; only a subtle fade settles each example swap. */
+.estimate-value {
+  display: inline-block;
+  min-width: 2.2ch;
+  font-variant-numeric: tabular-nums;
+  transition: opacity 240ms ease;
+}
+
+.estimate-value.is-switching {
+  opacity: 0;
+}
+
 .landing-section {
   padding-block: 128px;
 }
@@ -691,8 +720,6 @@
 .editorial-content h2,
 .showcase-copy h2,
 .progress-copy h2,
-.tools-heading h2,
-.emotional-section h2,
 .final-cta h2 {
   font-size: clamp(42px, 4.1vw, 48px);
   font-weight: 650;
@@ -707,7 +734,7 @@
   gap: 1px 20px;
   margin-top: 52px !important;
   color: var(--landing-text-secondary);
-  font-family: "Plus Jakarta Sans", sans-serif;
+  font-family: var(--landing-font-display), sans-serif;
   font-size: clamp(27px, 3vw, 38px);
   font-weight: 500;
   line-height: 1.55;
@@ -718,16 +745,6 @@
   color: var(--landing-text-secondary);
   font-size: 18px;
   line-height: 1.65;
-}
-
-.editorial-statement {
-  max-width: 890px;
-  margin-top: 84px !important;
-  font-family: "Plus Jakarta Sans", sans-serif;
-  font-size: clamp(28px, 3.2vw, 39px);
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.32;
 }
 
 .flow-section {
@@ -833,7 +850,7 @@
 
 @keyframes flowWordBeat {
   0% { background-size: 0% 2px; background-color: transparent; }
-  35% { background-size: 100% 2px; background-color: rgba(90, 90, 141, 0.14); }
+  35% { background-size: 100% 2px; background-color: rgba(179, 64, 46, 0.14); }
   100% { background-size: 100% 2px; background-color: transparent; }
 }
 
@@ -881,8 +898,8 @@
 
 @keyframes flowHitBeat {
   0% { background-color: transparent; }
-  35% { background-color: rgba(90, 90, 141, 0.26); }
-  100% { background-color: rgba(90, 90, 141, 0.14); }
+  35% { background-color: rgba(179, 64, 46, 0.26); }
+  100% { background-color: rgba(179, 64, 46, 0.14); }
 }
 
 .flow-reveal {
@@ -953,20 +970,22 @@
 }
 
 .flow-rating .rating-good {
-  border-color: #c8c6dd;
-  color: var(--landing-accent-hover);
-  background: var(--landing-accent-soft);
+  border: 1px solid transparent;
+  color: #fff;
+  background: var(--landing-accent);
+  transform: rotate(-1.5deg);
+  box-shadow: 0 2px 8px rgb(179 64 46 / 0.28);
 }
 
-/* Review Good beat: one brief muted-Indigo ring after the rating appears. */
+/* Review Good beat: one brief hanko ring after the rating appears. */
 .landing-js .landing-page [data-demo="flow"].is-playing .flow-good {
   animation: flowGoodBeat 500ms ease-out var(--step-delay, 2200ms) forwards;
 }
 
 @keyframes flowGoodBeat {
-  0% { box-shadow: 0 0 0 0 rgba(90, 90, 141, 0); }
-  35% { box-shadow: 0 0 0 3px rgba(90, 90, 141, 0.25); }
-  100% { box-shadow: 0 0 0 0 rgba(90, 90, 141, 0); }
+  0% { box-shadow: 0 0 0 0 rgba(179, 64, 46, 0); }
+  35% { box-shadow: 0 0 0 3px rgba(179, 64, 46, 0.25); }
+  100% { box-shadow: 0 0 0 0 rgba(179, 64, 46, 0); }
 }
 
 .flow-connector {
@@ -1009,13 +1028,13 @@
 
 .tone-mist {
   background:
-    radial-gradient(640px 300px at 78% 18%, rgba(90, 90, 141, 0.08), rgba(90, 90, 141, 0) 70%),
+    radial-gradient(640px 300px at 78% 18%, rgba(179, 64, 46, 0.08), rgba(179, 64, 46, 0) 70%),
     var(--landing-canvas);
 }
 
 .tone-hero {
   background:
-    radial-gradient(760px 420px at 72% 42%, rgba(90, 90, 141, 0.09), rgba(90, 90, 141, 0) 68%),
+    radial-gradient(760px 420px at 72% 42%, rgba(179, 64, 46, 0.09), rgba(179, 64, 46, 0) 68%),
     radial-gradient(520px 320px at 88% 78%, rgba(196, 164, 132, 0.1), rgba(196, 164, 132, 0) 70%),
     var(--landing-canvas);
 }
@@ -1027,7 +1046,7 @@
 
 .tone-analyzer .analyzer-demo {
   background:
-    radial-gradient(420px 220px at 82% 12%, rgba(90, 90, 141, 0.1), rgba(90, 90, 141, 0) 70%),
+    radial-gradient(420px 220px at 82% 12%, rgba(179, 64, 46, 0.1), rgba(179, 64, 46, 0) 70%),
     var(--landing-surface);
 }
 
@@ -1053,8 +1072,7 @@
 }
 
 .showcase-copy > p,
-.progress-copy > p,
-.tools-heading > p {
+.progress-copy > p {
   max-width: 530px;
   margin-top: 24px !important;
   color: var(--landing-text-secondary);
@@ -1424,9 +1442,11 @@
 }
 
 .review-rating .rating-good {
-  border-color: #c8c6dd;
-  color: var(--landing-accent-hover);
-  background: var(--landing-accent-soft);
+  border: 1px solid transparent;
+  color: #fff;
+  background: var(--landing-accent);
+  transform: rotate(-1.5deg);
+  box-shadow: 0 2px 8px rgb(179 64 46 / 0.28);
 }
 
 .progress-section {
@@ -1481,7 +1501,7 @@
 
 .progress-metrics strong {
   margin-top: 2px;
-  font-family: "Plus Jakarta Sans", sans-serif;
+  font-family: var(--landing-font-display), sans-serif;
   font-size: 30px;
   line-height: 1.2;
 }
@@ -1522,7 +1542,7 @@
 }
 
 .chart-area {
-  fill: rgba(90, 90, 141, 0.08);
+  fill: rgba(179, 64, 46, 0.08);
   stroke: none;
 }
 
@@ -1629,7 +1649,7 @@
 
 .placement-result > strong {
   margin-top: 22px;
-  font-family: "Plus Jakarta Sans", sans-serif;
+  font-family: var(--landing-font-display), sans-serif;
   font-size: 70px;
   letter-spacing: -0.04em;
   line-height: 1;
@@ -1730,64 +1750,7 @@
   text-decoration: none;
 }
 
-.tools-section {
-  padding-block: 150px;
-  border-top: 1px solid var(--landing-border-subtle);
-}
-
-.tools-heading {
-  display: grid;
-  grid-template-columns: 1fr 0.9fr;
-  align-items: end;
-  gap: 72px;
-}
-
-.tools-heading > p {
-  margin-top: 0 !important;
-}
-
-.tools-list {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  margin: 70px 0 0;
-  padding: 0;
-  border-top: 1px solid var(--landing-border);
-  list-style: none;
-}
-
-.tools-list li {
-  min-height: 92px;
-  padding: 28px 20px 20px 0;
-  border-bottom: 1px solid var(--landing-border);
-  color: var(--landing-text-secondary);
-  font-family: "Plus Jakarta Sans", sans-serif;
-  font-size: 23px;
-  font-weight: 600;
-}
-
-.emotional-section {
-  display: grid;
-  min-height: 540px;
-  place-items: center;
-  padding-block: 120px;
-  color: #f5f0e8;
-  background: #1c1a18;
-  text-align: center;
-}
-
-.emotional-section h2 {
-  max-width: 900px;
-  margin-inline: auto;
-  color: #f5f0e8;
-}
-
-.emotional-section p {
-  margin-top: 24px !important;
-  color: #b8aea4;
-  font-family: "Plus Jakarta Sans", sans-serif;
-  font-size: clamp(23px, 2.8vw, 32px);
-  line-height: 1.35;
-}
+/* V6: tools wall + emotional slab retired from the narrative. */
 
 .final-cta {
   padding-block: 136px;
@@ -1800,10 +1763,20 @@
 
 .final-cta > div > div {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: 25px;
   margin-top: 35px;
+}
+
+.final-cta-micro {
+  margin-top: 26px !important;
+  color: var(--landing-text-muted);
+  font-family: var(--landing-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .landing-footer {
@@ -1855,6 +1828,9 @@
 .footer-bottom p:first-child {
   max-width: 650px;
 }
+
+/* Constellation drift: gentle ambient float on desktop only. The mobile
+   ledger panels stay static; only the headline typing cursor moves there. */
 
 @keyframes heroDriftOne {
   0%, 100% { transform: rotate(-1deg) translate3d(0, 0, 0); }
@@ -2054,8 +2030,7 @@
   }
 
   .showcase-grid,
-  .progress-copy,
-  .tools-heading {
+  .progress-copy {
     gap: 48px;
   }
 
@@ -2109,8 +2084,7 @@
     padding-block: 96px;
   }
 
-  .editorial-section,
-  .tools-section {
+  .editorial-section {
     padding-block: 112px;
   }
 
@@ -2119,8 +2093,7 @@
   }
 
   .showcase-copy > p,
-  .progress-copy > p,
-  .tools-heading > p {
+  .progress-copy > p {
     font-size: 17px;
   }
 
@@ -2324,16 +2297,13 @@
     padding-block: 72px;
   }
 
-  .editorial-section,
-  .tools-section {
+  .editorial-section {
     padding-block: 88px;
   }
 
   .editorial-content h2,
   .showcase-copy h2,
   .progress-copy h2,
-  .tools-heading h2,
-  .emotional-section h2,
   .final-cta h2 {
     font-size: 32px;
     line-height: 1.15;
@@ -2349,11 +2319,6 @@
   .editorial-bridge {
     margin-top: 51px !important;
     font-size: 17px;
-  }
-
-  .editorial-statement {
-    margin-top: 62px !important;
-    font-size: 27px;
   }
 
   .flow-section {
@@ -2410,8 +2375,7 @@
   }
 
   .showcase-grid,
-  .progress-copy,
-  .tools-heading {
+  .progress-copy {
     grid-template-columns: 1fr;
     gap: 34px;
   }
@@ -2422,8 +2386,7 @@
   }
 
   .showcase-copy > p,
-  .progress-copy > p,
-  .tools-heading > p {
+  .progress-copy > p {
     margin-top: 19px !important;
     font-size: 17px;
   }
@@ -2477,22 +2440,6 @@
     inset: 22px;
   }
 
-  .tools-list {
-    grid-template-columns: repeat(2, 1fr);
-    margin-top: 46px;
-  }
-
-  .tools-list li {
-    min-height: 78px;
-    padding: 22px 12px 16px 0;
-    font-size: 19px;
-  }
-
-  .emotional-section {
-    min-height: 430px;
-    padding-block: 88px;
-  }
-
   .final-cta {
     padding-block: 84px;
   }
@@ -2518,18 +2465,6 @@
   }
 }
 
-/* Mobile hero: desktop layered composition stays untouched above this
-   breakpoint. At ~640px the absolute overlap becomes a compact layered
-   constellation grid so Japanese never clips and the page never scrolls
-   horizontally: Starting-estimate | Kanji on the top row, vocabulary
-   dominant full-row in the middle, then Review | Study-streak.
-   Staging rule: the grid owns responsive columns/rows ONLY (no negative
-   vertical margins anywhere — they size tracks unpredictably). All overlap
-   is translate transforms (visual only, deterministic): the top pair slides
-   down under vocabulary's top edge while review/streak rise under its
-   bottom edge, with z-order doing the layering. Cards stay in flow with
-   position: relative. Ambient float is disabled so the constellation stays
-   static. Desktop motion and reduced-motion are unchanged. */
 @media (max-width: 640px) {
   .hero-ecosystem {
     display: grid;
@@ -2642,12 +2577,6 @@
   }
 }
 
-/* Very small widths: keep the layered constellation (no single-column
-   fallback) — just ease it: smaller translate staging (~50-60% of the 640px
-   offsets), tighter satellite padding, and a real row gap so 320px
-   never covers content. transform:none would also kill the staging
-   translates, so each card carries its own explicit (unrotated) transform.
-   Vocabulary dominance survives via the full-row span + ~92% width. */
 @media (max-width: 380px) {
   .hero-ecosystem {
     grid-template-columns: 1fr 1fr;
@@ -2812,10 +2741,6 @@
     min-height: 500px;
   }
 
-  .tools-list li {
-    font-size: 17px;
-  }
-
   .footer-grid {
     grid-template-columns: 1fr 1fr;
   }
@@ -2848,7 +2773,7 @@
   }
 
   .landing-js .landing-page [data-demo="flow"] .flow-sentence-hit {
-    background-color: rgba(90, 90, 141, 0.14);
+    background-color: rgba(179, 64, 46, 0.14);
   }
 
   .landing-js .landing-page [data-demo="flow"] .flow-good {

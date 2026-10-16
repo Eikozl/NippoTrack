@@ -19,6 +19,7 @@ export function navbar(wordmarkUrl, themeAssets = {}, options = {}) {
   const howItWorksCurrent = isHowItWorks ? ' aria-current="page"' : '';
   return `
     <header class="landing-header" data-landing-header>
+      <p class="landing-issue"><span class="landing-container">NippoTrack — Study ledger · N5–N1 · <span lang="ja">日本語</span></span></p>
       <div class="landing-container landing-nav">
         <a class="landing-brand" href="/" aria-label="NippoTrack home">
           <img src="${wordmarkUrl}" data-landing-wordmark data-light-src="${lightSrc}" data-dark-src="${darkSrc}" alt="NippoTrack" width="260" height="88" fetchpriority="high">
@@ -67,7 +68,6 @@ function hero() {
           <p class="landing-lede">Organize what you learn, understand Japanese in context, and keep a clear view of your progress.</p>
           <div class="landing-hero-actions">
             <a class="landing-button landing-button-primary" href="/app?auth=sign-up" data-auth-open="sign-up">Register</a>
-            <a class="landing-button" data-android-download href="https://github.com/Eikozl/NippoTrack/releases/latest">Download on Android</a>
             <a class="landing-text-link landing-arrow-link" href="/how-it-works">See how it works <span aria-hidden="true">→</span></a>
           </div>
           <p class="landing-supporting">Built for the way you already study Japanese.</p>
@@ -110,7 +110,6 @@ function studySources() {
         <h2 id="sources-title">Your Japanese study is already everywhere.</h2>
         <p class="source-words" data-reveal-group><span>Textbooks.</span><span>Anime.</span><span>Manga.</span><span>YouTube.</span><span>Classes.</span><span>Flashcards.</span><span>Conversations.</span></p>
         <p class="editorial-bridge">NippoTrack doesn't replace them.<br>It connects what you learn from them.</p>
-        <p class="editorial-statement">NippoTrack doesn't replace how you learn Japanese.<br>It makes the way you already learn Japanese smarter.</p>
       </div>
     </section>`;
 }
@@ -283,27 +282,10 @@ function firstUseDashboard() {
     </section>`;
 }
 
-function existingTools() {
-  return `
-    <section class="landing-section tools-section tone-canvas" aria-labelledby="tools-title">
-      <div class="landing-container">
-        <div class="tools-heading"><h2 id="tools-title">Keep the tools you already love.</h2><p>NippoTrack is the layer that helps you organize what comes out of them</p><br></div>
-        <ul class="tools-list" role="list"><li>Genki</li><li>Anki</li><li>Bunpro</li><li>Duolingo</li><li>Anime</li><li>Manga</li><li>Classes</li><li>Your own notes</li></ul>
-      </div>
-    </section>`;
-}
-
-function emotionalMoment() {
-  return `
-    <section class="emotional-section" aria-labelledby="emotional-title">
-      <div class="landing-container"><h2 id="emotional-title">Your Japanese journey is already yours.</h2><p>NippoTrack just helps you see it clearly.</p></div>
-    </section>`;
-}
-
 function finalCta() {
   return `
     <section class="final-cta" id="final-cta" aria-labelledby="final-cta-title">
-      <div class="landing-container"><h2 id="final-cta-title">Ready to bring your Japanese study together?</h2><div><a class="landing-button landing-button-primary" href="/app?auth=sign-up" data-auth-open="sign-up">Start with NippoTrack</a><a class="landing-text-link" href="/app?auth=sign-in" data-auth-open="sign-in">Already have an account? Log in</a></div></div>
+      <div class="landing-container"><h2 id="final-cta-title">Ready to bring your Japanese study together?</h2><div><a class="landing-button landing-button-primary" href="/app?auth=sign-up" data-auth-open="sign-up">Start with NippoTrack</a><a class="landing-button" data-android-download href="https://github.com/Eikozl/NippoTrack/releases/latest">Download on Android</a><a class="landing-text-link" href="/app?auth=sign-in" data-auth-open="sign-in">Already have an account? Log in</a></div><p class="final-cta-micro">Free · PWA + Android · Your data stays yours</p></div>
     </section>`;
 }
 
@@ -320,8 +302,8 @@ export function footer(wordmarkUrl, themeAssets = {}, options = {}) {
     <footer class="landing-footer tone-canvas" id="faq">
       <div class="landing-container footer-grid">
         <div class="footer-brand"><img src="${wordmarkUrl}" data-landing-wordmark data-light-src="${lightSrc}" data-dark-src="${darkSrc}" alt="NippoTrack" width="260" height="88" loading="lazy"></div>
-        <div><h2>Product</h2><a href="${featuresHref}">Features</a><a href="${howItWorksHref}">How it works</a></div>
-        <div><h2>Resources</h2><span>About the data</span><span>Third-party notices</span></div>
+        <div><h2>Product</h2><a href="${featuresHref}">Features</a><a href="${howItWorksHref}">How it works</a><a data-android-download href="https://github.com/Eikozl/NippoTrack/releases/latest">Android app</a></div>
+        <div><h2>Data &amp; notices</h2><span>About the data</span><span>Third-party notices</span></div>
         <div><h2>Legal</h2><span>Privacy</span><span>Terms</span></div>
       </div>
       <div class="landing-container footer-bottom"><p>JMdict/EDRDG and KanjiVG data are used within NippoTrack. See third-party notices in the project distribution.</p><p>© 2026 NippoTrack</p></div>
@@ -348,8 +330,6 @@ export function createLandingMarkup(wordmarkUrl, themeAssets = {}) {
         ${progressShowcase()}
         ${onboardingShowcase()}
         ${firstUseDashboard()}
-        ${existingTools()}
-        ${emotionalMoment()}
         ${finalCta()}
       </main>
       ${footer(initialSrc, resolved)}

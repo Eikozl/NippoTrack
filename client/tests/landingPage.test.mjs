@@ -17,8 +17,6 @@ test('landing source follows the approved narrative order', () => {
     'See your learning take shape.',
     'Start from where you are.',
     'Know what to do next.',
-    'Keep the tools you already love.',
-    'Your Japanese journey is already yours.',
     'Ready to bring your Japanese study together?'
   ];
 
@@ -232,6 +230,16 @@ test('mobile hero is a compact layered constellation, static with bounded overla
   assert.ok(cssSource.includes('.hero-vocabulary'));
 });
 
+test('Android download lives only at the close (final CTA + footer), never in the hero', () => {
+  const heroStart = source.indexOf('<section class="landing-hero');
+  const heroBlock = source.slice(heroStart, source.indexOf('</section>', heroStart));
+  assert.ok(!heroBlock.includes('data-android-download'), 'no download hook in hero');
+  assert.ok(!heroBlock.includes('Download on Android'), 'no download copy in hero');
+  const ctaStart = source.indexOf('id="final-cta"');
+  assert.ok(source.slice(ctaStart, ctaStart + 1200).includes('Download on Android'), 'final CTA keeps the download');
+  assert.ok(source.includes('data-android-download'), 'download hook survives at the close');
+});
+
 test('section rhythm uses explicit tonal chapters without alternating washes', () => {
   assert.ok(!cssSource.includes('.showcase-section:nth-of-type(even)::before'));
   for (const tone of ['tone-ivory', 'tone-muted', 'tone-mist', 'tone-canvas', 'tone-hero']) {
@@ -244,15 +252,15 @@ test('section rhythm uses explicit tonal chapters without alternating washes', (
   assert.ok(cssSource.includes('background: #fffcf7'));
   assert.ok(cssSource.includes('.tone-muted'));
   assert.ok(cssSource.includes('.tone-mist'));
-  // Emotional stays a dark charcoal chapter in both themes.
-  assert.ok(cssSource.includes('.emotional-section'));
-  assert.ok(cssSource.includes('background: #1c1a18'));
-  assert.ok(cssSource.includes('background: #24211e'));
+  // V6: tools wall + emotional slab retired; the final CTA carries the close.
+  assert.ok(!source.includes('tools-section'), 'tools wall removed from markup');
+  assert.ok(!source.includes('emotional-section'), 'emotional slab removed from markup');
+  assert.ok(!cssSource.includes('.tools-list'), 'tools styles retired');
 });
 
 test('dark theme remaps land on tokens with no pure black or pure-white text', () => {
   assert.ok(cssSource.includes('[data-nippotrack-theme="dark"] .landing-page'));
-  for (const token of ['#1c1a18', '#24211e', '#2b2723', '#f5f0e8', '#b8aea4', '#3a3530', '#9292c8']) {
+  for (const token of ['#1c1a18', '#24211e', '#2b2723', '#f5f0e8', '#b8aea4', '#3a3530', '#d98a6f']) {
     assert.ok(cssSource.toLowerCase().includes(token), 'missing dark token: ' + token);
   }
   assert.ok(!cssSource.includes('#000000'));
@@ -269,7 +277,7 @@ test('dark theme remaps land on tokens with no pure black or pure-white text', (
 
 test('only approved Japanese examples appear and keep lang="ja"', () => {
   const runs = source.match(/[\u3040-\u30ff\u4e00-\u9faf]+/g) || [];
-  const allowed = new Set(['旅行', 'りょこう', '来年', '日本へ旅行します', '殻', '約束', 'やくそく', '料理', '昨日', '日本', 'を作った', 'りょうり', '日本料理を作った', '雨が降っている', '雨', '降っている', 'あめ', '図書館', 'としょかん', '日', 'ニチ・ジツ', 'ひ・か', '毎朝', '新聞を', '読みます', '読んだ']);
+  const allowed = new Set(['旅行', 'りょこう', '来年', '日本へ旅行します', '殻', '約束', 'やくそく', '料理', '昨日', '日本', 'を作った', 'りょうり', '日本料理を作った', '雨が降っている', '雨', '降っている', 'あめ', '図書館', 'としょかん', '日', 'ニチ・ジツ', 'ひ・か', '毎朝', '新聞を', '読みます', '読んだ', '日本語', '日本語の学びを', 'ひとつに']);
   for (const run of runs) {
     assert.ok(allowed.has(run), 'unexpected Japanese: ' + run);
   }

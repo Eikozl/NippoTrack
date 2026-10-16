@@ -1,16 +1,46 @@
 import {
   Bell, BookMarked, BookOpen, BookOpenText, Bookmark, CalendarDays, CalendarRange, ChartNoAxesCombined, Check, Circle, CircleUserRound,
   Clock, createElement, Ellipsis, FileText, Flag, Flame, Globe, History, House, LayoutDashboard, Library, Languages,
-  Menu, MessagesSquare, Moon, Newspaper, PieChart, Plus, RefreshCw, ScanText, Search, Settings, SlidersHorizontal, Square, Star, Sun, Tag, Target, Trash2, Users, Volume2, VolumeX, X, Zap
+  Menu, Moon, Newspaper, PieChart, Plus, RefreshCw, ScanText, Search, Settings, SlidersHorizontal, Square, Star, Sun, Tag, Target, Trash2, Users, Volume2, VolumeX, X, Zap
 } from 'lucide';
+import vocabularyRasterUrl from './assets/icon-vocabulary.png';
+import grammarRasterUrl from './assets/icon-grammar.png';
+
+// Brand raster glyphs: hand-drawn brush characters (あ for vocabulary, 文
+// for grammar) supplied as thresholded transparent PNGs. Lucide IconNodes
+// cannot carry raster art, so these resolve to <img> through the same
+// icon()/iconTile() API — same sizes, same labels, same tiles. Dark theme
+// inverts them back to paper ink via CSS (.jlt-icon-img), which is exact
+// for monochrome threshold art. Keys stay stable, so every surface (sidebar,
+// headers, tiles) picks the new art with zero markup changes.
+const RASTER_ICONS = {
+  vocabulary: vocabularyRasterUrl,
+  grammar: grammarRasterUrl
+};
+
+function rasterIcon(url, { className = '', size = 20, label } = {}) {
+  const img = document.createElement('img');
+  img.setAttribute('src', url);
+  img.setAttribute('width', String(size));
+  img.setAttribute('height', String(size));
+  img.setAttribute('class', `jlt-icon jlt-icon-img ${className}`.trim());
+  img.setAttribute('draggable', 'false');
+  if (label) {
+    img.setAttribute('role', 'img');
+    img.setAttribute('aria-label', label);
+  } else {
+    img.setAttribute('aria-hidden', 'true');
+  }
+  return img;
+}
 
 const ICONS = {
   dashboard: LayoutDashboard,
   sessions: CalendarDays,
-  vocabulary: BookOpen,
+  vocabulary: 'raster:vocabulary',
   kanji: Languages,
   analyzer: ScanText,
-  grammar: MessagesSquare,
+  grammar: 'raster:grammar',
   goals: Flag,
   content: Library,
   community: Globe,
@@ -72,6 +102,11 @@ const TITLES = {
 };
 
 export function icon(name, { className = '', size = 20, label } = {}) {
+  const mapped = ICONS[name];
+  if (typeof mapped === 'string' && mapped.startsWith('raster:')) {
+    const key = mapped.slice('raster:'.length);
+    if (RASTER_ICONS[key]) return rasterIcon(RASTER_ICONS[key], { className, size, label });
+  }
   const node = createElement(ICONS[name] || Circle, {
     width: size,
     height: size,

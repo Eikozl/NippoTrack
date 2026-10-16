@@ -109,13 +109,19 @@ test('boot shows a neutral splash, never the login form, while verifying', () =>
   assert.ok(boot.indexOf('Checking your session') < boot.indexOf('renderAuthGate'), 'splash renders before any gate');
 });
 
+test('boot splash keeps video out of the critical path', () => {
+  const main = readSource('src/main.js');
+  assert.ok(!main.includes('bootSplash'), 'no animation module in boot');
+  assert.ok(!main.includes('logo-draw'), 'no stroke-draw video in boot');
+});
+
 test('auth emails carry branded buttons and working Supabase variables', () => {
   const welcome = readFileSync(join(root, '../server/auth-emails/confirm-signup.html'), 'utf8');
   const reset = readFileSync(join(root, '../server/auth-emails/reset-password.html'), 'utf8');
   for (const [name, html] of [['welcome', welcome], ['reset', reset]]) {
     assert.ok(html.includes('{{ .ConfirmationURL }}'), name + ' links the Supabase action URL');
     assert.ok(html.includes('{{ .Email }}'), name + ' names the recipient');
-    assert.ok(html.includes('#5A5A8D'), name + ' uses the brand accent');
+    assert.ok(html.includes('#B3402E'), name + ' uses the brand accent');
     assert.ok(html.includes('#FFFCF7') && html.includes('#F5F0E8'), name + ' uses the warm canvas');
   }
   assert.ok(welcome.includes('>Authenticate</a>'), 'welcome CTA is a button, not a bare link');

@@ -12,10 +12,17 @@
 //   lexical parse request only; Kanji-only traffic never pays init cost.
 // - Concurrent first requests share one memoized Promise (no duplicate builds).
 // - Init failure clears the memo so a later request may retry (no poison).
-// - No disk writes, no network calls, no persistence, no logging of user text.
+// - No network calls and no persistence in local/dev/CI: the vendored dict
+//   on disk is used as-is. On serverless (Vercel) the *.dat.gz blobs are NOT
+//   bundled (see vercel.json: no includeFiles) — the pinned public npm copy
+//   is fetched once per instance into ephemeral /tmp and reused while warm.
+//   /tmp holds engine bytes only, never user text.
 // - Synchronous engine parsing cannot be preempted; per-request protection is
 //   the lexical input cap (MAX_LEXICAL_TEXT_LENGTH) plus duration telemetry.
 
+const fs = require('fs');
+const https = require('https');
+const os = require('os');
 const path = require('path');
 
 const ENGINE_NAME = 'kuromoji';
@@ -59,9 +66,8 @@ function enginePackageVersion() {
 }
 
 // Resolve the dictionary directory from the required entry point (not from a
-// hardcoded relative path), so Vercel's bundled layout keeps working as long
-// as the package's JS is traced. The *.dat.gz blobs themselves need explicit
-// function bundle inclusion (see vercel.json includeFiles).
+// hardcoded relative path), so local/dev/CI layouts keep working as long as
+// the package's JS is traced.
 function resolveDictionaryPath() {
   let entry;
   try {
@@ -70,6 +76,106 @@ function resolveDictionaryPath() {
     throw new ParserError('PARSER_INIT_FAILED', 'Japanese parser engine failed to load.');
   }
   return path.join(path.dirname(entry), '..', 'dict');
+}
+
+// IPADIC payload mirrored 1:1 from the pinned npm package (see the jsDelivr
+// default in dictBaseUrl). If the package adds/removes a blob in a future
+// upgrade, the cold-start check below fails loudly instead of half-loading.
+const DICT_FILES = [
+  'base.dat.gz', 'cc.dat.gz', 'check.dat.gz', 'tid.dat.gz', 'tid_map.dat.gz',
+  'tid_pos.dat.gz', 'unk.dat.gz', 'unk_char.dat.gz', 'unk_compat.dat.gz',
+  'unk_invoke.dat.gz', 'unk_map.dat.gz', 'unk_pos.dat.gz'
+];
+
+const DICT_DOWNLOAD_TIMEOUT_MS = 30000;
+const DICT_MAX_REDIRECTS = 3;
+const DICT_DOWNLOAD_RETRIES = 3;
+
+// Cold starts fail as a unit on any transient reset without this: one
+// failed blob out of twelve must not poison the whole boot.
+async function downloadWithRetry(url, dest, attempts = DICT_DOWNLOAD_RETRIES) {
+  let lastError = null;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      await downloadFile(url, dest);
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
+// Public, version-pinned CDN copy of the exact vendored blobs. Overridable
+// via KUROMOJI_DICT_URL (trailing slash optional) for air-gapped mirrors;
+// no secrets involved — IPADIC ships inside a public npm package.
+function dictBaseUrl() {
+  const fromEnv = (process.env.KUROMOJI_DICT_URL || '').trim().replace(/\/+$/, '');
+  if (fromEnv) return fromEnv;
+  const version = enginePackageVersion();
+  if (!version) throw new ParserError('PARSER_INIT_FAILED', 'Japanese parser engine failed to load.');
+  return `https://cdn.jsdelivr.net/npm/@sglkc/kuromoji@${version}/dict`;
+}
+
+function dictComplete(dir) {
+  try {
+    return DICT_FILES.every((file) => {
+      const stat = fs.statSync(path.join(dir, file));
+      return stat.isFile() && stat.size > 0;
+    });
+  } catch (_) {
+    return false;
+  }
+}
+
+function downloadFile(url, dest, redirects = DICT_MAX_REDIRECTS) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, { timeout: DICT_DOWNLOAD_TIMEOUT_MS }, (response) => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location && redirects > 0) {
+        response.resume();
+        resolve(downloadFile(response.headers.location, dest, redirects - 1));
+        return;
+      }
+      if (response.statusCode !== 200) {
+        response.resume();
+        reject(new ParserError('PARSER_INIT_FAILED', 'Japanese parser dictionary unavailable.'));
+        return;
+      }
+      const out = fs.createWriteStream(dest);
+      response.pipe(out);
+      out.on('finish', () => resolve());
+      out.on('error', (error) => {
+        fs.unlink(dest, () => undefined);
+        reject(error instanceof ParserError ? error : new ParserError('PARSER_INIT_FAILED', 'Japanese parser dictionary unavailable.'));
+      });
+    });
+    request.on('timeout', () => request.destroy(new ParserError('PARSER_INIT_FAILED', 'Japanese parser dictionary unavailable.')));
+    request.on('error', () => reject(new ParserError('PARSER_INIT_FAILED', 'Japanese parser dictionary unavailable.')));
+  });
+}
+
+// Cold-start dictionary source. Local/dev/CI (vendored blobs present) return
+// immediately with zero network. Serverless without bundled blobs fetches
+// the pinned public copy once per instance into ephemeral /tmp (warm reuse
+// via the skip-if-complete check above). Never throws raw errors: callers
+// map ParserError to the degraded lexical block.
+async function ensureDictionaryPath() {
+  const local = resolveDictionaryPath();
+  if (dictComplete(local)) return local;
+  const version = enginePackageVersion() || 'remote';
+  const dir = path.join(os.tmpdir(), `kuromoji-dict-${version}`);
+  fs.mkdirSync(dir, { recursive: true });
+  if (dictComplete(dir)) return dir;
+  const base = dictBaseUrl();
+  for (const file of DICT_FILES) {
+    const dest = path.join(dir, file);
+    try {
+      if (fs.statSync(dest).isFile() && fs.statSync(dest).size > 0) continue;
+    } catch (_) { /* missing: download below */ }
+    await downloadWithRetry(`${base}/${file}`, dest);
+  }
+  if (!dictComplete(dir)) throw new ParserError('PARSER_INIT_FAILED', 'Japanese parser dictionary unavailable.');
+  return dir;
 }
 
 function engineMetadata() {
@@ -94,14 +200,14 @@ class ParserError extends Error {
 let tokenizerPromise = null;
 let tokenizerReady = false;
 
-function buildTokenizer() {
+async function buildTokenizer() {
   let kuromoji;
   try {
     kuromoji = require('@sglkc/kuromoji');
   } catch (error) {
     throw new ParserError('PARSER_INIT_FAILED', 'Japanese parser engine failed to load.');
   }
-  const dicPath = resolveDictionaryPath();
+  const dicPath = await ensureDictionaryPath();
   return new Promise((resolve, reject) => {
     let settled = false;
     const timer = setTimeout(() => {
@@ -188,6 +294,7 @@ function resetParserForTests() {
 
 module.exports = {
   ADAPTER_VERSION,
+  DICT_FILES,
   ENGINE_DICTIONARY,
   ENGINE_NAME,
   ENGINE_PACKAGE,
@@ -195,7 +302,10 @@ module.exports = {
   MAX_LEXICAL_TEXT_LENGTH,
   PARSE_TIMEOUT_MS,
   ParserError,
+  dictBaseUrl,
+  dictComplete,
   engineMetadata,
+  ensureDictionaryPath,
   getParserStatus,
   getTokenizer,
   parseJapanese,

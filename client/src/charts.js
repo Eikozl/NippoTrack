@@ -22,14 +22,14 @@ function themeColors() {
   };
 }
 
-/* Muted Indigo/neutral palette read from canonical tokens (Part B).
+/* Sumi + hanko + warm-neutral palette read from canonical tokens (Part B).
  * Keeps the themeColors() mechanism + --jlt-* aliases alive: each entry
  * prefers --jlt-chart-N (which aliases --nt-chart-N and flips per theme),
  * falling back to --nt-chart-N, then to a muted light hex for test envs
- * without computed CSS. No neon, no red-hot bars. */
+ * without computed CSS. Max 2 hues per chart, no neon, no red-hot bars. */
 function chartPalette() {
   const styles = getComputedStyle(document.documentElement);
-  const fallbacks = ['#5A5A8D', '#7C7CA6', '#6E625E', '#A89E93', '#4E775E', '#8A6D3B', '#556B73', '#B59672'];
+  const fallbacks = ['#1C1A18', '#B3402E', '#6E625E', '#A89E93', '#4E775E', '#7A5F2B', '#556B73', '#B59672'];
   return fallbacks.map((fallback, index) => {
     const n = index + 1;
     return styles.getPropertyValue(`--jlt-chart-${n}`).trim()
@@ -42,7 +42,7 @@ function chartPrimary() {
   const styles = getComputedStyle(document.documentElement);
   return styles.getPropertyValue('--jlt-primary').trim()
     || styles.getPropertyValue('--nt-accent').trim()
-    || '#5A5A8D';
+    || '#B3402E';
 }
 
 function prefersReducedMotion() {

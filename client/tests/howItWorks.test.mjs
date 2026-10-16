@@ -62,6 +62,9 @@ test('how-it-works bundle stays isolated from app/supabase/backend code', () => 
       specifier === './sections.js' ||
       specifier === './interactions.js' ||
       specifier === './howItWorksMotion.js' ||
+      // V6 authorizes the shared font loader (presentation-only: appends
+      // the static Google Fonts link, no network/auth/storage of its own).
+      specifier === '../fonts.js' ||
       specifier === './theme.js' ||
       // v5.1-E.3 authorizes Lenis smooth scroll for the public experience.
       // smoothScroll.js is landing-scoped (dynamic lenis import, no backend).

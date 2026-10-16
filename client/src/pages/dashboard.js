@@ -11,7 +11,7 @@ import { applySessionContext } from '../sessionContext.js';
 
 function metric(iconName, label, value, note, page = null, featured = false) {
   const body = [
-    element('div', { className: 'flex items-center gap-3' }, [iconTile(iconName, { className: 'metric-icon' }), element('p', { className: 'text-xs font-semibold uppercase tracking-[0.13em] text-muted', text: label })]),
+    element('div', { className: 'flex items-center gap-3' }, [iconTile(iconName, { className: 'metric-icon' }), element('p', { className: 'metric-label text-xs font-semibold uppercase tracking-[0.13em] text-muted', text: label })]),
     element('p', { className: 'mt-3 font-display text-3xl font-semibold tracking-tight text-ink', text: value }),
     element('p', { className: 'mt-2 text-xs text-muted', text: note })
   ];

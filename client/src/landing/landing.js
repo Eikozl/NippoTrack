@@ -3,6 +3,7 @@ import wordmarkLight from '../assets/Logo_Modo_Claro.png';
 import wordmarkDark from '../assets/Logo_Modo_Oscuro.png';
 import { createLandingMarkup } from './sections.js';
 import { initEstimateRotation, initHeroStreak, initKanjiSequence, initLandingInteractions } from './interactions.js';
+import { ensureFonts } from '../fonts.js';
 import { initLandingSmoothScroll } from './smoothScroll.js';
 import { initAndroidDownload } from './androidRelease.js';
 
@@ -49,10 +50,7 @@ if (root) {
   // colorScheme + meta theme-color. Pre-paint dataset is also set by
   // theme-init.js; this re-syncs meta/wordmark/toggle state.
   applyLandingTheme(initialTheme, themeAssets);
-  const fontStylesheet = document.createElement('link');
-  fontStylesheet.rel = 'stylesheet';
-  fontStylesheet.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700&display=swap';
-  document.head.append(fontStylesheet);
+  ensureFonts(document);
   document.title = 'NippoTrack — Bring your Japanese learning together';
   document.querySelector('meta[name="description"]')?.setAttribute(
     'content',
