@@ -11,6 +11,11 @@
   --landing-canvas: #f5f0e8;
   --landing-surface: #fffcf7;
   --landing-surface-muted: #eee7dc;
+  /* V6 display stack (self-contained: the landing bundle never loads the
+     app stylesheet). TEMP preview alternates Newsreader via
+     data-display-preview="newsreader" (see displayPreview.js). */
+  --landing-font-display: "Fraunces", "Newsreader", Georgia, "Times New Roman", serif;
+  --landing-font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --landing-text: #111111;
   --landing-text-secondary: #5c5853;
   /* The approved #7B756F remains the source value; this small darkening keeps
@@ -18,9 +23,9 @@
   --landing-text-muted: #726c66;
   --landing-border: #dcd4ca;
   --landing-border-subtle: #e8e1d8;
-  --landing-accent: #5a5a8d;
-  --landing-accent-hover: #4d4d7d;
-  --landing-accent-soft: #e8e7f2;
+  --landing-accent: #b3402e;
+  --landing-accent-hover: #93331f;
+  --landing-accent-soft: #f3ddd6;
   --landing-success: #4e775e;
   /* Reserved counterparts keep the token vocabulary ready for a future dark theme. */
   --landing-canvas-dark: #1c1a18;
@@ -29,7 +34,7 @@
   --landing-text-dark: #f5f0e8;
   --landing-text-secondary-dark: #b8aea4;
   --landing-border-dark: #3a3530;
-  --landing-accent-dark: #9292c8;
+  --landing-accent-dark: #d98a6f;
   --landing-shadow: 0 4px 16px rgba(17, 17, 17, 0.035);
   --landing-shadow-float: 0 12px 36px rgba(17, 17, 17, 0.07);
   --landing-shadow-large: 0 18px 50px rgba(17, 17, 17, 0.055);
@@ -64,7 +69,7 @@
 .landing-page h2,
 .landing-page h3,
 .landing-page h4 {
-  font-family: "Plus Jakarta Sans", Inter, sans-serif;
+  font-family: var(--landing-font-display);
   text-wrap: balance;
 }
 
@@ -81,7 +86,7 @@
 .landing-page a:focus-visible,
 .landing-page button:focus-visible,
 .landing-skip-link:focus-visible {
-  outline: 2px solid var(--landing-accent, #5a5a8d);
+  outline: 2px solid var(--landing-accent, #b3402e);
   outline-offset: 2px;
 }
 
@@ -107,13 +112,18 @@
   padding: 10px 14px;
   border-radius: 8px;
   color: #fff;
-  background: #5a5a8d;
+  background: #1c1a18;
   font: 600 14px/1.4 Inter, sans-serif;
   transform: translateY(-160%);
 }
 
 .landing-skip-link:focus {
   transform: translateY(0);
+}
+
+/* TEMP-DISPLAY-PREVIEW — remove before merge to master. */
+:root[data-display-preview="newsreader"] .landing-page {
+  --landing-font-display: "Newsreader", Georgia, "Times New Roman", serif;
 }
 
 /* Dark theme remap: no pure black, no pure-white text. Muted/secondary
@@ -127,9 +137,9 @@
   --landing-text-muted: #a89e93;
   --landing-border: #3a3530;
   --landing-border-subtle: #2f2b27;
-  --landing-accent: #9292c8;
-  --landing-accent-hover: #a9a9d6;
-  --landing-accent-soft: rgba(146, 146, 200, 0.16);
+  --landing-accent: #d98a6f;
+  --landing-accent-hover: #e5a183;
+  --landing-accent-soft: rgba(217, 138, 111, 0.16);
   --landing-success: #9ac3a8;
   --landing-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
   --landing-shadow-float: 0 12px 36px rgba(0, 0, 0, 0.32);
@@ -422,7 +432,7 @@
   position: absolute;
   inset: 0;
   margin: 0;
-  font-family: "Plus Jakarta Sans", Inter, sans-serif;
+  font-family: var(--landing-font-display);
   font-size: clamp(56px, 5vw, 64px);
   font-weight: 700;
   letter-spacing: -0.035em;
@@ -641,7 +651,7 @@
 .hero-streak strong {
   display: inline-block;
   margin-top: 5px;
-  font-family: "Plus Jakarta Sans", sans-serif;
+  font-family: var(--landing-font-display), sans-serif;
   font-size: 26px;
   line-height: 1.2;
 }
@@ -707,7 +717,7 @@
   gap: 1px 20px;
   margin-top: 52px !important;
   color: var(--landing-text-secondary);
-  font-family: "Plus Jakarta Sans", sans-serif;
+  font-family: var(--landing-font-display), sans-serif;
   font-size: clamp(27px, 3vw, 38px);
   font-weight: 500;
   line-height: 1.55;
@@ -723,7 +733,7 @@
 .editorial-statement {
   max-width: 890px;
   margin-top: 84px !important;
-  font-family: "Plus Jakarta Sans", sans-serif;
+  font-family: var(--landing-font-display), sans-serif;
   font-size: clamp(28px, 3.2vw, 39px);
   font-weight: 600;
   letter-spacing: -0.02em;
@@ -1481,7 +1491,7 @@
 
 .progress-metrics strong {
   margin-top: 2px;
-  font-family: "Plus Jakarta Sans", sans-serif;
+  font-family: var(--landing-font-display), sans-serif;
   font-size: 30px;
   line-height: 1.2;
 }
@@ -1629,7 +1639,7 @@
 
 .placement-result > strong {
   margin-top: 22px;
-  font-family: "Plus Jakarta Sans", sans-serif;
+  font-family: var(--landing-font-display), sans-serif;
   font-size: 70px;
   letter-spacing: -0.04em;
   line-height: 1;
@@ -1760,7 +1770,7 @@
   padding: 28px 20px 20px 0;
   border-bottom: 1px solid var(--landing-border);
   color: var(--landing-text-secondary);
-  font-family: "Plus Jakarta Sans", sans-serif;
+  font-family: var(--landing-font-display), sans-serif;
   font-size: 23px;
   font-weight: 600;
 }
@@ -1784,7 +1794,7 @@
 .emotional-section p {
   margin-top: 24px !important;
   color: #b8aea4;
-  font-family: "Plus Jakarta Sans", sans-serif;
+  font-family: var(--landing-font-display), sans-serif;
   font-size: clamp(23px, 2.8vw, 32px);
   line-height: 1.35;
 }

@@ -2,6 +2,12 @@ import { resolveExperience } from './landing/routing.js';
 import { initNativeAuth } from './nativeAuth.js';
 import { supabase } from './authClient.js';
 import { requestPersistentStorage } from './storagePersist.js';
+import { initDisplayPreview } from './displayPreview.js';
+
+// TEMP-DISPLAY-PREVIEW — remove before merge to master.
+try {
+  initDisplayPreview();
+} catch { /* typeface preview is best-effort */ }
 
 // Ask the platform to exclude our origin from automatic website-data
 // eviction (keeps the stored session alive under storage pressure).

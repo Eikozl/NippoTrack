@@ -252,7 +252,7 @@ test('section rhythm uses explicit tonal chapters without alternating washes', (
 
 test('dark theme remaps land on tokens with no pure black or pure-white text', () => {
   assert.ok(cssSource.includes('[data-nippotrack-theme="dark"] .landing-page'));
-  for (const token of ['#1c1a18', '#24211e', '#2b2723', '#f5f0e8', '#b8aea4', '#3a3530', '#9292c8']) {
+  for (const token of ['#1c1a18', '#24211e', '#2b2723', '#f5f0e8', '#b8aea4', '#3a3530', '#d98a6f']) {
     assert.ok(cssSource.toLowerCase().includes(token), 'missing dark token: ' + token);
   }
   assert.ok(!cssSource.includes('#000000'));

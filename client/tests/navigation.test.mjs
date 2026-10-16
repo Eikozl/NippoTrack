@@ -115,7 +115,7 @@ test('auth emails carry branded buttons and working Supabase variables', () => {
   for (const [name, html] of [['welcome', welcome], ['reset', reset]]) {
     assert.ok(html.includes('{{ .ConfirmationURL }}'), name + ' links the Supabase action URL');
     assert.ok(html.includes('{{ .Email }}'), name + ' names the recipient');
-    assert.ok(html.includes('#5A5A8D'), name + ' uses the brand accent');
+    assert.ok(html.includes('#B3402E'), name + ' uses the brand accent');
     assert.ok(html.includes('#FFFCF7') && html.includes('#F5F0E8'), name + ' uses the warm canvas');
   }
   assert.ok(welcome.includes('>Authenticate</a>'), 'welcome CTA is a button, not a bare link');

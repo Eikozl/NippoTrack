@@ -38,6 +38,11 @@ jobs:
       - name: Build frontend
         run: npm --prefix client run build
 
+      - name: UI identity lint (informational, non-blocking)
+        run: |
+          matches=$(grep -rn -E "from-(indigo|blue|violet)-[0-9]+.*via-(purple|fuchsia)|via-purple.*to-pink|background-clip:text" client/src || true)
+          if [ -n "$matches" ]; then echo "$matches"; else echo "ui-lint: no banned gradient/text-clip patterns"; fi
+
       - name: Audit runtime dependencies
         run: |
           npm --prefix server audit --omit=dev --audit-level=high

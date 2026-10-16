@@ -2,7 +2,7 @@
    Static foundation only: layout, rhythm, and readable fallbacks.
    - Colors, shadows, and focus come from landing.css tokens consumed here
      exclusively via var(--landing-*). No one-off color values.
-   - Type inherits the landing stack (Plus Jakarta Sans / Inter /
+   - Type inherits the landing stack (V6 display / Inter /
      Noto Sans JP for [lang="ja"]); no new families are introduced.
    - Chapter visuals and motion scope any initial-hidden state under
      html.hiw-js so the no-JS final state below always stays readable. */

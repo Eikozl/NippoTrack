@@ -57,14 +57,16 @@ function contrastRatio(foreground, background) {
 
 // --- canonical tokens -------------------------------------------------------
 
-test('Canonical NippoTrack tokens match the frozen public palette', () => {
+test('Canonical NippoTrack tokens match the study-ledger palette', () => {
   assert.equal(ntToken('--nt-canvas'), '#F5F0E8');
   assert.equal(ntToken('--nt-surface'), '#FFFCF7');
-  assert.equal(ntToken('--nt-surface-muted'), '#EEE7DC');
-  assert.equal(ntToken('--nt-text'), '#111111');
-  assert.equal(ntToken('--nt-accent'), '#5A5A8D');
-  assert.equal(ntToken('--nt-accent-hover'), '#4D4D7D');
-  assert.equal(ntToken('--nt-accent-soft'), '#E8E7F2');
+  assert.equal(ntToken('--nt-surface-muted'), '#ECE5D8');
+  assert.equal(ntToken('--nt-text'), '#1B1713');
+  assert.equal(ntToken('--nt-accent'), '#B3402E');
+  assert.equal(ntToken('--nt-accent-hover'), '#93331F');
+  assert.equal(ntToken('--nt-accent-soft'), '#F3DDD6');
+  assert.equal(ntToken('--nt-sumi'), '#1C1A18');
+  assert.equal(ntToken('--nt-sumi-contrast'), '#FFFCF7');
   assert.ok(tokens.includes('--nt-surface-raised'));
   assert.ok(tokens.includes('--nt-text-secondary'));
   assert.ok(tokens.includes('--nt-border'));
@@ -74,14 +76,14 @@ test('Canonical NippoTrack tokens match the frozen public palette', () => {
   assert.ok(tokens.includes('--nt-radius-sm'));
   assert.ok(tokens.includes('--nt-radius-full'));
   // Dark canonical values.
-  for (const dark of ['#1C1A18', '#24211E', '#2B2723', '#F5F0E8', '#B8AEA4', '#3A3530', '#9292C8']) {
+  for (const dark of ['#1C1A18', '#24211E', '#2B2723', '#F5F0E8', '#B8AEA4', '#3A3530', '#D98A6F']) {
     assert.ok(tokens.toLowerCase().includes(dark.toLowerCase()), 'dark canonical present: ' + dark);
   }
 });
 
 // --- light aliases ----------------------------------------------------------
 
-test('Light theme: app tokens alias the canonical layer (muted Indigo)', () => {
+test('Light theme: app tokens alias the canonical layer (sumi + hanko)', () => {
   const block = lightBlock();
   assert.equal(token(block, '--jlt-bg'), 'var(--nt-canvas)');
   assert.equal(token(block, '--jlt-surface'), 'var(--nt-surface)');
@@ -117,20 +119,20 @@ test('Light theme: browser chrome tint follows the NippoTrack canvas', () => {
 test('Light theme: text contrast meets WCAG AA on canonical surfaces', () => {
   const bg = '#F5F0E8';
   const surface = '#FFFCF7';
-  const soft = '#EEE7DC';
-  const ink = '#111111';
+  const soft = '#ECE5D8';
+  const ink = '#1B1713';
   const muted = '#5C5853';
-  const primary = '#5A5A8D';
-  const strong = '#4D4D7D';
+  const primary = '#B3402E';
+  const strong = '#93331F';
   assert.ok(contrastRatio(ink, surface) >= 7, `primary text on cards: ${contrastRatio(ink, surface).toFixed(2)}`);
   assert.ok(contrastRatio(ink, bg) >= 7, `primary text on page: ${contrastRatio(ink, bg).toFixed(2)}`);
   assert.ok(contrastRatio(muted, surface) >= 4.5, `secondary text on cards: ${contrastRatio(muted, surface).toFixed(2)}`);
   assert.ok(contrastRatio(muted, bg) >= 4.5, `secondary text on page: ${contrastRatio(muted, bg).toFixed(2)}`);
   assert.ok(contrastRatio(muted, soft) >= 4.5, `secondary text on soft surfaces: ${contrastRatio(muted, soft).toFixed(2)}`);
-  assert.ok(contrastRatio(primary, surface) >= 4.5, `indigo accents/links on cards: ${contrastRatio(primary, surface).toFixed(2)}`);
-  assert.ok(contrastRatio(primary, bg) >= 4.5, `indigo accents on page: ${contrastRatio(primary, bg).toFixed(2)}`);
-  assert.ok(contrastRatio('#ffffff', strong) >= 4.5, `white button text on hover indigo: ${contrastRatio('#ffffff', strong).toFixed(2)}`);
-  assert.ok(contrastRatio('#ffffff', primary) >= 4.5, `white text on indigo: ${contrastRatio('#ffffff', primary).toFixed(2)}`);
+  assert.ok(contrastRatio(primary, surface) >= 4.5, `hanko accents/links on cards: ${contrastRatio(primary, surface).toFixed(2)}`);
+  assert.ok(contrastRatio(primary, bg) >= 4.5, `hanko accents on page: ${contrastRatio(primary, bg).toFixed(2)}`);
+  assert.ok(contrastRatio('#ffffff', strong) >= 4.5, `white button text on hover hanko: ${contrastRatio('#ffffff', strong).toFixed(2)}`);
+  assert.ok(contrastRatio('#ffffff', primary) >= 4.5, `white text on hanko: ${contrastRatio('#ffffff', primary).toFixed(2)}`);
   // Destructive actions keep their Tailwind red on light surfaces.
   assert.ok(contrastRatio('#b91c1c', '#ffffff') >= 4.5, `destructive red on white: ${contrastRatio('#b91c1c', '#ffffff').toFixed(2)}`);
 });
@@ -148,15 +150,15 @@ test('Dark theme: app tokens alias the canonical dark layer', () => {
   assert.doesNotMatch(block, /#202428[^;]*#202428[^;]*#30363c/);
 });
 
-test('Dark theme: canonical Indigo accents stay readable on charcoal', () => {
+test('Dark theme: canonical hanko accents stay readable on sumi', () => {
   const bg = '#1C1A18';
   const soft = '#2B2723';
   const muted = '#B8AEA4';
-  const primary = '#9292C8';
+  const primary = '#D98A6F';
   assert.ok(contrastRatio(muted, soft) >= 4.5, `dark secondary text on soft surfaces: ${contrastRatio(muted, soft).toFixed(2)}`);
   assert.ok(contrastRatio(primary, bg) >= 4.5, `dark accent on canvas: ${contrastRatio(primary, bg).toFixed(2)}`);
   assert.ok(contrastRatio('#1C1A18', primary) >= 4.5, `dark button text on accent: ${contrastRatio('#1C1A18', primary).toFixed(2)}`);
-  assert.match(css, /:root\[data-theme="dark"\] \.button-primary \{[^}]*background:\s*var\(--jlt-primary\)/);
+  assert.match(css, /:root\[data-theme="dark"\] \.button-primary \{[^}]*background:\s*var\(--jlt-sumi\)/);
 });
 
 // --- blue audit + semantic preservation ---------------------------------------

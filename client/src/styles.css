@@ -7,9 +7,9 @@
   --color-stone: var(--jlt-border);
   --color-ink: var(--jlt-ink);
   --color-muted: var(--jlt-muted);
-  /* Brand accent (muted Indigo). Legacy `vermilion` names stay as aliases
-     so existing Tailwind classes (text-vermilion, bg-vermilion, …) keep
-     working while rendering Indigo. New code should prefer `accent`. */
+  /* Brand accent (shu vermilion hanko). Legacy `vermilion` names stay as
+     aliases so existing Tailwind classes (text-vermilion, bg-vermilion, …)
+     keep working while rendering hanko. New code should prefer `accent`. */
   --color-vermilion: var(--jlt-primary);
   --color-vermilion-dark: var(--jlt-primary-strong);
   --color-vermilion-soft: var(--jlt-primary-soft);
@@ -17,20 +17,31 @@
   --color-accent-dark: var(--jlt-primary-strong);
   --color-accent-soft: var(--jlt-primary-soft);
   --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-display: "Plus Jakarta Sans", Inter, ui-sans-serif, system-ui, sans-serif;
+  /* V6 display: Fraunces editorial serif (TEMP preview alternates with
+     Newsreader via data-display-preview="newsreader"; see displayPreview.js,
+     remove before merge to master). */
+  --font-display: "Fraunces", "Newsreader", Georgia, "Times New Roman", serif;
   --font-jp: "Noto Sans JP", Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* TEMP-DISPLAY-PREVIEW — remove before merge to master. */
+:root[data-display-preview="newsreader"] {
+  --font-display: "Newsreader", Georgia, "Times New Roman", serif;
 }
 
 @layer base {
   :root {
     color-scheme: light;
     /* NippoTrack canonical aliases (values live in tokens.css).
-       Light: warm canvas #F5F0E8, surface #FFFCF7, muted Indigo accent.
+       Light: warm canvas #F5F0E8, surface #FFFCF7, sumi primary fills,
+       shu-vermilion hanko accents.
        Dark flips via --nt-* when data-theme="dark" (see tokens.css). */
     --jlt-bg: var(--nt-canvas); --jlt-surface: var(--nt-surface); --jlt-surface-soft: var(--nt-surface-muted); --jlt-border: var(--nt-border);
     --jlt-ink: var(--nt-text); --jlt-muted: var(--nt-text-secondary); --jlt-primary: var(--nt-accent);
     --jlt-primary-strong: var(--nt-accent-hover); --jlt-primary-soft: var(--nt-accent-soft);
     --jlt-accent-contrast: var(--nt-accent-contrast);
+    --jlt-sumi: var(--nt-sumi); --jlt-sumi-contrast: var(--nt-sumi-contrast);
     --jlt-success: var(--nt-success); --jlt-success-soft: var(--nt-success-soft);
     --jlt-warning: var(--nt-warning); --jlt-warning-soft: var(--nt-warning-soft);
     --jlt-error: var(--nt-error); --jlt-error-soft: var(--nt-error-soft);
@@ -55,6 +66,7 @@
     --jlt-ink: var(--nt-text); --jlt-muted: var(--nt-text-secondary); --jlt-primary: var(--nt-accent);
     --jlt-primary-strong: var(--nt-accent-hover); --jlt-primary-soft: var(--nt-accent-soft);
     --jlt-accent-contrast: var(--nt-accent-contrast);
+    --jlt-sumi: var(--nt-sumi); --jlt-sumi-contrast: var(--nt-sumi-contrast);
     --jlt-success: var(--nt-success); --jlt-success-soft: var(--nt-success-soft);
     --jlt-warning: var(--nt-warning); --jlt-warning-soft: var(--nt-warning-soft);
     --jlt-error: var(--nt-error); --jlt-error-soft: var(--nt-error-soft);
@@ -105,10 +117,11 @@
      Prominent surfaces (charts, dialogs, heroes) use 20px via their own
      classes below. No new wrappers — existing .surface markup only. */
   .surface { @apply rounded-[16px]; background:var(--jlt-surface); border:1px solid var(--nt-border-subtle); box-shadow:var(--nt-shadow-sm); }
-  /* Buttons: Indigo primary, warm-neutral secondary, muted-red danger.
-     12px radius, token surfaces, visible hover/active/disabled/loading. */
-  .button-primary { @apply inline-flex min-h-11 items-center justify-center rounded-[12px] bg-vermilion px-4 py-2 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-55; border:1px solid transparent; box-shadow:var(--nt-shadow-sm); color:var(--jlt-accent-contrast); }
-  .button-primary:hover { background:var(--jlt-primary-strong); } .button-primary:active { box-shadow:var(--shadow-inset-sm); }
+  /* Buttons: sumi-ink primary (paper fill in dark), warm-neutral
+     secondary, muted-red danger. 12px radius, token surfaces,
+     visible hover/active/disabled/loading. */
+  .button-primary { @apply inline-flex min-h-11 items-center justify-center rounded-[12px] px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-55; border:1px solid transparent; box-shadow:var(--nt-shadow-sm); background:var(--jlt-sumi); color:var(--jlt-sumi-contrast); }
+  .button-primary:hover { background:color-mix(in srgb, var(--jlt-sumi) 90%, var(--jlt-sumi-contrast)); } .button-primary:active { box-shadow:var(--shadow-inset-sm); }
   .button-primary:focus-visible { outline:2px solid var(--nt-focus-ring); outline-offset:2px; }
   .button-primary:disabled { box-shadow:none; }
   .button-secondary { @apply inline-flex min-h-11 items-center justify-center rounded-[12px] px-4 py-2 text-sm font-semibold text-ink transition disabled:cursor-not-allowed disabled:opacity-55; background:var(--jlt-surface); border:1px solid var(--jlt-border); box-shadow:var(--nt-shadow-sm); }
@@ -393,8 +406,8 @@
 :root[data-theme="dark"] .text-ink\/70 { color: color-mix(in srgb, var(--jlt-ink) 90%, var(--jlt-surface)) !important; }
 :root .text-ink\/80,
 :root .text-ink\/70 { color: color-mix(in srgb, var(--jlt-ink) 88%, var(--jlt-surface)) !important; }
-:root[data-theme="dark"] .button-primary { color: #241F1C !important; background: var(--jlt-primary) !important; }
-:root[data-theme="dark"] .button-primary:hover { background: var(--jlt-primary-strong) !important; }
+:root[data-theme="dark"] .button-primary { color: var(--jlt-sumi-contrast) !important; background: var(--jlt-sumi) !important; }
+:root[data-theme="dark"] .button-primary:hover { background: color-mix(in srgb, var(--jlt-sumi) 90%, var(--jlt-sumi-contrast)) !important; }
 :root[data-theme="dark"] .button-secondary { color: #f4f7fb !important; }
 :root[data-theme="dark"] .field-control option { color:#f4f7fb; background:#202428; }
 :root[data-theme="dark"] .button-danger { color: #ffb8b0 !important; background: #3b292c !important; }
