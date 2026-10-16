@@ -5,6 +5,7 @@
   "outputDirectory": "client/dist",
   "functions": {
     "api/*.js": {
+      "excludeFiles": "server/node_modules/@sglkc/kuromoji/dict/*.dat.gz",
       "maxDuration": 60
     }
   },
