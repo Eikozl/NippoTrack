@@ -31,7 +31,6 @@ export function element(tagName, { className, text, attrs, dataset } = {}, child
 export function pageHeader({ eyebrow: _eyebrow, title, description, action }) {
   const heading = element('h1', { className: 'font-display text-2xl font-semibold tracking-tight text-ink sm:text-3xl', text: title });
   const copy = element('div', {}, [
-    ledgerKicker(title),
     element('div', { className: 'mt-2' }, [heading]),
     element('p', { className: 'mt-2 max-w-2xl text-sm leading-6 text-muted', text: description })
   ]);
