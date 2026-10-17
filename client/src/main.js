@@ -204,9 +204,9 @@ async function bootstrapApp() {
     currentAuthEmail = session.user?.email || localAuthBypassEmail || null;
     profileStore.setEmail(currentAuthEmail);
     authRoot.replaceChildren();
-    // First-open mobile logo draw-in: plays once, then yields to the shell.
-    // Fail-open: never blocks the app if the animation module misbehaves.
-    if (!hasSeenLogoAnimation() && window.matchMedia('(max-width: 640px)').matches) {
+    // Mobile logo draw-in on every session start: plays at each login, then
+    // yields to the shell. Fail-open: never blocks the app.
+    if (window.matchMedia('(max-width: 640px)').matches) {
       await mountLogoAnimation(document.body).catch(() => undefined);
     }
     appShell.hidden = false;

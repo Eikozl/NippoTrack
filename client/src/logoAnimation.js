@@ -1,4 +1,4 @@
-// Logo draw-in animation — shown once on first mobile open.
+// Logo draw-in animation — shown on every session start (mobile).
 // Renders the NippoTrack wordmark as an SVG whose strokes are drawn
 // progressively (stroke-dashoffset), then fades out and yields to the
 // normal PNG wordmark. Fail-open: any failure resolves immediately so the
