@@ -289,13 +289,13 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   // lg:left shifts the anchor by half the sidebar (8.5rem) so -translate-x-1/2
   // centers the pill within the MAIN CONTENT column. Below lg there is no
   // sidebar (off-canvas drawer), so the base left-1/2 viewport centering stays.
-  tabs.className = 'community-bottom-nav fixed bottom-4 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 items-center justify-between gap-1 rounded-full border border-stone/60 bg-paper/80 px-2 py-1 shadow-lg backdrop-blur-md lg:left-[calc(50%+8.5rem)]';
+  tabs.className = 'community-bottom-nav fixed bottom-4 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 items-center justify-between gap-1 rounded-full border border-stone/60 bg-paper/80 px-2 py-0.5 shadow-lg backdrop-blur-md lg:left-[calc(50%+8.5rem)]';
   tabs.setAttribute('role', 'tablist');
   tabs.setAttribute('aria-label', 'Community sections');
   // Safe-area: the pill floats above the home indicator, never under it.
-  tabs.style.paddingBottom = 'max(0.5rem, env(safe-area-inset-bottom))';
+  tabs.style.paddingBottom = 'max(0.25rem, env(safe-area-inset-bottom))';
   // Reserve room so the floating pill never covers the last posts or pager.
-  body.style.paddingBottom = '4.5rem';
+  body.style.paddingBottom = '3.5rem';
 
   const tabDefs = [
     { key: 'feed', label: 'Home', iconName: 'home' },
@@ -320,27 +320,29 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     tabs.appendChild(button);
   }
 
-  // Share (+) FAB — floats bottom-right, above the More button.
-  // Square shape, 15% larger than the in-pill buttons (44px → 51px).
+  // Share (+) — bottom nav button, square, 15% larger than the in-pill tabs (44px → 51px).
   // Light theme: black bg + vermilion cross. Dark theme: white bg + vermilion cross.
-  const shareFab = element('button', {
-    className: 'fixed bottom-[130px] right-4 z-50 grid w-[51px] h-[51px] shrink-0 place-items-center rounded-xl transition hover:bg-paper/20 border',
-    attrs: { type: 'button', 'aria-label': 'Share something — open the composer' }
-  }, [icon('plus', { size: 24, label: 'Share something' })]);
-  function applyFabTheme() {
+  const addBtn = element('button', {
+    className: 'relative flex flex-col items-center shrink-0 min-h-[51px] min-w-[56px] rounded-xl transition hover:bg-paper/20 border',
+    attrs: { type: 'button', 'aria-label': 'Add' }
+  }, [
+    icon('plus', { size: 24 }),
+    element('span', { className: 'mt-1 text-[10px] font-medium leading-none', text: 'Add' })
+  ]);
+  function applyAddBtnTheme() {
     const dark = document.documentElement.dataset.theme === 'dark';
-    shareFab.className = 'fixed bottom-[130px] right-4 z-50 grid w-[51px] h-[51px] shrink-0 place-items-center rounded-xl transition hover:bg-paper/20 border ' +
+    addBtn.className = 'relative flex flex-col items-center shrink-0 min-h-[51px] min-w-[56px] rounded-xl transition hover:bg-paper/20 border ' +
       (dark ? 'bg-white text-[#e03145] border-stone/60 shadow-lg' : 'bg-black text-[#e03145] border-stone/60 shadow-lg');
   }
-  applyFabTheme();
-  window.addEventListener('jlt-theme-change', applyFabTheme);
-  shareFab.addEventListener('click', () => {
+  applyAddBtnTheme();
+  window.addEventListener('jlt-theme-change', applyAddBtnTheme);
+  addBtn.addEventListener('click', () => {
     openComposerDialog(async () => {
       if (state.profile || state.tab !== 'feed') await showTab('feed');
       else renderFeedRoot();
     });
   });
-  document.body.appendChild(shareFab);
+  tabs.appendChild(addBtn);
 
   // Overflow menu (three-dots): profiles were reachable only from
   // publications, so the "…" entry is now a small popup menu instead of a
