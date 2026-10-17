@@ -438,7 +438,7 @@ function placementResultNode(el, options = {}) {
       }, [
         el('span', { className: 'min-w-0 break-words text-sm font-semibold text-ink', text: placementBandRowText(band, entry.correct, entry.total) }),
         el('span', {
-          className: 'shrink-0 text-sm tracking-[0.2em] text-muted',
+          className: 'shrink-0 text-sm tracking-[0.08em] text-muted',
           text: placementBandDots(entry.correct, entry.total),
           attrs: { 'aria-hidden': 'true' }
         }),
@@ -1020,7 +1020,7 @@ function renderPlacement(container, deps = {}) {
       });
       return el('div', { className: 'flex min-w-0 flex-col gap-2 rounded-xl border border-stone p-3 sm:flex-row sm:items-center sm:justify-between' }, [
         el('div', { className: 'min-w-0' }, [
-          el('p', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: `Question ${position + 1}` }),
+          el('p', { className: 'text-xs font-semibold uppercase tracking-[0.08em] text-muted', text: `Question ${position + 1}` }),
           answerNode
         ]),
         change

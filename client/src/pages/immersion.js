@@ -142,7 +142,7 @@ export async function renderImmersion(container) {
       const items = Array.isArray(candidates[key]) ? candidates[key] : [];
       const section = element('section', { className: 'surface p-5 sm:p-6', attrs: { 'aria-label': label } });
       section.appendChild(element('div', { className: 'flex flex-wrap items-center justify-between gap-3' }, [
-        element('h2', { className: 'text-sm font-bold uppercase tracking-[0.12em] text-ink', text: `${label.toUpperCase()} · ${items.length}` })
+        element('h2', { className: 'text-sm font-bold uppercase tracking-[0.08em] text-ink', text: `${label.toUpperCase()} · ${items.length}` })
       ]));
 
       if (!items.length) {

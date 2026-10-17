@@ -39,7 +39,7 @@ export function openEnrollDialog(storyId, storyTitle, preview, meta = {}) {
     });
     picks.push(boxes);
     return element('div', { className: 'grid gap-1.5' }, [
-      element('p', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: `${label} (${entries.length})` }),
+      element('p', { className: 'text-xs font-semibold text-muted uppercase tracking-[0.08em]', text: `${label} (${entries.length})` }),
       element('div', { className: 'grid max-h-44 gap-1 overflow-y-auto' }, entries.map((entry, index) => {
         const play = element('button', { className: 'icon-button shrink-0', attrs: { type: 'button', 'aria-label': `Play ${candidateLabel(kind, entry)} aloud` } }, [icon('volume', { size: 18 })]);
         play.addEventListener('click', () => {
