@@ -1,4 +1,6 @@
 import './styles.css';
+import { mountAppIconAnimation, hasSeenAppIconAnimation, createAppIconAnimationStyles } from './appIconAnimation';
+import { mountLogoAnimation, hasSeenLogoAnimation, createLogoAnimationStyles } from './logoAnimation';
 import lightBrandLogo from './assets/Logo_Modo_Claro_App.png';
 import darkBrandLogo from './assets/Logo_Modo_Oscuro_App.png';
 import { APP_THEME_META, applyAppThemeAttributes, isAllowedAppTheme, persistAppTheme, resolveAppTheme, wordmarkForAppTheme } from './appTheme';
@@ -93,6 +95,9 @@ document.querySelectorAll('[data-jlt-icon]').forEach((holder) => {
   holder.appendChild(icon(moduleIconMap[holder.dataset.jltIcon] || holder.dataset.jltIcon, { size: 19 }));
 });
 document.documentElement.dataset.theme = savedTheme;
+// Inject app-icon animation styles early so the first-paint overlay is never
+// unstyled (avoids a flash of the low-res favicon before the draw-in).
+document.head.appendChild(createAppIconAnimationStyles());
 // Hotfix: prepaint sets BOTH attributes — runtime must keep them in sync or
 // a stale data-nippotrack-theme keeps dark tokens active after toggling.
 applyAppThemeAttributes(savedTheme);
@@ -182,6 +187,11 @@ async function bootstrapApp() {
     renderAuthGate('', initialAuthView);
   };
   try {
+    // App icon draw-in first: plays once on first open while assets load,
+    // then yields to the shell. Fail-open: never blocks the app.
+    if (!hasSeenAppIconAnimation() && window.matchMedia('(max-width: 640px)').matches) {
+      await mountAppIconAnimation(document.body).catch(() => undefined);
+    }
     if (!localAuthBypass) {
       const { data } = await supabase.auth.getSession();
       if (!data.session) { openGate(); return; }
