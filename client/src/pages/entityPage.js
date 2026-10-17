@@ -143,10 +143,10 @@ export const ENTITY_CONFIGS = {
                 : element('span', { className: 'status-pill shrink-0 text-xs', text: 'No reference data' }))
           ]),
           element('dl', { className: 'mt-2 grid gap-2 text-sm sm:grid-cols-2' }, [
-            element('div', {}, [element('dt', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Your on\u2019yomi (note \u2014 not from this word)' }), element('dd', { className: 'mt-1 text-ink/80', text: kanji.userOnyomi || 'Not recorded' })]),
-            element('div', {}, [element('dt', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Your kun\u2019yomi (note \u2014 not from this word)' }), element('dd', { className: 'mt-1 text-ink/80', text: kanji.userKunyomi || 'Not recorded' })]),
-            element('div', {}, [element('dt', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Reference on\u2019yomi (context only)' }), element('dd', { className: 'mt-1 text-ink/80', text: kanji.referenceOnyomi || '—' })]),
-            element('div', {}, [element('dt', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Reference kun\u2019yomi (context only)' }), element('dd', { className: 'mt-1 text-ink/80', text: kanji.referenceKunyomi || '—' })])
+            element('div', {}, [element('dt', { className: 'text-xs font-semibold text-muted uppercase tracking-[0.08em]', text: 'Your on\u2019yomi (note \u2014 not from this word)' }), element('dd', { className: 'mt-1 text-ink/80', text: kanji.userOnyomi || 'Not recorded' })]),
+            element('div', {}, [element('dt', { className: 'text-xs font-semibold text-muted uppercase tracking-[0.08em]', text: 'Your kun\u2019yomi (note \u2014 not from this word)' }), element('dd', { className: 'mt-1 text-ink/80', text: kanji.userKunyomi || 'Not recorded' })]),
+            element('div', {}, [element('dt', { className: 'text-xs font-semibold text-muted uppercase tracking-[0.08em]', text: 'Reference on\u2019yomi (context only)' }), element('dd', { className: 'mt-1 text-ink/80', text: kanji.referenceOnyomi || '—' })]),
+            element('div', {}, [element('dt', { className: 'text-xs font-semibold text-muted uppercase tracking-[0.08em]', text: 'Reference kun\u2019yomi (context only)' }), element('dd', { className: 'mt-1 text-ink/80', text: kanji.referenceKunyomi || '—' })])
           ]),
           ...(kanji.referenceMeanings ? [element('p', { className: 'mt-2 text-xs text-muted', text: `Reference meanings: ${kanji.referenceMeanings}${kanji.referenceJlptLevel ? ` · JLPT ${kanji.referenceJlptLevel} (Reference)` : ''}` })] : []),
           ...(!kanji.inUserCollection && kanji.importable ? [element('button', { className: 'button-secondary mt-3 min-h-9 px-3 py-1.5', text: 'Add to My Kanji', attrs: { type: 'button', 'data-kanji-add': kanji.character } })] : []),
@@ -269,7 +269,7 @@ renderDetail: (item) => {
             element('div', { className: 'kanji-fact' }, [element('dt', { className: 'text-muted', text: 'Session Writing Sources' }), element('dd', { className: 'mt-1 font-medium text-ink', text: String(encounters.bySource.find(s => s.sourceType === 'session_writing')?.count || 0) })])
           ]),
           encounters.recent?.length ? element('div', { className: 'mt-4' }, [
-            element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Recent Encounters (max 5)' }),
+            element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-[0.08em]', text: 'Recent Encounters (max 5)' }),
             element('ul', { className: 'mt-2 grid gap-2' }, encounters.recent.map((enc) => element('li', { className: 'text-sm text-ink/80 flex items-center gap-2' }, [
               element('span', { className: 'status-pill text-xs', text: enc.sourceType === 'vocabulary' ? 'Vocab' : 'Writing' }),
               element('span', { text: enc.sourceTitle || `Source #${enc.sourceId}` }),
@@ -308,11 +308,11 @@ renderDetail: (item) => {
         element('section', { className: 'kanji-detail-section surface p-5' }, [
           element('h3', { className: 'font-semibold text-ink', text: 'Personal Notes' }),
           notes ? element('div', { className: 'mt-2' }, [
-            element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Kanji Notes' }),
+            element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-[0.08em]', text: 'Kanji Notes' }),
             element('p', { className: 'mt-2 whitespace-pre-wrap text-sm leading-6 text-ink/80', text: notes })
           ]) : null,
           linkedNotes.length ? element('div', { className: 'mt-4' }, [
-            element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Linked Notes' }),
+            element('h4', { className: 'text-xs font-semibold text-muted uppercase tracking-[0.08em]', text: 'Linked Notes' }),
             element('div', { className: 'mt-2 grid gap-2' }, linkedNotes.map((note) => element('article', { className: 'detail-panel p-3' }, [
               element('h5', { className: 'font-medium text-ink', text: note.title || 'Untitled' }),
               element('p', { className: 'mt-1 text-sm text-muted', text: note.category }),
@@ -1022,7 +1022,7 @@ export function renderEntityPage(container, config) {
               : [element('p', { className: 'text-sm text-muted', text: 'No tags yet.' })])
           );
           if (suggested.length) {
-            tagsSlot.append(element('p', { className: 'mt-3 text-xs font-semibold text-muted uppercase tracking-wide', text: 'Suggested' }));
+            tagsSlot.append(element('p', { className: 'mt-3 text-xs font-semibold text-muted uppercase tracking-[0.08em]', text: 'Suggested' }));
             const row = element('div', { className: 'mt-1 flex flex-wrap gap-2' });
             for (const name of suggested) {
               const add = element('button', { className: 'button-secondary min-h-8 px-2.5 py-1 text-xs', text: `Add ${name}`, attrs: { type: 'button' } });

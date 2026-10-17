@@ -11,7 +11,7 @@ import { applySessionContext } from '../sessionContext.js';
 
 function metric(iconName, label, value, note, page = null, featured = false) {
   const body = [
-    element('div', { className: 'flex items-center gap-3' }, [iconTile(iconName, { className: 'metric-icon' }), element('p', { className: 'metric-label text-xs font-semibold uppercase tracking-[0.13em] text-muted', text: label })]),
+    element('div', { className: 'flex items-center gap-3' }, [iconTile(iconName, { className: 'metric-icon' }), element('p', { className: 'metric-label text-xs font-semibold uppercase tracking-[0.08em] text-muted', text: label })]),
     element('p', { className: 'mt-3 font-display text-3xl font-semibold tracking-tight text-ink', text: value }),
     element('p', { className: 'mt-2 text-xs text-muted', text: note })
   ];
@@ -56,7 +56,7 @@ function studyNowSection(studyNow) {
       element('div', { className: 'min-w-0' }, [
         element('h2', { className: 'mt-1 font-display text-lg font-semibold tracking-tight text-ink', text: primary.title || 'Keep studying' }),
         element('p', { className: 'mt-1 max-w-2xl text-sm leading-6 text-muted', text: primary.reason || '' }),
-        ...(primary.estimate ? [element('p', { className: 'mt-2 text-xs font-semibold uppercase tracking-[0.13em] text-muted', text: primary.estimate })] : [])
+        ...(primary.estimate ? [element('p', { className: 'mt-2 text-xs font-semibold uppercase tracking-[0.08em] text-muted', text: primary.estimate })] : [])
       ]),
       element('div', { className: 'flex shrink-0 items-center gap-3' }, [cta])
     ])
@@ -185,7 +185,7 @@ function todayProgressSection(studyNow) {
           return;
         }
         host.replaceChildren(...groups.filter(([, items]) => items.length).map(([label, items]) => element('div', { className: 'grid min-w-0 gap-2' }, [
-          element('p', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: `${label} (${items.length})` }),
+          element('p', { className: 'text-xs font-semibold uppercase tracking-[0.08em] text-muted', text: `${label} (${items.length})` }),
           element('ul', { className: 'grid min-w-0 gap-1.5', attrs: { role: 'list' } }, items.map((item) => element('li', { className: 'min-w-0 rounded-xl border border-stone bg-paper px-3 py-2' }, [
             element('p', { className: 'break-words font-jp text-sm font-semibold text-ink', text: item.display, attrs: { lang: 'ja' } }),
             ...([item.reading, item.meaning].filter(Boolean).length

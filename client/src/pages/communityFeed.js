@@ -203,7 +203,7 @@ function statsBlock(stats) {
   if (!rows.length) return null;
   const asOf = stats.asOf ? `verified snapshot · ${stats.asOf}` : 'verified snapshot';
   return element('div', { className: 'mt-3 rounded-xl border border-stone bg-paper p-3', attrs: { 'aria-label': 'Verified study snapshot' } }, [
-    element('p', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: 'Study snapshot' }),
+    element('p', { className: 'text-xs font-semibold uppercase tracking-[0.08em] text-muted', text: 'Study snapshot' }),
     element('ul', { className: 'mt-2 grid gap-1 text-sm text-ink/90', attrs: { role: 'list' } }, rows.map((line) => element('li', { className: 'tabular-nums', text: line }))),
     element('p', { className: 'mt-2 text-xs text-muted', text: asOf })
   ]);
@@ -806,7 +806,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     if (post.postType === 'share_deck' && post.deckId) {
       const title = snapshot?.title || 'Shared deck';
       return element('div', { className: 'mt-3 rounded-xl border border-stone bg-paper p-3' }, [
-        element('p', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: '📚 Deck' }),
+        element('p', { className: 'text-xs font-semibold uppercase tracking-[0.08em] text-muted', text: '📚 Deck' }),
         element('p', { className: 'mt-1 break-words font-semibold text-ink', text: title }),
         ...(snapshot?.itemCount !== undefined ? [element('p', { className: 'mt-1 text-xs text-muted', text: `${snapshot.itemCount} items${snapshot.entityType ? ` · ${snapshot.entityType}` : ''}` })] : []),
         element('div', { className: 'mt-2 flex flex-wrap gap-2' }, [openDeckButton(post.deckId, title)])
@@ -820,7 +820,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
       // Import + preview-as-Read reuse existing flows read-only.
       const levelText = snapshot?.level ? `Level ${snapshot.level} (reference)` : 'No level';
       return element('div', { className: 'mt-3 rounded-xl border border-stone bg-paper p-3' }, [
-        element('p', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: '📖 Reading — tap the title for a preview' }),
+        element('p', { className: 'text-xs font-semibold uppercase tracking-[0.08em] text-muted', text: '📖 Reading — tap the title for a preview' }),
         readingPreviewButton(post.readingId, title),
         ...(snapshot ? [element('p', { className: 'mt-1 text-xs text-muted', text: `${levelText}${snapshot.chars ? ` · ${Number(snapshot.chars).toLocaleString()} characters` : ''}`, attrs: { title: 'Reference level — not official JLPT data' } })] : []),
         element('div', { className: 'mt-2 flex flex-wrap gap-2' }, [importReadingButton(post.readingId)])
@@ -828,7 +828,7 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
     }
     if ((post.postType === 'share_vocab' || post.postType === 'share_kanji' || post.postType === 'share_grammar') && snapshot?.display) {
       return element('div', { className: 'mt-3 rounded-xl border border-stone bg-paper p-3' }, [
-        element('p', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: 'Shared learning item' }),
+        element('p', { className: 'text-xs font-semibold uppercase tracking-[0.08em] text-muted', text: 'Shared learning item' }),
         element('p', { className: 'mt-1 break-words font-jp text-lg font-semibold text-ink', text: snapshot.display, attrs: { lang: 'ja' } }),
         ...(snapshot.reading ? [element('p', { className: 'break-words font-jp text-sm text-muted', text: snapshot.reading, attrs: { lang: 'ja' } })] : []),
         ...(snapshot.meaning ? [element('p', { className: 'mt-1 break-words text-sm text-ink/80', text: snapshot.meaning })] : []),
@@ -879,7 +879,7 @@ function openDefineDialog(sentence) {
       return button;
     };
     const group = (label, items, kind) => (items.length ? element('div', { className: 'grid gap-2' }, [
-      element('p', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: label }),
+      element('p', { className: 'text-xs font-semibold uppercase tracking-[0.08em] text-muted', text: label }),
       element('div', { className: 'flex flex-wrap gap-2' }, items.map((item) => chip(item, kind)))
     ]) : null);
     host.replaceChildren(
@@ -902,7 +902,7 @@ function openDefinitionDialog(item, kind, contextSentence) {
   const content = [
     ...(item.reading ? [element('p', { className: 'break-words font-jp text-sm text-muted', text: item.reading, attrs: { lang: 'ja' } })] : []),
     element('div', { className: 'rounded-xl bg-vermilion-soft p-3', attrs: { 'aria-label': 'Meaning' } }, [
-      ...(item.owned && item.meaning ? [element('p', { className: 'mb-1 text-[11px] font-semibold uppercase tracking-wide text-vermilion', text: 'Your definition' })] : []),
+      ...(item.owned && item.meaning ? [element('p', { className: 'mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-vermilion', text: 'Your definition' })] : []),
       element('p', { className: 'min-w-0 break-words text-sm leading-6 text-ink', text: item.meaning || 'No definition available — the dictionary has no entry and it is not in your library.' })
     ]),
     element('details', { className: 'surface min-w-0 p-3' }, [

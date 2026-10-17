@@ -256,7 +256,7 @@ async function renderLibraryView(container) {
         attrs: { role: 'button', tabindex: '0', 'aria-label': `Open ${item.title}` }
       }, [
         element('div', { className: 'flex items-center justify-between gap-2' }, [
-          element('span', { className: 'text-xs uppercase tracking-wide text-muted', text: item.sourceType || 'user' }),
+          element('span', { className: 'text-xs uppercase tracking-[0.08em] text-muted', text: item.sourceType || 'user' }),
           levelPill(effectiveReadingLevel(item.id, item.level)) || element('span', { className: 'text-xs text-muted', text: '—' })
         ]),
         element('p', { className: 'font-semibold text-ink', text: item.title }),
@@ -1234,7 +1234,7 @@ async function renderReader(container, textId) {
       content: [
         ...(token.surfaceReading ? [element('p', { className: 'font-jp text-sm text-muted sm:col-span-2', text: token.surfaceReading, attrs: { lang: 'ja' } })] : []),
         element('div', { className: 'rounded-xl bg-vermilion-soft p-3 sm:col-span-2', attrs: { 'aria-label': 'Meaning' } }, [
-          ...(token.known === true && token.gloss ? [element('p', { className: 'mb-1 text-[11px] font-semibold uppercase tracking-wide text-vermilion', text: 'Your definition' })] : []),
+          ...(token.known === true && token.gloss ? [element('p', { className: 'mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-vermilion', text: 'Your definition' })] : []),
           element('p', { className: 'min-w-0 break-words text-sm leading-6 text-ink', text: token.gloss || 'No dictionary gloss is available for this item.' })
         ]),
         ...((token.lemma && surface && surface !== token.lemma)
@@ -1302,7 +1302,7 @@ async function renderReader(container, textId) {
       content: [
         ...(annotation.reading ? [element('p', { className: 'font-jp text-sm text-muted sm:col-span-2', text: annotation.reading, attrs: { lang: 'ja' } })] : []),
         element('div', { className: 'rounded-xl bg-vermilion-soft p-3 sm:col-span-2', attrs: { 'aria-label': 'Meaning' } }, [
-          ...(alreadyAdded && (annotation.meaning || annotation.explanation) ? [element('p', { className: 'mb-1 text-[11px] font-semibold uppercase tracking-wide text-vermilion', text: 'Your definition' })] : []),
+          ...(alreadyAdded && (annotation.meaning || annotation.explanation) ? [element('p', { className: 'mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-vermilion', text: 'Your definition' })] : []),
           element('p', { className: 'min-w-0 break-words text-sm leading-6 text-ink', text: annotation.meaning || annotation.explanation || 'No dictionary gloss is available for this item.' })
         ]),
         ...((baseForm && surface && surface !== baseForm)
@@ -1476,7 +1476,7 @@ async function renderReader(container, textId) {
   const headerCard = element('div', { className: 'surface mt-3 grid min-w-0 gap-3 p-4' }, [
     element('div', { className: 'flex min-w-0 flex-wrap items-start justify-between gap-3' }, [
       element('div', { className: 'min-w-0' }, [
-        element('p', { className: 'break-words text-xs font-semibold uppercase tracking-[0.16em] text-vermilion', text: `${data.level || 'No level'} · ${paragraphCount} paragraph${paragraphCount === 1 ? '' : 's'}` }),
+        element('p', { className: 'break-words text-xs font-semibold uppercase tracking-[0.08em] text-vermilion', text: `${data.level || 'No level'} · ${paragraphCount} paragraph${paragraphCount === 1 ? '' : 's'}` }),
         statusLine
       ]),
       modeGroup
@@ -1611,7 +1611,7 @@ async function renderReader(container, textId) {
   const anotherStoryButton = element('button', { className: 'button-secondary min-h-9 px-4 py-2 text-xs', text: 'Read another story', attrs: { type: 'button' } });
   anotherStoryButton.addEventListener('click', () => { window.location.hash = 'reading'; });
   const endCard = element('section', { className: 'surface mt-4 min-w-0 p-5 sm:p-6', attrs: { 'aria-label': 'End of story' } }, [
-    element('p', { className: 'text-xs font-semibold uppercase tracking-[0.16em] text-vermilion', text: 'You reached the end' }),
+    element('p', { className: 'text-xs font-semibold uppercase tracking-[0.08em] text-vermilion', text: 'You reached the end' }),
     element('p', { className: 'mt-2 font-display text-lg font-semibold text-ink', text: 'Finish this story and choose your next step.' }),
     element('div', { className: 'mt-4 grid gap-2 sm:justify-items-start' }, [finishButton, reviewSavedButton, anotherStoryButton])
   ]);
@@ -1762,7 +1762,7 @@ async function renderProgressView(container) {
   const maxMinutes = Math.max(1, ...weekly.map((week) => week.minutes));
 
   const statCard = (label, value) => element('div', { className: 'surface p-4' }, [
-    element('p', { className: 'text-xs uppercase tracking-wide text-muted', text: label }),
+    element('p', { className: 'text-xs uppercase tracking-[0.08em] text-muted', text: label }),
     element('p', { className: 'mt-1 text-2xl font-semibold text-ink', text: value })
   ]);
 

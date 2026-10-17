@@ -1,4 +1,4 @@
-import { icon, iconForTitle, iconTile } from './icons';
+import { icon, iconTile } from './icons';
 import { t } from './i18n';
 import { setActionPending } from './pendingAction';
 
@@ -29,17 +29,13 @@ export function element(tagName, { className, text, attrs, dataset } = {}, child
 // @deprecated The `eyebrow` param is deprecated (accepted but never rendered);
 // tests pin this shape, so it stays instead of being removed.
 export function pageHeader({ eyebrow: _eyebrow, title, description, action }) {
-  const headerIcon = iconForTitle(title);
-  const heading = element('div', { className: 'flex items-center gap-3' }, [
-    ...(headerIcon ? [iconTile(headerIcon, { className: 'page-header-icon' })] : []),
-    element('h1', { className: 'font-display text-2xl font-semibold tracking-tight text-ink sm:text-3xl', text: title })
-  ]);
+  const heading = element('h1', { className: 'font-display text-2xl font-semibold tracking-tight text-ink sm:text-3xl', text: title });
   const copy = element('div', {}, [
     ledgerKicker(title),
     element('div', { className: 'mt-2' }, [heading]),
     element('p', { className: 'mt-2 max-w-2xl text-sm leading-6 text-muted', text: description })
   ]);
-  return element('header', { className: 'mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between' }, [copy, action]);
+  return element('header', { className: 'page-header mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between' }, [copy, action]);
 }
 
 // V6 identity: ledger running-heads (hashira). Every page header opens

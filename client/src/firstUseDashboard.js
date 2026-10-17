@@ -201,7 +201,7 @@ function renderFirstUseDashboard(container, deps = {}) {
   };
 
   const targetRow = el('div', {}, [
-    el('dt', { className: 'text-xs font-semibold uppercase tracking-[0.13em] text-muted', text: FIRST_USE_COPY.targetLabel }),
+    el('dt', { className: 'text-xs font-semibold uppercase tracking-[0.08em] text-muted', text: FIRST_USE_COPY.targetLabel }),
     el('dd', { className: 'mt-1 text-sm font-semibold text-ink', text: formatFirstUseTarget(firstExperience?.targetLevel) })
   ]);
   // One-time starting point: not_started/skipped keep the Take CTA on the
@@ -212,7 +212,7 @@ function renderFirstUseDashboard(container, deps = {}) {
   const storedPlacement = placementResultFromState(firstExperience);
   const estimateRow = storedPlacement?.source === 'self_reported'
     ? el('div', {}, [
-      el('dt', { className: 'text-xs font-semibold uppercase tracking-[0.13em] text-muted', text: FIRST_USE_COPY.startingLevelLabel }),
+      el('dt', { className: 'text-xs font-semibold uppercase tracking-[0.08em] text-muted', text: FIRST_USE_COPY.startingLevelLabel }),
       el('dd', { className: 'mt-2 min-w-0' }, [
         selfReportResultNode(el, {
           estimate: storedPlacement.estimate,
@@ -223,7 +223,7 @@ function renderFirstUseDashboard(container, deps = {}) {
     ])
     : storedPlacement
       ? el('div', {}, [
-        el('dt', { className: 'text-xs font-semibold uppercase tracking-[0.13em] text-muted', text: FIRST_USE_COPY.estimateLabel }),
+        el('dt', { className: 'text-xs font-semibold uppercase tracking-[0.08em] text-muted', text: FIRST_USE_COPY.estimateLabel }),
         el('dd', { className: 'mt-1 min-w-0' }, [
           el('p', { className: 'text-xs text-muted', text: FIRST_USE_COPY.quizSourceLabel }),
           el('div', { className: 'mt-2' }, [
@@ -237,7 +237,7 @@ function renderFirstUseDashboard(container, deps = {}) {
         ])
       ])
       : el('div', {}, [
-      el('dt', { className: 'text-xs font-semibold uppercase tracking-[0.13em] text-muted', text: FIRST_USE_COPY.estimateLabel }),
+      el('dt', { className: 'text-xs font-semibold uppercase tracking-[0.08em] text-muted', text: FIRST_USE_COPY.estimateLabel }),
       el('dd', { className: 'mt-1 text-sm font-semibold text-ink', text: firstUseEstimateLabel(firstExperience) }),
       (() => {
         const take = el('button', {
@@ -252,7 +252,7 @@ function renderFirstUseDashboard(container, deps = {}) {
   const sourceLabels = firstUseSourceLabels(firstExperience?.onboarding?.studySources);
   const rows = sourceLabels.length
     ? [...[targetRow, estimateRow], el('div', {}, [
-      el('dt', { className: 'text-xs font-semibold uppercase tracking-[0.13em] text-muted', text: FIRST_USE_COPY.sourcesLabel }),
+      el('dt', { className: 'text-xs font-semibold uppercase tracking-[0.08em] text-muted', text: FIRST_USE_COPY.sourcesLabel }),
       el('dd', { className: 'mt-1 text-sm font-semibold text-ink', text: sourceLabels.join(', ') })
     ])]
     : [targetRow, estimateRow];

@@ -1585,7 +1585,7 @@ const CARD_TYPE_DESCRIPTIONS = {
 
       const section = element('section', { className: 'surface p-5 sm:p-6', attrs: { 'aria-label': TYPE_LABEL[type] } });
       const headingRow = element('div', { className: 'flex flex-wrap items-center justify-between gap-3' }, [
-        element('h2', { className: 'text-sm font-bold uppercase tracking-[0.12em] text-ink', text: `${TYPE_HEADING[type]} · ${total}` })
+        element('h2', { className: 'text-sm font-bold uppercase tracking-[0.08em] text-ink', text: `${TYPE_HEADING[type]} · ${total}` })
       ]);
       const listActions = element('div', { className: 'flex flex-wrap gap-2' });
       const selectAllButton = element('button', { className: 'button-secondary min-h-9 px-3 py-1.5 text-sm', text: 'Select all', attrs: { type: 'button' } });
@@ -1828,7 +1828,7 @@ const CARD_TYPE_DESCRIPTIONS = {
       if (picked === 'recall' && !item.meaning) return 'recognition';
       return picked;
     })();
-    const typePill = element('span', { className: 'text-xs font-semibold uppercase tracking-wide text-muted', text: CARD_TYPE_LABEL[cardType] || cardType, attrs: { 'aria-label': `Card type ${CARD_TYPE_LABEL[cardType] || cardType}` } });
+    const typePill = element('span', { className: 'text-xs font-semibold uppercase tracking-[0.08em] text-muted', text: CARD_TYPE_LABEL[cardType] || cardType, attrs: { 'aria-label': `Card type ${CARD_TYPE_LABEL[cardType] || cardType}` } });
     const frontText = cardType === 'recall' ? item.meaning : cardType === 'audio' ? 'Listen and recall' : item.display;
     const title = element('h2', { className: 'mt-2 break-words text-3xl font-semibold tracking-tight text-ink', text: frontText, attrs: { tabindex: '-1' } });
     // Speaker lives beside the heading so the front/answer toggle never removes it,

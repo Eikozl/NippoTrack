@@ -74,7 +74,7 @@ export function normalizeKanjiOwnedIdentity(item = {}) {
 
 function readingFact(h, term, value) {
   return h('div', { className: 'kanji-fact' }, [
-    h('dt', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: term }),
+    h('dt', { className: 'text-xs font-semibold text-muted uppercase tracking-[0.08em]', text: term }),
     h('dd', { className: 'mt-1 font-jp text-sm text-ink/80', text: value, attrs: { lang: 'ja' } })
   ]);
 }

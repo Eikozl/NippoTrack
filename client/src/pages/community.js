@@ -130,7 +130,7 @@ function itemDetailView(entry, entityType) {
     apiRequest(endpoint).then((detail) => {
       const examples = Array.isArray(detail?.examples) ? detail.examples : [];
       if (!examples.length) return;
-      extras.append(element('p', { className: 'text-xs font-semibold text-muted uppercase tracking-wide', text: 'Usage examples' }));
+      extras.append(element('p', { className: 'text-xs font-semibold text-muted uppercase tracking-[0.08em]', text: 'Usage examples' }));
       extras.append(element('ul', { className: 'grid w-full min-w-0 max-w-full grid-cols-1 gap-2', attrs: { role: 'list' } }, examples.slice(0, 3).map((example) => element('li', { className: 'min-w-0 max-w-full wrap-anywhere break-words rounded-md bg-paper p-2 text-sm' }, [
         element('p', { className: 'font-jp text-ink', text: example.sentence, attrs: { lang: 'ja' } }),
         ...(example.translation ? [element('p', { className: 'mt-1 text-xs text-muted', text: example.translation })] : [])
