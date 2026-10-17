@@ -1,0 +1,11 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .n-stroke { fill: none; stroke: currentColor; stroke-width: 3.4; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+  </defs>
+  <g class="n-stroke">
+    <path d="M 20 18 L 20 44" />
+    <path d="M 44 18 Q 20 18 20 44 Q 20 54 30 54 Q 40 54 44 44 L 48 36" />
+  </g>
+</svg>
