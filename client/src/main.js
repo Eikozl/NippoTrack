@@ -1,4 +1,5 @@
 import './styles.css';
+import { mountLogoAnimation, hasSeenLogoAnimation, createLogoAnimationStyles } from './logoAnimation';
 import lightBrandLogo from './assets/Logo_Modo_Claro_App.png';
 import darkBrandLogo from './assets/Logo_Modo_Oscuro_App.png';
 import { APP_THEME_META, applyAppThemeAttributes, isAllowedAppTheme, persistAppTheme, resolveAppTheme, wordmarkForAppTheme } from './appTheme';
@@ -17,6 +18,9 @@ import { authViewFromSearch } from './landing/routing';
 
 const content = document.getElementById('app-content');
 const authRoot = document.getElementById('auth-root');
+// Inject logo-animation styles early so the first-paint overlay is never
+// unstyled (avoids a flash of the PNG wordmark before the draw-in).
+document.head.appendChild(createLogoAnimationStyles());
 const appShell = document.getElementById('app-shell');
 const initialAuthView = authViewFromSearch(window.location.search);
 const sidebar = document.getElementById('sidebar');
@@ -191,6 +195,11 @@ async function bootstrapApp() {
     currentAuthEmail = session.user?.email || localAuthBypassEmail || null;
     profileStore.setEmail(currentAuthEmail);
     authRoot.replaceChildren();
+    // First-open mobile logo draw-in: plays once, then yields to the shell.
+    // Fail-open: never blocks the app if the animation module misbehaves.
+    if (!hasSeenLogoAnimation() && window.matchMedia('(max-width: 640px)').matches) {
+      await mountLogoAnimation(document.body).catch(() => undefined);
+    }
     appShell.hidden = false;
     // Profile identity is presentation-only and never blocks the shell. The
     // cached store is shared by the user menu and Settings so opening the menu
