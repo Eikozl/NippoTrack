@@ -2832,3 +2832,123 @@
 html.lenis, html.lenis body { height: auto; }
 .lenis.lenis-smooth { scroll-behavior: auto !important; }
 .lenis.lenis-stopped { overflow: hidden; }
+/* ── Mobile landing: simplify the start ──
+   On narrow screens the landing carries too much information. Hide the
+   editorial/flow/progress/onboarding chapters so the mobile start is just:
+   logo → hero (with the ecosystem cards) → final CTA. Everything else stays
+   intact for desktop and for visitors who scroll past the fold. */
+@media (max-width: 640px) {
+  .landing-page .editorial-section,
+  .landing-page .flow-section,
+  .landing-page .progress-section,
+  .landing-page .onboarding-showcase,
+  .landing-page .first-use-dashboard {
+    display: none !important;
+  }
+
+  .landing-hero {
+    padding-top: 40px;
+    padding-bottom: 32px;
+    min-height: 0;
+  }
+  .landing-hero h1,
+  .hero-typing {
+    font-size: clamp(32px, 10vw, 44px);
+    line-height: 1.1;
+  }
+  .landing-lede {
+    font-size: 16px;
+    line-height: 1.55;
+  }
+  .landing-hero-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    margin-top: 20px;
+  }
+  .landing-hero-actions .landing-button {
+    width: 100%;
+    justify-content: center;
+  }
+  .landing-hero-actions .landing-arrow-link {
+    width: auto;
+    justify-content: center;
+  }
+
+  .hero-ecosystem {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+    margin-top: 16px !important;
+    width: 100% !important;
+    height: auto !important;
+  }
+  .hero-ecosystem .hero-card {
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    bottom: auto !important;
+    right: auto !important;
+    width: auto !important;
+    min-height: 0 !important;
+    margin: 0 auto !important;
+    animation: none !important;
+    transform: none !important;
+    max-width: 260px;
+  }
+  .hero-ecosystem::before {
+    display: none !important;
+  }
+
+  .final-cta {
+    padding-block: 64px 24px !important;
+  }
+  .final-cta h2 {
+    font-size: clamp(24px, 6vw, 32px) !important;
+    line-height: 1.2;
+  }
+  .final-cta > div > div {
+    flex-direction: column !important;
+    gap: 14px !important;
+    margin-top: 24px !important;
+  }
+  .final-cta > div > div > * {
+    width: 100% !important;
+  }
+
+  .landing-footer {
+    padding-block: 48px 20px !important;
+  }
+  .footer-grid {
+    grid-template-columns: 1fr !important;
+    gap: 28px !important;
+  }
+  .footer-grid > div {
+    gap: 6px !important;
+  }
+  .footer-brand {
+    grid-column: 1 !important;
+    text-align: center;
+  }
+  .footer-brand img {
+    width: 140px !important;
+    margin: 0 auto !important;
+  }
+  .footer-bottom {
+    flex-direction: column !important;
+    gap: 14px !important;
+    text-align: center;
+    font-size: 10px !important;
+  }
+  .footer-bottom p:first-child {
+    max-width: none !important;
+  }
+
+  .landing-mobile-menu a:not(.landing-button) {
+    font-size: 14px !important;
+    padding-block: 10px !important;
+  }
+  .landing-mobile-menu .landing-button {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+}

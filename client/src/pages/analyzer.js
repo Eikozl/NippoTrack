@@ -241,7 +241,7 @@ export async function renderAnalyzer(container) {
         ['Vocabulary candidates', String(summary.candidates ?? 0)],
         ['Already in Vocabulary', String(summary.existing ?? 0)],
         ['New candidates', String(summary.new ?? 0)]
-      ].map(([label, value]) => element('div', { className: 'rounded-lg border border-stone bg-paper p-3 text-center' }, [
+      ].map(([label, value], index) => element('div', { className: `rounded-lg border border-stone bg-paper p-3 text-center ${index === 2 ? 'sm:col-span-2' : ''}` }, [
         element('p', { className: 'text-xl font-semibold text-ink', text: value }),
         element('p', { className: 'mt-1 text-xs text-muted', text: label })
       ]));

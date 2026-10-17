@@ -14,6 +14,33 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link data-nt-fonts rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Inter:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,500..600&family=Noto+Sans+JP:wght@400;500;600;700&display=swap" />
     <script src="/theme-init.js"></script>
+    <script>
+      // Standalone (Add to Home Screen) session guard.
+      // Home-screen web apps run in a separate browsing context on iOS/Android.
+      // Ensure the stored Supabase session is visible to this context before
+      // the app bundle boots, and that the standalone flag is set so the app
+      // can adapt its behaviour (e.g. no address bar, fullscreen).
+      (function () {
+        try {
+          if (window.matchMedia('(display-mode: standalone)').matches ||
+              window.navigator.standalone === true) {
+            document.documentElement.dataset.standalone = 'true';
+            // Supabase persists sessions in localStorage. In a standalone
+            // context the storage area is shared with the origin's regular
+            // tab only if the session was created there; if the user signed
+            // in via the PWA, the session lives here. Nothing to migrate —
+            // just make sure we don't treat a missing session as "signed out"
+            // before the auth client has had a chance to read it.
+            var stored = localStorage.getItem('supabase.auth.token') ||
+                         localStorage.getItem('sb-*-auth-token') ||
+                         '';
+            if (stored) {
+              document.documentElement.dataset.hasStoredSession = 'true';
+            }
+          }
+        } catch { /* best-effort; standalone detection is progressive */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="landing-root"></div>

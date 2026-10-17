@@ -6,11 +6,23 @@ import { requestPersistentStorage } from './storagePersist.js';
 // Ask the platform to exclude our origin from automatic website-data
 // eviction (keeps the stored session alive under storage pressure).
 // Fire-and-forget: boot never waits on it and denial changes nothing.
+// Called before anything else so the Supabase session (in localStorage) is
+// excluded from automatic eviction on iOS/Android home-screen apps.
 try {
   if (typeof window !== 'undefined' && window.navigator) {
     requestPersistentStorage(window.navigator).catch(() => undefined);
   }
 } catch { /* storage hardening is best-effort */ }
+
+// Mark standalone mode so the app can adapt (fullscreen, no address bar).
+// The inline script in index.html already sets data-standalone; this is a
+// fallback for environments where that script hasn't run yet.
+try {
+  if (window.matchMedia('(display-mode: standalone)').matches ||
+      window.navigator.standalone === true) {
+    document.documentElement.dataset.standalone = 'true';
+  }
+} catch { /* best-effort */ }
 
 // Production-web PWA only: never inside Capacitor (the native shell manages
 // its own lifecycle) and never over insecure origins.
@@ -19,6 +31,13 @@ try {
     window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js'); });
   }
 } catch { /* best-effort enhancement */ }
+
+// Track PWA installation so we can surface a one-time nudge if needed.
+try {
+  window.addEventListener('appinstalled', () => {
+    try { document.documentElement.dataset.appInstalled = 'true'; } catch { /* best-effort */ }
+  }, { once: true });
+} catch { /* best-effort */ }
 
 // Sideloaded APK: email confirm/recovery links return via the
 // nippotrack:// scheme instead of the browser. Registered before the app
