@@ -289,60 +289,51 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   // lg:left shifts the anchor by half the sidebar (8.5rem) so -translate-x-1/2
   // centers the pill within the MAIN CONTENT column. Below lg there is no
   // sidebar (off-canvas drawer), so the base left-1/2 viewport centering stays.
-  tabs.className = 'community-bottom-nav fixed bottom-4 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 items-center justify-between gap-1 rounded-full border border-stone/60 bg-paper/80 px-2 py-0.5 shadow-lg backdrop-blur-md lg:left-[calc(50%+8.5rem)]';
+  tabs.className = 'community-bottom-nav fixed bottom-4 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 items-center justify-between gap-1 rounded-full border border-stone/60 bg-paper/80 px-2 py-2 shadow-lg backdrop-blur-md lg:left-[calc(50%+8.5rem)]';
   tabs.setAttribute('role', 'tablist');
   tabs.setAttribute('aria-label', 'Community sections');
   // Safe-area: the pill floats above the home indicator, never under it.
-  tabs.style.paddingBottom = 'max(0.25rem, env(safe-area-inset-bottom))';
+  tabs.style.paddingBottom = 'max(0.5rem, env(safe-area-inset-bottom))';
   // Reserve room so the floating pill never covers the last posts or pager.
-  body.style.paddingBottom = '3.5rem';
+  body.style.paddingBottom = '6.5rem';
 
   const tabDefs = [
-    { key: 'feed', label: 'Home', iconName: 'home' },
+    { key: 'feed', label: 'Feed', iconName: 'home' },
     { key: 'following', label: 'Following', iconName: 'users' },
-    { key: 'discover', label: 'Search', iconName: 'search' }
+    { key: 'discover', label: 'Discover', iconName: 'search' }
   ];
   const tabButtons = new Map();
-  // Bottom nav buttons: icon on top, label below. 56px wide is enough for
-  // the longest label (Discover/Search) at 10px; active state comes from
-  // .is-active (see styles.css).
-  const navButtonClass = 'relative flex flex-col items-center shrink-0 min-h-16 min-w-[56px] rounded-full text-muted transition hover:text-ink';
+  // Icon-only buttons: compact 44px touch targets (5 × 44px + gaps fits
+  // 360px with no page h-scroll). Monochrome like the rest of the set —
+  // active state comes from .is-active (see styles.css), never color alone
+  // without the pill highlight.
+  const navButtonClass = 'relative grid min-h-11 min-w-11 shrink-0 place-items-center rounded-full text-muted transition hover:text-ink';
   for (const def of tabDefs) {
     const button = element('button', {
       className: navButtonClass,
       attrs: { type: 'button', role: 'tab', 'aria-selected': 'false', 'aria-label': def.label }
-    }, [
-      icon(def.iconName, { size: 20 }),
-      element('span', { className: 'mt-1 text-[10px] font-medium leading-none', text: def.label })
-    ]);
+    }, [icon(def.iconName, { size: 22 })]);
     button.addEventListener('click', () => showTab(def.key));
     tabButtons.set(def.key, button);
     tabs.appendChild(button);
   }
 
-  // Share (+) — bottom nav button, square, 15% larger than the in-pill tabs (44px → 51px).
-  // Light theme: black bg + vermilion cross. Dark theme: white bg + vermilion cross.
-  const addBtn = element('button', {
-    className: 'relative flex flex-col items-center shrink-0 min-h-[51px] min-w-[56px] rounded-xl transition hover:bg-paper/20 border',
-    attrs: { type: 'button', 'aria-label': 'Add' }
-  }, [
-    icon('plus', { size: 24 }),
-    element('span', { className: 'mt-1 text-[10px] font-medium leading-none', text: 'Add' })
-  ]);
-  function applyAddBtnTheme() {
-    const dark = document.documentElement.dataset.theme === 'dark';
-    addBtn.className = 'relative flex flex-col items-center shrink-0 min-h-[51px] min-w-[56px] rounded-xl transition hover:bg-paper/20 border ' +
-      (dark ? 'bg-white text-[#e03145] border-stone/60 shadow-lg' : 'bg-black text-[#e03145] border-stone/60 shadow-lg');
-  }
-  applyAddBtnTheme();
-  window.addEventListener('jlt-theme-change', applyAddBtnTheme);
-  addBtn.addEventListener('click', () => {
+  // Share (+) is the SOLE composer entry: it opens the full composer inside
+  // an openDialog (same 9 types, grouped picker, conditional fields,
+  // byte-identical payloads). Escape cancels and discards the draft
+  // (documented in the dialog description). No inline composer remains in
+  // the feed body.
+  const share = element('button', {
+    className: navButtonClass,
+    attrs: { type: 'button', 'aria-label': 'Share something — open the composer' }
+  }, [icon('plus', { size: 22 })]);
+  share.addEventListener('click', () => {
     openComposerDialog(async () => {
       if (state.profile || state.tab !== 'feed') await showTab('feed');
       else renderFeedRoot();
     });
   });
-  tabs.appendChild(addBtn);
+  tabs.appendChild(share);
 
   // Overflow menu (three-dots): profiles were reachable only from
   // publications, so the "…" entry is now a small popup menu instead of a
@@ -356,11 +347,8 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   const overflowWrap = element('div', { className: 'relative shrink-0' });
   const overflowButton = element('button', {
     className: navButtonClass,
-    attrs: { type: 'button', 'aria-label': 'More', 'aria-haspopup': 'menu', 'aria-expanded': 'false' }
-  }, [
-    icon(decksDef.iconName, { size: 20 }),
-    element('span', { className: 'mt-1 text-[10px] font-medium leading-none', text: 'More' })
-  ]);
+    attrs: { type: 'button', 'aria-label': 'More options', 'aria-haspopup': 'menu', 'aria-expanded': 'false' }
+  }, [icon(decksDef.iconName, { size: 22 })]);
   // Unread signal lives ONLY on this toggle (no standalone bell): the small
   // vermilion count badge it carries preserves the signal (information, kept).
   const overflowBadge = element('span', {

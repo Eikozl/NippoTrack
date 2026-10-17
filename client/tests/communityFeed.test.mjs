@@ -1,4 +1,4 @@
-﻿// V6.0 Community feed â€” source assertions. No DOM needed.
+// V6.0 Community feed — source assertions. No DOM needed.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -178,7 +178,7 @@ test('search offers a single filter selector and compact learning rows', () => {
   assert.ok(!source.includes('SEARCH_CHIPS'), 'chip array gone');
   assert.ok(!source.includes('chipsWrap'), 'chips row gone');
   assert.ok(!source.includes('paintChips'), 'chip painter gone');
-  assert.ok(!source.includes('Search category'), 'chip group label gone â€” selector uses Search filter');
+  assert.ok(!source.includes('Search category'), 'chip group label gone — selector uses Search filter');
   assert.ok(source.includes('Search filter'), 'selector labeled for a11y');
   assert.ok(source.includes("icon('filter'"), 'sliders glyph from icons.js, never emoji');
   assert.ok(source.includes('Filter: ${'), 'button text shows the current selection');
@@ -236,7 +236,7 @@ test('avatars and names both open profiles', () => {
   const source = readSource('src/pages/communityFeed.js');
   assert.ok(source.includes('Open profile of'), 'profile entry points labeled');
   assert.ok(!source.includes('tabs.appendChild(bell)'), 'no standalone bell in the pill (menu-only)');
-  assert.ok(source.includes('overflowButton.appendChild(overflowBadge)'), 'unread badge lives on the â€¦ toggle');
+  assert.ok(source.includes('overflowButton.appendChild(overflowBadge)'), 'unread badge lives on the … toggle');
 });
 
 test('empty states guide instead of dead-ending', () => {
@@ -482,7 +482,7 @@ test('phase 7: like costs one mutation without full feed reload', () => {
 test('phase 7: bell badge uses cheap unread-count, inbox flows unchanged', () => {
   const source = readSource('src/pages/communityFeed.js');
   assert.ok(source.includes('/api/community/notifications/unread-count'), 'badge uses cheap unread-count');
-  assert.ok(source.includes('refreshOverflowBadge'), 'badge refresh lives on the â€¦ toggle');
+  assert.ok(source.includes('refreshOverflowBadge'), 'badge refresh lives on the … toggle');
   assert.ok(source.includes('More options, ${unread} unread notifications'), 'toggle aria-label carries the unread count');
   assert.ok(!source.includes('/api/community/notifications?limit=1'), 'expensive list?limit=1 badge fetch removed');
   assert.ok(source.includes('/api/community/notifications?page='), 'inbox paging unchanged');
@@ -498,7 +498,7 @@ test('own profile manages blocked users with an unblock path', () => {
   assert.ok(source.includes('profile.isSelf'), 'blocked surface is self-only');
   assert.ok(source.includes('Unblock'), 'per-row unblock action with confirm');
   assert.ok(source.includes('Unblock @'), 'unblock confirm names the user');
-  assert.ok(source.includes('Unblockingâ€¦'), 'unblock pending state');
+  assert.ok(source.includes('Unblocking…'), 'unblock pending state');
   assert.ok(source.includes('User unblocked.'), 'unblock success toast plus list refresh');
   assert.ok(source.includes('Unable to unblock.'), 'unblock failure toast');
   assert.ok(source.includes('No blocked users.'), 'blocked empty state guides');
@@ -516,7 +516,7 @@ test('profile library counts hide undisclosed null values', () => {
   assert.ok(source.includes('${counts.vocabulary} words'), 'words label unchanged');
   assert.ok(source.includes('${counts.kanji} kanji'), 'kanji label unchanged');
   assert.ok(source.includes('undisclosed'), 'null-means-undisclosed documented in code');
-  assert.ok(source.includes("parts.join(' Â· ')"), 'remaining non-null values joined, row omitted when all null');
+  assert.ok(source.includes("parts.join(' · ')"), 'remaining non-null values joined, row omitted when all null');
   assert.ok(source.includes('posts} posts'), 'public posts/followers/following row unchanged');
 });
 
@@ -545,21 +545,21 @@ test('bottom nav restyles the existing tabs node as a floating glass pill', () =
 
 test('bottom nav carries pill buttons plus an overflow menu, no emoji', () => {
   const source = readSource('src/pages/communityFeed.js');
-  for (const label of ['Home', 'Following', 'Search', 'Add', 'More']) {
+  for (const label of ['Feed', 'Following', 'Discover', 'Share something', 'More options']) {
     assert.ok(source.includes(label), `pill/menu label "${label}" present`);
   }
   for (const item of ['Decks', 'My profile', 'Notifications']) {
     assert.ok(source.includes(item), `overflow menu item "${item}"`);
   }
-  assert.ok(!source.includes('ðŸ””'), 'no emoji bell anywhere in the new bar');
+  assert.ok(!source.includes('🔔'), 'no emoji bell anywhere in the new bar');
   assert.ok(source.includes("'bell'"), 'notifications menu item reuses the bell glyph key');
   assert.ok(source.includes("iconName: 'home'") && source.includes("iconName: 'users'") && source.includes("iconName: 'search'"), 'feed/following/discover glyphs come from icons.js');
   assert.ok(source.includes("icon('plus'") && source.includes("iconName: 'dots'"), 'share/overflow glyphs come from icons.js');
   assert.ok(source.includes("role: 'menu'") && source.includes("role: 'menuitem'"), 'overflow uses the menu pattern with real buttons');
-  assert.ok(source.includes('min-w-[56px]') && source.includes('min-h-[51px]'), 'add button 15% larger than tabs');
-  assert.ok(source.includes('min-h-16'), 'tab buttons include text labels'); assert.ok(source.includes('44px → 51px'), 'add button 15% larger than in-pill buttons');
+  assert.ok(source.includes('min-h-11') && source.includes('min-w-11'), 'compact 44px touch targets fit 360px');
+  assert.ok(source.includes('5 × 44px'), 'pill holds 5 targets (bell removed) fitting 360px');
   assert.ok(source.includes('bg-vermilion'), 'vermilion unread count badge kept (it carries information)');
-  assert.ok(source.includes('More options, ${unread} unread notifications'), 'badge aria-label lives on the â€¦ toggle');
+  assert.ok(source.includes('More options, ${unread} unread notifications'), 'badge aria-label lives on the … toggle');
 });
 
 test('overflow menu opens upward with Esc/outside-click close and focus return', () => {
@@ -582,7 +582,7 @@ test('overflow items reuse existing destinations, profiles resolve via the own-p
   assert.ok(!source.includes("bell.addEventListener('click', openNotifications)"), 'no standalone bell listener remains');
   assert.ok(!source.includes('tabs.appendChild(bell)'), 'standalone bell removed from the pill entirely');
   assert.ok(!source.includes('const bell = element'), 'no standalone bell button constructed');
-  assert.ok(source.includes("addOverflowItem('Notifications', 'bell'"), 'â€¦ menu keeps its Notifications item');
+  assert.ok(source.includes("addOverflowItem('Notifications', 'bell'"), '… menu keeps its Notifications item');
   assert.ok(source.includes('openNotifications()'), 'Notifications item reuses the same inbox action');
   assert.ok(source.includes('/api/users/me'), 'own profile resolves through the existing own-profile endpoint');
   assert.ok(source.includes('openProfile(ownUsername)'), 'own profile reuses the standard profile path');
@@ -626,7 +626,7 @@ test('batch A: skeleton helper renders pulsing blocks with AT text and reduced-m
   assert.ok(ui.includes('skeleton-block'), 'pulsing placeholder blocks');
   assert.ok(ui.includes("aria-hidden"), 'visual blocks aria-hidden');
   assert.ok(ui.includes("role: 'status'") || ui.includes("role:'status'") || ui.includes('role'), 'role=status for AT');
-  assert.ok(ui.includes('visually-hidden'), 'Loadingâ€¦ text for AT, not bare visible text');
+  assert.ok(ui.includes('visually-hidden'), 'Loading… text for AT, not bare visible text');
   assert.ok(ui.includes('aria-label'), 'label announced');
   const css = readSource('src/styles.css');
   assert.ok(css.includes('.skeleton-block'), 'shimmer style exists');
@@ -636,7 +636,7 @@ test('batch A: skeleton helper renders pulsing blocks with AT text and reduced-m
 test('batch A: community async surfaces use skeletons with aria-busy, error/empty untouched', () => {
   const source = readSource('src/pages/communityFeed.js');
   assert.ok(source.includes('skeleton({'), 'skeleton helper used');
-  for (const label of ['Loading postsâ€¦', 'Loading Discoverâ€¦', 'Searchingâ€¦', 'Loading commentsâ€¦', 'Loading deckâ€¦', 'Loading previewâ€¦', 'Loading notificationsâ€¦', 'Loadingâ€¦']) {
+  for (const label of ['Loading posts…', 'Loading Discover…', 'Searching…', 'Loading comments…', 'Loading deck…', 'Loading preview…', 'Loading notifications…', 'Loading…']) {
     assert.ok(source.includes(label), `skeleton label "${label}" present`);
   }
   assert.ok(source.includes("variant: 'cards'"), 'cards shape for lists');
@@ -656,7 +656,7 @@ test('batch A: saving from Community confirms first with pending state', () => {
   assert.ok(source.includes('Save "'), 'single confirm names what will be saved');
   assert.ok(source.includes('to your library?'), 'confirm copy asks to save');
   assert.ok(source.includes('Save ${items.length} items to your library?'), 'Save-all confirms with count');
-  assert.ok(source.includes("pendingLabel: 'Savingâ€¦'"), 'pending state on confirm');
+  assert.ok(source.includes("pendingLabel: 'Saving…'"), 'pending state on confirm');
   assert.ok(source.includes("confirmClassName: 'button-primary'"), 'save confirm is not danger-styled');
   assert.ok(ui.includes("pendingLabel"), 'confirmDialog supports pending labels');
   assert.ok(source.includes('entityCreateBody(post.entityType'), 'honesty gates unchanged');
@@ -689,14 +689,14 @@ test('batch A: no bare deck #review links remain, kept hub link documented', () 
   assert.ok(!source.includes("href: '#review'") || source.includes('save first to include'), 'kept link never claims queueing');
 });
 
-test('v6.1: bell lives ONLY in the â€¦ menu with badge on the toggle', () => {
+test('v6.1: bell lives ONLY in the … menu with badge on the toggle', () => {
   const source = readSource('src/pages/communityFeed.js');
   assert.ok(!source.includes('const bell = element'), 'no standalone bell button constructed');
   assert.ok(!source.includes('tabs.appendChild(bell)'), 'pill holds 5 targets, no duplicate bell');
   assert.ok(!source.includes('bellBadge'), 'old pill badge variable gone');
-  assert.ok(source.includes('const overflowBadge = element'), 'unread badge constructed for the â€¦ toggle');
+  assert.ok(source.includes('const overflowBadge = element'), 'unread badge constructed for the … toggle');
   assert.ok(source.includes('overflowButton.appendChild(overflowBadge)'), 'badge mounted on the toggle');
-  assert.ok(source.includes("addOverflowItem('Notifications', 'bell'"), 'â€¦ menu keeps its Notifications item opening the same inbox');
+  assert.ok(source.includes("addOverflowItem('Notifications', 'bell'"), '… menu keeps its Notifications item opening the same inbox');
   assert.ok(source.includes('openNotifications()'), 'menu item reuses the inbox action');
   assert.ok(source.includes('/api/community/notifications/unread-count'), 'cheap unread-count refresh preserved');
   assert.ok(source.includes('refreshOverflowBadge'), 'mount + after-inbox-close refresh points kept');
@@ -731,7 +731,7 @@ test('bottom nav pill centers within the content column on desktop, viewport on 
   assert.ok(source.includes('max-w-md'), 'desktop width cap preserved');
   assert.ok(source.includes('safe-area-inset-bottom'), 'home-indicator safe area preserved');
   assert.ok(source.includes('bottom-full'), 'overflow menu still opens upward from the pill');
-  assert.ok(source.includes('overflowButton.appendChild(overflowBadge)'), 'unread badge stays on the â€¦ toggle');
+  assert.ok(source.includes('overflowButton.appendChild(overflowBadge)'), 'unread badge stays on the … toggle');
 });
 
 test('deck + reading dialogs never leave a stale loading header', () => {
@@ -871,5 +871,3 @@ test('v6.1.2: deck review helpers shared via deckSaveGate (no duplication)', () 
     assert.ok(source.includes('deckSaveGate'), `${path} reuses the shared gate`);
   }
 });
-
-
