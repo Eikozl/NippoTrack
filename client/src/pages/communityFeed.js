@@ -298,42 +298,41 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   body.style.paddingBottom = '6.5rem';
 
   const tabDefs = [
-    { key: 'feed', label: 'Feed', iconName: 'home' },
+    { key: 'feed', label: 'Home', iconName: 'home' },
     { key: 'following', label: 'Following', iconName: 'users' },
-    { key: 'discover', label: 'Discover', iconName: 'search' }
+    { key: 'discover', label: 'Discover/Search', iconName: 'search' }
   ];
   const tabButtons = new Map();
-  // Icon-only buttons: compact 44px touch targets (5 × 44px + gaps fits
-  // 360px with no page h-scroll). Monochrome like the rest of the set —
-  // active state comes from .is-active (see styles.css), never color alone
-  // without the pill highlight.
-  const navButtonClass = 'relative grid min-h-11 min-w-11 shrink-0 place-items-center rounded-full text-muted transition hover:text-ink';
+  // Bottom nav buttons: icon on top, label below. 56px wide is enough for
+  // the longest label (Discover/Search) at 10px; active state comes from
+  // .is-active (see styles.css).
+  const navButtonClass = 'relative flex flex-col items-center shrink-0 min-h-16 min-w-[56px] rounded-full text-muted transition hover:text-ink';
   for (const def of tabDefs) {
     const button = element('button', {
       className: navButtonClass,
       attrs: { type: 'button', role: 'tab', 'aria-selected': 'false', 'aria-label': def.label }
-    }, [icon(def.iconName, { size: 22 })]);
+    }, [
+      icon(def.iconName, { size: 20 }),
+      element('span', { className: 'mt-1 text-[10px] font-medium leading-none', text: def.label })
+    ]);
     button.addEventListener('click', () => showTab(def.key));
     tabButtons.set(def.key, button);
     tabs.appendChild(button);
   }
 
-  // Share (+) is the SOLE composer entry: it opens the full composer inside
-  // an openDialog (same 9 types, grouped picker, conditional fields,
-  // byte-identical payloads). Escape cancels and discards the draft
-  // (documented in the dialog description). No inline composer remains in
-  // the feed body.
-  const share = element('button', {
-    className: navButtonClass,
+  // Share (+) FAB — floats bottom-right, above the More button.
+  // 15% larger than the in-pill buttons (44px → 51px).
+  const shareFab = element('button', {
+    className: 'fixed bottom-[88px] right-4 z-50 grid min-h-[51px] min-w-[51px] shrink-0 place-items-center rounded-full text-muted transition hover:text-ink shadow-lg bg-paper/90 backdrop-blur-sm border border-stone/60',
     attrs: { type: 'button', 'aria-label': 'Share something — open the composer' }
-  }, [icon('plus', { size: 22 })]);
-  share.addEventListener('click', () => {
+  }, [icon('plus', { size: 24 })]);
+  shareFab.addEventListener('click', () => {
     openComposerDialog(async () => {
       if (state.profile || state.tab !== 'feed') await showTab('feed');
       else renderFeedRoot();
     });
   });
-  tabs.appendChild(share);
+  document.body.appendChild(shareFab);
 
   // Overflow menu (three-dots): profiles were reachable only from
   // publications, so the "…" entry is now a small popup menu instead of a
@@ -347,8 +346,11 @@ export async function mountSocialFeed({ tabs, body, renderDecksHub }) {
   const overflowWrap = element('div', { className: 'relative shrink-0' });
   const overflowButton = element('button', {
     className: navButtonClass,
-    attrs: { type: 'button', 'aria-label': 'More options', 'aria-haspopup': 'menu', 'aria-expanded': 'false' }
-  }, [icon(decksDef.iconName, { size: 22 })]);
+    attrs: { type: 'button', 'aria-label': 'More', 'aria-haspopup': 'menu', 'aria-expanded': 'false' }
+  }, [
+    icon(decksDef.iconName, { size: 20 }),
+    element('span', { className: 'mt-1 text-[10px] font-medium leading-none', text: 'More' })
+  ]);
   // Unread signal lives ONLY on this toggle (no standalone bell): the small
   // vermilion count badge it carries preserves the signal (information, kept).
   const overflowBadge = element('span', {
