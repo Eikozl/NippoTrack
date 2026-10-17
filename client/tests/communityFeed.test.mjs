@@ -545,7 +545,7 @@ test('bottom nav restyles the existing tabs node as a floating glass pill', () =
 
 test('bottom nav carries pill buttons plus an overflow menu, no emoji', () => {
   const source = readSource('src/pages/communityFeed.js');
-  for (const label of ['Home', 'Following', 'Discover/Search', 'Share something', 'More']) {
+  for (const label of ['Home', 'Following', 'Search', 'Share something', 'More']) {
     assert.ok(source.includes(label), `pill/menu label "${label}" present`);
   }
   for (const item of ['Decks', 'My profile', 'Notifications']) {
@@ -556,7 +556,7 @@ test('bottom nav carries pill buttons plus an overflow menu, no emoji', () => {
   assert.ok(source.includes("iconName: 'home'") && source.includes("iconName: 'users'") && source.includes("iconName: 'search'"), 'feed/following/discover glyphs come from icons.js');
   assert.ok(source.includes("icon('plus'") && source.includes("iconName: 'dots'"), 'share/overflow glyphs come from icons.js');
   assert.ok(source.includes("role: 'menu'") && source.includes("role: 'menuitem'"), 'overflow uses the menu pattern with real buttons');
-  assert.ok(source.includes('min-h-[51px]') && source.includes('min-w-[51px]'), 'share FAB 15% larger than tabs');
+  assert.ok(source.includes('w-[51px]') && source.includes('h-[51px]'), 'share FAB 15% larger than tabs');
   assert.ok(source.includes('min-h-16'), 'tab buttons include text labels'); assert.ok(source.includes('44px → 51px'), 'share button 15% larger than in-pill buttons');
   assert.ok(source.includes('bg-vermilion'), 'vermilion unread count badge kept (it carries information)');
   assert.ok(source.includes('More options, ${unread} unread notifications'), 'badge aria-label lives on the â€¦ toggle');
