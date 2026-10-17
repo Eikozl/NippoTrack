@@ -1,4 +1,4 @@
-.has-landing {
+﻿.has-landing {
   margin: 0;
   background: #f5f0e8;
 }
@@ -121,7 +121,7 @@
 }
 
 /* Dark theme remap: no pure black, no pure-white text. Muted/secondary
-   tones stay above WCAG AA on 12–13px supporting copy. */
+   tones stay above WCAG AA on 12â€“13px supporting copy. */
 [data-nippotrack-theme="dark"] .landing-page {
   --landing-canvas: #1c1a18;
   --landing-surface: #24211e;
@@ -691,7 +691,7 @@
   text-transform: uppercase;
 }
 
-/* Starting-estimate rotation stays width-locked so cycling N5–N1 never
+/* Starting-estimate rotation stays width-locked so cycling N5â€“N1 never
    shifts layout; only a subtle fade settles each example swap. */
 .estimate-value {
   display: inline-block;
@@ -832,7 +832,7 @@
 }
 
 /* Capture emphasis beat: one-shot accent underline with a brief wash that
-   settles to a kept underline. "Intentionally kept" — never a save affordance. */
+   settles to a kept underline. "Intentionally kept" â€” never a save affordance. */
 .flow-tracked {
   display: inline-block;
   justify-self: start;
@@ -1319,7 +1319,7 @@
   font-weight: 600;
 }
 
-/* Kanji stroke-sequence showcase: one stage changes from 日 → 空 → 深.
+/* Kanji stroke-sequence showcase: one stage changes from æ—¥ â†’ ç©º â†’ æ·±.
    It draws once when the section enters the viewport, using only the
    existing shared motion vocabulary and token-driven surfaces. */
 .showcase-panel.kanji-demo {
@@ -2483,7 +2483,7 @@
 
   .hero-ecosystem .hero-card {
     position: relative;
-    /* Reset the desktop/≤767 absolute coordinates: under position:relative
+    /* Reset the desktop/â‰¤767 absolute coordinates: under position:relative
        they would act as visual offsets (this leaked +105px under the
        vocabulary card and +32px under kanji). All staging deltas below are
        transforms only. */
@@ -2506,7 +2506,7 @@
   }
 
   /* Dominant vocabulary row: full-row span, centered, ~92% of the row.
-     It is the static anchor — neighbors translate toward it, so it always
+     It is the static anchor â€” neighbors translate toward it, so it always
      reads visually highest. z3 above everything. */
   .hero-vocabulary {
     grid-column: 1 / -1;
@@ -2538,7 +2538,7 @@
   }
 
   /* Bottom satellite pair, asymmetric and peripheral: review shifts left
-     and tucks lightly under vocabulary so READY TO REVIEW + 約束 stay
+     and tucks lightly under vocabulary so READY TO REVIEW + ç´„æŸ stay
      readable; streak shifts left and tucks deeper so its top sits behind
      vocabulary's bottom padding while "30 days" stays clear. Both sit
      lower (z1) below vocabulary (z3). Review stays unrotated so the bottom
@@ -2626,7 +2626,7 @@
 
   /* Constellation posture inherited from the 640px breakpoint stays static
      (animation: none inherited): only tighten type and padding here. Row
-     gap stays 0 — staging overlap is transforms, exactly as above. No
+     gap stays 0 â€” staging overlap is transforms, exactly as above. No
      absolute offsets or fixed widths. */
   .hero-ecosystem {
     gap: 0 10px;
@@ -2832,11 +2832,12 @@
 html.lenis, html.lenis body { height: auto; }
 .lenis.lenis-smooth { scroll-behavior: auto !important; }
 .lenis.lenis-stopped { overflow: hidden; }
+
 /* ── Mobile landing: simplify the start ──
    On narrow screens the landing carries too much information. Hide the
    editorial/flow/progress/onboarding chapters so the mobile start is just:
-   logo → hero (with the ecosystem cards) → final CTA. Everything else stays
-   intact for desktop and for visitors who scroll past the fold. */
+   logo → hero (unchanged) → final CTA. Everything else stays intact for
+   desktop and for visitors who scroll past the fold. */
 @media (max-width: 640px) {
   .landing-page .editorial-section,
   .landing-page .flow-section,
@@ -2846,59 +2847,9 @@ html.lenis, html.lenis body { height: auto; }
     display: none !important;
   }
 
-  .landing-hero {
-    padding-top: 40px;
-    padding-bottom: 32px;
-    min-height: 0;
-  }
-  .landing-hero h1,
-  .hero-typing {
-    font-size: clamp(32px, 10vw, 44px);
-    line-height: 1.1;
-  }
-  .landing-lede {
-    font-size: 16px;
-    line-height: 1.55;
-  }
-  .landing-hero-actions {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-    margin-top: 20px;
-  }
-  .landing-hero-actions .landing-button {
-    width: 100%;
-    justify-content: center;
-  }
-  .landing-hero-actions .landing-arrow-link {
-    width: auto;
-    justify-content: center;
-  }
+  /* Hero: leave untouched — the 767px / 479px breakpoints already handle it. */
 
-  .hero-ecosystem {
-    grid-template-columns: 1fr !important;
-    gap: 10px !important;
-    margin-top: 16px !important;
-    width: 100% !important;
-    height: auto !important;
-  }
-  .hero-ecosystem .hero-card {
-    position: relative !important;
-    top: auto !important;
-    left: auto !important;
-    bottom: auto !important;
-    right: auto !important;
-    width: auto !important;
-    min-height: 0 !important;
-    margin: 0 auto !important;
-    animation: none !important;
-    transform: none !important;
-    max-width: 260px;
-  }
-  .hero-ecosystem::before {
-    display: none !important;
-  }
-
+  /* Final CTA: stacked buttons, smaller heading, all centred. */
   .final-cta {
     padding-block: 64px 24px !important;
   }
@@ -2908,26 +2859,29 @@ html.lenis, html.lenis body { height: auto; }
   }
   .final-cta > div > div {
     flex-direction: column !important;
+    align-items: center !important;
     gap: 14px !important;
     margin-top: 24px !important;
   }
   .final-cta > div > div > * {
     width: 100% !important;
+    text-align: center !important;
   }
 
+  /* Footer: two columns (not one long column), centred brand. */
   .landing-footer {
     padding-block: 48px 20px !important;
   }
   .footer-grid {
-    grid-template-columns: 1fr !important;
+    grid-template-columns: repeat(2, 1fr) !important;
     gap: 28px !important;
   }
   .footer-grid > div {
     gap: 6px !important;
   }
   .footer-brand {
-    grid-column: 1 !important;
-    text-align: center;
+    grid-column: 1 / -1 !important;
+    text-align: center !important;
   }
   .footer-brand img {
     width: 140px !important;
@@ -2936,13 +2890,14 @@ html.lenis, html.lenis body { height: auto; }
   .footer-bottom {
     flex-direction: column !important;
     gap: 14px !important;
-    text-align: center;
+    text-align: center !important;
     font-size: 10px !important;
   }
   .footer-bottom p:first-child {
     max-width: none !important;
   }
 
+  /* Mobile menu: simpler, fewer items. */
   .landing-mobile-menu a:not(.landing-button) {
     font-size: 14px !important;
     padding-block: 10px !important;
